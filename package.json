@@ -1,0 +1,366 @@
+{
+  "name": "cliply-desktop",
+  "version": "0.0.1",
+  "description": "Desktop YouTube downloader with segment support",
+  "main": "src/main/index.js",
+  "homepage": "./",
+  "private": true,
+  "author": {
+    "name": "Cliply Team",
+    "email": "cliply.space@gmail.com"
+  },
+  "scripts": {
+    "start": "npm run dev",
+    "start:electron-only": "cross-env NODE_ENV=development electron .",
+    "dev": "npm run dev:renderer & npm run dev:main",
+    "dev:main": "cross-env NODE_ENV=development nodemon --watch src/main --exec electron .",
+    "dev:renderer": "cd src/main/renderer && npm run dev",
+    "dev:python": "cd python && python server.py",
+    "setup:python": "cd python && python -m pip install -r requirements.txt",
+    "setup:python-deps": "node scripts/install-python-deps.js",
+    "setup:python:venv": "cd python && python -m venv venv && source venv/bin/activate && pip install -r requirements.txt",
+    "setup:python-runtime": "node scripts/setup-python-runtime.js",
+    "cleanup:binaries": "find binaries -name 'yt-dlp*' -type f -delete || true",
+    "install:renderer": "cd src/main/renderer && npm install",
+    "build:renderer": "cd src/main/renderer && npm run build",
+    "build:main": "echo 'Main process ready for packaging'",
+    "build:app": "npm run install:renderer && npm run build:renderer && npm run build:main",
+    "prepare:python": "npm run cleanup:binaries && npm run setup:python-runtime && npm run setup:python-deps",
+    "prepare:full": "npm run generate:icons && npm run build:app && npm run prepare:python",
+    "prepack": "npm run prepare:full",
+    "pack": "electron-builder --dir",
+    "predist": "npm run prepare:full",
+    "dist": "electron-builder",
+    "dist:all": "npm run prepare:full && cross-env BUILD_ALL_PLATFORMS=true node scripts/setup-python-runtime.js && electron-builder -mwl",
+    "dist:win": "npm run prepare:full && cross-env BUILD_TARGET_PLATFORM=win32-x64 node scripts/setup-python-runtime.js && electron-builder --win",
+    "dist:mac": "npm run prepare:full && cross-env BUILD_TARGET_PLATFORM=darwin-arm64 node scripts/setup-python-runtime.js && electron-builder --mac",
+    "dist:linux": "npm run prepare:full && cross-env BUILD_TARGET_PLATFORM=linux-x64 node scripts/setup-python-runtime.js && electron-builder --linux",
+    "dist:mac:direct": "npm run install:renderer && npm run build:renderer && npm run cleanup:binaries && npm run setup:python-runtime && npm run setup:python-deps && electron-builder --mac",
+    "postinstall": "electron-builder install-app-deps",
+    "test": "jest",
+    "test:python": "cd python && python -m pytest",
+    "lint": "eslint src/main --ext .js",
+    "lint:fix": "eslint src/main --ext .js --fix",
+    "clean": "rimraf dist && rimraf src/main/renderer/dist && rimraf python/venv && rimraf python-runtime && rimraf .python-cache",
+    "generate:icons": "node scripts/generate-icons.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.5.0",
+    "electron-updater": "^6.1.8",
+    "undici": "^7.10.0",
+    "uuid": "^9.0.1"
+  },
+  "devDependencies": {
+    "cross-env": "^7.0.3",
+    "electron": "^28.0.0",
+    "electron-builder": "^24.0.0",
+    "eslint": "^8.0.0",
+    "jest": "^29.0.0",
+    "node-fetch": "^3.3.2",
+    "nodemon": "^3.0.0",
+    "rimraf": "^5.0.0",
+    "tar": "^6.2.0"
+  },
+  "build": {
+    "appId": "com.cliply.desktop",
+    "productName": "Cliply",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "src/main/**/*",
+      "src/preload/**/*",
+      "src/main/renderer/dist/**/*",
+      "package.json",
+      "!**/.DS_Store",
+      "!**/node_modules",
+      "!src/main/renderer/src/**/*",
+      "!src/main/renderer/node_modules",
+      "!src/main/renderer/public/**/*",
+      "!src/main/renderer/.git*",
+      "!src/main/renderer/bun.lock",
+      "!src/main/renderer/package-lock.json",
+      "!src/main/renderer/README.md",
+      "!src/main/renderer/.prettierrc",
+      "!src/main/renderer/eslint.config.js",
+      "!src/main/renderer/postcss.config.mjs",
+      "!src/main/renderer/tailwind.config.js",
+      "!src/main/renderer/tsconfig*.json",
+      "!src/main/renderer/vite.config.ts",
+      "!src/main/renderer/components.json",
+      "!**/venv",
+      "!**/__pycache__"
+    ],
+    "extraResources": [
+      {
+        "from": "python/",
+        "to": "python/",
+        "filter": [
+          "server.py",
+          "requirements.txt",
+          "cookies/**/*",
+          "!venv/**/*",
+          "!__pycache__/**/*",
+          "!*.pyc"
+        ]
+      }
+    ],
+    "mac": {
+      "icon": "assets/icon.icns",
+      "category": "public.app-category.utilities",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "arm64"
+          ]
+        }
+      ],
+      "hardenedRuntime": false,
+      "gatekeeperAssess": false,
+      "extendInfo": {
+        "NSMicrophoneUsageDescription": "This app does not use the microphone.",
+        "NSCameraUsageDescription": "This app does not use the camera."
+      },
+      "extraResources": [
+        {
+          "from": "binaries/macos/",
+          "to": "binaries/",
+          "filter": [
+            "ffmpeg"
+          ]
+        },
+        {
+          "from": "python-runtime/darwin-arm64/",
+          "to": "python-runtime/darwin-arm64/",
+          "filter": [
+            "**/*",
+            "!**/*.pyc",
+            "!**/test",
+            "!**/tests"
+          ]
+        },
+        {
+          "from": "assets/",
+          "to": "assets/",
+          "filter": [
+            "**/*"
+          ]
+        }
+      ]
+    },
+    "win": {
+      "icon": "assets/icon.ico",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "publisherName": "Cliply Team",
+      "verifyUpdateCodeSignature": false,
+      "requestedExecutionLevel": "asInvoker",
+      "extraResources": [
+        {
+          "from": "binaries/windows/",
+          "to": "binaries/",
+          "filter": [
+            "ffmpeg.exe"
+          ]
+        },
+        {
+          "from": "python-runtime/win32-x64/",
+          "to": "python-runtime/win32-x64/",
+          "filter": [
+            "**/*",
+            "!**/__pycache__",
+            "!**/*.pyc",
+            "!**/test",
+            "!**/tests"
+          ]
+        }
+      ]
+    },
+    "linux": {
+      "icon": "assets/icon.png",
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "deb",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "tar.gz",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "category": "AudioVideo",
+      "desktop": {
+        "StartupWMClass": "Cliply"
+      },
+      "extraResources": [
+        {
+          "from": "binaries/linux/",
+          "to": "binaries/",
+          "filter": [
+            "ffmpeg"
+          ]
+        },
+        {
+          "from": "python-runtime/linux-x64/",
+          "to": "python-runtime/linux-x64/",
+          "filter": [
+            "**/*",
+            "!**/__pycache__",
+            "!**/*.pyc",
+            "!**/test",
+            "!**/tests"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Cliply",
+      "displayLanguageSelector": true,
+      "perMachine": false,
+      "runAfterFinish": false,
+      "allowElevation": false,
+      "uninstallDisplayName": "Cliply - YouTube Downloader",
+      "menuCategory": "Audio & Video",
+      "artifactName": "Cliply.Setup.${version}.${ext}"
+    },
+    "dmg": {
+      "title": "Cliply ${version}",
+      "artifactName": "Cliply-${version}-${arch}.${ext}",
+      "contents": [
+        {
+          "x": 130,
+          "y": 220
+        },
+        {
+          "x": 410,
+          "y": 220,
+          "type": "link",
+          "path": "/Applications"
+        }
+      ],
+      "window": {
+        "width": 540,
+        "height": 380
+      }
+    },
+    "appImage": {
+      "artifactName": "Cliply-${version}-${arch}.${ext}"
+    },
+    "deb": {
+      "artifactName": "Cliply-${version}-${arch}.${ext}",
+      "depends": [
+        "libgtk-3-0",
+        "libnotify4",
+        "libnss3",
+        "libxss1",
+        "libxtst6",
+        "xdg-utils",
+        "libatspi2.0-0",
+        "libdrm2",
+        "libxcomposite1",
+        "libxdamage1",
+        "libxrandr2",
+        "libgbm1",
+        "libxkbcommon0",
+        "libasound2"
+      ]
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "cliply",
+      "repo": "cliply-desktop",
+      "releaseType": "release"
+    },
+    "compression": "normal"
+  },
+  "engines": {
+    "node": ">=18.0.0",
+    "npm": ">=8.0.0"
+  },
+  "keywords": [
+    "youtube",
+    "downloader",
+    "video",
+    "audio",
+    "segment",
+    "electron",
+    "desktop",
+    "yt-dlp",
+    "python",
+    "hybrid"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/cliply/cliply-desktop.git"
+  },
+  "bugs": {
+    "url": "https://github.com/cliply/cliply-desktop/issues"
+  },
+  "license": "MIT",
+  "jest": {
+    "testEnvironment": "node",
+    "testMatch": [
+      "**/tests/**/*.test.js"
+    ],
+    "collectCoverageFrom": [
+      "src/main/**/*.js",
+      "!src/main/index.js"
+    ]
+  },
+  "eslintConfig": {
+    "env": {
+      "node": true,
+      "es2022": true
+    },
+    "extends": [
+      "eslint:recommended"
+    ],
+    "parserOptions": {
+      "ecmaVersion": 2022,
+      "sourceType": "module"
+    },
+    "rules": {
+      "no-console": "off",
+      "no-unused-vars": [
+        "error",
+        {
+          "argsIgnorePattern": "^_"
+        }
+      ]
+    }
+  }
+}

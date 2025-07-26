@@ -1,0 +1,238 @@
+import { useEffect, useRef, useState } from "react"
+import { progressLogger } from "../progressLogger"
+
+interface DownloadState {
+  status:
+    | "idle"
+    | "starting"
+    | "downloading"
+    | "completed"
+    | "failed"
+    | "cancelled"
+  progress: number
+}
+
+interface VideoInfo {
+  duration: number // in seconds
+  quality: string // like "720p", "1080p", "360p" or audio quality like "128kbps"
+  format: string // file extension
+  type: "video" | "audio"
+}
+
+// Smart progress calculation based on video characteristics
+function calculateProgressConfig(videoInfo: VideoInfo) {
+  const { duration, quality, type } = videoInfo
+
+  // Base speed multipliers based on quality
+  let qualityMultiplier = 1
+  if (type === "video") {
+    if (quality.includes("2160p") || quality.includes("4K"))
+      qualityMultiplier = 0.3 // Very slow for 4K
+    else if (quality.includes("1440p")) qualityMultiplier = 0.4
+    else if (quality.includes("1080p")) qualityMultiplier = 0.6
+    else if (quality.includes("720p")) qualityMultiplier = 0.8
+    else if (quality.includes("480p")) qualityMultiplier = 1.0
+    else if (quality.includes("360p")) qualityMultiplier = 1.3
+    else if (quality.includes("240p")) qualityMultiplier = 1.5
+  } else {
+    // Audio quality multipliers
+    if (quality.includes("320") || quality.includes("256"))
+      qualityMultiplier = 0.7
+    else if (quality.includes("192") || quality.includes("160"))
+      qualityMultiplier = 0.85
+    else qualityMultiplier = 1.0 // 128kbps and below
+  }
+
+  // Duration factor - longer videos start slower but catch up
+  let durationFactor = 1
+  if (duration > 3600)
+    durationFactor = 0.7 // 1+ hour videos
+  else if (duration > 1800)
+    durationFactor = 0.8 // 30+ min videos
+  else if (duration > 600) durationFactor = 0.9 // 10+ min videos
+
+  // Calculate realistic intervals and increments
+  const baseInterval = 600 // Base update interval
+  const interval = baseInterval / (qualityMultiplier * durationFactor)
+
+  return {
+    interval: Math.max(300, Math.min(1500, interval)), // Clamp between 300ms-1.5s
+    qualityMultiplier,
+    durationFactor,
+    initialBoost: quality.includes("360p") || quality.includes("240p") ? 2 : 1 // Faster start for low quality
+  }
+}
+
+export function useDownloadProgress(
+  realDownloadState: DownloadState,
+  videoInfo?: VideoInfo
+) {
+  const [simulatedProgress, setSimulatedProgress] = useState(0)
+  const [buttonState, setButtonState] = useState<
+    "idle" | "downloading" | "downloaded" | "complete"
+  >("idle")
+  const [phase, setPhase] = useState<"starting" | "fast" | "finishing">(
+    "starting"
+  )
+  const intervalRef = useRef<NodeJS.Timeout | null>(null)
+  const timeoutRef = useRef<NodeJS.Timeout | null>(null)
+
+  // Reset simulated progress when download starts
+  useEffect(() => {
+    if (
+      realDownloadState.status === "starting" ||
+      realDownloadState.status === "downloading"
+    ) {
+      if (simulatedProgress === 0) {
+        setButtonState("downloading")
+        setPhase("starting")
+
+        const config = videoInfo
+          ? calculateProgressConfig(videoInfo)
+          : {
+              interval: 800,
+              qualityMultiplier: 1,
+              durationFactor: 1,
+              initialBoost: 1
+            }
+
+        progressLogger.logStart(
+          videoInfo?.type || "unknown",
+          videoInfo?.quality || "unknown",
+          videoInfo?.duration || 0
+        )
+        progressLogger.logConfig(
+          config.interval,
+          config.qualityMultiplier,
+          config.durationFactor
+        )
+
+        // Start with realistic initial progress
+        const initialProgress = Math.random() * 3 + 2 // 2-5%
+        setSimulatedProgress(initialProgress)
+        progressLogger.logProgress(initialProgress, "starting")
+
+        intervalRef.current = setInterval(() => {
+          setSimulatedProgress((prev) => {
+            // Don't increment if real download completed
+            if (realDownloadState.status === "completed") {
+              return prev
+            }
+
+            let increment = 0
+            let newPhase: "starting" | "fast" | "finishing" = phase
+
+            // Phase-based progress simulation
+            if (prev < 15) {
+              // Starting phase: slow connection establishment
+              newPhase = "starting"
+              increment = (Math.random() * 2 + 1) * config.qualityMultiplier // 1-3%
+            } else if (prev < 80) {
+              // Fast download phase
+              newPhase = "fast"
+              increment =
+                (Math.random() * 6 + 3) *
+                config.qualityMultiplier *
+                config.durationFactor // 3-9%
+            } else {
+              // Finishing phase: processing and finalizing
+              newPhase = "finishing"
+              increment = (Math.random() * 2 + 0.5) * config.qualityMultiplier // 0.5-2.5%
+            }
+
+            // Update phase if changed
+            if (newPhase !== phase) {
+              setPhase(newPhase)
+              progressLogger.logPhaseChange(newPhase)
+            }
+
+            // Cap at 95% until real completion
+            const newProgress = Math.min(prev + increment, 95)
+
+            // Log every 10% milestone
+            if (Math.floor(newProgress / 10) !== Math.floor(prev / 10)) {
+              progressLogger.logProgress(newProgress, newPhase)
+            }
+
+            return newProgress
+          })
+        }, config.interval)
+      }
+    }
+  }, [realDownloadState.status, simulatedProgress, videoInfo, phase])
+
+  // Handle real download completion
+  useEffect(() => {
+    if (realDownloadState.status === "completed") {
+      setSimulatedProgress(100)
+      setButtonState("downloaded")
+      progressLogger.logComplete()
+
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current)
+        intervalRef.current = null
+      }
+
+      // Show "Downloaded" for 1.5 seconds, then transition to complete
+      timeoutRef.current = setTimeout(() => {
+        setButtonState("complete")
+        progressLogger.log('Transitioning to "Complete" state', "phase")
+
+        // Reset to idle after a brief moment
+        setTimeout(() => {
+          setButtonState("idle")
+          setSimulatedProgress(0)
+          setPhase("starting")
+          progressLogger.logReset()
+          progressLogger.clear() // Clear logs for next download
+        }, 100)
+      }, 1500)
+    }
+  }, [realDownloadState.status])
+
+  // Reset when going back to idle
+  useEffect(() => {
+    if (
+      realDownloadState.status === "idle" ||
+      realDownloadState.status === "failed" ||
+      realDownloadState.status === "cancelled"
+    ) {
+      setSimulatedProgress(0)
+      setButtonState("idle")
+      setPhase("starting")
+
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current)
+        intervalRef.current = null
+      }
+
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current)
+        timeoutRef.current = null
+      }
+
+      if (realDownloadState.status === "failed") {
+        progressLogger.logError("Download failed, reset to idle")
+      } else if (realDownloadState.status === "cancelled") {
+        progressLogger.log("Download cancelled, reset to idle", "info")
+      }
+    }
+  }, [realDownloadState.status])
+
+  // Cleanup intervals and timeouts on unmount
+  useEffect(() => {
+    return () => {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current)
+      }
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current)
+      }
+    }
+  }, [])
+
+  return {
+    progress: Math.round(simulatedProgress),
+    status: buttonState
+  }
+}

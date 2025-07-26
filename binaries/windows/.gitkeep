@@ -1,0 +1,5 @@
+# put ffmpeg.exe here for windows
+# best: download yt-dlp's optimized build from:
+# https://github.com/yt-dlp/FFmpeg-Builds/releases/latest
+# get: ffmpeg-master-latest-win64-gpl.zip
+# extract and copy ffmpeg.exe to this folder

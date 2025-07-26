@@ -1,0 +1,18 @@
+export { CompactSearch } from "./CompactSearch"
+export { FormatSelector } from "./FormatSelector"
+export { VideoDetails } from "./VideoDetails"
+export { VideoLayout } from "./VideoLayout"
+export { VideoPlayer } from "./VideoPlayer"
+
+// New components for redesigned layout
+export { AudioDownloadButton } from "./AudioDownloadButton"
+export { AudioFormatDropdown } from "./AudioFormatDropdown"
+export { FeedbackCard } from "./FeedbackCard"
+export { PlaylistAccessCard } from "./PlaylistAccessCard"
+export { TimeRangeSelector } from "./TimeRangeSelector"
+export { UnifiedDownloadCard } from "./UnifiedDownloadCard"
+export { VideoDetailsCard } from "./VideoDetailsCard"
+export { VideoDownloadButton } from "./VideoDownloadButton"
+export { VideoPlayerFrame } from "./VideoPlayerFrame"
+export { VideoQualityDropdown } from "./VideoQualityDropdown"
+export { VideoTimeRangeSelector } from "./VideoTimeRangeSelector"

@@ -1,0 +1,5 @@
+# put your linux ffmpeg binary here
+# best: download yt-dlp's optimized build from:
+# https://github.com/yt-dlp/FFmpeg-Builds/releases/latest
+# get: ffmpeg-master-latest-linux64-gpl.tar.xz
+# extract and copy ffmpeg here, then: chmod +x ffmpeg

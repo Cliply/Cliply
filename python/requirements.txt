@@ -1,0 +1,25 @@
+# cliply desktop python server dependencies
+# essential packages for embedded youtube downloader server
+
+# core web framework
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+
+# youtube downloader library
+yt-dlp>=2023.12.30
+
+# http and async support
+httpx==0.25.2
+aiofiles==23.2.1
+
+# data validation and parsing
+pydantic==2.5.2
+
+# optional performance enhancements (graceful fallbacks in code)
+# these will improve performance but aren't required
+uvloop==0.19.0; sys_platform != "win32"
+httptools==0.6.1
+requests==2.32.3
+
+# json handling (usually included with python)
+# orjson==3.9.10  # uncomment for faster json if needed

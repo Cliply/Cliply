@@ -1,0 +1,118 @@
+// Simple logging utility for download progress tracking
+// This helps debug the smart progress calculation
+
+interface ProgressLogEntry {
+  timestamp: string
+  message: string
+  type: "info" | "progress" | "phase" | "complete" | "error"
+}
+
+class ProgressLogger {
+  private logs: ProgressLogEntry[] = []
+  private maxLogs = 50 // Keep last 50 logs
+
+  log(message: string, type: ProgressLogEntry["type"] = "info") {
+    const timestamp = new Date().toLocaleTimeString()
+    const entry: ProgressLogEntry = {
+      timestamp,
+      message,
+      type
+    }
+
+    this.logs.push(entry)
+
+    // Keep only recent logs
+    if (this.logs.length > this.maxLogs) {
+      this.logs = this.logs.slice(-this.maxLogs)
+    }
+
+    // Console log with emoji for easy identification
+    const emoji = {
+      info: "📝",
+      progress: "📈",
+      phase: "🔄",
+      complete: "✅",
+      error: "❌"
+    }[type]
+
+    console.log(`${emoji} Download Progress [${timestamp}]: ${message}`)
+  }
+
+  getLogs(): ProgressLogEntry[] {
+    return [...this.logs]
+  }
+
+  getLogsAsText(): string {
+    return this.logs
+      .map(
+        (log) => `[${log.timestamp}] ${log.type.toUpperCase()}: ${log.message}`
+      )
+      .join("\n")
+  }
+
+  clear() {
+    this.logs = []
+    console.log("📝 Download Progress: Logs cleared")
+  }
+
+  // Log specific progress events
+  logStart(videoType: string, quality: string, duration: number) {
+    this.log(
+      `Starting ${videoType} download - Quality: ${quality}, Duration: ${duration}s`,
+      "info"
+    )
+  }
+
+  logConfig(
+    interval: number,
+    qualityMultiplier: number,
+    durationFactor: number
+  ) {
+    this.log(
+      `Config: interval=${interval}ms, quality=${qualityMultiplier.toFixed(2)}x, duration=${durationFactor.toFixed(2)}x`,
+      "info"
+    )
+  }
+
+  logProgress(progress: number, phase: string) {
+    this.log(`Progress: ${progress.toFixed(1)}% (${phase} phase)`, "progress")
+  }
+
+  logPhaseChange(newPhase: string) {
+    this.log(`Phase changed to: ${newPhase}`, "phase")
+  }
+
+  logComplete() {
+    this.log('Download completed! Showing "Downloaded" state', "complete")
+  }
+
+  logReset() {
+    this.log("Reset to idle state", "info")
+  }
+
+  logError(error: string) {
+    this.log(`Error: ${error}`, "error")
+  }
+}
+
+// Export singleton instance
+export const progressLogger = new ProgressLogger()
+
+// Helper function to save logs to a file (for development/debugging)
+export function saveProgressLogsToFile() {
+  try {
+    const logsText = progressLogger.getLogsAsText()
+    const blob = new Blob([logsText], { type: "text/plain" })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement("a")
+    a.href = url
+    a.download = `download-progress-${new Date().toISOString().slice(0, 10)}.log`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+    console.log("📁 Progress logs saved to file")
+  } catch (error) {
+    console.error("Failed to save progress logs:", error)
+  }
+}

@@ -1,0 +1,5 @@
+# put your mac ffmpeg binary here
+# yt-dlp doesn't have mac builds, so use homebrew:
+# brew install ffmpeg
+# then: cp /opt/homebrew/bin/ffmpeg ./ (or /usr/local/bin/ for intel)
+# and: chmod +x ffmpeg
