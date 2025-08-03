@@ -1,4 +1,5 @@
 // post-build script to fix platform specific stuff
+// delete this later
 
 const fs = require("fs").promises
 const path = require("path")

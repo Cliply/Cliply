@@ -20,7 +20,7 @@ currently, you can:
 - download videos in multiple qualities (144p to 4k)
 - grab audio-only files
 - trim clips to specific time ranges
-- download full playlists
+- download entire playlists
 
 new features are being added regularly. got an idea? request it [here](https://cliply.space/hey)
 
@@ -82,7 +82,6 @@ this is open source! feel free to report bugs, suggest features, or submit pull 
 
 > stuff to do
 
-- [ ] add instruction for setting up backend
 - [ ] add docs
 - [ ] add support for transcripts
 - [x] fix race conditions in downloads
