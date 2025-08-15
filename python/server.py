@@ -284,11 +284,6 @@ def get_enhanced_ydl_opts(base_opts: dict = None) -> dict:
     simple_opts = {
         'quiet': True,
         'no_warnings': True,
-        'extractor_args': {
-            'youtube': {
-                'player_client': ['tv'],
-            }
-        }
     }
     
     if FFMPEG_PATH:
@@ -408,6 +403,42 @@ async def download_async(url: str, opts: dict) -> None:
     loop = asyncio.get_event_loop()
     return await loop.run_in_executor(executor, _download_blocking, url, opts)
 
+async def download_with_fallback(url: str, base_opts: dict) -> None:
+    """download with fallback strategy similar to extract_video_info_with_fallback"""
+    strategies = [
+        lambda: get_enhanced_ydl_opts(base_opts),
+        lambda: get_enhanced_ydl_opts({
+            **base_opts,
+            'extractor_args': {
+                'youtube': {
+                    'player_client': ['android'],
+                }
+            }
+        }),
+        lambda: get_enhanced_ydl_opts({
+            **base_opts,
+            'extractor_args': {
+                'youtube': {
+                    'player_client': ['web'],
+                }
+            }
+        })
+    ]
+    
+    for attempt, strategy in enumerate(strategies):
+        try:
+            if attempt > 0:
+                wait_time = (2 ** attempt) + random.uniform(0.5, 2)
+                await asyncio.sleep(wait_time)
+            opts = strategy()
+            await download_async(url, opts)
+            return
+        except Exception as e:
+            if attempt == len(strategies) - 1:
+                raise e
+                
+    raise Exception("all download strategies failed")
+
 def _extract_info_blocking(url: str, opts: dict) -> dict:
     with yt_dlp.YoutubeDL(opts) as ydl:
         return ydl.extract_info(url, download=False)
@@ -423,27 +454,17 @@ async def extract_video_info_with_fallback(url: str) -> dict:
         lambda: get_enhanced_ydl_opts({
             'extractor_args': {
                 'youtube': {
-                    'player_client': ['tv'],
+                    'player_client': ['android'],
                 }
             }
         }),
         lambda: get_enhanced_ydl_opts({
             'extractor_args': {
                 'youtube': {
-                    'player_client': ['ios'],
+                    'player_client': ['web'],
                 }
             }
-        }),
-        lambda: {
-            'quiet': True,
-            'no_warnings': True,
-            'cookiefile': str(cookie_manager.cookie_file) if cookie_manager.has_valid_cookies() else None,
-            'extractor_args': {
-                'youtube': {
-                    'player_client': ['web_embedded'],
-                }
-            }
-        }
+        })
     ]
     
     for attempt, strategy in enumerate(strategies):
@@ -472,7 +493,7 @@ async def extract_playlist_info_with_fallback(url: str, max_videos: int = 50, in
             **base_playlist_opts,
             'extractor_args': {
                 'youtube': {
-                    'player_client': ['tv'],
+                    'player_client': ['android'],
                 }
             }
         }),
@@ -480,21 +501,10 @@ async def extract_playlist_info_with_fallback(url: str, max_videos: int = 50, in
             **base_playlist_opts,
             'extractor_args': {
                 'youtube': {
-                    'player_client': ['ios'],
+                    'player_client': ['web'],
                 }
             }
-        }),
-        lambda: {
-            **base_playlist_opts,
-            'quiet': True,
-            'no_warnings': True,
-            'cookiefile': str(cookie_manager.cookie_file) if cookie_manager.has_valid_cookies() else None,
-            'extractor_args': {
-                'youtube': {
-                    'player_client': ['web_embedded'],
-                }
-            }
-        }
+        })
     ]
     
     for attempt, strategy in enumerate(strategies):
@@ -642,8 +652,8 @@ async def download_combined_video_audio(request: CombinedDownloadRequest):
         
         final_path = DOWNLOADS_DIR / final_filename
         
-        # SIMPLIFIED: Direct download to final location (no temp files)
-        # Combine video + audio formats OR use single combined format
+        # direct download to final location (no temp files)
+        # combine video + audio formats or use single combined format
         if request.video_format_id == "18":
             # Format 18 is already combined (video+audio)
             format_string = request.video_format_id
@@ -651,15 +661,15 @@ async def download_combined_video_audio(request: CombinedDownloadRequest):
             # Combine separate video + audio formats
             format_string = f"{request.video_format_id}+{request.audio_format_id}"
         
-        ydl_opts = get_enhanced_ydl_opts({
+        base_opts = {
             'format': format_string,
             'outtmpl': str(final_path),
             'merge_output_format': 'mp4',
-        })
+        }
         
-        ydl_opts = get_ydl_opts_with_time_range(ydl_opts, request.time_range, request.precise_cut)
+        base_opts = get_ydl_opts_with_time_range(base_opts, request.time_range, request.precise_cut)
         
-        await download_async(request.url, ydl_opts)
+        await download_with_fallback(request.url, base_opts)
         
         base_name = final_filename.replace('.%(ext)s', '')
         downloaded_files = list(DOWNLOADS_DIR.glob(f"{base_name}.*"))
@@ -712,15 +722,15 @@ async def download_audio_only(request: AudioDownloadRequest):
         
         final_path = DOWNLOADS_DIR / final_filename
         
-        # SIMPLIFIED: Direct download to final location (no temp files)
-        ydl_opts = get_enhanced_ydl_opts({
+        # direct download to final location (no temp files)
+        base_opts = {
             'format': request.format_id,
             'outtmpl': str(final_path),
-        })
+        }
         
-        ydl_opts = get_ydl_opts_with_time_range(ydl_opts, request.time_range, request.precise_cut)
+        base_opts = get_ydl_opts_with_time_range(base_opts, request.time_range, request.precise_cut)
         
-        await download_async(request.url, ydl_opts)
+        await download_with_fallback(request.url, base_opts)
         
         base_name = final_filename.replace('.%(ext)s', '')
         downloaded_files = list(DOWNLOADS_DIR.glob(f"{base_name}.*"))
@@ -823,14 +833,14 @@ async def download_playlist_videos(request: PlaylistDownloadRequest, background_
                 output_filename = f"{video_index:03d}_{safe_video_title}"
                 output_path = batch_dir / f"{output_filename}.%(ext)s"
                 
-                ydl_opts = get_enhanced_ydl_opts({
+                base_opts = {
                     'format': format_string,
                     'outtmpl': str(output_path),
                     'merge_output_format': file_ext,
                     'restrictfilenames': True,
-                })
+                }
                 
-                await download_async(video_url, ydl_opts)
+                await download_with_fallback(video_url, base_opts)
                 
                 downloaded_file = list(batch_dir.glob(f"{output_filename}.*"))
                 
