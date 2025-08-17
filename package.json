@@ -7,7 +7,7 @@
   "private": true,
   "author": {
     "name": "Cliply Team",
-    "email": "cliply.space@gmail.com"
+    "email": "hello.cliply@gmail.com"
   },
   "scripts": {
     "start": "npm run dev",
@@ -123,8 +123,15 @@
           ]
         }
       ],
-      "hardenedRuntime": false,
+      "hardenedRuntime": true,
       "gatekeeperAssess": false,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist",
+      "identity": null,
+      "signIgnore": [
+        "python-runtime/**/*",
+        "binaries/**/*"
+      ],
       "extendInfo": {
         "NSMicrophoneUsageDescription": "This app does not use the microphone.",
         "NSCameraUsageDescription": "This app does not use the camera."
