@@ -109,6 +109,10 @@ export interface UpdateInfo {
   version: string
   releaseNotes?: string
   releaseDate?: string
+  autoDownloading?: boolean
+  autoInstallOnQuit?: boolean
+  requiresManualDownload?: boolean
+  platform?: string
 }
 
 export interface UpdateProgress {
@@ -190,11 +194,6 @@ declare global {
           callback: (error: { message: string }) => void
         ) => () => void
         onUpdateChecking: (callback: () => void) => () => void
-        onSecurityUpdate: (
-          callback: (
-            info: UpdateInfo & { isSecurity: boolean; message: string }
-          ) => void
-        ) => () => void
       }
       server: {
         onStarting: (callback: () => void) => () => void
@@ -706,13 +705,5 @@ export const updaterApi = {
       return window.electronAPI!.updater.onUpdateChecking(callback)
     },
 
-    onSecurityUpdate: (
-      callback: (
-        info: UpdateInfo & { isSecurity: boolean; message: string }
-      ) => void
-    ) => {
-      if (!isElectron()) return () => {}
-      return window.electronAPI!.updater.onSecurityUpdate(callback)
-    }
   }
 }

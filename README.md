@@ -87,3 +87,4 @@ this is open source! feel free to report bugs, suggest features, or submit pull 
 - [x] fix race conditions in downloads
 - [ ] ffmpeg docs and license
 - [ ] fix auto upgrade system
+- [ ] add github workflows for new release

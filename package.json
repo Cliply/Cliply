@@ -1,6 +1,6 @@
 {
   "name": "cliply-desktop",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "Desktop YouTube downloader with segment support",
   "main": "src/main/index.js",
   "homepage": "./",
@@ -35,6 +35,9 @@
     "dist:win": "npm run prepare:full && cross-env BUILD_TARGET_PLATFORM=win32-x64 node scripts/setup-python-runtime.js && electron-builder --win",
     "dist:mac": "npm run prepare:full && cross-env BUILD_TARGET_PLATFORM=darwin-arm64 node scripts/setup-python-runtime.js && electron-builder --mac",
     "dist:linux": "npm run prepare:full && cross-env BUILD_TARGET_PLATFORM=linux-x64 node scripts/setup-python-runtime.js && electron-builder --linux",
+    "dist:win:safe": "npm run prepare:full && cross-env BUILD_TARGET_PLATFORM=win32-x64 node scripts/setup-python-runtime.js && electron-builder --win --publish never && node scripts/create-update-files.js",
+    "dist:mac:safe": "npm run prepare:full && cross-env BUILD_TARGET_PLATFORM=darwin-arm64 node scripts/setup-python-runtime.js && electron-builder --mac --publish never && node scripts/create-update-files.js",
+    "dist:linux:safe": "npm run prepare:full && cross-env BUILD_TARGET_PLATFORM=linux-x64 node scripts/setup-python-runtime.js && electron-builder --linux --publish never && node scripts/create-update-files.js",
     "dist:mac:direct": "npm run install:renderer && npm run build:renderer && npm run cleanup:binaries && npm run setup:python-runtime && npm run setup:python-deps && electron-builder --mac",
     "postinstall": "electron-builder install-app-deps",
     "test": "jest",
@@ -45,6 +48,7 @@
     "generate:icons": "node scripts/generate-icons.js"
   },
   "dependencies": {
+    "@aptabase/electron": "^0.3.1",
     "dotenv": "^16.5.0",
     "electron-updater": "^6.1.8",
     "undici": "^7.10.0",
@@ -306,10 +310,11 @@
         "libasound2"
       ]
     },
+    "generateUpdatesFilesForAllChannels": true,
     "publish": {
       "provider": "github",
-      "owner": "cliply",
-      "repo": "cliply-desktop",
+      "owner": "Cliply",
+      "repo": "Cliply",
       "releaseType": "release"
     },
     "compression": "normal"
@@ -332,10 +337,10 @@
   ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/cliply/cliply-desktop.git"
+    "url": "https://github.com/Cliply/Cliply.git"
   },
   "bugs": {
-    "url": "https://github.com/cliply/cliply-desktop/issues"
+    "url": "https://github.com/Cliply/Cliply/issues"
   },
   "license": "MIT",
   "jest": {
