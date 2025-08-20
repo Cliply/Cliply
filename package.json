@@ -1,13 +1,13 @@
 {
   "name": "cliply-desktop",
-  "version": "0.0.15",
+  "version": "0.0.2",
   "description": "Desktop YouTube downloader with segment support",
   "main": "src/main/index.js",
   "homepage": "./",
   "private": true,
   "author": {
     "name": "Cliply Team",
-    "email": "cliply.space@gmail.com"
+    "email": "hello.cliply@gmail.com"
   },
   "scripts": {
     "start": "npm run dev",
@@ -306,8 +306,8 @@
     "generateUpdatesFilesForAllChannels": true,
     "publish": {
       "provider": "github",
-      "owner": "devansh1401",
-      "repo": "next-todo-app",
+      "owner": "Cliply",
+      "repo": "Cliply",
       "releaseType": "release"
     },
     "compression": "normal"
@@ -330,10 +330,10 @@
   ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/devansh1401/next-todo-app.git"
+    "url": "https://github.com/Cliply/Cliply.git"
   },
   "bugs": {
-    "url": "https://github.com/devansh1401/next-todo-app/issues"
+    "url": "https://github.com/Cliply/Cliply/issues"
   },
   "license": "MIT",
   "jest": {
