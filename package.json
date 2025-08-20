@@ -1,6 +1,6 @@
 {
   "name": "cliply-desktop",
-  "version": "0.0.14",
+  "version": "0.0.15",
   "description": "Desktop YouTube downloader with segment support",
   "main": "src/main/index.js",
   "homepage": "./",
@@ -48,6 +48,7 @@
     "generate:icons": "node scripts/generate-icons.js"
   },
   "dependencies": {
+    "@aptabase/electron": "^0.3.1",
     "dotenv": "^16.5.0",
     "electron-updater": "^6.1.8",
     "undici": "^7.10.0",

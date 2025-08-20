@@ -1,4 +1,4 @@
-// app constants and config
+// app constants
 
 const path = require("path")
 const os = require("os")
@@ -80,6 +80,21 @@ const APP_CONFIG = {
 
     // periodic check interval (12 hours in milliseconds)
     PERIODIC_CHECK_INTERVAL: 12 * 60 * 60 * 1000
+  },
+
+  // analytics configuration
+  ANALYTICS_CONFIG: {
+    // aptabase app key
+    APP_KEY: "A-EU-7558244378",
+
+    // enable analytics
+    ENABLED: true,
+
+    // events to track
+    EVENTS: {
+      DOWNLOAD_COMPLETED: "download_completed",
+      DOWNLOAD_FAILED: "download_failed"
+    }
   }
 }
 

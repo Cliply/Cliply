@@ -31,6 +31,7 @@ export function AudioDownloadButton({
 }: AudioDownloadButtonProps) {
   const {
     url,
+    videoInfo,
     audioTimeRange,
     setIsDownloadingAudio,
     selectedAudioFormatForDownload,
@@ -42,7 +43,6 @@ export function AudioDownloadButton({
   const serverStatus = useServerStatus()
 
   const selectedDuration = audioTimeRange.end - audioTimeRange.start
-
 
   if (!isVisible) return null
 
@@ -78,7 +78,8 @@ export function AudioDownloadButton({
         url,
         format_id: selectedAudioFormatForDownload.format_id,
         time_range: audioTimeRange,
-        precise_cut: audioPreciseCut
+        precise_cut: audioPreciseCut,
+        title: videoInfo?.title || "audio"
       })
 
       showDownloadSuccessToast("audio")

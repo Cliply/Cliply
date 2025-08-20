@@ -33,6 +33,7 @@ export function VideoDownloadButton({
 }: VideoDownloadButtonProps) {
   const {
     url,
+    videoInfo,
     videoTimeRange,
     selectedVideoQuality,
     setIsDownloadingVideo,
@@ -44,7 +45,6 @@ export function VideoDownloadButton({
 
   const bestAudioFormat = selectBestAudioFormat(audioFormats)
   const selectedDuration = videoTimeRange.end - videoTimeRange.start
-
 
   if (!isVisible || !selectedVideoQuality) return null
 
@@ -68,7 +68,8 @@ export function VideoDownloadButton({
         video_format_id: selectedVideoQuality.format.format_id,
         audio_format_id: bestAudioFormat.format_id,
         time_range: videoTimeRange,
-        precise_cut: videoPreciseCut
+        precise_cut: videoPreciseCut,
+        title: videoInfo?.title || "video"
       })
 
       showDownloadSuccessToast("video")

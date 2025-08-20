@@ -1,7 +1,16 @@
-// ipc handlers for main electron process
+// ipc handlers
 
 const { ipcMain, dialog } = require("electron")
 const { IPC_CHANNELS, APP_CONFIG } = require("./utils/constants")
+const {
+  categorizeError,
+  extractQuality,
+  extractTitleFromFilename,
+  sanitizeTitle
+} = require("./utils/analytics-helpers")
+
+// get trackEvent from global
+const getTrackEvent = () => global.trackEvent || (() => {})
 
 class IPCHandlers {
   constructor(services, autoUpdater = null) {
@@ -10,16 +19,16 @@ class IPCHandlers {
     this.autoUpdater = autoUpdater
     this.mainWindow = null
 
-    // simple audit logging
+    // audit logging
     this.auditLog = []
 
-    // active downloads tracking
+    // active downloads
     this.activeDownloads = new Map()
 
     this.registerHandlers()
   }
 
-  // simple audit logging
+  // audit logging
   logAudit(operation, success = true, data = {}) {
     const logEntry = {
       timestamp: new Date().toISOString(),
@@ -213,17 +222,22 @@ class IPCHandlers {
   // combined download with single atomic tracking
   async handleDownloadCombined(event, data) {
     const downloadId = `combined_${Date.now()}`
+    let title = "unknown" // default title for error tracking
+    let video_format_id = "unknown" // default for error tracking
 
     try {
       // validate input
       this.validateRequest(data, ["url", "video_format_id", "audio_format_id"])
       const {
         url,
-        video_format_id,
-        audio_format_id,
+        video_format_id: videoFormatId,
+        audio_format_id: audioFormatId,
         time_range,
-        title = "video"
+        title: requestTitle = "video"
       } = data
+
+      title = requestTitle
+      video_format_id = videoFormatId
 
       // check python server
       if (!this.serverManager.isServerReady()) {
@@ -247,7 +261,11 @@ class IPCHandlers {
 
       try {
         // prepare request
-        const requestData = { url, video_format_id, audio_format_id }
+        const requestData = {
+          url,
+          video_format_id: videoFormatId,
+          audio_format_id: audioFormatId
+        }
         if (time_range) {
           requestData.time_range = time_range
         }
@@ -270,6 +288,28 @@ class IPCHandlers {
             filename: result.filename
           })
 
+          // track success
+          try {
+            const actualTitle = result.filename
+              ? extractTitleFromFilename(result.filename)
+              : title
+            const eventData = {
+              type: "combined",
+              video_title: sanitizeTitle(actualTitle),
+              format_quality: extractQuality(videoFormatId),
+              file_size_mb: Math.round((result.file_size || 0) / (1024 * 1024))
+            }
+            getTrackEvent()(
+              APP_CONFIG.ANALYTICS_CONFIG.EVENTS.DOWNLOAD_COMPLETED,
+              eventData
+            )
+          } catch (analyticsError) {
+            console.warn(
+              "Failed to track download completion:",
+              analyticsError.message
+            )
+          }
+
           return this.createSuccess({
             filename: result.filename,
             file_path: result.file_path,
@@ -290,10 +330,27 @@ class IPCHandlers {
       }
     } catch (error) {
       this.activeDownloads.delete(downloadId)
-      console.error(
-        `[${downloadId}] Combined download failed:`,
-        error.message
-      )
+      console.error(`[${downloadId}] Combined download failed:`, error.message)
+
+      // track failure
+      try {
+        const eventData = {
+          error_type: categorizeError(error.message),
+          type: "combined",
+          video_title: sanitizeTitle(title),
+          format_quality: extractQuality(video_format_id)
+        }
+        getTrackEvent()(
+          APP_CONFIG.ANALYTICS_CONFIG.EVENTS.DOWNLOAD_FAILED,
+          eventData
+        )
+      } catch (analyticsError) {
+        console.warn(
+          "Failed to track download failure:",
+          analyticsError.message
+        )
+      }
+
       return this.createError(
         "Download failed",
         "Please try again or check your connection"
@@ -304,11 +361,21 @@ class IPCHandlers {
   // audio download with single atomic tracking
   async handleDownloadAudio(event, data) {
     const downloadId = `audio_${Date.now()}`
+    let title = "unknown" // default title for error tracking
+    let format_id = "unknown" // default for error tracking
 
     try {
       // validate input
       this.validateRequest(data, ["url", "format_id"])
-      const { url, format_id, time_range, title = "audio" } = data
+      const {
+        url,
+        format_id: formatId,
+        time_range,
+        title: requestTitle = "audio"
+      } = data
+
+      title = requestTitle
+      format_id = formatId
 
       // check python server
       if (!this.serverManager.isServerReady()) {
@@ -332,7 +399,7 @@ class IPCHandlers {
 
       try {
         // prepare request
-        const requestData = { url, format_id }
+        const requestData = { url, format_id: formatId }
         if (time_range) {
           requestData.time_range = time_range
         }
@@ -355,6 +422,28 @@ class IPCHandlers {
             filename: result.filename
           })
 
+          // track success
+          try {
+            const actualTitle = result.filename
+              ? extractTitleFromFilename(result.filename)
+              : title
+            const eventData = {
+              type: "audio",
+              video_title: sanitizeTitle(actualTitle),
+              format_quality: extractQuality(formatId),
+              file_size_mb: Math.round((result.file_size || 0) / (1024 * 1024))
+            }
+            getTrackEvent()(
+              APP_CONFIG.ANALYTICS_CONFIG.EVENTS.DOWNLOAD_COMPLETED,
+              eventData
+            )
+          } catch (analyticsError) {
+            console.warn(
+              "Failed to track audio download completion:",
+              analyticsError.message
+            )
+          }
+
           return this.createSuccess({
             filename: result.filename,
             file_path: result.file_path,
@@ -376,6 +465,28 @@ class IPCHandlers {
     } catch (error) {
       this.activeDownloads.delete(downloadId)
       console.error(`[${downloadId}] Audio download failed:`, error.message)
+
+      // track failure
+      try {
+        // use actual format id
+        const actualFormatId = data?.format_id || format_id
+        const eventData = {
+          error_type: categorizeError(error.message),
+          type: "audio",
+          video_title: sanitizeTitle(title),
+          format_quality: extractQuality(actualFormatId)
+        }
+        getTrackEvent()(
+          APP_CONFIG.ANALYTICS_CONFIG.EVENTS.DOWNLOAD_FAILED,
+          eventData
+        )
+      } catch (analyticsError) {
+        console.warn(
+          "Failed to track audio download failure:",
+          analyticsError.message
+        )
+      }
+
       return this.createError(
         "Download failed",
         "Please try again or check your connection"
@@ -680,7 +791,7 @@ class IPCHandlers {
 
       // set a flag to indicate we're updating
       global.isUpdating = true
-      
+
       // use setImmediate to allow the response to be sent before quitting
       setImmediate(() => {
         try {
@@ -695,7 +806,7 @@ class IPCHandlers {
           }, 1000)
         }
       })
-      
+
       return this.createSuccess({ installing: true })
     } catch (error) {
       console.error("Install update failed:", error.message)
@@ -718,7 +829,7 @@ class IPCHandlers {
 
       // force check for updates
       await this.autoUpdater.checkForUpdates()
-      return this.createSuccess({ 
+      return this.createSuccess({
         checking: true,
         forced: true,
         reason: "Security check requested"

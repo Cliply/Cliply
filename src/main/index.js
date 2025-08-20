@@ -14,6 +14,30 @@ const ServerManager = require("./services/server-manager")
 const CookieManager = require("./services/cookie-manager")
 const IPCHandlers = require("./ipc-handlers")
 const { APP_CONFIG } = require("./utils/constants")
+const { getAppVersion } = require("./utils/analytics-helpers")
+
+// analytics
+let trackEvent = null
+if (APP_CONFIG.ANALYTICS_CONFIG.ENABLED) {
+  try {
+    const {
+      initialize,
+      trackEvent: aptabaseTrackEvent
+    } = require("@aptabase/electron/main")
+    initialize(APP_CONFIG.ANALYTICS_CONFIG.APP_KEY)
+    trackEvent = aptabaseTrackEvent
+    // make globally available
+    global.trackEvent = trackEvent
+    console.log("Analytics initialized")
+  } catch (error) {
+    console.warn("Failed to initialize analytics:", error.message)
+    trackEvent = () => {}
+    global.trackEvent = trackEvent
+  }
+} else {
+  trackEvent = () => {}
+  global.trackEvent = trackEvent
+}
 
 // polyfill fetch for node environments
 if (!globalThis.fetch) {
@@ -50,7 +74,7 @@ class CliplyApp {
 
       // set app properties
       app.setName("Cliply")
-      app.setVersion("0.0.1")
+      app.setVersion(getAppVersion())
 
       // init services
       await this.initializeServices()
@@ -129,11 +153,15 @@ class CliplyApp {
 
       // update available - handle based on platform
       autoUpdater.on("update-available", (info) => {
-        const isMac = process.platform === 'darwin'
-        
+        const isMac = process.platform === "darwin"
+
         if (isMac) {
-          console.log("Update available:", info.version, "- showing manual download for macOS")
-          
+          console.log(
+            "Update available:",
+            info.version,
+            "- showing manual download for macOS"
+          )
+
           // macOS: Show manual download popup
           if (this.mainWindow && !this.mainWindow.isDestroyed()) {
             this.mainWindow.webContents.send("update:available", {
@@ -141,12 +169,16 @@ class CliplyApp {
               releaseNotes: info.releaseNotes,
               releaseDate: info.releaseDate,
               requiresManualDownload: true,
-              platform: 'darwin'
+              platform: "darwin"
             })
           }
         } else {
-          console.log("Update available:", info.version, "- auto-downloading...")
-          
+          console.log(
+            "Update available:",
+            info.version,
+            "- auto-downloading..."
+          )
+
           // Windows/Linux: Auto-download as before
           if (this.mainWindow && !this.mainWindow.isDestroyed()) {
             this.mainWindow.webContents.send("update:available", {
@@ -351,6 +383,7 @@ class CliplyApp {
       })
     })
   }
+
 
   // create main window
   createWindow() {
