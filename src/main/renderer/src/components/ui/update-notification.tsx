@@ -40,8 +40,6 @@ export const UpdateNotification: React.FC<UpdateNotificationProps> = ({
   const [showUpdateDialog, setShowUpdateDialog] = useState(false)
   const [showInstallDialog, setShowInstallDialog] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [isSecurityUpdate, setIsSecurityUpdate] = useState(false)
-  const [autoInstallCountdown, setAutoInstallCountdown] = useState<number | null>(null)
 
   useEffect(() => {
     // Set up update event listeners
@@ -51,17 +49,42 @@ export const UpdateNotification: React.FC<UpdateNotificationProps> = ({
     const unsubscribeAvailable = updaterApi.events.onUpdateAvailable((info) => {
       console.log("🔔 Update available:", info.version)
       setUpdateInfo(info)
-      setShowUpdateDialog(true)
 
       toast.dismiss("update-check") // Dismiss the checking toast
-      toast.success("Update Available", {
-        description: `Version ${info.version} is ready to download`,
-        action: {
-          label: "Download",
-          onClick: () => handleDownloadUpdate()
-        },
-        duration: 10000
-      })
+
+      if (info.requiresManualDownload) {
+        // macOS: Show manual download dialog
+        setShowUpdateDialog(true)
+        toast.success("Update Available", {
+          description: `Version ${info.version} requires manual download on Mac`,
+          action: {
+            label: "Download",
+            onClick: () =>
+              window.open(
+                `https://github.com/devansh1401/next-todo-app/releases/latest`,
+                "_blank"
+              )
+          },
+          duration: 10000
+        })
+      } else if (info.autoDownloading) {
+        // Auto-downloading - only show toast, no dialog
+        toast.success("Update Downloading", {
+          description: `Version ${info.version} is downloading automatically in the background`,
+          duration: 5000
+        })
+      } else {
+        // Manual download - show dialog and toast
+        setShowUpdateDialog(true)
+        toast.success("Update Available", {
+          description: `Version ${info.version} is ready to download`,
+          action: {
+            label: "Download",
+            onClick: () => handleDownloadUpdate()
+          },
+          duration: 10000
+        })
+      }
 
       onUpdateAvailable?.(info)
     })
@@ -86,15 +109,18 @@ export const UpdateNotification: React.FC<UpdateNotificationProps> = ({
         console.log(`Update download progress: ${progress.percent}%`)
         setDownloadProgress(progress)
         setIsDownloading(true)
-        
+
         // Show progress toast every 10% or if it's the first progress update
         if (progress.percent % 10 === 0 || progress.percent < 5) {
-          toast.loading(`Downloading Update: ${Math.round(progress.percent)}%`, {
-            id: "update-progress",
-            description: progress.bytesPerSecond 
-              ? `${Math.round(progress.bytesPerSecond / 1024)} KB/s`
-              : "Downloading in background..."
-          })
+          toast.loading(
+            `Downloading Update: ${Math.round(progress.percent)}%`,
+            {
+              id: "update-progress",
+              description: progress.bytesPerSecond
+                ? `${Math.round(progress.bytesPerSecond / 1024)} KB/s`
+                : "Downloading in background..."
+            }
+          )
         }
       }
     )
@@ -102,7 +128,7 @@ export const UpdateNotification: React.FC<UpdateNotificationProps> = ({
 
     // Update downloaded
     const unsubscribeDownloaded = updaterApi.events.onUpdateDownloaded(
-      (info: any) => {
+      (info: UpdateInfo) => {
         console.log("Update downloaded:", info.version)
         setIsDownloading(false)
         setIsDownloaded(true)
@@ -111,42 +137,17 @@ export const UpdateNotification: React.FC<UpdateNotificationProps> = ({
         // Dismiss the progress toast
         toast.dismiss("update-progress")
 
-        if (info.isSecurity && info.autoInstallIn) {
-          // Security update with auto-install countdown
-          const countdownSeconds = Math.ceil(info.autoInstallIn / 1000)
-          setAutoInstallCountdown(countdownSeconds)
-          setShowInstallDialog(true)
+        // All updates now use simple auto-install on quit
+        setShowInstallDialog(true)
 
-          toast.success("Update Installing Automatically", {
-            description: `Version ${info.version} will install in ${countdownSeconds} seconds`,
-            duration: info.autoInstallIn
-          })
-
-          // Start countdown timer
-          const countdownInterval = setInterval(() => {
-            setAutoInstallCountdown((prev) => {
-              if (prev && prev > 1) {
-                return prev - 1
-              } else {
-                clearInterval(countdownInterval)
-                return null
-              }
-            })
-          }, 1000)
-
-        } else {
-          // Normal update
-          setShowInstallDialog(true)
-          
-          toast.success("Update Ready to Install!", {
-            description: `Version ${info.version} has been downloaded successfully. Click to install and restart.`,
-            action: {
-              label: "Install & Restart",
-              onClick: () => handleInstallUpdate()
-            },
-            duration: 0 // Keep open until dismissed
-          })
-        }
+        toast.success("Update Ready to Install!", {
+          description: `Version ${info.version} has been downloaded successfully. It will install when you close the app.`,
+          action: {
+            label: "Install Now",
+            onClick: () => handleInstallUpdate()
+          },
+          duration: 0 // Keep open until dismissed
+        })
 
         onUpdateDownloaded?.(info)
       }
@@ -176,27 +177,6 @@ export const UpdateNotification: React.FC<UpdateNotificationProps> = ({
     })
     cleanupFunctions.push(unsubscribeError)
 
-    // Security update available
-    const unsubscribeSecurityUpdate = updaterApi.events.onSecurityUpdate((info) => {
-      console.log("Important update available:", info.version)
-      setUpdateInfo(info)
-      setIsSecurityUpdate(true)
-      setShowUpdateDialog(true)
-
-      toast.dismiss("update-check")
-      toast.success("Update Available", {
-        description: `Version ${info.version} is downloading automatically`,
-        action: {
-          label: "Downloading...",
-          onClick: () => {} // Auto-downloading, no action needed
-        },
-        duration: 5000 // Normal duration
-      })
-
-      onUpdateAvailable?.(info)
-    })
-    cleanupFunctions.push(unsubscribeSecurityUpdate)
-
     return () => {
       cleanupFunctions.forEach((cleanup) => cleanup())
     }
@@ -216,7 +196,8 @@ export const UpdateNotification: React.FC<UpdateNotificationProps> = ({
 
       toast.dismiss("update-download")
       toast.success("Download Started", {
-        description: "Update is downloading in the background. You can continue using the app.",
+        description:
+          "Update is downloading in the background. You can continue using the app.",
         duration: 4000
       })
     } catch (error) {
@@ -228,7 +209,9 @@ export const UpdateNotification: React.FC<UpdateNotificationProps> = ({
       toast.dismiss("update-download")
       toast.error("Download Failed", {
         description:
-          error instanceof Error ? error.message : "Please try again or check your internet connection"
+          error instanceof Error
+            ? error.message
+            : "Please try again or check your internet connection"
       })
     }
   }
@@ -247,7 +230,9 @@ export const UpdateNotification: React.FC<UpdateNotificationProps> = ({
       console.error("Failed to install update:", error)
       toast.error("Installation Failed", {
         description:
-          error instanceof Error ? error.message : "Please try downloading the update again",
+          error instanceof Error
+            ? error.message
+            : "Please try downloading the update again",
         duration: 6000
       })
     }
@@ -270,9 +255,9 @@ export const UpdateNotification: React.FC<UpdateNotificationProps> = ({
       toast.loading("Checking for updates...", {
         id: "update-check"
       })
-      
+
       await updaterApi.forceSecurityCheck()
-      
+
       setTimeout(() => {
         toast.dismiss("update-check")
       }, 3000)
@@ -308,7 +293,9 @@ export const UpdateNotification: React.FC<UpdateNotificationProps> = ({
             <CardHeader className="pb-3">
               <CardTitle className="flex items-center gap-2 text-sm">
                 <div className="flex h-8 w-8 items-center justify-center rounded-full bg-cyan-100 dark:bg-cyan-900/50">
-                  <span className="text-cyan-600 dark:text-cyan-400 font-bold text-lg">*</span>
+                  <span className="text-cyan-600 dark:text-cyan-400 font-bold text-lg">
+                    *
+                  </span>
                 </div>
                 <div>
                   <div className="font-medium text-slate-900 dark:text-white">
@@ -352,7 +339,9 @@ export const UpdateNotification: React.FC<UpdateNotificationProps> = ({
             <CardHeader className="pb-3">
               <CardTitle className="flex items-center gap-2 text-sm">
                 <div className="flex h-8 w-8 items-center justify-center rounded-full bg-cyan-100 dark:bg-cyan-900/50">
-                  <span className="text-cyan-600 dark:text-cyan-400 font-bold text-lg">*</span>
+                  <span className="text-cyan-600 dark:text-cyan-400 font-bold text-lg">
+                    *
+                  </span>
                 </div>
                 <div>
                   <div className="font-medium text-slate-900 dark:text-white">
@@ -396,7 +385,9 @@ export const UpdateNotification: React.FC<UpdateNotificationProps> = ({
             <CardHeader className="pb-3">
               <CardTitle className="flex items-center gap-2 text-sm">
                 <div className="flex h-8 w-8 items-center justify-center rounded-full bg-red-100 dark:bg-red-900/50">
-                  <span className="text-red-600 dark:text-red-400 font-bold text-lg">!</span>
+                  <span className="text-red-600 dark:text-red-400 font-bold text-lg">
+                    !
+                  </span>
                 </div>
                 <div>
                   <div className="font-medium text-slate-900 dark:text-white">
@@ -451,17 +442,18 @@ export const UpdateNotification: React.FC<UpdateNotificationProps> = ({
             <DialogHeader className="space-y-4 pb-6">
               <div className="flex items-center gap-3">
                 <div className="flex h-12 w-12 items-center justify-center rounded-full bg-cyan-100 dark:bg-cyan-900/50">
-                  <span className="text-cyan-600 dark:text-cyan-400 font-bold text-2xl">*</span>
+                  <span className="text-cyan-600 dark:text-cyan-400 font-bold text-2xl">
+                    *
+                  </span>
                 </div>
                 <div>
                   <DialogTitle className="text-left">
                     Update Available
                   </DialogTitle>
                   <DialogDescription className="text-left">
-                    {isSecurityUpdate 
-                      ? "An important update is being downloaded automatically." 
-                      : "A new version of Cliply is available."
-                    }
+                    {updateInfo?.requiresManualDownload
+                      ? "We can't auto-update on Mac. Click 'Learn Why' to find out more."
+                      : "A new version of Cliply is available."}
                   </DialogDescription>
                 </div>
               </div>
@@ -475,7 +467,8 @@ export const UpdateNotification: React.FC<UpdateNotificationProps> = ({
                   </h4>
                   {updateInfo.releaseDate && (
                     <p className="text-sm text-slate-600 dark:text-slate-400 mt-1">
-                      Released {new Date(updateInfo.releaseDate).toLocaleDateString()}
+                      Released{" "}
+                      {new Date(updateInfo.releaseDate).toLocaleDateString()}
                     </p>
                   )}
                 </div>
@@ -484,20 +477,42 @@ export const UpdateNotification: React.FC<UpdateNotificationProps> = ({
           </div>
 
           <DialogFooter className="flex-col sm:flex-row gap-3 pt-4">
-            {isSecurityUpdate ? (
-              <div className="w-full text-center">
-                <p className="text-sm text-slate-600 dark:text-slate-400 mb-3">
-                  Update is downloading automatically in the background
-                </p>
+            {updateInfo?.requiresManualDownload ? (
+              // macOS manual download buttons
+              <>
                 <Button
                   variant="outline"
                   onClick={() => setShowUpdateDialog(false)}
                   className="w-full sm:w-auto"
                 >
-                  OK
+                  Later
                 </Button>
-              </div>
+                <Button
+                  onClick={() =>
+                    window.open(
+                      "https://www.cliply.space/download/macos/autoupdates",
+                      "_blank"
+                    )
+                  }
+                  variant="outline"
+                  className="w-full sm:w-auto"
+                >
+                  Learn Why
+                </Button>
+                <Button
+                  onClick={() =>
+                    window.open(
+                      `https://github.com/devansh1401/next-todo-app/releases/latest`,
+                      "_blank"
+                    )
+                  }
+                  className="w-full sm:w-auto bg-cyan-600 hover:bg-cyan-700 text-white border-2 border-cyan-600 hover:border-cyan-700 transition-all duration-200"
+                >
+                  Download from GitHub
+                </Button>
+              </>
             ) : (
+              // Regular download buttons
               <>
                 <Button
                   variant="outline"
@@ -531,17 +546,17 @@ export const UpdateNotification: React.FC<UpdateNotificationProps> = ({
             <DialogHeader className="space-y-4 pb-6">
               <div className="flex items-center gap-3">
                 <div className="flex h-12 w-12 items-center justify-center rounded-full bg-cyan-100 dark:bg-cyan-900/50">
-                  <span className="text-cyan-600 dark:text-cyan-400 font-bold text-2xl">*</span>
+                  <span className="text-cyan-600 dark:text-cyan-400 font-bold text-2xl">
+                    *
+                  </span>
                 </div>
                 <div>
                   <DialogTitle className="text-left">
-                    {autoInstallCountdown ? "Installing Automatically" : "Update Ready to Install"}
+                    Update Ready to Install
                   </DialogTitle>
                   <DialogDescription className="text-left">
-                    {autoInstallCountdown 
-                      ? `Update will install automatically in ${autoInstallCountdown} seconds. The app will restart.`
-                      : "The update has been downloaded and is ready to install. The app will restart automatically."
-                    }
+                    The update has been downloaded and is ready to install. The
+                    app will restart automatically.
                   </DialogDescription>
                 </div>
               </div>
@@ -554,10 +569,7 @@ export const UpdateNotification: React.FC<UpdateNotificationProps> = ({
                     Version {updateInfo.version}
                   </h4>
                   <p className="text-sm text-slate-600 dark:text-slate-400 mt-1">
-                    {autoInstallCountdown 
-                      ? "Ready to install automatically" 
-                      : "Ready to install when you're ready"
-                    }
+                    Ready to install when you're ready
                   </p>
                 </div>
               </div>
@@ -565,35 +577,19 @@ export const UpdateNotification: React.FC<UpdateNotificationProps> = ({
           </div>
 
           <DialogFooter className="flex-col sm:flex-row gap-3 pt-4">
-            {autoInstallCountdown ? (
-              <div className="w-full text-center">
-                <p className="text-sm text-slate-600 dark:text-slate-400 mb-3">
-                  Installing automatically in {autoInstallCountdown} seconds...
-                </p>
-                <Button
-                  onClick={handleInstallUpdate}
-                  className="w-full sm:w-auto bg-cyan-600 hover:bg-cyan-700 text-white border-2 border-cyan-600 hover:border-cyan-700 transition-all duration-200"
-                >
-                  Install Now
-                </Button>
-              </div>
-            ) : (
-              <>
-                <Button
-                  variant="outline"
-                  onClick={() => setShowInstallDialog(false)}
-                  className="w-full sm:w-auto"
-                >
-                  Later
-                </Button>
-                <Button
-                  onClick={handleInstallUpdate}
-                  className="w-full sm:w-auto bg-cyan-600 hover:bg-cyan-700 text-white border-2 border-cyan-600 hover:border-cyan-700 transition-all duration-200"
-                >
-                  Install & Restart
-                </Button>
-              </>
-            )}
+            <Button
+              variant="outline"
+              onClick={() => setShowInstallDialog(false)}
+              className="w-full sm:w-auto"
+            >
+              Later
+            </Button>
+            <Button
+              onClick={handleInstallUpdate}
+              className="w-full sm:w-auto bg-cyan-600 hover:bg-cyan-700 text-white border-2 border-cyan-600 hover:border-cyan-700 transition-all duration-200"
+            >
+              Install & Restart
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

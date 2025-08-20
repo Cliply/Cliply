@@ -31,10 +31,10 @@ class CliplyApp {
     // event emitter for service communication
     this.eventEmitter = new EventEmitter()
 
-    // security update handling
-    this.securityUpdate = {
-      isSecurityUpdate: false,
-      autoInstallTimer: null
+    // update handling
+    this.updateState = {
+      lastCheckTime: null,
+      isCheckingForUpdates: false
     }
 
     // bind methods
@@ -65,7 +65,6 @@ class CliplyApp {
       if (!isDev) {
         this.setupAutoUpdater()
       }
-
     } catch (error) {
       console.error("Failed to initialize Cliply Desktop:", error)
       dialog.showErrorBox(
@@ -104,7 +103,6 @@ class CliplyApp {
       // init ipc handlers
       this.autoUpdater = autoUpdater
       this.ipcHandlers = new IPCHandlers(this.services, this.autoUpdater)
-
     } catch (error) {
       console.error("Service initialization failed:", error)
       throw error
@@ -129,21 +127,40 @@ class CliplyApp {
         }
       })
 
-      // update available
+      // update available - handle based on platform
       autoUpdater.on("update-available", (info) => {
-        const isSecurityUpdate = this.isSecurityUpdate(info)
+        const isMac = process.platform === 'darwin'
         
-        if (isSecurityUpdate) {
-          this.handleSecurityUpdate(info)
-        } else {
+        if (isMac) {
+          console.log("Update available:", info.version, "- showing manual download for macOS")
+          
+          // macOS: Show manual download popup
           if (this.mainWindow && !this.mainWindow.isDestroyed()) {
             this.mainWindow.webContents.send("update:available", {
               version: info.version,
               releaseNotes: info.releaseNotes,
               releaseDate: info.releaseDate,
-              isSecurity: false
+              requiresManualDownload: true,
+              platform: 'darwin'
             })
           }
+        } else {
+          console.log("Update available:", info.version, "- auto-downloading...")
+          
+          // Windows/Linux: Auto-download as before
+          if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+            this.mainWindow.webContents.send("update:available", {
+              version: info.version,
+              releaseNotes: info.releaseNotes,
+              releaseDate: info.releaseDate,
+              autoDownloading: true
+            })
+          }
+
+          // auto-download for non-macOS platforms
+          this.downloadUpdateWithRetry().catch((error) => {
+            console.error("Auto-download failed:", error)
+          })
         }
       })
 
@@ -166,35 +183,19 @@ class CliplyApp {
         }
       })
 
-      // update downloaded
+      // update downloaded - enable auto-install on quit for all updates
       autoUpdater.on("update-downloaded", (info) => {
-        if (this.securityUpdate.isSecurityUpdate) {
-          // security update: auto-install after 10 seconds
-          autoUpdater.autoInstallOnAppQuit = true
-          
-          this.securityUpdate.autoInstallTimer = setTimeout(() => {
-            try {
-              autoUpdater.quitAndInstall(false, true)
-            } catch (error) {
-              console.error("Auto-install failed:", error)
-            }
-          }, 10000)
+        console.log("Update downloaded:", info.version, "- ready to install")
 
-          if (this.mainWindow && !this.mainWindow.isDestroyed()) {
-            this.mainWindow.webContents.send("update:downloaded", {
-              version: info.version,
-              isSecurity: true,
-              autoInstallIn: 10000
-            })
-          }
-        } else {
-          // normal update
-          if (this.mainWindow && !this.mainWindow.isDestroyed()) {
-            this.mainWindow.webContents.send("update:downloaded", {
-              version: info.version,
-              isSecurity: false
-            })
-          }
+        // enable auto-install on quit for all updates
+        autoUpdater.autoInstallOnAppQuit = true
+
+        // notify renderer that update is ready
+        if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+          this.mainWindow.webContents.send("update:downloaded", {
+            version: info.version,
+            autoInstallOnQuit: true
+          })
         }
       })
 
@@ -210,93 +211,85 @@ class CliplyApp {
 
       // check for updates after app ready
       app.whenReady().then(() => {
-        const shouldCheck = isDev || Math.random() < 0.2
+        const shouldCheck = isDev || Math.random() < 0.9
 
         if (shouldCheck) {
           setTimeout(() => {
-            autoUpdater.checkForUpdates().catch((error) => {
+            this.checkForUpdatesWithRetry().catch((error) => {
               console.error("Failed to check for updates:", error)
             })
           }, 3000)
         }
-      })
 
+        // setup periodic update checks every 12 hours
+        this.setupPeriodicUpdateChecks()
+      })
     } catch (error) {
       console.error("Auto-updater setup failed:", error)
     }
   }
 
-  // check if update is security update
-  isSecurityUpdate(updateInfo) {
-    try {
-      const { version, releaseNotes } = updateInfo
-      const { VERSION_PATTERNS, NOTES_PATTERNS } = APP_CONFIG.SECURITY_UPDATE
+  // retry logic for update checks
+  async checkForUpdatesWithRetry(
+    maxRetries = APP_CONFIG.UPDATE_CONFIG.MAX_CHECK_RETRIES
+  ) {
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        await autoUpdater.checkForUpdates()
+        return
+      } catch (error) {
+        console.error(`Update check attempt ${attempt} failed:`, error.message)
 
-      // check version for security patterns
-      const versionLower = version.toLowerCase()
-      const hasSecurityVersion = VERSION_PATTERNS.some(pattern => 
-        versionLower.includes(pattern.toLowerCase())
-      )
+        if (attempt === maxRetries) {
+          throw error
+        }
 
-      // check release notes for security patterns
-      const notesLower = (releaseNotes || "").toLowerCase()
-      const hasSecurityNotes = NOTES_PATTERNS.some(pattern =>
-        notesLower.includes(pattern.toLowerCase())
-      )
-
-      const isSecurity = hasSecurityVersion || hasSecurityNotes
-      return isSecurity
-    } catch (error) {
-      console.error("Error checking security update:", error)
-      return false
+        // wait before retry (exponential backoff)
+        const delay = Math.min(1000 * Math.pow(2, attempt - 1), 10000)
+        await new Promise((resolve) => setTimeout(resolve, delay))
+      }
     }
   }
 
-  // handle security update
-  async handleSecurityUpdate(updateInfo) {
-    try {
-      console.log("Handling security update:", updateInfo.version)
+  // retry logic for update downloads
+  async downloadUpdateWithRetry(
+    maxRetries = APP_CONFIG.UPDATE_CONFIG.MAX_DOWNLOAD_RETRIES
+  ) {
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        await autoUpdater.downloadUpdate()
+        return
+      } catch (error) {
+        console.error(
+          `Update download attempt ${attempt} failed:`,
+          error.message
+        )
 
-      this.securityUpdate.isSecurityUpdate = true
+        if (attempt === maxRetries) {
+          throw error
+        }
 
-      // notify renderer
-      if (this.mainWindow && !this.mainWindow.isDestroyed()) {
-        this.mainWindow.webContents.send("update:security-critical", {
-          version: updateInfo.version,
-          releaseNotes: updateInfo.releaseNotes,
-          releaseDate: updateInfo.releaseDate,
-          isSecurity: true,
-          message: "Security update detected - downloading automatically"
+        // wait before retry
+        const delay = 2000 * attempt
+        await new Promise((resolve) => setTimeout(resolve, delay))
+      }
+    }
+  }
+
+  // setup periodic update checks
+  setupPeriodicUpdateChecks() {
+    // check every 12 hours using config
+    const checkInterval = APP_CONFIG.UPDATE_CONFIG.PERIODIC_CHECK_INTERVAL
+
+    setInterval(() => {
+      // only check if app is not quitting and in production
+      if (!this.isQuitting && !isDev) {
+        console.log("Performing periodic update check...")
+        this.checkForUpdatesWithRetry().catch((error) => {
+          console.error("Periodic update check failed:", error)
         })
       }
-
-      // auto-download security updates
-      if (APP_CONFIG.SECURITY_UPDATE.AUTO_DOWNLOAD) {
-        console.log("Auto-downloading security update...")
-        
-        const originalAutoDownload = autoUpdater.autoDownload
-        autoUpdater.autoDownload = true
-        
-        try {
-          await autoUpdater.downloadUpdate()
-          console.log("Security update download started")
-        } catch (downloadError) {
-          console.error("Security update download failed:", downloadError)
-          
-          if (this.mainWindow && !this.mainWindow.isDestroyed()) {
-            this.mainWindow.webContents.send("update:error", {
-              message: "Security update download failed. Please check your connection and try again.",
-              isSecurity: true
-            })
-          }
-        } finally {
-          autoUpdater.autoDownload = originalAutoDownload
-        }
-      }
-
-    } catch (error) {
-      console.error("Error handling security update:", error)
-    }
+    }, checkInterval)
   }
 
   // setup app event handlers
@@ -527,11 +520,8 @@ class CliplyApp {
     }
 
     try {
-      // clear security update timer
-      if (this.securityUpdate.autoInstallTimer) {
-        clearTimeout(this.securityUpdate.autoInstallTimer)
-        this.securityUpdate.autoInstallTimer = null
-      }
+      // update cleanup
+      this.updateState.isCheckingForUpdates = false
 
       // stop python server
       if (this.services.serverManager) {
@@ -542,7 +532,6 @@ class CliplyApp {
       if (this.ipcHandlers) {
         this.ipcHandlers.cleanup()
       }
-
     } catch (error) {
       console.error("Error during shutdown:", error)
     }
@@ -613,10 +602,7 @@ class CliplyApp {
                   if (result.success) {
                     // update notification component handles ui feedback
                   } else {
-                    console.error(
-                      "Update check failed:",
-                      result.error?.message
-                    )
+                    console.error("Update check failed:", result.error?.message)
                     dialog.showMessageBox(this.mainWindow, {
                       type: "error",
                       title: "Update Check Failed",
@@ -741,7 +727,7 @@ class CliplyApp {
             click: () => {
               shell.openExternal("https://github.com/your-repo/cliply/issues")
             }
-          },
+          }
         ]
       }
     ]

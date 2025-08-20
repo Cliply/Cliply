@@ -684,11 +684,13 @@ class IPCHandlers {
       // use setImmediate to allow the response to be sent before quitting
       setImmediate(() => {
         try {
-          this.autoUpdater.quitAndInstall()
+          console.log("Attempting to quit and install update...")
+          this.autoUpdater.quitAndInstall(false, true)
         } catch (error) {
           console.error("quitAndInstall failed:", error)
           // force quit as fallback
           setTimeout(() => {
+            console.log("Force quitting app...")
             require("electron").app.quit()
           }, 1000)
         }

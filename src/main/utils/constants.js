@@ -69,16 +69,17 @@ const APP_CONFIG = {
     VENV_DIR: "venv"
   },
 
-  // security update config
-  SECURITY_UPDATE: {
-    // version tag patterns that indicate security updates
-    VERSION_PATTERNS: ["-security", "-hotfix", "-critical"],
+  // update config - all updates are treated as important
+  UPDATE_CONFIG: {
+    // auto-download all updates (not just security)
+    AUTO_DOWNLOAD: true,
 
-    // release notes patterns that indicate security updates
-    NOTES_PATTERNS: ["[SECURITY]", "[HOTFIX]", "[CRITICAL]"],
+    // retry configuration
+    MAX_CHECK_RETRIES: 3,
+    MAX_DOWNLOAD_RETRIES: 2,
 
-    // auto-download security updates (bypass user permission)
-    AUTO_DOWNLOAD: true
+    // periodic check interval (12 hours in milliseconds)
+    PERIODIC_CHECK_INTERVAL: 12 * 60 * 60 * 1000
   }
 }
 
@@ -112,7 +113,6 @@ const IPC_CHANNELS = {
   UPDATE_DOWNLOAD_PROGRESS: "update:download-progress",
   UPDATE_DOWNLOADED: "update:downloaded",
   UPDATE_ERROR: "update:error",
-  UPDATE_SECURITY_CRITICAL: "update:security-critical",
 
   // system operations
   SYSTEM_HEALTH: "system:health",
