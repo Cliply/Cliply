@@ -61,7 +61,7 @@ export const UpdateNotification: React.FC<UpdateNotificationProps> = ({
             label: "Download",
             onClick: () =>
               window.open(
-                `https://github.com/devansh1401/next-todo-app/releases/latest`,
+                `https://github.com/Cliply/Cliply/releases/latest`,
                 "_blank"
               )
           },
@@ -502,7 +502,7 @@ export const UpdateNotification: React.FC<UpdateNotificationProps> = ({
                 <Button
                   onClick={() =>
                     window.open(
-                      `https://github.com/devansh1401/next-todo-app/releases/latest`,
+                      `https://github.com/Cliply/Cliply/releases/latest`,
                       "_blank"
                     )
                   }

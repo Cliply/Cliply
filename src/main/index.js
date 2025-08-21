@@ -758,7 +758,7 @@ class CliplyApp {
           {
             label: "Report Issue",
             click: () => {
-              shell.openExternal("https://github.com/your-repo/cliply/issues")
+              shell.openExternal("https://github.com/Cliply/Cliply/issues")
             }
           }
         ]

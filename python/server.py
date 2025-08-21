@@ -14,7 +14,6 @@ from yt_dlp.utils import download_range_func
 import uuid
 import re
 from typing import List, Optional, Union
-import random
 import time
 import os
 import asyncio
@@ -281,9 +280,14 @@ def get_enhanced_ydl_opts(base_opts: dict = None) -> dict:
     if base_opts is None:
         base_opts = {}
     
+    # Use yt-dlp's built-in retry mechanisms instead of custom fallbacks
     simple_opts = {
         'quiet': True,
         'no_warnings': True,
+        'retries': 3,                    # Built-in HTTP retries (default is 10)
+        'extractor_retries': 2,          # Built-in extractor retries (default is 3) 
+        'fragment_retries': 3,           # Built-in fragment retries for HLS/DASH (default is 10)
+        'file_access_retries': 2,        # Built-in file access retries (default is 3)
     }
     
     if FFMPEG_PATH:
@@ -404,40 +408,10 @@ async def download_async(url: str, opts: dict) -> None:
     return await loop.run_in_executor(executor, _download_blocking, url, opts)
 
 async def download_with_fallback(url: str, base_opts: dict) -> None:
-    """download with fallback strategy similar to extract_video_info_with_fallback"""
-    strategies = [
-        lambda: get_enhanced_ydl_opts(base_opts),
-        lambda: get_enhanced_ydl_opts({
-            **base_opts,
-            'extractor_args': {
-                'youtube': {
-                    'player_client': ['android'],
-                }
-            }
-        }),
-        lambda: get_enhanced_ydl_opts({
-            **base_opts,
-            'extractor_args': {
-                'youtube': {
-                    'player_client': ['web'],
-                }
-            }
-        })
-    ]
-    
-    for attempt, strategy in enumerate(strategies):
-        try:
-            if attempt > 0:
-                wait_time = (2 ** attempt) + random.uniform(0.5, 2)
-                await asyncio.sleep(wait_time)
-            opts = strategy()
-            await download_async(url, opts)
-            return
-        except Exception as e:
-            if attempt == len(strategies) - 1:
-                raise e
-                
-    raise Exception("all download strategies failed")
+    """Download using yt-dlp's built-in retry mechanisms"""
+    # Let yt-dlp handle fallbacks automatically with its built-in retry system
+    opts = get_enhanced_ydl_opts(base_opts)
+    await download_async(url, opts)
 
 def _extract_info_blocking(url: str, opts: dict) -> dict:
     with yt_dlp.YoutubeDL(opts) as ydl:
@@ -448,89 +422,36 @@ def _download_blocking(url: str, opts: dict) -> None:
         ydl.download([url])
 
 async def extract_video_info_with_fallback(url: str) -> dict:
-    # try different strategies if one fails
-    strategies = [
-        lambda: get_enhanced_ydl_opts(),
-        lambda: get_enhanced_ydl_opts({
-            'extractor_args': {
-                'youtube': {
-                    'player_client': ['android'],
-                }
-            }
-        }),
-        lambda: get_enhanced_ydl_opts({
-            'extractor_args': {
-                'youtube': {
-                    'player_client': ['web'],
-                }
-            }
-        })
-    ]
-    
-    for attempt, strategy in enumerate(strategies):
-        try:
-            if attempt > 0:
-                wait_time = (2 ** attempt) + random.uniform(0.5, 2)
-                await asyncio.sleep(wait_time)
-            opts = strategy()
-            info = await extract_info_async(url, opts)
-            return info
-        except Exception as e:
-            if attempt == len(strategies) - 1:
-                raise e
-    raise Exception("All extraction strategies failed")
+    """Extract video info using yt-dlp's built-in retry mechanisms"""
+    # Let yt-dlp handle fallbacks automatically with its built-in retry system
+    opts = get_enhanced_ydl_opts()
+    return await extract_info_async(url, opts)
 
 async def extract_playlist_info_with_fallback(url: str, max_videos: int = 50, include_formats: bool = False) -> dict:
-    start_time = time.time()
+    """Extract playlist info using yt-dlp's built-in retry mechanisms"""
     base_playlist_opts = {
         'extract_flat': not include_formats,
         'playlist_items': f'1:{max_videos}',
     }
     
-    strategies = [
-        lambda: get_enhanced_ydl_opts(base_playlist_opts),
-        lambda: get_enhanced_ydl_opts({
-            **base_playlist_opts,
-            'extractor_args': {
-                'youtube': {
-                    'player_client': ['android'],
+    try:
+        # Let yt-dlp handle fallbacks automatically with its built-in retry system
+        opts = get_enhanced_ydl_opts(base_playlist_opts)
+        return await extract_info_async(url, opts)
+    except Exception as e:
+        error_msg = str(e)
+        # Still handle the specific cookie-related error for playlists
+        if "Sign in to confirm" in error_msg and not cookie_manager.has_valid_cookies():
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "error": "YouTube bot detection triggered for playlist",
+                    "message": "Server needs YouTube cookies to access playlists",
+                    "has_cookies": False,
+                    "solution": "Admin needs to update server cookies"
                 }
-            }
-        }),
-        lambda: get_enhanced_ydl_opts({
-            **base_playlist_opts,
-            'extractor_args': {
-                'youtube': {
-                    'player_client': ['web'],
-                }
-            }
-        })
-    ]
-    
-    for attempt, strategy in enumerate(strategies):
-        try:
-            if attempt > 0:
-                wait_time = (2 ** attempt) + random.uniform(0.5, 2)
-                await asyncio.sleep(wait_time)
-            opts = strategy()
-            info = await extract_info_async(url, opts)
-            return info
-        except Exception as e:
-            error_msg = str(e)
-            if "Sign in to confirm" in error_msg and not cookie_manager.has_valid_cookies():
-                if attempt == len(strategies) - 1:
-                    raise HTTPException(
-                        status_code=503,
-                        detail={
-                            "error": "YouTube bot detection triggered for playlist",
-                            "message": "Server needs YouTube cookies to access playlists",
-                            "has_cookies": False,
-                            "solution": "Admin needs to update server cookies"
-                        }
-                    )
-            if attempt == len(strategies) - 1:
-                raise e
-    raise Exception("All playlist extraction strategies failed")
+            )
+        raise e
 
 def process_playlist_entries(entries: List[dict], include_formats: bool = False) -> List[PlaylistVideoInfo]:
     videos = []
