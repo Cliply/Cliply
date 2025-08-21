@@ -297,67 +297,32 @@ def get_enhanced_ydl_opts(base_opts: dict = None) -> dict:
     return simple_opts
 
 def extract_formats(formats_list: List[dict]) -> tuple[List[Format], List[Format]]:
-    # just return the predefined formats - no need to parse the mess from yt-dlp
+    # Return yt-dlp optimized format options instead of hardcoded format IDs
     video_formats = [
         Format(
-            format_id="160",
-            quality="144p",
-            ext="mp4",
+            format_id="auto",
+            quality="Auto (Recommended)",
+            ext="mp4/webm",
+            filesize=None,
+            type="auto"
+        ),
+        Format(
+            format_id="best_quality",
+            quality="Best Quality",
+            ext="mp4/webm",
             filesize=None,
             type="video"
         ),
         Format(
-            format_id="133", 
-            quality="240p",
-            ext="mp4",
-            filesize=None,
-            type="video"
-        ),
-        Format(
-            format_id="134",
-            quality="360p", 
-            ext="mp4",
-            filesize=None,
-            type="video"
-        ),
-        Format(
-            format_id="135",
-            quality="480p",
-            ext="mp4",
-            filesize=None,
-            type="video"
-        ),
-        Format(
-            format_id="136",
+            format_id="hd_720p",
             quality="720p HD",
-            ext="mp4",
+            ext="mp4/webm",
             filesize=None,
             type="video"
         ),
         Format(
-            format_id="137",
-            quality="1080p Full HD",
-            ext="mp4",
-            filesize=None,
-            type="video"
-        ),
-        Format(
-            format_id="400",
-            quality="1440p 2K",
-            ext="mp4",
-            filesize=None,
-            type="video"
-        ),
-        Format(
-            format_id="401",
-            quality="2160p 4K",
-            ext="mp4",
-            filesize=None,
-            type="video"
-        ),
-        Format(
-            format_id="18",
-            quality="360p (Combined/Fast)",
+            format_id="eco_360p",
+            quality="360p (Fast)",
             ext="mp4",
             filesize=None,
             type="combined"
@@ -366,29 +331,79 @@ def extract_formats(formats_list: List[dict]) -> tuple[List[Format], List[Format
     
     audio_formats = [
         Format(
-            format_id="worstaudio",
-            quality="Low Quality",
-            ext="webm",
+            format_id="auto_audio",
+            quality="Auto",
+            ext="m4a/webm",
             filesize=None,
             type="audio"
         ),
         Format(
-            format_id="bestaudio[abr<=70]",
-            quality="Medium Quality", 
-            ext="webm",
-            filesize=None,
-            type="audio"
-        ),
-        Format(
-            format_id="bestaudio",
+            format_id="high_audio",
             quality="High Quality",
-            ext="webm",
+            ext="m4a/webm",
+            filesize=None,
+            type="audio"
+        ),
+        Format(
+            format_id="medium_audio",
+            quality="Medium Quality", 
+            ext="m4a/webm",
             filesize=None,
             type="audio"
         )
     ]
     
     return video_formats, audio_formats
+
+
+def get_format_selector(video_format_id: str, audio_format_id: str) -> Optional[str]:
+    """Convert format IDs to yt-dlp format selectors"""
+    
+    # Handle special cases first
+    if video_format_id == "auto":
+        # Use yt-dlp default (no format specified) - best quality + speed
+        return None
+    elif video_format_id == "eco_360p":
+        # Use the fast combined format
+        return "best"
+    
+    # Handle video + audio combinations
+    video_selectors = {
+        "best_quality": "bestvideo",
+        "hd_720p": "bestvideo[height<=720]"
+    }
+    
+    audio_selectors = {
+        "auto_audio": "bestaudio",
+        "high_audio": "bestaudio",
+        "medium_audio": "bestaudio[abr<=128]"
+    }
+    
+    video_selector = video_selectors.get(video_format_id, "bestvideo")
+    audio_selector = audio_selectors.get(audio_format_id, "bestaudio")
+    
+    return f"{video_selector}+{audio_selector}"
+
+
+def get_audio_format_selector(format_id: str) -> str:
+    """Convert audio format ID to yt-dlp selector for audio-only downloads"""
+    audio_selectors = {
+        "auto_audio": "bestaudio",
+        "high_audio": "bestaudio", 
+        "medium_audio": "bestaudio[abr<=128]"
+    }
+    return audio_selectors.get(format_id, "bestaudio")
+
+
+def get_quality_label(video_format_id: str) -> str:
+    """Get quality label for filename generation"""
+    quality_labels = {
+        "auto": "auto",
+        "best_quality": "best", 
+        "hd_720p": "720p",
+        "eco_360p": "360p"
+    }
+    return quality_labels.get(video_format_id, video_format_id)
 
 
 def get_ydl_opts_with_time_range(base_opts: dict, time_range: Optional[TimeRange], precise_cut: bool = False) -> dict:
@@ -561,7 +576,7 @@ async def download_combined_video_audio(request: CombinedDownloadRequest):
         title = sanitize_filename(info.get('title', 'video'))
         
         # Create unique filename including quality info
-        quality = request.video_format_id if request.video_format_id != "18" else "360p"
+        quality = get_quality_label(request.video_format_id)
         timestamp = int(time.time() * 1000) % 100000  # Last 5 digits for uniqueness
         
         if request.time_range:
@@ -573,20 +588,17 @@ async def download_combined_video_audio(request: CombinedDownloadRequest):
         
         final_path = DOWNLOADS_DIR / final_filename
         
-        # direct download to final location (no temp files)
-        # combine video + audio formats or use single combined format
-        if request.video_format_id == "18":
-            # Format 18 is already combined (video+audio)
-            format_string = request.video_format_id
-        else:
-            # Combine separate video + audio formats
-            format_string = f"{request.video_format_id}+{request.audio_format_id}"
+        # Use yt-dlp format selectors instead of hardcoded format IDs
+        format_string = get_format_selector(request.video_format_id, request.audio_format_id)
         
         base_opts = {
-            'format': format_string,
             'outtmpl': str(final_path),
             'merge_output_format': 'mp4',
         }
+        
+        # Only add format if not using yt-dlp default (auto)
+        if format_string is not None:
+            base_opts['format'] = format_string
         
         base_opts = get_ydl_opts_with_time_range(base_opts, request.time_range, request.precise_cut)
         
@@ -631,7 +643,7 @@ async def download_audio_only(request: AudioDownloadRequest):
         title = sanitize_filename(info.get('title', 'audio'))
         
         # Create unique filename including quality info
-        quality = request.format_id.replace('bestaudio', 'high').replace('worstaudio', 'low')
+        quality = request.format_id.replace('_audio', '').replace('auto_audio', 'auto').replace('high_audio', 'high').replace('medium_audio', 'medium')
         timestamp = int(time.time() * 1000) % 100000
         
         if request.time_range:
@@ -643,9 +655,10 @@ async def download_audio_only(request: AudioDownloadRequest):
         
         final_path = DOWNLOADS_DIR / final_filename
         
-        # direct download to final location (no temp files)
+        # Use yt-dlp audio format selector
+        format_string = get_audio_format_selector(request.format_id)
         base_opts = {
-            'format': request.format_id,
+            'format': format_string,
             'outtmpl': str(final_path),
         }
         
@@ -744,10 +757,10 @@ async def download_playlist_videos(request: PlaylistDownloadRequest, background_
                 video_url = f"https://www.youtube.com/watch?v={video_id}"
                 
                 if request.video_format_id:
-                    format_string = f"{request.video_format_id}+{request.audio_format_id}"
+                    format_string = get_format_selector(request.video_format_id, request.audio_format_id)
                     file_ext = "mp4"
                 else:
-                    format_string = request.audio_format_id
+                    format_string = get_audio_format_selector(request.audio_format_id)
                     file_ext = "m4a"
                 
                 safe_video_title = re.sub(r'[^\w\s-]', '', video_title)[:100]
@@ -755,11 +768,14 @@ async def download_playlist_videos(request: PlaylistDownloadRequest, background_
                 output_path = batch_dir / f"{output_filename}.%(ext)s"
                 
                 base_opts = {
-                    'format': format_string,
                     'outtmpl': str(output_path),
                     'merge_output_format': file_ext,
                     'restrictfilenames': True,
                 }
+                
+                # Only add format if not using yt-dlp default (auto)
+                if format_string is not None:
+                    base_opts['format'] = format_string
                 
                 await download_with_fallback(video_url, base_opts)
                 
