@@ -183,8 +183,8 @@ const ERROR_TYPES = {
 
 // http client config
 const HTTP_CONFIG = {
-  TIMEOUT: isDevelopment ? 15000 : 30000,
-  RETRIES: 3,
+  TIMEOUT: isDevelopment ? 2400000 : 3600000, // Long videos: 40min dev, 60min prod
+  RETRIES: 1, // Single attempt for long downloads
   RETRY_DELAY: 1000,
   HEADERS: {
     "Content-Type": "application/json",

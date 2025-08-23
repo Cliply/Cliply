@@ -280,14 +280,21 @@ def get_enhanced_ydl_opts(base_opts: dict = None) -> dict:
     if base_opts is None:
         base_opts = {}
     
-    # Use yt-dlp's built-in retry mechanisms instead of custom fallbacks
+    # anti-detection settings
     simple_opts = {
         'quiet': True,
         'no_warnings': True,
-        'retries': 3,                    # Built-in HTTP retries (default is 10)
-        'extractor_retries': 2,          # Built-in extractor retries (default is 3) 
-        'fragment_retries': 3,           # Built-in fragment retries for HLS/DASH (default is 10)
-        'file_access_retries': 2,        # Built-in file access retries (default is 3)
+        'retries': 1,
+        'extractor_retries': 1,
+        'fragment_retries': 2,
+
+        'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36',
+        'referer': 'https://www.youtube.com/',
+        'headers': {
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Accept-Language': 'en-us,en;q=0.5',
+            'Sec-Fetch-Mode': 'navigate',
+        }
     }
     
     if FFMPEG_PATH:
@@ -297,7 +304,7 @@ def get_enhanced_ydl_opts(base_opts: dict = None) -> dict:
     return simple_opts
 
 def extract_formats(formats_list: List[dict]) -> tuple[List[Format], List[Format]]:
-    # Return yt-dlp optimized format options instead of hardcoded format IDs
+
     video_formats = [
         Format(
             format_id="auto",
@@ -357,17 +364,15 @@ def extract_formats(formats_list: List[dict]) -> tuple[List[Format], List[Format
 
 
 def get_format_selector(video_format_id: str, audio_format_id: str) -> Optional[str]:
-    """Convert format IDs to yt-dlp format selectors"""
+    """convert format ids to yt-dlp selectors"""
     
-    # Handle special cases first
+    # handle special cases
     if video_format_id == "auto":
-        # Use yt-dlp default (no format specified) - best quality + speed
-        return None
+        return None  # use yt-dlp default
     elif video_format_id == "eco_360p":
-        # Use the fast combined format
-        return "best"
+        return "best"  # fast combined format
     
-    # Handle video + audio combinations
+    # handle video + audio combinations
     video_selectors = {
         "best_quality": "bestvideo",
         "hd_720p": "bestvideo[height<=720]"
@@ -382,11 +387,11 @@ def get_format_selector(video_format_id: str, audio_format_id: str) -> Optional[
     video_selector = video_selectors.get(video_format_id, "bestvideo")
     audio_selector = audio_selectors.get(audio_format_id, "bestaudio")
     
-    return f"{video_selector}+{audio_selector}"
+    return f"{video_selector}+{audio_selector}/best"  # fallback to pre-merged format
 
 
 def get_audio_format_selector(format_id: str) -> str:
-    """Convert audio format ID to yt-dlp selector for audio-only downloads"""
+    """convert audio format id to yt-dlp selector"""
     audio_selectors = {
         "auto_audio": "bestaudio",
         "high_audio": "bestaudio", 
@@ -396,7 +401,7 @@ def get_audio_format_selector(format_id: str) -> str:
 
 
 def get_quality_label(video_format_id: str) -> str:
-    """Get quality label for filename generation"""
+    """get quality label for filename"""
     quality_labels = {
         "auto": "auto",
         "best_quality": "best", 
@@ -559,13 +564,11 @@ async def get_video_info(request: VideoInfoRequest):
 
 @app.post("/api/video/download-combined")
 async def download_combined_video_audio(request: CombinedDownloadRequest):
-    """Download and merge video+audio with optional time range"""
+    """download and merge video+audio with optional time range"""
     download_id = str(uuid.uuid4())
     
-
-    
     try:
-        # Track active download
+
         active_downloads[download_id] = {
             "type": "combined",
             "url": request.url,
@@ -575,9 +578,9 @@ async def download_combined_video_audio(request: CombinedDownloadRequest):
         info = await extract_video_info_with_fallback(request.url)
         title = sanitize_filename(info.get('title', 'video'))
         
-        # Create unique filename including quality info
+
         quality = get_quality_label(request.video_format_id)
-        timestamp = int(time.time() * 1000) % 100000  # Last 5 digits for uniqueness
+        timestamp = int(time.time() * 1000) % 100000
         
         if request.time_range:
             start_str = seconds_to_time_string(request.time_range.start)
@@ -588,7 +591,7 @@ async def download_combined_video_audio(request: CombinedDownloadRequest):
         
         final_path = DOWNLOADS_DIR / final_filename
         
-        # Use yt-dlp format selectors instead of hardcoded format IDs
+
         format_string = get_format_selector(request.video_format_id, request.audio_format_id)
         
         base_opts = {
@@ -596,7 +599,7 @@ async def download_combined_video_audio(request: CombinedDownloadRequest):
             'merge_output_format': 'mp4',
         }
         
-        # Only add format if not using yt-dlp default (auto)
+
         if format_string is not None:
             base_opts['format'] = format_string
         
@@ -604,25 +607,24 @@ async def download_combined_video_audio(request: CombinedDownloadRequest):
         
         await download_with_fallback(request.url, base_opts)
         
-        base_name = final_filename.replace('.%(ext)s', '')
-        downloaded_files = list(DOWNLOADS_DIR.glob(f"{base_name}.*"))
+
+        all_files = list(DOWNLOADS_DIR.glob("*.mp4")) + list(DOWNLOADS_DIR.glob("*.m4a")) + list(DOWNLOADS_DIR.glob("*.webm"))
         
-        if not downloaded_files:
-            raise HTTPException(status_code=500, detail="Download failed - file not found")
+        if not all_files:
+            raise HTTPException(status_code=500, detail="Download failed - no files in directory")
         
-        actual_file = downloaded_files[0]
+        actual_file = max(all_files, key=lambda x: x.stat().st_mtime)
         active_downloads.pop(download_id, None)
         
         return JSONResponse({
             "success": True,
             "filename": actual_file.name,
             "file_path": str(actual_file),
-            "file_size": actual_file.stat().st_size,
+            "file_size": 0,
             "download_id": download_id
         })
         
     except Exception as e:
-        # Cleanup on error (simplified)
         active_downloads.pop(download_id, None)
         raise HTTPException(status_code=500, detail=f"Combined download failed: {str(e)}")
 
@@ -666,25 +668,24 @@ async def download_audio_only(request: AudioDownloadRequest):
         
         await download_with_fallback(request.url, base_opts)
         
-        base_name = final_filename.replace('.%(ext)s', '')
-        downloaded_files = list(DOWNLOADS_DIR.glob(f"{base_name}.*"))
+
+        all_files = list(DOWNLOADS_DIR.glob("*.mp4")) + list(DOWNLOADS_DIR.glob("*.m4a")) + list(DOWNLOADS_DIR.glob("*.webm"))
         
-        if not downloaded_files:
-            raise HTTPException(status_code=500, detail="Download failed - file not found")
+        if not all_files:
+            raise HTTPException(status_code=500, detail="Download failed - no files in directory")
         
-        actual_file = downloaded_files[0]
+        actual_file = max(all_files, key=lambda x: x.stat().st_mtime)
         active_downloads.pop(download_id, None)
         
         return JSONResponse({
             "success": True,
             "filename": actual_file.name,
             "file_path": str(actual_file),
-            "file_size": actual_file.stat().st_size,
+            "file_size": 0,
             "download_id": download_id
         })
         
     except Exception as e:
-        # Cleanup on error (simplified)
         active_downloads.pop(download_id, None)
         raise HTTPException(status_code=500, detail=f"Audio download failed: {str(e)}")
 
