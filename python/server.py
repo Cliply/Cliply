@@ -247,7 +247,7 @@ class PlaylistDownloadRequest(BaseModel):
         return v
 
 def sanitize_filename(filename: str) -> str:
-    filename = filename.replace('..', '')
+    filename = os.path.basename(filename)
     filename = re.sub(r'[<>:"/\\|?*]', '', filename)
     filename = re.sub(r'\s+', ' ', filename).strip()
     return filename[:200] if len(filename) > 200 else filename
@@ -280,21 +280,13 @@ def get_enhanced_ydl_opts(base_opts: dict = None) -> dict:
     if base_opts is None:
         base_opts = {}
     
-    # anti-detection settings
     simple_opts = {
         'quiet': True,
         'no_warnings': True,
         'retries': 1,
         'extractor_retries': 1,
         'fragment_retries': 2,
-
-        'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36',
-        'referer': 'https://www.youtube.com/',
-        'headers': {
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-            'Accept-Language': 'en-us,en;q=0.5',
-            'Sec-Fetch-Mode': 'navigate',
-        }
+        # removed custom headers
     }
     
     if FFMPEG_PATH:
