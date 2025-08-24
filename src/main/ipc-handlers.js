@@ -315,7 +315,7 @@ class IPCHandlers {
             file_path: result.file_path,
             file_size: result.file_size,
             type: "combined",
-            downloadId
+            download_id: downloadId
           })
         } else {
           throw new Error(result.error || "Download failed")
@@ -449,7 +449,7 @@ class IPCHandlers {
             file_path: result.file_path,
             file_size: result.file_size,
             type: "audio",
-            downloadId
+            download_id: downloadId
           })
         } else {
           throw new Error(result.error || "Download failed")

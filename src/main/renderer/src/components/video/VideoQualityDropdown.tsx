@@ -135,7 +135,8 @@ export function VideoQualityDropdown({
                     </p>
                     <div className="flex items-center gap-3">
                       <p className="text-sm text-slate-500 dark:text-slate-400">
-                        {option.format.ext.toUpperCase()} • video only
+                        {option.format.ext.toUpperCase()}
+                        {option.label === "Auto" && " • recommended"}
                       </p>
                       {selectedVideoQuality?.format.format_id ===
                         option.format.format_id && (

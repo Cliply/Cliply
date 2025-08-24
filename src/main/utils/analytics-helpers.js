@@ -51,7 +51,25 @@ function extractQuality(formatId) {
 
   const id = formatId.toString().toLowerCase()
 
-  // youtube format mappings
+  // handle our new dynamic format selectors first
+  const newFormatMappings = {
+    // video format selectors
+    auto: "auto",
+    best_quality: "best",
+    hd_720p: "720p",
+    eco_360p: "360p",
+
+    // audio format selectors
+    auto_audio: "auto_audio",
+    high_audio: "high_quality",
+    medium_audio: "medium_quality"
+  }
+
+  if (newFormatMappings[id]) {
+    return newFormatMappings[id]
+  }
+
+  // youtube format mappings (legacy support)
   const formatMap = {
     137: "1080p",
     299: "1080p",
