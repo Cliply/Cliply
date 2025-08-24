@@ -39,11 +39,17 @@ if (APP_CONFIG.ANALYTICS_CONFIG.ENABLED) {
   global.trackEvent = trackEvent
 }
 
-// polyfill fetch for node environments
-if (!globalThis.fetch) {
-  globalThis.fetch = (...args) =>
-    import("undici").then(({ fetch }) => fetch(...args))
-}
+// Configure undici defaults globally to prevent HeadersTimeoutError
+const { setGlobalDispatcher, Agent } = require('undici')
+
+// Create agent with no timeouts for long downloads
+const agent = new Agent({
+  headersTimeout: 0, // No headers timeout  
+  bodyTimeout: 0,    // No body timeout
+  connectTimeout: 30000 // Keep connection timeout only
+})
+
+setGlobalDispatcher(agent)
 
 class CliplyApp {
   constructor() {

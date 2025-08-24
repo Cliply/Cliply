@@ -599,20 +599,44 @@ async def download_combined_video_audio(request: CombinedDownloadRequest):
         
         await download_with_fallback(request.url, base_opts)
         
-
-        all_files = list(DOWNLOADS_DIR.glob("*.mp4")) + list(DOWNLOADS_DIR.glob("*.m4a")) + list(DOWNLOADS_DIR.glob("*.webm"))
+        # More robust file detection - check for files with the expected base name
+        base_name = final_filename.replace('.%(ext)s', '')
+        possible_files = []
         
-        if not all_files:
-            raise HTTPException(status_code=500, detail="Download failed - no files in directory")
+        # Look for files with the exact base name and common extensions
+        for ext in ['mp4', 'm4a', 'webm', 'mkv', 'mov', 'avi']:
+            pattern = f"{base_name}.{ext}"
+            matches = list(DOWNLOADS_DIR.glob(pattern))
+            possible_files.extend(matches)
         
-        actual_file = max(all_files, key=lambda x: x.stat().st_mtime)
+        # If no exact matches, fall back to generic search (most recent file)
+        if not possible_files:
+            all_files = list(DOWNLOADS_DIR.glob("*.mp4")) + list(DOWNLOADS_DIR.glob("*.m4a")) + list(DOWNLOADS_DIR.glob("*.webm")) + list(DOWNLOADS_DIR.glob("*.mkv"))
+            if all_files:
+                # Get the most recently created file
+                possible_files = [max(all_files, key=lambda x: x.stat().st_mtime)]
+        
+        if not possible_files:
+            raise HTTPException(status_code=500, detail="Download failed - no files found in directory")
+        
+        # Use the most recent file if multiple matches
+        actual_file = max(possible_files, key=lambda x: x.stat().st_mtime)
+        
+        # ensure file is completely written before getting size
+        try:
+            actual_file_size = actual_file.stat().st_size
+            if actual_file_size == 0:
+                raise HTTPException(status_code=500, detail="Download failed - file is empty")
+        except OSError as e:
+            raise HTTPException(status_code=500, detail=f"Download failed - cannot access file: {str(e)}")
+        
         active_downloads.pop(download_id, None)
         
         return JSONResponse({
             "success": True,
             "filename": actual_file.name,
             "file_path": str(actual_file),
-            "file_size": 0,
+            "file_size": actual_file_size,
             "download_id": download_id
         })
         
@@ -660,20 +684,44 @@ async def download_audio_only(request: AudioDownloadRequest):
         
         await download_with_fallback(request.url, base_opts)
         
-
-        all_files = list(DOWNLOADS_DIR.glob("*.mp4")) + list(DOWNLOADS_DIR.glob("*.m4a")) + list(DOWNLOADS_DIR.glob("*.webm"))
+        # More robust file detection - check for files with the expected base name
+        base_name = final_filename.replace('.%(ext)s', '')
+        possible_files = []
         
-        if not all_files:
-            raise HTTPException(status_code=500, detail="Download failed - no files in directory")
+        # Look for files with the exact base name and common extensions
+        for ext in ['m4a', 'mp3', 'webm', 'ogg', 'wav', 'aac']:
+            pattern = f"{base_name}.{ext}"
+            matches = list(DOWNLOADS_DIR.glob(pattern))
+            possible_files.extend(matches)
         
-        actual_file = max(all_files, key=lambda x: x.stat().st_mtime)
+        # If no exact matches, fall back to generic search (most recent file)
+        if not possible_files:
+            all_files = list(DOWNLOADS_DIR.glob("*.m4a")) + list(DOWNLOADS_DIR.glob("*.mp3")) + list(DOWNLOADS_DIR.glob("*.webm")) + list(DOWNLOADS_DIR.glob("*.ogg"))
+            if all_files:
+                # Get the most recently created file
+                possible_files = [max(all_files, key=lambda x: x.stat().st_mtime)]
+        
+        if not possible_files:
+            raise HTTPException(status_code=500, detail="Download failed - no audio files found in directory")
+        
+        # Use the most recent file if multiple matches
+        actual_file = max(possible_files, key=lambda x: x.stat().st_mtime)
+        
+        # ensure file is completely written before getting size
+        try:
+            actual_file_size = actual_file.stat().st_size
+            if actual_file_size == 0:
+                raise HTTPException(status_code=500, detail="Download failed - file is empty")
+        except OSError as e:
+            raise HTTPException(status_code=500, detail=f"Download failed - cannot access file: {str(e)}")
+        
         active_downloads.pop(download_id, None)
         
         return JSONResponse({
             "success": True,
             "filename": actual_file.name,
             "file_path": str(actual_file),
-            "file_size": 0,
+            "file_size": actual_file_size,
             "download_id": download_id
         })
         
