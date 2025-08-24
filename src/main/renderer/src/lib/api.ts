@@ -617,7 +617,7 @@ const extractQualityLabel = (quality: string): string | null => {
     Auto: "Auto", // Handle both old and new format
     "Best Quality": "Best",
     "720p HD": "720p",
-    "360p (Fast)": "360p"
+    "360p (Fast)": "Fastest"
   }
 
   // Check if it's one of our new quality formats

@@ -358,22 +358,26 @@ def extract_formats(formats_list: List[dict]) -> tuple[List[Format], List[Format
 def get_format_selector(video_format_id: str, audio_format_id: str) -> Optional[str]:
     """convert format ids to yt-dlp selectors"""
     
-    # handle special cases
-    if video_format_id == "auto":
-        return None  # use yt-dlp default
-    elif video_format_id == "eco_360p":
-        return "best"  # fast combined format
-    
-    # handle video + audio combinations
-    video_selectors = {
-        "best_quality": "bestvideo",
-        "hd_720p": "bestvideo[height<=720]"
-    }
-    
+    # define audio selectors first
     audio_selectors = {
         "auto_audio": "bestaudio",
         "high_audio": "bestaudio",
         "medium_audio": "bestaudio[abr<=128]"
+    }
+    
+    # handle special cases
+    if video_format_id == "auto":
+        return None  # use yt-dlp default
+    elif video_format_id == "eco_360p":
+        return "best[height<=720]/bestvideo[height<=360]+bestaudio"  # fastest pre-merged, fallback to 360p+audio
+    elif video_format_id == "hd_720p":
+        # high quality: always use separate streams for better quality
+        audio_selector = audio_selectors.get(audio_format_id, "bestaudio") 
+        return f"bestvideo[height<=720]+{audio_selector}"
+    
+    # handle video + audio combinations
+    video_selectors = {
+        "best_quality": "bestvideo"
     }
     
     video_selector = video_selectors.get(video_format_id, "bestvideo")
