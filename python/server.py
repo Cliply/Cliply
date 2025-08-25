@@ -159,7 +159,7 @@ class VideoInfoRequest(BaseModel):
     @field_validator('url')
     @classmethod
     def validate_youtube_url(cls, v):
-        youtube_regex = r'(https?://)?(www\.)?(youtube\.com/(watch\?v=|embed/|v/)|youtu\.be/)'
+        youtube_regex = r'(https?://)?(www\.)?(youtube\.com/(watch\?v=|embed/|v/|shorts/)|youtu\.be/)'
         if not re.match(youtube_regex, v):
             raise ValueError('Invalid YouTube URL')
         return v
@@ -246,6 +246,10 @@ class PlaylistDownloadRequest(BaseModel):
             raise ValueError('Maximum 20 videos can be downloaded at once')
         return v
 
+def is_youtube_shorts(url: str) -> bool:
+    """Check if URL is a YouTube Shorts URL"""
+    return '/shorts/' in url.lower()
+
 def sanitize_filename(filename: str) -> str:
     filename = os.path.basename(filename)
     filename = re.sub(r'[<>:"/\\|?*]', '', filename)
@@ -295,116 +299,59 @@ def get_enhanced_ydl_opts(base_opts: dict = None) -> dict:
     simple_opts.update(base_opts)
     return simple_opts
 
-def extract_formats(formats_list: List[dict]) -> tuple[List[Format], List[Format]]:
-
-    video_formats = [
-        Format(
-            format_id="auto",
-            quality="Auto (Recommended)",
-            ext="mp4/webm",
-            filesize=None,
-            type="auto"
-        ),
-        Format(
-            format_id="best_quality",
-            quality="Best Quality",
-            ext="mp4/webm",
-            filesize=None,
-            type="video"
-        ),
-        Format(
-            format_id="hd_720p",
-            quality="720p HD",
-            ext="mp4/webm",
-            filesize=None,
-            type="video"
-        ),
-        Format(
-            format_id="eco_360p",
-            quality="360p (Fast)",
-            ext="mp4",
-            filesize=None,
-            type="combined"
-        )
-    ]
-    
-    audio_formats = [
-        Format(
-            format_id="auto_audio",
-            quality="Auto",
-            ext="m4a/webm",
-            filesize=None,
-            type="audio"
-        ),
-        Format(
-            format_id="high_audio",
-            quality="High Quality",
-            ext="m4a/webm",
-            filesize=None,
-            type="audio"
-        ),
-        Format(
-            format_id="medium_audio",
-            quality="Medium Quality", 
-            ext="m4a/webm",
-            filesize=None,
-            type="audio"
-        )
-    ]
+def extract_formats(formats_list: List[dict], url: str = "") -> tuple[List[Format], List[Format]]:
+    # shorts get single auto format, regular videos get full options
+    if is_youtube_shorts(url):
+        video_formats = [Format(format_id="shorts_auto", quality="Auto", ext="mp4", filesize=None, type="auto")]
+        audio_formats = [Format(format_id="auto_audio", quality="Auto", ext="m4a", filesize=None, type="audio")]
+    else:
+        video_formats = [
+            Format(format_id="auto", quality="Auto (Recommended)", ext="mp4/webm", filesize=None, type="auto"),
+            Format(format_id="best_quality", quality="Best Quality", ext="mp4/webm", filesize=None, type="video"),
+            Format(format_id="hd_720p", quality="720p HD", ext="mp4/webm", filesize=None, type="video"),
+            Format(format_id="eco_360p", quality="360p (Fast)", ext="mp4", filesize=None, type="combined")
+        ]
+        audio_formats = [
+            Format(format_id="auto_audio", quality="Auto", ext="m4a", filesize=None, type="audio"),
+            Format(format_id="high_audio", quality="High Quality", ext="m4a", filesize=None, type="audio"),
+            Format(format_id="medium_audio", quality="Medium Quality", ext="m4a", filesize=None, type="audio")
+        ]
     
     return video_formats, audio_formats
 
 
 def get_format_selector(video_format_id: str, audio_format_id: str) -> Optional[str]:
-    """convert format ids to yt-dlp selectors"""
-    
-    # define audio selectors first
-    audio_selectors = {
-        "auto_audio": "bestaudio",
-        "high_audio": "bestaudio",
-        "medium_audio": "bestaudio[abr<=128]"
-    }
-    
-    # handle special cases
+    # convert format ids to yt-dlp selectors
     if video_format_id == "auto":
-        return None  # use yt-dlp default
+        return None
+    elif video_format_id == "shorts_auto":
+        return "bestvideo[height<=1080]+bestaudio/best[height<=1080]"
     elif video_format_id == "eco_360p":
-        return "best[height<=720]/bestvideo[height<=360]+bestaudio"  # fastest pre-merged, fallback to 360p+audio
+        return "best[height<=720]/bestvideo[height<=360]+bestaudio"
     elif video_format_id == "hd_720p":
-        # high quality: always use separate streams for better quality
-        audio_selector = audio_selectors.get(audio_format_id, "bestaudio") 
-        return f"bestvideo[height<=720]+{audio_selector}"
-    
-    # handle video + audio combinations
-    video_selectors = {
-        "best_quality": "bestvideo"
-    }
-    
-    video_selector = video_selectors.get(video_format_id, "bestvideo")
-    audio_selector = audio_selectors.get(audio_format_id, "bestaudio")
-    
-    return f"{video_selector}+{audio_selector}/best"  # fallback to pre-merged format
+        return "bestvideo[height<=720]+bestaudio"
+    else:
+        return "bestvideo+bestaudio/best"
 
 
 def get_audio_format_selector(format_id: str) -> str:
-    """convert audio format id to yt-dlp selector"""
-    audio_selectors = {
+    selectors = {
         "auto_audio": "bestaudio",
         "high_audio": "bestaudio", 
         "medium_audio": "bestaudio[abr<=128]"
     }
-    return audio_selectors.get(format_id, "bestaudio")
+    return selectors.get(format_id, "bestaudio")
 
 
 def get_quality_label(video_format_id: str) -> str:
-    """get quality label for filename"""
-    quality_labels = {
+    labels = {
         "auto": "auto",
+        "shorts_auto": "shorts",
         "best_quality": "best", 
         "hd_720p": "720p",
         "eco_360p": "360p"
     }
-    return quality_labels.get(video_format_id, video_format_id)
+    return labels.get(video_format_id, video_format_id)
 
 
 def get_ydl_opts_with_time_range(base_opts: dict, time_range: Optional[TimeRange], precise_cut: bool = False) -> dict:
@@ -487,7 +434,7 @@ def process_playlist_entries(entries: List[dict], include_formats: bool = False)
             audio_formats = []
             
             if include_formats and entry.get('formats'):
-                video_formats, audio_formats = extract_formats(entry.get('formats', []))
+                video_formats, audio_formats = extract_formats(entry.get('formats', []), video_url)
             
             video_info = PlaylistVideoInfo(
                 video_id=video_id,
@@ -543,7 +490,7 @@ async def get_video_info(request: VideoInfoRequest):
     """Get video information with format details"""
     try:
         info = await extract_video_info_with_fallback(request.url)
-        video_formats, audio_formats = extract_formats(info.get('formats', []))
+        video_formats, audio_formats = extract_formats(info.get('formats', []), request.url)
         
         return VideoInfoResponse(
             title=info.get('title', 'Unknown'),

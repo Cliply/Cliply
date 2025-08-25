@@ -35,7 +35,6 @@ export function UnifiedDownloadCard({
     useState(false)
   const [activeTab, setActiveTab] = useState("video")
 
-  // Audio section logic
   const isValidAudioTimeRange = validateTimeRange(
     audioTimeRange.start,
     audioTimeRange.end,
@@ -43,10 +42,8 @@ export function UnifiedDownloadCard({
   ).isValid
 
   const showAudioFormatDropdown = isValidAudioTimeRange
-  const showAudioDownloadButton =
-    showAudioFormatDropdown && !!selectedAudioFormatForDownload
+  const showAudioDownloadButton = showAudioFormatDropdown && !!selectedAudioFormatForDownload
 
-  // Video section logic
   const isValidVideoTimeRange = validateTimeRange(
     videoTimeRange.start,
     videoTimeRange.end,
@@ -54,8 +51,7 @@ export function UnifiedDownloadCard({
   ).isValid
 
   const showVideoQualityDropdown = isValidVideoTimeRange
-  const showVideoDownloadButton =
-    showVideoQualityDropdown && !!selectedVideoQuality
+  const showVideoDownloadButton = showVideoQualityDropdown && !!selectedVideoQuality
 
   return (
     <motion.div
@@ -71,13 +67,11 @@ export function UnifiedDownloadCard({
         // Common styles
         "shadow-xl",
         "font-space-grotesk",
-        // Add bottom margin when dropdown is open to prevent overflow
         isVideoQualityDropdownOpen && activeTab === "video" && "mb-80",
         className
       )}
     >
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-        {/* Tabs Header */}
         <div className="p-6 pb-0">
           <TabsList className="grid w-full grid-cols-2 bg-slate-100/50 dark:bg-slate-800/50 border border-slate-200/50 dark:border-slate-700/50">
             <TabsTrigger
@@ -95,22 +89,17 @@ export function UnifiedDownloadCard({
           </TabsList>
         </div>
 
-        {/* Video Download Tab */}
         <TabsContent value="video" className="p-6 pt-4 m-0">
           <div className="space-y-4">
-            {/* Section Description */}
             <div className="mb-6">
               <p className="text-sm text-slate-600 dark:text-slate-400">
                 Download video with automatically paired audio
               </p>
             </div>
 
-            {/* Video Download Flow */}
             <div className="space-y-6">
-              {/* Step 1: Time Range Selection */}
               <VideoTimeRangeSelector maxDuration={videoInfo.duration} />
 
-              {/* Step 2: Video Quality Selection */}
               <VideoQualityDropdown
                 videoFormats={videoInfo.video_formats}
                 audioFormats={videoInfo.audio_formats}
@@ -118,7 +107,6 @@ export function UnifiedDownloadCard({
                 onOpenChange={setIsVideoQualityDropdownOpen}
               />
 
-              {/* Step 3: Download Button */}
               <VideoDownloadButton
                 maxDuration={videoInfo.duration}
                 audioFormats={videoInfo.audio_formats}
@@ -128,28 +116,22 @@ export function UnifiedDownloadCard({
           </div>
         </TabsContent>
 
-        {/* Audio Only Download Tab */}
         <TabsContent value="audio" className="p-6 pt-4 m-0">
           <div className="space-y-4">
-            {/* Section Description */}
             <div className="mb-6">
               <p className="text-sm text-slate-600 dark:text-slate-400">
                 Extract audio from the video with custom time range
               </p>
             </div>
 
-            {/* Audio Download Flow */}
             <div className="space-y-6">
-              {/* Step 1: Time Range Selection */}
               <TimeRangeSelector maxDuration={videoInfo.duration} />
 
-              {/* Step 2: Audio Format Selection */}
               <AudioFormatDropdown
                 audioFormats={videoInfo.audio_formats}
                 isVisible={showAudioFormatDropdown}
               />
 
-              {/* Step 3: Download Button */}
               <AudioDownloadButton
                 maxDuration={videoInfo.duration}
                 isVisible={showAudioDownloadButton}

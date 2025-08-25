@@ -384,12 +384,13 @@ export const systemApi = {
   }
 }
 
-// Utility functions (unchanged from original)
 export const extractVideoId = (url: string): string | null => {
-  const regex =
-    /(?:youtube\.com\/(?:[^/]+\/.+\/|(?:v|e(?:mbed)?)\/|.*[?&]v=)|youtu\.be\/)([^"&?/\s]{11})/
-  const match = url.match(regex)
+  const match = url.match(/(?:youtube\.com\/(?:watch\?v=|embed\/|v\/|shorts\/)|youtu\.be\/)([^"&?/\s]{11})/)
   return match ? match[1] : null
+}
+
+export const isYouTubeShorts = (url: string): boolean => {
+  return /\/shorts\//.test(url.toLowerCase())
 }
 
 export const formatFileSize = (bytes?: number | null): string => {
@@ -588,12 +589,12 @@ export const getVideoQualityOptions = (
 
   // Sort by quality with custom order for our new formats
   return Array.from(qualityMap.values()).sort((a, b) => {
-    // Define custom sort order for our new quality options
     const qualityOrder: { [key: string]: number } = {
-      Auto: 1, // Best overall option first
-      Best: 2, // Best quality second
-      "720p": 3, // 720p third
-      "360p": 4 // 360p last
+      "Shorts Auto": 1,
+      Auto: 2,
+      Best: 3,
+      "720p": 4,
+      "360p": 5
     }
 
     const orderA = qualityOrder[a.label] || 999
@@ -611,10 +612,10 @@ export const getVideoQualityOptions = (
 }
 
 const extractQualityLabel = (quality: string): string | null => {
-  // Handle our new yt-dlp optimized quality names
   const qualityMappings: { [key: string]: string } = {
     "Auto (Recommended)": "Auto",
-    Auto: "Auto", // Handle both old and new format
+    "Shorts Auto": "Shorts Auto",
+    Auto: "Auto",
     "Best Quality": "Best",
     "720p HD": "720p",
     "360p (Fast)": "Fastest"

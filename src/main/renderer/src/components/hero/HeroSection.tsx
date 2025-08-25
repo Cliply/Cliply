@@ -51,7 +51,8 @@ export function HeroSection() {
                   'Geist Mono, ui-monospace, SFMono-Regular, "SF Mono", Consolas, "Liberation Mono", Menlo, monospace'
               }}
             >
-              clip youtube videos effortlessly
+              download stuff effortlessly{" "}
+              <span className="text-cyan-500">(&gt;ᴗ•)</span>
             </motion.p>
           </motion.div>
 
