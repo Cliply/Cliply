@@ -74,17 +74,47 @@ export function HeroSection() {
         transition={{ duration: 0.8, delay: 1.0 }}
         className="absolute bottom-8 left-0 right-0 z-20"
       >
-        <div className="flex justify-center items-center px-4">
+        <div className="flex justify-center items-center px-4 gap-6">
           <Link
             to="/disclaimer"
-            className="text-xs text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 transition-colors duration-200"
+            className="text-xs text-slate-500 dark:text-slate-400 hover:text-cyan-500 dark:hover:text-cyan-400 transition-colors duration-200"
             style={{
               fontFamily:
                 'Geist Mono, ui-monospace, SFMono-Regular, "SF Mono", Consolas, "Liberation Mono", Menlo, monospace'
             }}
           >
-            about cliply
+            disclaimer
           </Link>
+          
+          <span className="text-slate-400 dark:text-slate-600">•</span>
+          
+          <a
+            href="https://buymeacoffee.com/itssdevk"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-xs text-slate-500 dark:text-slate-400 hover:text-cyan-500 dark:hover:text-cyan-400 transition-colors duration-200"
+            style={{
+              fontFamily:
+                'Geist Mono, ui-monospace, SFMono-Regular, "SF Mono", Consolas, "Liberation Mono", Menlo, monospace'
+            }}
+          >
+            donate
+          </a>
+          
+          <span className="text-slate-400 dark:text-slate-600">•</span>
+          
+          <a
+            href="https://github.com/Cliply/Cliply/"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-xs text-slate-500 dark:text-slate-400 hover:text-cyan-500 dark:hover:text-cyan-400 transition-colors duration-200"
+            style={{
+              fontFamily:
+                'Geist Mono, ui-monospace, SFMono-Regular, "SF Mono", Consolas, "Liberation Mono", Menlo, monospace'
+            }}
+          >
+            github
+          </a>
         </div>
       </motion.div>
 
