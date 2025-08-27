@@ -40,12 +40,12 @@ if (APP_CONFIG.ANALYTICS_CONFIG.ENABLED) {
 }
 
 // Configure undici defaults globally to prevent HeadersTimeoutError
-const { setGlobalDispatcher, Agent } = require('undici')
+const { setGlobalDispatcher, Agent } = require("undici")
 
 // Create agent with no timeouts for long downloads
 const agent = new Agent({
-  headersTimeout: 0, // No headers timeout  
-  bodyTimeout: 0,    // No body timeout
+  headersTimeout: 0, // No headers timeout
+  bodyTimeout: 0, // No body timeout
   connectTimeout: 30000 // Keep connection timeout only
 })
 
@@ -390,7 +390,6 @@ class CliplyApp {
     })
   }
 
-
   // create main window
   createWindow() {
     // create browser window
@@ -419,15 +418,16 @@ class CliplyApp {
     // window event handlers
     this.mainWindow.on("closed", this.onWindowClosed)
 
-    this.mainWindow.on("close", (event) => {
+    this.mainWindow.on("close", (_event) => {
       // allow close during update
       if (global.isUpdating) {
         return
       }
 
-      if (!this.isQuitting && process.platform === "darwin") {
-        event.preventDefault()
-        this.mainWindow.hide()
+      // quit the app when close button is clicked (consistent behavior)
+      if (!this.isQuitting) {
+        this.isQuitting = true
+        app.quit()
       }
     })
 

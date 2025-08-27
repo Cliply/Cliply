@@ -1,11 +1,46 @@
 import { ModeToggle } from "@/components/ui/mode-toggle"
+import { MenuVertical } from "@/components/ui/menu-vertical"
+import { updaterApi } from "@/lib/api"
 import { motion } from "framer-motion"
 import { Link } from "react-router-dom"
+import { toast } from "sonner"
 import { SearchCard } from "./SearchCard"
 
 export function HeroSection() {
+
+  const handleCheckForUpdates = async () => {
+    try {
+      await updaterApi.checkForUpdates()
+    } catch (error) {
+      console.error("Failed to check for updates:", error)
+      toast.error("Check Failed", {
+        description:
+          error instanceof Error ? error.message : "Failed to check for updates"
+      })
+    }
+  }
+
   return (
     <section className="relative min-h-screen w-full overflow-hidden">
+      {/* Menu - top left for wider phones, tablets, desktop */}
+      <div className="absolute top-6 left-2 z-20 hidden sm:block">
+        <MenuVertical
+          menuItems={[
+            {
+              label: "update",
+              onClick: handleCheckForUpdates
+            },
+            {
+              label: "donate",
+              href: "https://buymeacoffee.com/itssdevk",
+              external: true
+            }
+          ]}
+          color="#0891b2"
+          skew={-2}
+        />
+      </div>
+
       {/* Mode toggle - top right */}
       <div className="absolute top-6 right-6 z-20">
         <ModeToggle />
@@ -85,21 +120,6 @@ export function HeroSection() {
           >
             disclaimer
           </Link>
-          
-          <span className="text-slate-400 dark:text-slate-600">•</span>
-          
-          <a
-            href="https://buymeacoffee.com/itssdevk"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-xs text-slate-500 dark:text-slate-400 hover:text-cyan-500 dark:hover:text-cyan-400 transition-colors duration-200"
-            style={{
-              fontFamily:
-                'Geist Mono, ui-monospace, SFMono-Regular, "SF Mono", Consolas, "Liberation Mono", Menlo, monospace'
-            }}
-          >
-            donate
-          </a>
           
           <span className="text-slate-400 dark:text-slate-600">•</span>
           
