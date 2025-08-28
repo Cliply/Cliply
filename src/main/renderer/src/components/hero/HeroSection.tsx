@@ -1,11 +1,46 @@
 import { ModeToggle } from "@/components/ui/mode-toggle"
+import { MenuVertical } from "@/components/ui/menu-vertical"
+import { updaterApi } from "@/lib/api"
 import { motion } from "framer-motion"
 import { Link } from "react-router-dom"
+import { toast } from "sonner"
 import { SearchCard } from "./SearchCard"
 
 export function HeroSection() {
+
+  const handleCheckForUpdates = async () => {
+    try {
+      await updaterApi.checkForUpdates()
+    } catch (error) {
+      console.error("Failed to check for updates:", error)
+      toast.error("Check Failed", {
+        description:
+          error instanceof Error ? error.message : "Failed to check for updates"
+      })
+    }
+  }
+
   return (
     <section className="relative min-h-screen w-full overflow-hidden">
+      {/* Menu - top left for wider phones, tablets, desktop */}
+      <div className="absolute top-6 left-2 z-20 hidden sm:block">
+        <MenuVertical
+          menuItems={[
+            {
+              label: "update",
+              onClick: handleCheckForUpdates
+            },
+            {
+              label: "donate",
+              href: "https://buymeacoffee.com/itssdevk",
+              external: true
+            }
+          ]}
+          color="#0891b2"
+          skew={-2}
+        />
+      </div>
+
       {/* Mode toggle - top right */}
       <div className="absolute top-6 right-6 z-20">
         <ModeToggle />
@@ -51,7 +86,8 @@ export function HeroSection() {
                   'Geist Mono, ui-monospace, SFMono-Regular, "SF Mono", Consolas, "Liberation Mono", Menlo, monospace'
               }}
             >
-              clip youtube videos effortlessly
+              download stuff effortlessly{" "}
+              <span className="text-cyan-500">(&gt;ᴗ•)</span>
             </motion.p>
           </motion.div>
 
@@ -73,17 +109,32 @@ export function HeroSection() {
         transition={{ duration: 0.8, delay: 1.0 }}
         className="absolute bottom-8 left-0 right-0 z-20"
       >
-        <div className="flex justify-center items-center px-4">
+        <div className="flex justify-center items-center px-4 gap-6">
           <Link
             to="/disclaimer"
-            className="text-xs text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 transition-colors duration-200"
+            className="text-xs text-slate-500 dark:text-slate-400 hover:text-cyan-500 dark:hover:text-cyan-400 transition-colors duration-200"
             style={{
               fontFamily:
                 'Geist Mono, ui-monospace, SFMono-Regular, "SF Mono", Consolas, "Liberation Mono", Menlo, monospace'
             }}
           >
-            about cliply
+            disclaimer
           </Link>
+          
+          <span className="text-slate-400 dark:text-slate-600">•</span>
+          
+          <a
+            href="https://github.com/Cliply/Cliply/"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-xs text-slate-500 dark:text-slate-400 hover:text-cyan-500 dark:hover:text-cyan-400 transition-colors duration-200"
+            style={{
+              fontFamily:
+                'Geist Mono, ui-monospace, SFMono-Regular, "SF Mono", Consolas, "Liberation Mono", Menlo, monospace'
+            }}
+          >
+            github
+          </a>
         </div>
       </motion.div>
 

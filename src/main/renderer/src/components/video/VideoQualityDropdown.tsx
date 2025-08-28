@@ -25,10 +25,10 @@ export function VideoQualityDropdown({
   const { selectedVideoQuality, setSelectedVideoQuality } = useAppStore()
   const [isOpen, setIsOpen] = useState(false)
 
-  if (!isVisible) return null
-
   const qualityOptions = getVideoQualityOptions(videoFormats)
   const bestAudioFormat = selectBestAudioFormat(audioFormats)
+
+  if (!isVisible) return null
 
   const handleQualitySelect = (option: VideoQualityOption) => {
     setSelectedVideoQuality(option)
@@ -44,7 +44,6 @@ export function VideoQualityDropdown({
       transition={{ duration: 0.3, ease: "easeOut" }}
       className={cn("space-y-4", "font-space-grotesk", className)}
     >
-      {/* Header */}
       <div className="flex items-center gap-2">
         <Video className="h-5 w-5 text-slate-600 dark:text-slate-400" />
         <h3 className="font-medium text-slate-900 dark:text-white">
@@ -52,7 +51,6 @@ export function VideoQualityDropdown({
         </h3>
       </div>
 
-      {/* Dropdown */}
       <div className="relative">
         <Button
           variant="outline"
@@ -64,11 +62,8 @@ export function VideoQualityDropdown({
           className={cn(
             "w-full justify-between h-auto p-4 text-left",
             "border-2 rounded-xl transition-all duration-200",
-            // Dark mode styles
             "dark:bg-slate-800/60 dark:border-slate-700/50 dark:hover:border-slate-600",
-            // Light mode styles
             "bg-white/80 border-slate-300/50 hover:border-slate-400",
-            // Common styles
             "backdrop-blur-sm shadow-lg",
             isOpen && "border-slate-400 dark:border-slate-600"
           )}
@@ -80,7 +75,7 @@ export function VideoQualityDropdown({
                   {selectedVideoQuality.label}
                 </p>
                 <p className="text-sm text-slate-500 dark:text-slate-400">
-                  {selectedVideoQuality.format.ext.toUpperCase()} • video only
+                  {selectedVideoQuality.format.ext.toUpperCase()}
                 </p>
               </div>
             ) : (
@@ -97,7 +92,6 @@ export function VideoQualityDropdown({
           />
         </Button>
 
-        {/* Dropdown Options */}
         {isOpen && (
           <motion.div
             initial={{ opacity: 0, y: -10 }}
@@ -107,11 +101,8 @@ export function VideoQualityDropdown({
             className={cn(
               "absolute top-full left-0 right-0 mt-2 z-[70]",
               "border-2 rounded-xl overflow-hidden",
-              // Dark mode styles
               "dark:bg-slate-800/95 dark:border-slate-700/50 dark:backdrop-blur-xl",
-              // Light mode styles
               "bg-white/95 border-slate-300/50 backdrop-blur-xl",
-              // Common styles
               "shadow-2xl max-h-80"
             )}
           >
@@ -135,7 +126,8 @@ export function VideoQualityDropdown({
                     </p>
                     <div className="flex items-center gap-3">
                       <p className="text-sm text-slate-500 dark:text-slate-400">
-                        {option.format.ext.toUpperCase()} • video only
+                        {option.format.ext.toUpperCase()}
+                        {option.label === "Auto" && " • recommended"}
                       </p>
                       {selectedVideoQuality?.format.format_id ===
                         option.format.format_id && (
@@ -150,18 +142,14 @@ export function VideoQualityDropdown({
         )}
       </div>
 
-      {/* Audio Pairing Info */}
       {selectedVideoQuality && bestAudioFormat && (
         <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           className={cn(
             "p-3 rounded-xl border transition-all duration-200",
-            // Dark mode styles
             "dark:bg-slate-800/40 dark:border-slate-700/50",
-            // Light mode styles
             "bg-slate-50/80 border-slate-300/50",
-            // Common styles
             "backdrop-blur-sm"
           )}
         >
@@ -177,7 +165,6 @@ export function VideoQualityDropdown({
         </motion.div>
       )}
 
-      {/* Quality Description */}
       {selectedVideoQuality && (
         <motion.div
           initial={{ opacity: 0 }}

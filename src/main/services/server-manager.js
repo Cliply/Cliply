@@ -56,7 +56,6 @@ class ServerManager {
       this.serverScript = path.join(resourcesPath, "python", "server.py")
     }
 
-
     await this.validatePythonEnvironment()
   }
 
@@ -136,10 +135,8 @@ class ServerManager {
     })
 
     this.serverProcess.on("close", (code) => {
-
       // show detailed error info for debugging
       if (code !== 0 && code !== null) {
-
         // show user-friendly error with details
         const { dialog } = require("electron")
         const BrowserWindow = require("electron").BrowserWindow
@@ -257,7 +254,6 @@ class ServerManager {
           this.isReady = true
           this.eventEmitter.emit("python:server:ready")
         }
-
       } catch (error) {
         console.warn("health check failed:", error.message)
 
@@ -284,7 +280,6 @@ class ServerManager {
    * stop the python server
    */
   async stopServer() {
-
     this.stopHealthCheck()
 
     if (this.startupTimeout) {
@@ -375,18 +370,26 @@ class ServerManager {
     }
 
     const url = this.getServerUrl(endpoint)
-    const config = {
-      timeout: HTTP_CONFIG.TIMEOUT,
-      headers: HTTP_CONFIG.HEADERS,
-      ...options
-    }
 
     let lastError = null
 
     // retry logic
     for (let attempt = 1; attempt <= HTTP_CONFIG.RETRIES; attempt++) {
+      const controller = new AbortController()
+      const timeoutId = setTimeout(
+        () => controller.abort(),
+        HTTP_CONFIG.TIMEOUT
+      )
+
       try {
+        const config = {
+          headers: HTTP_CONFIG.HEADERS,
+          signal: controller.signal,
+          ...options
+        }
+
         const response = await fetch(url, config)
+        clearTimeout(timeoutId)
 
         if (!response.ok) {
           throw new Error(`HTTP ${response.status}: ${response.statusText}`)
@@ -394,6 +397,7 @@ class ServerManager {
 
         return response
       } catch (error) {
+        clearTimeout(timeoutId)
         lastError = error
         console.warn(`request attempt ${attempt} failed:`, error.message)
 
@@ -418,18 +422,21 @@ class ServerManager {
     }
 
     try {
-      
       // check if yt-dlp is available
       const { spawn } = require("child_process")
-      
+
       const checkResult = await new Promise((resolve) => {
-        const checkProcess = spawn(this.pythonPath, ["-c", "import yt_dlp; print('OK')"], {
-          stdio: ["pipe", "pipe", "pipe"],
-          env: {
-            ...process.env,
-            PYTHONUNBUFFERED: "1"
+        const checkProcess = spawn(
+          this.pythonPath,
+          ["-c", "import yt_dlp; print('OK')"],
+          {
+            stdio: ["pipe", "pipe", "pipe"],
+            env: {
+              ...process.env,
+              PYTHONUNBUFFERED: "1"
+            }
           }
-        })
+        )
 
         checkProcess.on("close", (code) => {
           resolve(code === 0)
@@ -446,12 +453,11 @@ class ServerManager {
       }
 
       // dependencies missing - try to install them
-      
+
       // simple path: requirements.txt is in the same directory as python.exe
       const runtimeDir = path.dirname(this.pythonPath)
       const requirementsPath = path.join(runtimeDir, "requirements.txt")
-      
-      
+
       // check if requirements.txt exists
       const fs = require("fs").promises
       try {
@@ -462,17 +468,18 @@ class ServerManager {
 
       // install dependencies with proper environment
       await new Promise((resolve) => {
-        
         const args = [
-          "-m", "pip", "install", 
-          "--user",                    // install to user directory
-          "--no-cache-dir",           // don't use cache
+          "-m",
+          "pip",
+          "install",
+          "--user", // install to user directory
+          "--no-cache-dir", // don't use cache
           "--no-warn-script-location", // suppress warnings
           "--disable-pip-version-check", // suppress pip version warnings
-          "-r", requirementsPath
+          "-r",
+          requirementsPath
         ]
-        
-        
+
         const installProcess = spawn(this.pythonPath, args, {
           stdio: ["pipe", "pipe", "pipe"],
           cwd: runtimeDir,
@@ -484,12 +491,12 @@ class ServerManager {
 
         let stdout = ""
         let stderr = ""
-        
+
         installProcess.stdout.on("data", (data) => {
           const output = data.toString()
           stdout += output
         })
-        
+
         installProcess.stderr.on("data", (data) => {
           stderr += data.toString()
         })
@@ -509,13 +516,11 @@ class ServerManager {
           resolve() // don't fail startup
         })
       })
-
     } catch (error) {
       console.warn("dependency check failed:", error.message)
       // don't fail startup for dependency issues
     }
   }
-
 
   /**
    * get server status information

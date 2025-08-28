@@ -120,7 +120,7 @@ export function CompactSearch({
       <form onSubmit={form.handleSubmit(handleSubmit)} className="relative">
         <div className="relative flex items-center">
           {/* Search Icon */}
-          <Search className="absolute left-4 h-5 w-5 text-slate-400 dark:text-slate-500" />
+          <Search className="absolute left-4 h-5 w-5 text-slate-600 dark:text-slate-500" />
 
           {/* Input Field */}
           <input

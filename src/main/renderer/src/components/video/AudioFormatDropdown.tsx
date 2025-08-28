@@ -36,7 +36,6 @@ export function AudioFormatDropdown({
       transition={{ duration: 0.3, ease: "easeOut" }}
       className={cn("space-y-4", "font-space-grotesk", className)}
     >
-      {/* Header */}
       <div className="flex items-center gap-2">
         <Headphones className="h-5 w-5 text-slate-600 dark:text-slate-400" />
         <h3 className="font-medium text-slate-900 dark:text-white">
@@ -44,7 +43,6 @@ export function AudioFormatDropdown({
         </h3>
       </div>
 
-      {/* Dropdown */}
       <div className="relative">
         <Button
           variant="outline"
@@ -52,11 +50,8 @@ export function AudioFormatDropdown({
           className={cn(
             "w-full justify-between h-auto p-4 text-left",
             "border-2 rounded-xl transition-all duration-200",
-            // Dark mode styles
             "dark:bg-slate-800/60 dark:border-slate-700/50 dark:hover:border-slate-600",
-            // Light mode styles
             "bg-white/80 border-slate-300/50 hover:border-slate-400",
-            // Common styles
             "backdrop-blur-sm shadow-lg",
             isOpen && "border-slate-400 dark:border-slate-600"
           )}
@@ -85,7 +80,6 @@ export function AudioFormatDropdown({
           />
         </Button>
 
-        {/* Dropdown Options */}
         {isOpen && (
           <motion.div
             initial={{ opacity: 0, y: -10 }}
@@ -95,11 +89,8 @@ export function AudioFormatDropdown({
             className={cn(
               "absolute top-full left-0 right-0 mt-2 z-[70]",
               "border-2 rounded-xl overflow-hidden",
-              // Dark mode styles
               "dark:bg-slate-800/95 dark:border-slate-700/50 dark:backdrop-blur-xl",
-              // Light mode styles
               "bg-white/95 border-slate-300/50 backdrop-blur-xl",
-              // Common styles
               "shadow-2xl max-h-80"
             )}
           >
@@ -124,6 +115,7 @@ export function AudioFormatDropdown({
                     <div className="flex items-center gap-3">
                       <p className="text-sm text-slate-500 dark:text-slate-400">
                         {format.ext.toUpperCase()}
+                        {format.quality === "Auto" && " • recommended"}
                       </p>
                       {selectedAudioFormatForDownload?.format_id ===
                         format.format_id && (
@@ -138,7 +130,6 @@ export function AudioFormatDropdown({
         )}
       </div>
 
-      {/* Format Description */}
       {selectedAudioFormatForDownload && (
         <motion.div
           initial={{ opacity: 0 }}
