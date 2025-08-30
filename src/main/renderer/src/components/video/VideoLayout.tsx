@@ -49,7 +49,13 @@ export function VideoLayout() {
           {/* Left side: Logo and brand text */}
           <div className="flex items-center gap-2 flex-shrink-0">
             {/* Small Logo */}
-            <div className="w-8 h-8 text-slate-700 dark:text-slate-300 transition-colors duration-300">
+            <div 
+              className="w-8 h-8 text-slate-700 dark:text-slate-300 transition-colors duration-300 cursor-pointer hover:text-slate-900 dark:hover:text-slate-100"
+              onClick={() => {
+                const { reset } = useAppStore.getState()
+                reset()
+              }}
+            >
               <svg
                 viewBox="0 0 100 94.27"
                 className="w-full h-full"
@@ -78,7 +84,11 @@ export function VideoLayout() {
 
             {/* Brand text - only on desktop */}
             <span
-              className="hidden lg:block text-lg font-light text-slate-700 dark:text-slate-300 tracking-tight"
+              className="hidden lg:block text-lg font-light text-slate-700 dark:text-slate-300 tracking-tight cursor-pointer hover:text-slate-900 dark:hover:text-slate-100 transition-colors duration-300"
+              onClick={() => {
+                const { reset } = useAppStore.getState()
+                reset()
+              }}
               style={{
                 fontFamily:
                   'Geist Mono, ui-monospace, SFMono-Regular, "SF Mono", Consolas, "Liberation Mono", Menlo, monospace'

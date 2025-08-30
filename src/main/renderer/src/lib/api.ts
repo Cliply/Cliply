@@ -5,7 +5,7 @@ export interface VideoFormat {
   quality: string
   ext: string
   filesize?: number | null
-  type: string // "combined" | "video" | "audio"
+  type: string // "combined" | "video" | "audio" | "auto"
   height?: number
   width?: number
   fps?: number
@@ -384,12 +384,13 @@ export const systemApi = {
   }
 }
 
-// Utility functions (unchanged from original)
 export const extractVideoId = (url: string): string | null => {
-  const regex =
-    /(?:youtube\.com\/(?:[^/]+\/.+\/|(?:v|e(?:mbed)?)\/|.*[?&]v=)|youtu\.be\/)([^"&?/\s]{11})/
-  const match = url.match(regex)
+  const match = url.match(/(?:youtube\.com\/(?:watch\?v=|embed\/|v\/|shorts\/)|youtu\.be\/)([^"&?/\s]{11})/)
   return match ? match[1] : null
+}
+
+export const isYouTubeShorts = (url: string): boolean => {
+  return /\/shorts\//.test(url.toLowerCase())
 }
 
 export const formatFileSize = (bytes?: number | null): string => {
@@ -454,15 +455,21 @@ export const validateTimeRange = (
 export const selectBestAudioFormat = (
   formats: VideoFormat[]
 ): VideoFormat | null => {
+  // Handle our new audio format names
+  const autoQuality = formats.find(
+    (format) => format.type === "audio" && format.quality === "Auto"
+  )
+  if (autoQuality) return autoQuality
+
   // first try to find high quality audio
-  const highQuality = formats.find((format) => 
-    format.type === "audio" && format.quality === "High Quality"
+  const highQuality = formats.find(
+    (format) => format.type === "audio" && format.quality === "High Quality"
   )
   if (highQuality) return highQuality
 
   // fallback to medium quality
-  const mediumQuality = formats.find((format) => 
-    format.type === "audio" && format.quality === "Medium Quality"
+  const mediumQuality = formats.find(
+    (format) => format.type === "audio" && format.quality === "Medium Quality"
   )
   if (mediumQuality) return mediumQuality
 
@@ -511,7 +518,11 @@ export const selectBestVideoFormat = (
   // Robust video format detection
   let filtered = formats.filter((format) => {
     // Check format type first
-    if (format.type === "video" || format.type === "combined") {
+    if (
+      format.type === "video" ||
+      format.type === "combined" ||
+      format.type === "auto"
+    ) {
       return true
     }
 
@@ -551,8 +562,13 @@ export const getVideoQualityOptions = (
     // Extract quality from the quality field
     const quality = extractQualityLabel(format.quality)
 
-    // Include both video-only and combined formats
-    if (quality && (format.type === "video" || format.type === "combined")) {
+    // Include video, combined, and auto formats
+    if (
+      quality &&
+      (format.type === "video" ||
+        format.type === "combined" ||
+        format.type === "auto")
+    ) {
       const existing = qualityMap.get(quality)
 
       // Prefer better formats (higher file size, better type)
@@ -560,14 +576,35 @@ export const getVideoQualityOptions = (
         qualityMap.set(quality, {
           label: quality,
           format,
-          type: format.type === "combined" ? "combined" : "video-only"
+          type:
+            format.type === "combined"
+              ? "combined"
+              : format.type === "auto"
+                ? "combined"
+                : "video-only"
         })
       }
     }
   })
 
-  // Sort by quality (highest first)
+  // Sort by quality with custom order for our new formats
   return Array.from(qualityMap.values()).sort((a, b) => {
+    const qualityOrder: { [key: string]: number } = {
+      "Shorts Auto": 1,
+      Auto: 2,
+      Best: 3,
+      "720p": 4,
+      "360p": 5
+    }
+
+    const orderA = qualityOrder[a.label] || 999
+    const orderB = qualityOrder[b.label] || 999
+
+    if (orderA !== orderB) {
+      return orderA - orderB
+    }
+
+    // Fallback to numeric sorting for legacy formats
     const aNum = parseInt(a.label.replace(/\D/g, ""))
     const bNum = parseInt(b.label.replace(/\D/g, ""))
     return bNum - aNum
@@ -575,7 +612,21 @@ export const getVideoQualityOptions = (
 }
 
 const extractQualityLabel = (quality: string): string | null => {
-  // Common quality patterns
+  const qualityMappings: { [key: string]: string } = {
+    "Auto (Recommended)": "Auto",
+    "Shorts Auto": "Shorts Auto",
+    Auto: "Auto",
+    "Best Quality": "Best",
+    "720p HD": "720p",
+    "360p (Fast)": "Fastest"
+  }
+
+  // Check if it's one of our new quality formats
+  if (qualityMappings[quality]) {
+    return qualityMappings[quality]
+  }
+
+  // Fallback to original pattern matching for legacy formats
   const patterns = [
     /(\d{3,4}p)/, // 1080p, 720p, 480p, etc.
     /(\d{3,4})/ // Just numbers
@@ -595,9 +646,12 @@ const isFormatBetter = (
   formatA: VideoFormat,
   formatB: VideoFormat
 ): boolean => {
-  // Prefer combined formats over video-only
+  // Prefer auto formats first, then combined, then video-only
   if (formatA.type !== formatB.type) {
-    return formatA.type === "combined"
+    const typeOrder = { auto: 1, combined: 2, video: 3 }
+    const orderA = typeOrder[formatA.type as keyof typeof typeOrder] || 4
+    const orderB = typeOrder[formatB.type as keyof typeof typeOrder] || 4
+    return orderA < orderB
   }
 
   // Prefer larger file size (usually better quality)
@@ -703,7 +757,6 @@ export const updaterApi = {
     onUpdateChecking: (callback: () => void) => {
       if (!isElectron()) return () => {}
       return window.electronAPI!.updater.onUpdateChecking(callback)
-    },
-
+    }
   }
 }

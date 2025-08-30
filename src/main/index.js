@@ -39,11 +39,17 @@ if (APP_CONFIG.ANALYTICS_CONFIG.ENABLED) {
   global.trackEvent = trackEvent
 }
 
-// polyfill fetch for node environments
-if (!globalThis.fetch) {
-  globalThis.fetch = (...args) =>
-    import("undici").then(({ fetch }) => fetch(...args))
-}
+// Configure undici defaults globally to prevent HeadersTimeoutError
+const { setGlobalDispatcher, Agent } = require("undici")
+
+// Create agent with no timeouts for long downloads
+const agent = new Agent({
+  headersTimeout: 0, // No headers timeout
+  bodyTimeout: 0, // No body timeout
+  connectTimeout: 30000 // Keep connection timeout only
+})
+
+setGlobalDispatcher(agent)
 
 class CliplyApp {
   constructor() {
@@ -384,7 +390,6 @@ class CliplyApp {
     })
   }
 
-
   // create main window
   createWindow() {
     // create browser window
@@ -413,15 +418,16 @@ class CliplyApp {
     // window event handlers
     this.mainWindow.on("closed", this.onWindowClosed)
 
-    this.mainWindow.on("close", (event) => {
+    this.mainWindow.on("close", (_event) => {
       // allow close during update
       if (global.isUpdating) {
         return
       }
 
-      if (!this.isQuitting && process.platform === "darwin") {
-        event.preventDefault()
-        this.mainWindow.hide()
+      // quit the app when close button is clicked (consistent behavior)
+      if (!this.isQuitting) {
+        this.isQuitting = true
+        app.quit()
       }
     })
 
@@ -758,7 +764,7 @@ class CliplyApp {
           {
             label: "Report Issue",
             click: () => {
-              shell.openExternal("https://github.com/your-repo/cliply/issues")
+              shell.openExternal("https://github.com/Cliply/Cliply/issues")
             }
           }
         ]

@@ -141,7 +141,7 @@ export function URLInput({ form, onFocusChange, isLoading }: URLInputProps) {
                   'Geist Mono, ui-monospace, SFMono-Regular, "SF Mono", Consolas, "Liberation Mono", Menlo, monospace'
               }}
             >
-              supports youtube links from youtube.com and youtu.be
+              supports youtube <span className="text-cyan-500">videos</span> & <span className="text-cyan-500">shorts</span> from youtube.com and youtu.be
             </p>
           )}
         </motion.div>

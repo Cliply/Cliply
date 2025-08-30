@@ -14,7 +14,6 @@ from yt_dlp.utils import download_range_func
 import uuid
 import re
 from typing import List, Optional, Union
-import random
 import time
 import os
 import asyncio
@@ -160,7 +159,7 @@ class VideoInfoRequest(BaseModel):
     @field_validator('url')
     @classmethod
     def validate_youtube_url(cls, v):
-        youtube_regex = r'(https?://)?(www\.)?(youtube\.com/(watch\?v=|embed/|v/)|youtu\.be/)'
+        youtube_regex = r'(https?://)?(www\.)?(youtube\.com/(watch\?v=|embed/|v/|shorts/)|youtu\.be/)'
         if not re.match(youtube_regex, v):
             raise ValueError('Invalid YouTube URL')
         return v
@@ -247,8 +246,12 @@ class PlaylistDownloadRequest(BaseModel):
             raise ValueError('Maximum 20 videos can be downloaded at once')
         return v
 
+def is_youtube_shorts(url: str) -> bool:
+    """Check if URL is a YouTube Shorts URL"""
+    return '/shorts/' in url.lower()
+
 def sanitize_filename(filename: str) -> str:
-    filename = filename.replace('..', '')
+    filename = os.path.basename(filename)
     filename = re.sub(r'[<>:"/\\|?*]', '', filename)
     filename = re.sub(r'\s+', ' ', filename).strip()
     return filename[:200] if len(filename) > 200 else filename
@@ -284,6 +287,10 @@ def get_enhanced_ydl_opts(base_opts: dict = None) -> dict:
     simple_opts = {
         'quiet': True,
         'no_warnings': True,
+        'retries': 1,
+        'extractor_retries': 1,
+        'fragment_retries': 2,
+        # removed custom headers
     }
     
     if FFMPEG_PATH:
@@ -292,99 +299,59 @@ def get_enhanced_ydl_opts(base_opts: dict = None) -> dict:
     simple_opts.update(base_opts)
     return simple_opts
 
-def extract_formats(formats_list: List[dict]) -> tuple[List[Format], List[Format]]:
-    # just return the predefined formats - no need to parse the mess from yt-dlp
-    video_formats = [
-        Format(
-            format_id="160",
-            quality="144p",
-            ext="mp4",
-            filesize=None,
-            type="video"
-        ),
-        Format(
-            format_id="133", 
-            quality="240p",
-            ext="mp4",
-            filesize=None,
-            type="video"
-        ),
-        Format(
-            format_id="134",
-            quality="360p", 
-            ext="mp4",
-            filesize=None,
-            type="video"
-        ),
-        Format(
-            format_id="135",
-            quality="480p",
-            ext="mp4",
-            filesize=None,
-            type="video"
-        ),
-        Format(
-            format_id="136",
-            quality="720p HD",
-            ext="mp4",
-            filesize=None,
-            type="video"
-        ),
-        Format(
-            format_id="137",
-            quality="1080p Full HD",
-            ext="mp4",
-            filesize=None,
-            type="video"
-        ),
-        Format(
-            format_id="400",
-            quality="1440p 2K",
-            ext="mp4",
-            filesize=None,
-            type="video"
-        ),
-        Format(
-            format_id="401",
-            quality="2160p 4K",
-            ext="mp4",
-            filesize=None,
-            type="video"
-        ),
-        Format(
-            format_id="18",
-            quality="360p (Combined/Fast)",
-            ext="mp4",
-            filesize=None,
-            type="combined"
-        )
-    ]
-    
-    audio_formats = [
-        Format(
-            format_id="worstaudio",
-            quality="Low Quality",
-            ext="webm",
-            filesize=None,
-            type="audio"
-        ),
-        Format(
-            format_id="bestaudio[abr<=70]",
-            quality="Medium Quality", 
-            ext="webm",
-            filesize=None,
-            type="audio"
-        ),
-        Format(
-            format_id="bestaudio",
-            quality="High Quality",
-            ext="webm",
-            filesize=None,
-            type="audio"
-        )
-    ]
+def extract_formats(formats_list: List[dict], url: str = "") -> tuple[List[Format], List[Format]]:
+    # shorts get single auto format, regular videos get full options
+    if is_youtube_shorts(url):
+        video_formats = [Format(format_id="shorts_auto", quality="Auto", ext="mp4", filesize=None, type="auto")]
+        audio_formats = [Format(format_id="auto_audio", quality="Auto", ext="m4a", filesize=None, type="audio")]
+    else:
+        video_formats = [
+            Format(format_id="auto", quality="Auto (Recommended)", ext="mp4/webm", filesize=None, type="auto"),
+            Format(format_id="best_quality", quality="Best Quality", ext="mp4/webm", filesize=None, type="video"),
+            Format(format_id="hd_720p", quality="720p HD", ext="mp4/webm", filesize=None, type="video"),
+            Format(format_id="eco_360p", quality="360p (Fast)", ext="mp4", filesize=None, type="combined")
+        ]
+        audio_formats = [
+            Format(format_id="auto_audio", quality="Auto", ext="m4a", filesize=None, type="audio"),
+            Format(format_id="high_audio", quality="High Quality", ext="m4a", filesize=None, type="audio"),
+            Format(format_id="medium_audio", quality="Medium Quality", ext="m4a", filesize=None, type="audio")
+        ]
     
     return video_formats, audio_formats
+
+
+def get_format_selector(video_format_id: str, audio_format_id: str) -> Optional[str]:
+    # convert format ids to yt-dlp selectors
+    if video_format_id == "auto":
+        return None
+    elif video_format_id == "shorts_auto":
+        return "bestvideo[height<=1080]+bestaudio/best[height<=1080]"
+    elif video_format_id == "eco_360p":
+        return "best[height<=720]/bestvideo[height<=360]+bestaudio"
+    elif video_format_id == "hd_720p":
+        return "bestvideo[height<=720]+bestaudio"
+    else:
+        return "bestvideo+bestaudio/best"
+
+
+def get_audio_format_selector(format_id: str) -> str:
+    selectors = {
+        "auto_audio": "bestaudio",
+        "high_audio": "bestaudio", 
+        "medium_audio": "bestaudio[abr<=128]"
+    }
+    return selectors.get(format_id, "bestaudio")
+
+
+def get_quality_label(video_format_id: str) -> str:
+    labels = {
+        "auto": "auto",
+        "shorts_auto": "shorts",
+        "best_quality": "best", 
+        "hd_720p": "720p",
+        "eco_360p": "360p"
+    }
+    return labels.get(video_format_id, video_format_id)
 
 
 def get_ydl_opts_with_time_range(base_opts: dict, time_range: Optional[TimeRange], precise_cut: bool = False) -> dict:
@@ -404,40 +371,10 @@ async def download_async(url: str, opts: dict) -> None:
     return await loop.run_in_executor(executor, _download_blocking, url, opts)
 
 async def download_with_fallback(url: str, base_opts: dict) -> None:
-    """download with fallback strategy similar to extract_video_info_with_fallback"""
-    strategies = [
-        lambda: get_enhanced_ydl_opts(base_opts),
-        lambda: get_enhanced_ydl_opts({
-            **base_opts,
-            'extractor_args': {
-                'youtube': {
-                    'player_client': ['android'],
-                }
-            }
-        }),
-        lambda: get_enhanced_ydl_opts({
-            **base_opts,
-            'extractor_args': {
-                'youtube': {
-                    'player_client': ['web'],
-                }
-            }
-        })
-    ]
-    
-    for attempt, strategy in enumerate(strategies):
-        try:
-            if attempt > 0:
-                wait_time = (2 ** attempt) + random.uniform(0.5, 2)
-                await asyncio.sleep(wait_time)
-            opts = strategy()
-            await download_async(url, opts)
-            return
-        except Exception as e:
-            if attempt == len(strategies) - 1:
-                raise e
-                
-    raise Exception("all download strategies failed")
+    """Download using yt-dlp's built-in retry mechanisms"""
+    # Let yt-dlp handle fallbacks automatically with its built-in retry system
+    opts = get_enhanced_ydl_opts(base_opts)
+    await download_async(url, opts)
 
 def _extract_info_blocking(url: str, opts: dict) -> dict:
     with yt_dlp.YoutubeDL(opts) as ydl:
@@ -448,89 +385,36 @@ def _download_blocking(url: str, opts: dict) -> None:
         ydl.download([url])
 
 async def extract_video_info_with_fallback(url: str) -> dict:
-    # try different strategies if one fails
-    strategies = [
-        lambda: get_enhanced_ydl_opts(),
-        lambda: get_enhanced_ydl_opts({
-            'extractor_args': {
-                'youtube': {
-                    'player_client': ['android'],
-                }
-            }
-        }),
-        lambda: get_enhanced_ydl_opts({
-            'extractor_args': {
-                'youtube': {
-                    'player_client': ['web'],
-                }
-            }
-        })
-    ]
-    
-    for attempt, strategy in enumerate(strategies):
-        try:
-            if attempt > 0:
-                wait_time = (2 ** attempt) + random.uniform(0.5, 2)
-                await asyncio.sleep(wait_time)
-            opts = strategy()
-            info = await extract_info_async(url, opts)
-            return info
-        except Exception as e:
-            if attempt == len(strategies) - 1:
-                raise e
-    raise Exception("All extraction strategies failed")
+    """Extract video info using yt-dlp's built-in retry mechanisms"""
+    # Let yt-dlp handle fallbacks automatically with its built-in retry system
+    opts = get_enhanced_ydl_opts()
+    return await extract_info_async(url, opts)
 
 async def extract_playlist_info_with_fallback(url: str, max_videos: int = 50, include_formats: bool = False) -> dict:
-    start_time = time.time()
+    """Extract playlist info using yt-dlp's built-in retry mechanisms"""
     base_playlist_opts = {
         'extract_flat': not include_formats,
         'playlist_items': f'1:{max_videos}',
     }
     
-    strategies = [
-        lambda: get_enhanced_ydl_opts(base_playlist_opts),
-        lambda: get_enhanced_ydl_opts({
-            **base_playlist_opts,
-            'extractor_args': {
-                'youtube': {
-                    'player_client': ['android'],
+    try:
+        # Let yt-dlp handle fallbacks automatically with its built-in retry system
+        opts = get_enhanced_ydl_opts(base_playlist_opts)
+        return await extract_info_async(url, opts)
+    except Exception as e:
+        error_msg = str(e)
+        # Still handle the specific cookie-related error for playlists
+        if "Sign in to confirm" in error_msg and not cookie_manager.has_valid_cookies():
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "error": "YouTube bot detection triggered for playlist",
+                    "message": "Server needs YouTube cookies to access playlists",
+                    "has_cookies": False,
+                    "solution": "Admin needs to update server cookies"
                 }
-            }
-        }),
-        lambda: get_enhanced_ydl_opts({
-            **base_playlist_opts,
-            'extractor_args': {
-                'youtube': {
-                    'player_client': ['web'],
-                }
-            }
-        })
-    ]
-    
-    for attempt, strategy in enumerate(strategies):
-        try:
-            if attempt > 0:
-                wait_time = (2 ** attempt) + random.uniform(0.5, 2)
-                await asyncio.sleep(wait_time)
-            opts = strategy()
-            info = await extract_info_async(url, opts)
-            return info
-        except Exception as e:
-            error_msg = str(e)
-            if "Sign in to confirm" in error_msg and not cookie_manager.has_valid_cookies():
-                if attempt == len(strategies) - 1:
-                    raise HTTPException(
-                        status_code=503,
-                        detail={
-                            "error": "YouTube bot detection triggered for playlist",
-                            "message": "Server needs YouTube cookies to access playlists",
-                            "has_cookies": False,
-                            "solution": "Admin needs to update server cookies"
-                        }
-                    )
-            if attempt == len(strategies) - 1:
-                raise e
-    raise Exception("All playlist extraction strategies failed")
+            )
+        raise e
 
 def process_playlist_entries(entries: List[dict], include_formats: bool = False) -> List[PlaylistVideoInfo]:
     videos = []
@@ -550,7 +434,7 @@ def process_playlist_entries(entries: List[dict], include_formats: bool = False)
             audio_formats = []
             
             if include_formats and entry.get('formats'):
-                video_formats, audio_formats = extract_formats(entry.get('formats', []))
+                video_formats, audio_formats = extract_formats(entry.get('formats', []), video_url)
             
             video_info = PlaylistVideoInfo(
                 video_id=video_id,
@@ -606,7 +490,7 @@ async def get_video_info(request: VideoInfoRequest):
     """Get video information with format details"""
     try:
         info = await extract_video_info_with_fallback(request.url)
-        video_formats, audio_formats = extract_formats(info.get('formats', []))
+        video_formats, audio_formats = extract_formats(info.get('formats', []), request.url)
         
         return VideoInfoResponse(
             title=info.get('title', 'Unknown'),
@@ -623,13 +507,11 @@ async def get_video_info(request: VideoInfoRequest):
 
 @app.post("/api/video/download-combined")
 async def download_combined_video_audio(request: CombinedDownloadRequest):
-    """Download and merge video+audio with optional time range"""
+    """download and merge video+audio with optional time range"""
     download_id = str(uuid.uuid4())
     
-
-    
     try:
-        # Track active download
+
         active_downloads[download_id] = {
             "type": "combined",
             "url": request.url,
@@ -639,9 +521,9 @@ async def download_combined_video_audio(request: CombinedDownloadRequest):
         info = await extract_video_info_with_fallback(request.url)
         title = sanitize_filename(info.get('title', 'video'))
         
-        # Create unique filename including quality info
-        quality = request.video_format_id if request.video_format_id != "18" else "360p"
-        timestamp = int(time.time() * 1000) % 100000  # Last 5 digits for uniqueness
+
+        quality = get_quality_label(request.video_format_id)
+        timestamp = int(time.time() * 1000) % 100000
         
         if request.time_range:
             start_str = seconds_to_time_string(request.time_range.start)
@@ -652,44 +534,64 @@ async def download_combined_video_audio(request: CombinedDownloadRequest):
         
         final_path = DOWNLOADS_DIR / final_filename
         
-        # direct download to final location (no temp files)
-        # combine video + audio formats or use single combined format
-        if request.video_format_id == "18":
-            # Format 18 is already combined (video+audio)
-            format_string = request.video_format_id
-        else:
-            # Combine separate video + audio formats
-            format_string = f"{request.video_format_id}+{request.audio_format_id}"
+
+        format_string = get_format_selector(request.video_format_id, request.audio_format_id)
         
         base_opts = {
-            'format': format_string,
             'outtmpl': str(final_path),
             'merge_output_format': 'mp4',
         }
+        
+
+        if format_string is not None:
+            base_opts['format'] = format_string
         
         base_opts = get_ydl_opts_with_time_range(base_opts, request.time_range, request.precise_cut)
         
         await download_with_fallback(request.url, base_opts)
         
+        # More robust file detection - check for files with the expected base name
         base_name = final_filename.replace('.%(ext)s', '')
-        downloaded_files = list(DOWNLOADS_DIR.glob(f"{base_name}.*"))
+        possible_files = []
         
-        if not downloaded_files:
-            raise HTTPException(status_code=500, detail="Download failed - file not found")
+        # Look for files with the exact base name and common extensions
+        for ext in ['mp4', 'm4a', 'webm', 'mkv', 'mov', 'avi']:
+            pattern = f"{base_name}.{ext}"
+            matches = list(DOWNLOADS_DIR.glob(pattern))
+            possible_files.extend(matches)
         
-        actual_file = downloaded_files[0]
+        # If no exact matches, fall back to generic search (most recent file)
+        if not possible_files:
+            all_files = list(DOWNLOADS_DIR.glob("*.mp4")) + list(DOWNLOADS_DIR.glob("*.m4a")) + list(DOWNLOADS_DIR.glob("*.webm")) + list(DOWNLOADS_DIR.glob("*.mkv"))
+            if all_files:
+                # Get the most recently created file
+                possible_files = [max(all_files, key=lambda x: x.stat().st_mtime)]
+        
+        if not possible_files:
+            raise HTTPException(status_code=500, detail="Download failed - no files found in directory")
+        
+        # Use the most recent file if multiple matches
+        actual_file = max(possible_files, key=lambda x: x.stat().st_mtime)
+        
+        # ensure file is completely written before getting size
+        try:
+            actual_file_size = actual_file.stat().st_size
+            if actual_file_size == 0:
+                raise HTTPException(status_code=500, detail="Download failed - file is empty")
+        except OSError as e:
+            raise HTTPException(status_code=500, detail=f"Download failed - cannot access file: {str(e)}")
+        
         active_downloads.pop(download_id, None)
         
         return JSONResponse({
             "success": True,
             "filename": actual_file.name,
             "file_path": str(actual_file),
-            "file_size": actual_file.stat().st_size,
+            "file_size": actual_file_size,
             "download_id": download_id
         })
         
     except Exception as e:
-        # Cleanup on error (simplified)
         active_downloads.pop(download_id, None)
         raise HTTPException(status_code=500, detail=f"Combined download failed: {str(e)}")
 
@@ -710,7 +612,7 @@ async def download_audio_only(request: AudioDownloadRequest):
         title = sanitize_filename(info.get('title', 'audio'))
         
         # Create unique filename including quality info
-        quality = request.format_id.replace('bestaudio', 'high').replace('worstaudio', 'low')
+        quality = request.format_id.replace('_audio', '').replace('auto_audio', 'auto').replace('high_audio', 'high').replace('medium_audio', 'medium')
         timestamp = int(time.time() * 1000) % 100000
         
         if request.time_range:
@@ -722,9 +624,10 @@ async def download_audio_only(request: AudioDownloadRequest):
         
         final_path = DOWNLOADS_DIR / final_filename
         
-        # direct download to final location (no temp files)
+        # Use yt-dlp audio format selector
+        format_string = get_audio_format_selector(request.format_id)
         base_opts = {
-            'format': request.format_id,
+            'format': format_string,
             'outtmpl': str(final_path),
         }
         
@@ -732,25 +635,48 @@ async def download_audio_only(request: AudioDownloadRequest):
         
         await download_with_fallback(request.url, base_opts)
         
+        # More robust file detection - check for files with the expected base name
         base_name = final_filename.replace('.%(ext)s', '')
-        downloaded_files = list(DOWNLOADS_DIR.glob(f"{base_name}.*"))
+        possible_files = []
         
-        if not downloaded_files:
-            raise HTTPException(status_code=500, detail="Download failed - file not found")
+        # Look for files with the exact base name and common extensions
+        for ext in ['m4a', 'mp3', 'webm', 'ogg', 'wav', 'aac']:
+            pattern = f"{base_name}.{ext}"
+            matches = list(DOWNLOADS_DIR.glob(pattern))
+            possible_files.extend(matches)
         
-        actual_file = downloaded_files[0]
+        # If no exact matches, fall back to generic search (most recent file)
+        if not possible_files:
+            all_files = list(DOWNLOADS_DIR.glob("*.m4a")) + list(DOWNLOADS_DIR.glob("*.mp3")) + list(DOWNLOADS_DIR.glob("*.webm")) + list(DOWNLOADS_DIR.glob("*.ogg"))
+            if all_files:
+                # Get the most recently created file
+                possible_files = [max(all_files, key=lambda x: x.stat().st_mtime)]
+        
+        if not possible_files:
+            raise HTTPException(status_code=500, detail="Download failed - no audio files found in directory")
+        
+        # Use the most recent file if multiple matches
+        actual_file = max(possible_files, key=lambda x: x.stat().st_mtime)
+        
+        # ensure file is completely written before getting size
+        try:
+            actual_file_size = actual_file.stat().st_size
+            if actual_file_size == 0:
+                raise HTTPException(status_code=500, detail="Download failed - file is empty")
+        except OSError as e:
+            raise HTTPException(status_code=500, detail=f"Download failed - cannot access file: {str(e)}")
+        
         active_downloads.pop(download_id, None)
         
         return JSONResponse({
             "success": True,
             "filename": actual_file.name,
             "file_path": str(actual_file),
-            "file_size": actual_file.stat().st_size,
+            "file_size": actual_file_size,
             "download_id": download_id
         })
         
     except Exception as e:
-        # Cleanup on error (simplified)
         active_downloads.pop(download_id, None)
         raise HTTPException(status_code=500, detail=f"Audio download failed: {str(e)}")
 
@@ -823,10 +749,10 @@ async def download_playlist_videos(request: PlaylistDownloadRequest, background_
                 video_url = f"https://www.youtube.com/watch?v={video_id}"
                 
                 if request.video_format_id:
-                    format_string = f"{request.video_format_id}+{request.audio_format_id}"
+                    format_string = get_format_selector(request.video_format_id, request.audio_format_id)
                     file_ext = "mp4"
                 else:
-                    format_string = request.audio_format_id
+                    format_string = get_audio_format_selector(request.audio_format_id)
                     file_ext = "m4a"
                 
                 safe_video_title = re.sub(r'[^\w\s-]', '', video_title)[:100]
@@ -834,11 +760,14 @@ async def download_playlist_videos(request: PlaylistDownloadRequest, background_
                 output_path = batch_dir / f"{output_filename}.%(ext)s"
                 
                 base_opts = {
-                    'format': format_string,
                     'outtmpl': str(output_path),
                     'merge_output_format': file_ext,
                     'restrictfilenames': True,
                 }
+                
+                # Only add format if not using yt-dlp default (auto)
+                if format_string is not None:
+                    base_opts['format'] = format_string
                 
                 await download_with_fallback(video_url, base_opts)
                 
