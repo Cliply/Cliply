@@ -2,7 +2,8 @@ import type {
   TimeRange,
   VideoFormat,
   VideoInfoResponse,
-  VideoQualityOption
+  VideoQualityOption,
+  DownloadPathInfo
 } from "@/lib/api"
 
 import { create } from "zustand"
@@ -43,6 +44,12 @@ interface AppState {
   audioPreciseCut: boolean
   setAudioPreciseCut: (enabled: boolean) => void
 
+  // Download path management
+  downloadPath: DownloadPathInfo | null
+  setDownloadPath: (pathInfo: DownloadPathInfo) => void
+  isLoadingDownloadPath: boolean
+  setIsLoadingDownloadPath: (loading: boolean) => void
+
   // Reset function
   reset: () => void
 }
@@ -63,6 +70,8 @@ export const useAppStore = create<AppState>((set) => ({
   isDownloadingVideo: false,
   videoPreciseCut: true,
   audioPreciseCut: true,
+  downloadPath: null,
+  isLoadingDownloadPath: false,
 
   // Actions
   setUrl: (url) => set({ url }),
@@ -82,6 +91,8 @@ export const useAppStore = create<AppState>((set) => ({
     set({ isDownloadingVideo: downloading }),
   setVideoPreciseCut: (enabled) => set({ videoPreciseCut: enabled }),
   setAudioPreciseCut: (enabled) => set({ audioPreciseCut: enabled }),
+  setDownloadPath: (pathInfo) => set({ downloadPath: pathInfo }),
+  setIsLoadingDownloadPath: (loading) => set({ isLoadingDownloadPath: loading }),
 
   // Reset all state
   reset: () =>
@@ -99,6 +110,8 @@ export const useAppStore = create<AppState>((set) => ({
       selectedVideoQuality: null,
       isDownloadingVideo: false,
       videoPreciseCut: true,
-      audioPreciseCut: true
+      audioPreciseCut: true,
+      downloadPath: null,
+      isLoadingDownloadPath: false
     })
 }))

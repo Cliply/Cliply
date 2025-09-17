@@ -1,16 +1,18 @@
 import { Button } from "@/components/ui/button"
-import { videoApi } from "@/lib/api"
+import { videoApi, settingsApi, systemApi } from "@/lib/api"
+import { useDownloadPath } from "@/lib/hooks/useDownloadPath"
 import { useServerStatus } from "@/lib/hooks/useServerStatus"
 import { useAppStore } from "@/lib/store"
 import {
   showServerOverwhelmedToast,
-  showServerStartingToast
+  showServerStartingToast,
+  showFolderSelectedToast
 } from "@/lib/toast-utils"
 import { cn } from "@/lib/utils"
 import { youtubeUrlSchema, type YouTubeUrlFormData } from "@/lib/validation"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { motion } from "framer-motion"
-import { Loader2, Search, Send, X } from "lucide-react"
+import { Folder, Loader2, Search, Send, X } from "lucide-react"
 import { useForm } from "react-hook-form"
 import { toast } from "sonner"
 
@@ -32,8 +34,13 @@ export function CompactSearch({
     setShowVideoDetails,
     setIsLoadingVideoInfo,
     isLoadingVideoInfo,
+    setDownloadPath,
+    setIsLoadingDownloadPath,
+    isLoadingDownloadPath,
     reset
   } = useAppStore()
+
+  useDownloadPath() // initialize download path
 
   const serverStatus = useServerStatus()
   const isLoading = externalLoading || isLoadingVideoInfo
@@ -110,6 +117,24 @@ export function CompactSearch({
     reset()
   }
 
+  const handleFolderSelect = async () => {
+    try {
+      const selectedPath = await systemApi.selectDownloadFolder()
+      
+      if (selectedPath) {
+        setIsLoadingDownloadPath(true)
+        const updatedPathInfo = await settingsApi.setDownloadPath(selectedPath)
+        setDownloadPath(updatedPathInfo)
+        showFolderSelectedToast()
+      }
+    } catch (error) {
+      console.error("Failed to update download folder:", error)
+      toast.error("Failed to update download folder")
+    } finally {
+      setIsLoadingDownloadPath(false)
+    }
+  }
+
   return (
     <motion.div
       initial={{ opacity: 0, y: -20 }}
@@ -129,7 +154,7 @@ export function CompactSearch({
             placeholder="Enter new YouTube URL..."
             disabled={isLoading}
             className={cn(
-              "w-full h-12 pl-12 pr-24 rounded-xl border transition-all duration-200",
+              "w-full h-12 pl-12 pr-32 rounded-xl border transition-all duration-200",
               // Dark mode styles
               "dark:bg-slate-800/60 dark:border-slate-700/50 dark:text-white dark:placeholder:text-slate-500",
               "dark:focus:bg-slate-700/70 dark:focus:border-slate-600",
@@ -142,9 +167,35 @@ export function CompactSearch({
             )}
           />
 
-          {/* Action Buttons */}
+          {/* folder selector */}
+          <button
+            type="button"
+            onClick={handleFolderSelect}
+            disabled={isLoadingDownloadPath || isLoading}
+            title="select folder"
+            className={cn(
+              "absolute right-16 top-1/2 -translate-y-1/2",
+              "h-8 w-8 rounded-lg transition-all duration-200 ease-out",
+              "flex items-center justify-center",
+              // Dark mode styles
+              "dark:hover:bg-slate-700 dark:text-slate-400 dark:hover:text-slate-300",
+              // Light mode styles
+              "hover:bg-slate-100 text-slate-500 hover:text-slate-700",
+              // Common styles
+              "disabled:opacity-30 disabled:cursor-not-allowed",
+              "focus:outline-none focus:ring-2 focus:ring-slate-400/50"
+            )}
+          >
+            {isLoadingDownloadPath ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <Folder className="w-4 h-4" />
+            )}
+          </button>
+
+          {/* action buttons */}
           <div className="absolute right-2 flex items-center gap-1">
-            {/* Clear Button */}
+            {/* clear button */}
             {form.watch("url") && (
               <Button
                 type="button"
@@ -157,7 +208,7 @@ export function CompactSearch({
               </Button>
             )}
 
-            {/* Search Button */}
+            {/* submit button */}
             <button
               type="submit"
               disabled={isLoading || !form.watch("url")}

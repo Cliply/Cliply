@@ -602,9 +602,13 @@ class CliplyApp {
             label: "Open Downloads Folder",
             accelerator: "CmdOrCtrl+D",
             click: async () => {
-              const { shell } = require("electron")
-              const { APP_CONFIG } = require("./utils/constants")
-              await shell.openPath(APP_CONFIG.DOWNLOADS_DIR)
+              try {
+                if (this.ipcHandlers) {
+                  await this.ipcHandlers.handleOpenDownloadFolder()
+                }
+              } catch (error) {
+                console.error("Failed to open downloads folder:", error)
+              }
             }
           },
           { type: "separator" },
@@ -663,6 +667,38 @@ class CliplyApp {
               } catch (error) {
                 console.error("Manual update check failed:", error)
                 dialog.showErrorBox("Error", "Failed to check for updates.")
+              }
+            }
+          },
+          { type: "separator" },
+          {
+            label: "Choose Download Folder",
+            accelerator: "CmdOrCtrl+Shift+D",
+            click: async () => {
+              try {
+                if (this.ipcHandlers) {
+                  const folderResult = await this.ipcHandlers.handleSelectDownloadFolder()
+                  
+                  if (folderResult.success && folderResult.data.folderPath) {
+                    // update download path
+                    const setResult = await this.ipcHandlers.handleSetDownloadPath(null, {
+                      path: folderResult.data.folderPath
+                    })
+                    
+                    if (setResult.success) {
+                      // show success dialog
+                      dialog.showMessageBox(this.mainWindow, {
+                        type: "info",
+                        title: "download folder updated",
+                        message: "download folder updated successfully!",
+                        buttons: ["OK"]
+                      })
+                    }
+                  }
+                }
+              } catch (error) {
+                console.error("Failed to select download folder:", error)
+                dialog.showErrorBox("Error", "Failed to update download folder.")
               }
             }
           },

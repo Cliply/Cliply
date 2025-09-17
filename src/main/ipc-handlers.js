@@ -165,6 +165,14 @@ class IPCHandlers {
       "system:select-download-folder",
       this.handleSelectDownloadFolder.bind(this)
     )
+    ipcMain.handle(
+      "settings:get-download-path",
+      this.handleGetDownloadPath.bind(this)
+    )
+    ipcMain.handle(
+      "settings:set-download-path",
+      this.handleSetDownloadPath.bind(this)
+    )
 
     // auto-updater operations
     ipcMain.handle(
@@ -702,11 +710,27 @@ class IPCHandlers {
     }
   }
 
-  // open downloads folder
+  // open user's downloads folder
   async handleOpenDownloadFolder(_event) {
     try {
+      if (!this.serverManager.isServerReady()) {
+        return this.createError(
+          "Download engine starting",
+          "Please wait a moment and try again",
+          "ENGINE_STARTING"
+        )
+      }
+
+      // Get current download path from Python server
+      const response = await this.serverManager.makeRequest(
+        "/api/settings/download-path",
+        { method: "GET" }
+      )
+
+      const pathInfo = await response.json()
+      
       const { shell } = require("electron")
-      await shell.openPath(APP_CONFIG.DOWNLOADS_DIR)
+      await shell.openPath(pathInfo.path)
       return this.createSuccess({ opened: true })
     } catch (error) {
       console.error("Open download folder failed:", error.message)
@@ -733,6 +757,65 @@ class IPCHandlers {
     } catch (error) {
       console.error("Select download folder failed:", error.message)
       return this.createError("Failed to select folder")
+    }
+  }
+
+  // get current download path
+  async handleGetDownloadPath(_event) {
+    try {
+      if (!this.serverManager.isServerReady()) {
+        return this.createError(
+          "Download engine starting",
+          "Please wait a moment and try again",
+          "ENGINE_STARTING"
+        )
+      }
+
+      const response = await this.serverManager.makeRequest(
+        "/api/settings/download-path",
+        { method: "GET" }
+      )
+
+      const pathInfo = await response.json()
+      return this.createSuccess(pathInfo)
+    } catch (error) {
+      console.error("Get download path failed:", error.message)
+      return this.createError("Failed to get download path")
+    }
+  }
+
+  // update download folder location
+  async handleSetDownloadPath(_event, data) {
+    try {
+      this.validateRequest(data, ["path"])
+      const { path } = data
+
+      if (!this.serverManager.isServerReady()) {
+        return this.createError(
+          "Download engine starting",
+          "Please wait a moment and try again",
+          "ENGINE_STARTING"
+        )
+      }
+
+      const response = await this.serverManager.makeRequest(
+        "/api/settings/download-path",
+        {
+          method: "POST",
+          body: JSON.stringify({ path })
+        }
+      )
+
+      const result = await response.json()
+      
+      if (result.success) {
+        return this.createSuccess(result)
+      } else {
+        return this.createError(result.error || "Failed to set download path")
+      }
+    } catch (error) {
+      console.error("Set download path failed:", error.message)
+      return this.createError("Failed to set download path")
     }
   }
 
@@ -894,7 +977,9 @@ class IPCHandlers {
       "download:get-status",
       "download:get-all",
       "system:open-download-folder",
-      "system:select-download-folder"
+      "system:select-download-folder",
+      "settings:get-download-path",
+      "settings:set-download-path"
     ]
 
     channels.forEach((channel) => {
