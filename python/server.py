@@ -45,7 +45,7 @@ def load_settings():
             with open(settings_file, 'r') as f:
                 return json.load(f)
     except Exception as e:
-        print(f"Failed to load settings: {e}")
+        print(f"failed to load settings: {e}")
     
     # Return default settings
     return {
@@ -63,7 +63,7 @@ def save_settings(settings):
             json.dump(settings, f, indent=2)
         return True
     except Exception as e:
-        print(f"Failed to save settings: {e}")
+        print(f"failed to save settings: {e}")
         return False
 
 def get_downloads_directory():
@@ -76,7 +76,7 @@ def get_downloads_directory():
         download_path.mkdir(parents=True, exist_ok=True)
         return download_path
     except Exception as e:
-        print(f"Failed to create download directory {download_path}: {e}")
+        print(f"failed to create download directory {download_path}: {e}")
         # Fallback to default
         fallback_path = Path.home() / "Downloads" / "Cliply"
         fallback_path.mkdir(parents=True, exist_ok=True)
@@ -105,7 +105,7 @@ def set_downloads_directory(new_path):
         return save_settings(settings)
         
     except Exception as e:
-        print(f"Failed to set download directory to {new_path}: {e}")
+        print(f"failed to set download directory to {new_path}: {e}")
         return False
 
 def get_cookies_directory():
@@ -988,7 +988,7 @@ async def get_download_path():
         )
         
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to get download path: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"failed to get download path: {str(e)}")
 
 @app.post("/api/settings/download-path")
 async def set_download_path(request: DownloadPathRequest):
@@ -999,7 +999,7 @@ async def set_download_path(request: DownloadPathRequest):
         if not success:
             raise HTTPException(
                 status_code=400, 
-                detail="Failed to set download path. Please check path exists and is writable."
+                detail="failed to set download path. please check path exists and is writable."
             )
         
         # Return updated path info
@@ -1026,7 +1026,7 @@ async def set_download_path(request: DownloadPathRequest):
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to set download path: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"failed to set download path: {str(e)}")
 
 @app.get("/api/health/ffmpeg", include_in_schema=False)
 async def check_ffmpeg_health():

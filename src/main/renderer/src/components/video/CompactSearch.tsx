@@ -1,12 +1,11 @@
 import { Button } from "@/components/ui/button"
-import { videoApi, settingsApi, systemApi } from "@/lib/api"
+import { videoApi } from "@/lib/api"
 import { useDownloadPath } from "@/lib/hooks/useDownloadPath"
 import { useServerStatus } from "@/lib/hooks/useServerStatus"
 import { useAppStore } from "@/lib/store"
 import {
   showServerOverwhelmedToast,
-  showServerStartingToast,
-  showFolderSelectedToast
+  showServerStartingToast
 } from "@/lib/toast-utils"
 import { cn } from "@/lib/utils"
 import { youtubeUrlSchema, type YouTubeUrlFormData } from "@/lib/validation"
@@ -34,13 +33,10 @@ export function CompactSearch({
     setShowVideoDetails,
     setIsLoadingVideoInfo,
     isLoadingVideoInfo,
-    setDownloadPath,
-    setIsLoadingDownloadPath,
-    isLoadingDownloadPath,
     reset
   } = useAppStore()
 
-  useDownloadPath() // initialize download path
+  const { selectFolder, isLoading: folderLoading, serverReady } = useDownloadPath()
 
   const serverStatus = useServerStatus()
   const isLoading = externalLoading || isLoadingVideoInfo
@@ -117,23 +113,6 @@ export function CompactSearch({
     reset()
   }
 
-  const handleFolderSelect = async () => {
-    try {
-      const selectedPath = await systemApi.selectDownloadFolder()
-      
-      if (selectedPath) {
-        setIsLoadingDownloadPath(true)
-        const updatedPathInfo = await settingsApi.setDownloadPath(selectedPath)
-        setDownloadPath(updatedPathInfo)
-        showFolderSelectedToast()
-      }
-    } catch (error) {
-      console.error("Failed to update download folder:", error)
-      toast.error("Failed to update download folder")
-    } finally {
-      setIsLoadingDownloadPath(false)
-    }
-  }
 
   return (
     <motion.div
@@ -170,8 +149,8 @@ export function CompactSearch({
           {/* folder selector */}
           <button
             type="button"
-            onClick={handleFolderSelect}
-            disabled={isLoadingDownloadPath || isLoading}
+            onClick={selectFolder}
+            disabled={!serverReady || folderLoading || isLoading}
             title="select folder"
             className={cn(
               "absolute right-16 top-1/2 -translate-y-1/2",
@@ -186,7 +165,7 @@ export function CompactSearch({
               "focus:outline-none focus:ring-2 focus:ring-slate-400/50"
             )}
           >
-            {isLoadingDownloadPath ? (
+            {folderLoading ? (
               <Loader2 className="w-4 h-4 animate-spin" />
             ) : (
               <Folder className="w-4 h-4" />

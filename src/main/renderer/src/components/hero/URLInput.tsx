@@ -1,11 +1,8 @@
 import { motion } from "framer-motion"
 import { Folder, Loader2, Send } from "lucide-react"
 import type { UseFormReturn } from "react-hook-form"
-import { toast } from "sonner"
 
-import { settingsApi, systemApi } from "@/lib/api"
-import { useAppStore } from "@/lib/store"
-import { showFolderSelectedToast } from "@/lib/toast-utils"
+import { useDownloadPath } from "@/lib/hooks/useDownloadPath"
 import { cn } from "@/lib/utils"
 import type { YouTubeUrlFormData } from "@/lib/validation"
 
@@ -22,29 +19,12 @@ export function URLInput({ form, onFocusChange, isLoading }: URLInputProps) {
     watch
   } = form
 
-  const { setDownloadPath, setIsLoadingDownloadPath, isLoadingDownloadPath } = useAppStore()
+  const { selectFolder, isLoading: folderLoading, serverReady } = useDownloadPath()
 
   const urlValue = watch("url")
   const hasError = !!errors.url
   const hasValue = urlValue && urlValue.length > 0
 
-  const handleFolderSelect = async () => {
-    try {
-      const selectedPath = await systemApi.selectDownloadFolder()
-      
-      if (selectedPath) {
-        setIsLoadingDownloadPath(true)
-        const updatedPathInfo = await settingsApi.setDownloadPath(selectedPath)
-        setDownloadPath(updatedPathInfo)
-        showFolderSelectedToast()
-      }
-    } catch (error) {
-      console.error("Failed to update download folder:", error)
-      toast.error("Failed to update download folder")
-    } finally {
-      setIsLoadingDownloadPath(false)
-    }
-  }
 
   return (
     <div className="w-full max-w-2xl mx-auto space-y-4">
@@ -90,8 +70,8 @@ export function URLInput({ form, onFocusChange, isLoading }: URLInputProps) {
           {/* folder selector */}
           <button
             type="button"
-            onClick={handleFolderSelect}
-            disabled={isLoadingDownloadPath || isLoading}
+            onClick={selectFolder}
+            disabled={!serverReady || folderLoading || isLoading}
             title="Select folder"
             className={cn(
               "w-7 h-7 rounded-lg border transition-all duration-200 ease-out",
@@ -105,7 +85,7 @@ export function URLInput({ form, onFocusChange, isLoading }: URLInputProps) {
               "focus:outline-none focus:ring-1 focus:ring-slate-300/30"
             )}
           >
-            {isLoadingDownloadPath ? (
+            {folderLoading ? (
               <Loader2 className="w-4 h-4 animate-spin" />
             ) : (
               <Folder className="w-4 h-4" />

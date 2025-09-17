@@ -201,8 +201,8 @@ class IPCHandlers {
 
       if (!this.serverManager.isServerReady()) {
         return this.createError(
-          "Download engine starting",
-          "Please wait a moment and try again",
+          "download engine starting",
+          "please wait a moment and try again",
           "ENGINE_STARTING"
         )
       }
@@ -250,8 +250,8 @@ class IPCHandlers {
       // check python server
       if (!this.serverManager.isServerReady()) {
         return this.createError(
-          "Download engine starting",
-          "Please wait a moment and try again",
+          "download engine starting",
+          "please wait a moment and try again",
           "ENGINE_STARTING"
         )
       }
@@ -388,8 +388,8 @@ class IPCHandlers {
       // check python server
       if (!this.serverManager.isServerReady()) {
         return this.createError(
-          "Download engine starting",
-          "Please wait a moment and try again",
+          "download engine starting",
+          "please wait a moment and try again",
           "ENGINE_STARTING"
         )
       }
@@ -715,8 +715,8 @@ class IPCHandlers {
     try {
       if (!this.serverManager.isServerReady()) {
         return this.createError(
-          "Download engine starting",
-          "Please wait a moment and try again",
+          "download engine starting",
+          "please wait a moment and try again",
           "ENGINE_STARTING"
         )
       }
@@ -733,8 +733,8 @@ class IPCHandlers {
       await shell.openPath(pathInfo.path)
       return this.createSuccess({ opened: true })
     } catch (error) {
-      console.error("Open download folder failed:", error.message)
-      return this.createError("Failed to open downloads folder")
+      console.error("open download folder failed:", error.message)
+      return this.createError("failed to open downloads folder")
     }
   }
 
@@ -765,8 +765,8 @@ class IPCHandlers {
     try {
       if (!this.serverManager.isServerReady()) {
         return this.createError(
-          "Download engine starting",
-          "Please wait a moment and try again",
+          "download engine starting",
+          "please wait a moment and try again",
           "ENGINE_STARTING"
         )
       }
@@ -779,8 +779,8 @@ class IPCHandlers {
       const pathInfo = await response.json()
       return this.createSuccess(pathInfo)
     } catch (error) {
-      console.error("Get download path failed:", error.message)
-      return this.createError("Failed to get download path")
+      console.error("get download path failed:", error.message)
+      return this.createError("failed to get download path")
     }
   }
 
@@ -792,8 +792,8 @@ class IPCHandlers {
 
       if (!this.serverManager.isServerReady()) {
         return this.createError(
-          "Download engine starting",
-          "Please wait a moment and try again",
+          "download engine starting",
+          "please wait a moment and try again",
           "ENGINE_STARTING"
         )
       }
@@ -811,11 +811,11 @@ class IPCHandlers {
       if (result.success) {
         return this.createSuccess(result)
       } else {
-        return this.createError(result.error || "Failed to set download path")
+        return this.createError(result.error || "failed to set download path")
       }
     } catch (error) {
-      console.error("Set download path failed:", error.message)
-      return this.createError("Failed to set download path")
+      console.error("set download path failed:", error.message)
+      return this.createError("failed to set download path")
     }
   }
 
