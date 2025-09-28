@@ -672,38 +672,6 @@ class CliplyApp {
           },
           { type: "separator" },
           {
-            label: "Choose Download Folder",
-            accelerator: "CmdOrCtrl+Shift+D",
-            click: async () => {
-              try {
-                if (this.ipcHandlers) {
-                  const folderResult = await this.ipcHandlers.handleSelectDownloadFolder()
-                  
-                  if (folderResult.success && folderResult.data.folderPath) {
-                    // update download path
-                    const setResult = await this.ipcHandlers.handleSetDownloadPath(null, {
-                      path: folderResult.data.folderPath
-                    })
-                    
-                    if (setResult.success) {
-                      // show success dialog
-                      dialog.showMessageBox(this.mainWindow, {
-                        type: "info",
-                        title: "download folder updated",
-                        message: "download folder updated successfully!",
-                        buttons: ["OK"]
-                      })
-                    }
-                  }
-                }
-              } catch (error) {
-                console.error("Failed to select download folder:", error)
-                dialog.showErrorBox("Error", "Failed to update download folder.")
-              }
-            }
-          },
-          { type: "separator" },
-          {
             label: "Settings",
             accelerator: "CmdOrCtrl+,",
             click: () => {
