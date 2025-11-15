@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react"
+import { systemApi } from "@/lib/api"
 
 export type ServerStatus = "unknown" | "starting" | "ready" | "error"
 
@@ -10,7 +11,20 @@ export const useServerStatus = () => {
       return
     }
 
-    // Listen for server events
+    // check current server status on mount (fixes reload issue)
+    const checkCurrentStatus = async () => {
+      try {
+        await systemApi.getHealth()
+        setStatus("ready")
+      } catch {
+        setStatus("starting")
+      }
+    }
+
+    // check immediately
+    checkCurrentStatus()
+
+    // listen for server events
     const unsubscribeStarting = window.electronAPI.server.onStarting(() => {
       setStatus("starting")
     })
@@ -21,7 +35,7 @@ export const useServerStatus = () => {
 
     const unsubscribeError = window.electronAPI.server.onError(
       (error: { message: string }) => {
-        console.error("Server error:", error)
+        console.error("server error:", error)
         setStatus("error")
       }
     )

@@ -1,7 +1,8 @@
 import { motion } from "framer-motion"
-import { Loader2, Send } from "lucide-react"
+import { Folder, Loader2, Send } from "lucide-react"
 import type { UseFormReturn } from "react-hook-form"
 
+import { useDownloadPath } from "@/lib/hooks/useDownloadPath"
 import { cn } from "@/lib/utils"
 import type { YouTubeUrlFormData } from "@/lib/validation"
 
@@ -18,64 +19,101 @@ export function URLInput({ form, onFocusChange, isLoading }: URLInputProps) {
     watch
   } = form
 
+  const { selectFolder, isLoading: folderLoading, serverReady } = useDownloadPath()
+
   const urlValue = watch("url")
   const hasError = !!errors.url
   const hasValue = urlValue && urlValue.length > 0
 
-  return (
-    <div className="w-full space-y-4">
-      {/* Input container */}
-      <div className="relative">
-        {/* Input field */}
-        <input
-          {...register("url")}
-          type="text"
-          placeholder="paste video url here..."
-          disabled={isLoading}
-          onFocus={() => onFocusChange(true)}
-          onBlur={() => onFocusChange(false)}
-          className={cn(
-            "w-full h-20 px-8 pr-20 text-xl border-2 rounded-3xl font-mono transition-all duration-200 ease-out",
-            // Dark mode styles
-            "dark:bg-slate-800 dark:border-slate-700 dark:text-white dark:placeholder:text-slate-500",
-            "dark:focus:bg-slate-700 dark:focus:border-slate-600 dark:hover:border-slate-600",
-            // Light mode styles
-            "bg-white border-slate-300 text-slate-900 placeholder:text-slate-500",
-            "focus:bg-slate-50 focus:border-slate-400 hover:border-slate-400",
-            // Common styles
-            "focus:outline-none focus:ring-0 shadow-xl shadow-black/10",
-            hasError && "border-red-500 focus:border-red-500",
-            isLoading && "cursor-not-allowed opacity-70"
-          )}
-          style={{
-            fontFamily:
-              'Geist Mono, ui-monospace, SFMono-Regular, "SF Mono", Consolas, "Liberation Mono", Menlo, monospace'
-          }}
-        />
 
-        {/* Send button */}
-        <button
-          type="submit"
-          disabled={isLoading || !hasValue || hasError}
-          className={cn(
-            "absolute right-4 top-1/2 -translate-y-1/2",
-            "w-12 h-12 rounded-2xl transition-all duration-200 ease-out",
-            "flex items-center justify-center shadow-lg",
-            // Dark mode styles
-            "dark:bg-white dark:hover:bg-gray-100 dark:text-slate-800",
-            // Light mode styles
-            "bg-slate-900 hover:bg-slate-800 text-white",
-            // Common styles
-            "disabled:opacity-30 disabled:cursor-not-allowed",
-            "focus:outline-none focus:ring-2 focus:ring-slate-400/50 focus:ring-offset-0"
-          )}
-        >
-          {isLoading ? (
-            <Loader2 className="w-6 h-6 animate-spin" />
-          ) : (
-            <Send className="w-6 h-6" />
-          )}
-        </button>
+  return (
+    <div className="w-full max-w-2xl mx-auto space-y-4">
+      {/* main input container */}
+      <div className={cn(
+        "relative border rounded-2xl transition-all duration-200 ease-out overflow-hidden",
+        // Dark mode styles matching Claude
+        "dark:bg-slate-800/60 dark:border-slate-700/60 dark:backdrop-blur-sm",
+        "dark:focus-within:border-slate-600/70 dark:hover:border-slate-600/70",
+        // Light mode styles matching Claude
+        "bg-white/90 border-slate-200/60 backdrop-blur-sm",
+        "focus-within:border-slate-300/80 hover:border-slate-300/80",
+        // Error states
+        hasError && "border-red-500/60 focus-within:border-red-500/60",
+        isLoading && "cursor-not-allowed opacity-70"
+      )}>
+        {/* url input area */}
+        <div className="px-4 py-4">
+          <input
+            {...register("url")}
+            type="text"
+            placeholder="paste video url here..."
+            disabled={isLoading}
+            onFocus={() => onFocusChange(true)}
+            onBlur={() => onFocusChange(false)}
+            className={cn(
+              "w-full text-sm bg-transparent border-0 outline-none transition-all duration-200 ease-out font-mono",
+              // Dark mode styles
+              "dark:text-white dark:placeholder:text-slate-500",
+              // Light mode styles  
+              "text-slate-900 placeholder:text-slate-500",
+              isLoading && "cursor-not-allowed"
+            )}
+            style={{
+              fontFamily:
+                'Geist Mono, ui-monospace, SFMono-Regular, "SF Mono", Consolas, "Liberation Mono", Menlo, monospace'
+            }}
+          />
+        </div>
+
+        {/* action buttons */}
+        <div className="h-11 px-4 flex items-center justify-between">
+          {/* folder selector */}
+          <button
+            type="button"
+            onClick={selectFolder}
+            disabled={!serverReady || folderLoading || isLoading}
+            title="Select folder"
+            className={cn(
+              "w-7 h-7 rounded-lg border transition-all duration-200 ease-out",
+              "flex items-center justify-center flex-shrink-0 bg-transparent",
+              // Dark mode styles - transparent with sleek border only
+              "dark:border-slate-600/40 dark:hover:border-slate-500/50 dark:text-slate-400 dark:hover:text-slate-300",
+              // Light mode styles - transparent with sleek border only
+              "border-slate-200/60 hover:border-slate-300/70 text-slate-600 hover:text-slate-700",
+              // Common styles
+              "disabled:opacity-40 disabled:cursor-not-allowed",
+              "focus:outline-none focus:ring-1 focus:ring-slate-300/30"
+            )}
+          >
+            {folderLoading ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <Folder className="w-4 h-4" />
+            )}
+          </button>
+
+          {/* submit button */}
+          <button
+            type="submit"
+            disabled={isLoading || !hasValue || hasError}
+            className={cn(
+              "w-7 h-7 rounded-lg transition-colors duration-200 ease-out",
+              "flex items-center justify-center flex-shrink-0",
+              // Original send button styling
+              "bg-slate-900 hover:bg-slate-800 text-white",
+              "dark:bg-slate-100 dark:hover:bg-slate-200 dark:text-slate-900",
+              // Common styles
+              "disabled:opacity-50 disabled:cursor-not-allowed",
+              "focus:outline-none focus:ring-2 focus:ring-slate-400 focus:ring-offset-2 dark:focus:ring-offset-slate-900"
+            )}
+          >
+            {isLoading ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <Send className="w-4 h-4" />
+            )}
+          </button>
+        </div>
       </div>
 
       {/* Error message */}

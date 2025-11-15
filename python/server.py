@@ -28,8 +28,85 @@ import tempfile
 import subprocess
 from concurrent.futures import ThreadPoolExecutor
 
+# app config directory
+APP_CONFIG_DIR = ".config/app-data-7c4f"
+
+def get_settings_directory():
+    return Path.home() / APP_CONFIG_DIR
+
+def get_settings_file():
+    return get_settings_directory() / "settings.json"
+
+def load_settings():
+    """load user settings, fallback to defaults if missing"""
+    try:
+        settings_file = get_settings_file()
+        if settings_file.exists():
+            with open(settings_file, 'r') as f:
+                return json.load(f)
+    except Exception as e:
+        print(f"failed to load settings: {e}")
+    
+    # Return default settings
+    return {
+        "download_path": str(Path.home() / "Downloads" / "Cliply")
+    }
+
+def save_settings(settings):
+    """save settings to disk"""
+    try:
+        settings_dir = get_settings_directory()
+        settings_dir.mkdir(parents=True, exist_ok=True)
+        
+        settings_file = get_settings_file()
+        with open(settings_file, 'w') as f:
+            json.dump(settings, f, indent=2)
+        return True
+    except Exception as e:
+        print(f"failed to save settings: {e}")
+        return False
+
 def get_downloads_directory():
-    return Path.home() / "Downloads" / "Cliply"
+    """get user's download folder, create if needed"""
+    settings = load_settings()
+    download_path = Path(settings.get("download_path", Path.home() / "Downloads" / "Cliply"))
+    
+    # Ensure directory exists
+    try:
+        download_path.mkdir(parents=True, exist_ok=True)
+        return download_path
+    except Exception as e:
+        print(f"failed to create download directory {download_path}: {e}")
+        # Fallback to default
+        fallback_path = Path.home() / "Downloads" / "Cliply"
+        fallback_path.mkdir(parents=True, exist_ok=True)
+        return fallback_path
+
+def set_downloads_directory(new_path):
+    """update download folder after validation"""
+    try:
+        path_obj = Path(new_path)
+        
+        # validate and test the new path
+        if not path_obj.exists():
+            path_obj.mkdir(parents=True, exist_ok=True)
+        
+        if not path_obj.is_dir():
+            raise ValueError("path is not a directory")
+        
+        # make sure we can write files here
+        test_file = path_obj / "cliply_test_file.tmp"
+        test_file.write_text("test")
+        test_file.unlink()
+        
+        # all good, save to settings
+        settings = load_settings()
+        settings["download_path"] = str(path_obj)
+        return save_settings(settings)
+        
+    except Exception as e:
+        print(f"failed to set download directory to {new_path}: {e}")
+        return False
 
 def get_cookies_directory():
     return Path.home() / ".config" / "app-data-7c4f" / "cookies"
@@ -55,12 +132,34 @@ def detect_ffmpeg_path():
                 return str(path)
     return None
 
-DOWNLOADS_DIR = get_downloads_directory()
+def detect_deno_path():
+    """Detect Deno binary path for yt-dlp JavaScript runtime support"""
+    script_dir = Path(__file__).parent.absolute()
+    potential_paths = []
+    
+    if platform.system() == "Darwin":
+        potential_paths.append(script_dir.parent / "binaries" / "deno" / "macos" / "deno")
+    elif platform.system() == "Windows":
+        potential_paths.append(script_dir.parent / "binaries" / "deno" / "windows" / "deno.exe")
+    elif platform.system() == "Linux":
+        potential_paths.append(script_dir.parent / "binaries" / "deno" / "linux" / "deno")
+    
+    for path in potential_paths:
+        if path.exists() and path.is_file():
+            import stat
+            if path.stat().st_mode & stat.S_IXUSR:
+                return str(path)
+    return None
+
 COOKIES_DIR = get_cookies_directory()
-DOWNLOADS_DIR.mkdir(parents=True, exist_ok=True)
 COOKIES_DIR.mkdir(parents=True, exist_ok=True)
 
+# make sure default download folder exists
+get_downloads_directory()
+
 FFMPEG_PATH = detect_ffmpeg_path()
+DENO_PATH = detect_deno_path()
+
 if FFMPEG_PATH:
     ffmpeg_dir = str(Path(FFMPEG_PATH).parent)
     current_path = os.environ.get('PATH', '')
@@ -246,6 +345,30 @@ class PlaylistDownloadRequest(BaseModel):
             raise ValueError('Maximum 20 videos can be downloaded at once')
         return v
 
+class DownloadPathRequest(BaseModel):
+    path: str
+    
+    @field_validator('path')
+    @classmethod
+    def validate_path(cls, v):
+        if not v or not v.strip():
+            raise ValueError('Path cannot be empty')
+        
+        # Basic path validation
+        try:
+            path_obj = Path(v)
+            if not path_obj.is_absolute():
+                raise ValueError('Path must be absolute')
+        except Exception:
+            raise ValueError('Invalid path format')
+        
+        return v.strip()
+
+class DownloadPathResponse(BaseModel):
+    path: str
+    exists: bool
+    writable: bool
+
 def is_youtube_shorts(url: str) -> bool:
     """Check if URL is a YouTube Shorts URL"""
     return '/shorts/' in url.lower()
@@ -293,8 +416,13 @@ def get_enhanced_ydl_opts(base_opts: dict = None) -> dict:
         # removed custom headers
     }
     
+    # Add FFmpeg location if available
     if FFMPEG_PATH:
         simple_opts['ffmpeg_location'] = FFMPEG_PATH
+    
+    # Add Deno runtime for JavaScript execution (required for yt-dlp 2025.11.12+)
+    if DENO_PATH:
+        simple_opts['js_runtimes'] = {'deno': {'path': DENO_PATH}}
     
     simple_opts.update(base_opts)
     return simple_opts
@@ -464,10 +592,12 @@ async def root():
         "version": "1.0.0",
         "status": "running",
         "active_downloads": len(active_downloads),
-        "downloads_directory": str(DOWNLOADS_DIR),
+        "downloads_directory": str(get_downloads_directory()),
         "cookies": cookie_manager.has_valid_cookies(),
         "ffmpeg_available": FFMPEG_PATH is not None,
-        "ffmpeg_path": str(FFMPEG_PATH) if FFMPEG_PATH else None
+        "ffmpeg_path": str(FFMPEG_PATH) if FFMPEG_PATH else None,
+        "deno_available": DENO_PATH is not None,
+        "deno_path": str(DENO_PATH) if DENO_PATH else None
     }
 
 @app.get("/docs", response_class=HTMLResponse, include_in_schema=False)
@@ -532,7 +662,7 @@ async def download_combined_video_audio(request: CombinedDownloadRequest):
         else:
             final_filename = f"{title}_{quality}_{timestamp}.%(ext)s"
         
-        final_path = DOWNLOADS_DIR / final_filename
+        final_path = get_downloads_directory() / final_filename
         
 
         format_string = get_format_selector(request.video_format_id, request.audio_format_id)
@@ -557,12 +687,13 @@ async def download_combined_video_audio(request: CombinedDownloadRequest):
         # Look for files with the exact base name and common extensions
         for ext in ['mp4', 'm4a', 'webm', 'mkv', 'mov', 'avi']:
             pattern = f"{base_name}.{ext}"
-            matches = list(DOWNLOADS_DIR.glob(pattern))
+            matches = list(get_downloads_directory().glob(pattern))
             possible_files.extend(matches)
         
         # If no exact matches, fall back to generic search (most recent file)
         if not possible_files:
-            all_files = list(DOWNLOADS_DIR.glob("*.mp4")) + list(DOWNLOADS_DIR.glob("*.m4a")) + list(DOWNLOADS_DIR.glob("*.webm")) + list(DOWNLOADS_DIR.glob("*.mkv"))
+            downloads_dir = get_downloads_directory()
+            all_files = list(downloads_dir.glob("*.mp4")) + list(downloads_dir.glob("*.m4a")) + list(downloads_dir.glob("*.webm")) + list(downloads_dir.glob("*.mkv"))
             if all_files:
                 # Get the most recently created file
                 possible_files = [max(all_files, key=lambda x: x.stat().st_mtime)]
@@ -622,7 +753,7 @@ async def download_audio_only(request: AudioDownloadRequest):
         else:
             final_filename = f"{title}_audio_{quality}_{timestamp}.%(ext)s"
         
-        final_path = DOWNLOADS_DIR / final_filename
+        final_path = get_downloads_directory() / final_filename
         
         # Use yt-dlp audio format selector
         format_string = get_audio_format_selector(request.format_id)
@@ -642,12 +773,13 @@ async def download_audio_only(request: AudioDownloadRequest):
         # Look for files with the exact base name and common extensions
         for ext in ['m4a', 'mp3', 'webm', 'ogg', 'wav', 'aac']:
             pattern = f"{base_name}.{ext}"
-            matches = list(DOWNLOADS_DIR.glob(pattern))
+            matches = list(get_downloads_directory().glob(pattern))
             possible_files.extend(matches)
         
         # If no exact matches, fall back to generic search (most recent file)
         if not possible_files:
-            all_files = list(DOWNLOADS_DIR.glob("*.m4a")) + list(DOWNLOADS_DIR.glob("*.mp3")) + list(DOWNLOADS_DIR.glob("*.webm")) + list(DOWNLOADS_DIR.glob("*.ogg"))
+            downloads_dir = get_downloads_directory()
+            all_files = list(downloads_dir.glob("*.m4a")) + list(downloads_dir.glob("*.mp3")) + list(downloads_dir.glob("*.webm")) + list(downloads_dir.glob("*.ogg"))
             if all_files:
                 # Get the most recently created file
                 possible_files = [max(all_files, key=lambda x: x.stat().st_mtime)]
@@ -735,7 +867,7 @@ async def download_playlist_videos(request: PlaylistDownloadRequest, background_
                 detail=f"Invalid video indices: {invalid_indices}. Playlist has {len(entries)} videos (indices 0-{max_index})"
             )
         
-        batch_dir = DOWNLOADS_DIR / f"playlist_{download_id}"
+        batch_dir = get_downloads_directory() / f"playlist_{download_id}"
         batch_dir.mkdir(exist_ok=True)
         
         downloaded_files = []
@@ -847,7 +979,7 @@ async def download_playlist_videos(request: PlaylistDownloadRequest, background_
         
     except Exception as e:
         try:
-            batch_dir = DOWNLOADS_DIR / f"playlist_{download_id}"
+            batch_dir = get_downloads_directory() / f"playlist_{download_id}"
             if batch_dir.exists():
                 for file in batch_dir.glob("*"):
                     file.unlink()
@@ -855,6 +987,74 @@ async def download_playlist_videos(request: PlaylistDownloadRequest, background_
         except:
             pass
         raise HTTPException(status_code=500, detail=f"Playlist download failed: {str(e)}")
+
+# SETTINGS ENDPOINTS
+@app.get("/api/settings/download-path", response_model=DownloadPathResponse)
+async def get_download_path():
+    """get current download folder info"""
+    try:
+        current_path = get_downloads_directory()
+        
+        # Check if path exists and is writable
+        exists = current_path.exists()
+        writable = False
+        
+        if exists:
+            try:
+                # Test write permissions
+                test_file = current_path / "cliply_test_write.tmp"
+                test_file.write_text("test")
+                test_file.unlink()
+                writable = True
+            except:
+                writable = False
+        
+        return DownloadPathResponse(
+            path=str(current_path),
+            exists=exists,
+            writable=writable
+        )
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"failed to get download path: {str(e)}")
+
+@app.post("/api/settings/download-path")
+async def set_download_path(request: DownloadPathRequest):
+    """update download folder location"""
+    try:
+        success = set_downloads_directory(request.path)
+        
+        if not success:
+            raise HTTPException(
+                status_code=400, 
+                detail="failed to set download path. please check path exists and is writable."
+            )
+        
+        # Return updated path info
+        current_path = get_downloads_directory()
+        exists = current_path.exists()
+        writable = False
+        
+        if exists:
+            try:
+                test_file = current_path / "cliply_test_write.tmp"
+                test_file.write_text("test")
+                test_file.unlink()
+                writable = True
+            except:
+                writable = False
+        
+        return {
+            "success": True,
+            "path": str(current_path),
+            "exists": exists,
+            "writable": writable
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"failed to set download path: {str(e)}")
 
 @app.get("/api/health/ffmpeg", include_in_schema=False)
 async def check_ffmpeg_health():
@@ -897,6 +1097,50 @@ async def check_ffmpeg_health():
             "available": False,
             "path": FFMPEG_PATH,
             "error": f"ffmpeg test error: {str(e)}"
+        }
+
+@app.get("/api/health/deno", include_in_schema=False)
+async def check_deno_health():
+    """Check if Deno runtime is available and working"""
+    if not DENO_PATH: 
+        return {
+            "available": False,
+            "error": "deno not found"
+        }
+    
+    try:
+        result = subprocess.run([DENO_PATH, '--version'], 
+                              capture_output=True, 
+                              timeout=10,
+                              text=True)
+        
+        if result.returncode == 0:
+            version_line = result.stdout.split('\n')[0] if result.stdout else "Unknown version"
+            return {
+                "available": True,
+                "path": DENO_PATH,
+                "version": version_line,
+                "test_passed": True
+            }
+        else:
+            return {
+                "available": False,
+                "path": DENO_PATH,
+                "error": f"deno test failed with code {result.returncode}",
+                "stderr": result.stderr[:500] if result.stderr else ""
+            }
+            
+    except subprocess.TimeoutExpired:
+        return {
+            "available": False,
+            "path": DENO_PATH,
+            "error": "deno test timeout"
+        }
+    except Exception as e:
+        return {
+            "available": False,
+            "path": DENO_PATH,
+            "error": f"deno test error: {str(e)}"
         }
 
 if __name__ == "__main__":

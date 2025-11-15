@@ -602,9 +602,13 @@ class CliplyApp {
             label: "Open Downloads Folder",
             accelerator: "CmdOrCtrl+D",
             click: async () => {
-              const { shell } = require("electron")
-              const { APP_CONFIG } = require("./utils/constants")
-              await shell.openPath(APP_CONFIG.DOWNLOADS_DIR)
+              try {
+                if (this.ipcHandlers) {
+                  await this.ipcHandlers.handleOpenDownloadFolder()
+                }
+              } catch (error) {
+                console.error("Failed to open downloads folder:", error)
+              }
             }
           },
           { type: "separator" },
@@ -665,16 +669,6 @@ class CliplyApp {
                 dialog.showErrorBox("Error", "Failed to check for updates.")
               }
             }
-          },
-          { type: "separator" },
-          {
-            label: "Settings",
-            accelerator: "CmdOrCtrl+,",
-            click: () => {
-              if (this.mainWindow) {
-                this.mainWindow.webContents.send("menu:open-settings")
-              }
-            }
           }
         ]
       },
@@ -725,7 +719,7 @@ class CliplyApp {
                 type: "info",
                 title: "About Cliply",
                 message: "Cliply Desktop",
-                detail: `Version: 0.0.1\nDesktop YouTube downloader with segment support\n\nBuilt with Electron and embedded Python server`,
+                detail: `Version: ${getAppVersion()}\n\nYour fave little desktop app; powered by open source tools (>ᴗ•)`,
                 buttons: ["OK"]
               })
             }

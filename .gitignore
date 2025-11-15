@@ -59,6 +59,8 @@ Thumbs.db
 binaries/linux/ffmpeg
 binaries/macos/ffmpeg
 binaries/windows/ffmpeg.exe
+binaries/deno/linux/deno.exe
+binaries/deno/macos/deno
 !binaries/**/.gitkeep
 !binaries/README.md
 

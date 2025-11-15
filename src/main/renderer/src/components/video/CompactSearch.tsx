@@ -129,7 +129,7 @@ export function CompactSearch({
             placeholder="Enter new YouTube URL..."
             disabled={isLoading}
             className={cn(
-              "w-full h-12 pl-12 pr-24 rounded-xl border transition-all duration-200",
+              "w-full h-12 pl-12 pr-16 rounded-xl border transition-all duration-200",
               // Dark mode styles
               "dark:bg-slate-800/60 dark:border-slate-700/50 dark:text-white dark:placeholder:text-slate-500",
               "dark:focus:bg-slate-700/70 dark:focus:border-slate-600",
@@ -142,9 +142,9 @@ export function CompactSearch({
             )}
           />
 
-          {/* Action Buttons */}
+          {/* action buttons */}
           <div className="absolute right-2 flex items-center gap-1">
-            {/* Clear Button */}
+            {/* clear button */}
             {form.watch("url") && (
               <Button
                 type="button"
@@ -157,7 +157,7 @@ export function CompactSearch({
               </Button>
             )}
 
-            {/* Search Button */}
+            {/* submit button */}
             <button
               type="submit"
               disabled={isLoading || !form.watch("url")}

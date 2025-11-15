@@ -52,6 +52,12 @@ export interface SystemHealth {
   activeDownloads: number
 }
 
+export interface DownloadPathInfo {
+  path: string
+  exists: boolean
+  writable: boolean
+}
+
 export interface VideoInfoResponse {
   title: string
   duration: number
@@ -177,7 +183,11 @@ declare global {
           url: string
         ) => Promise<IPCResponse<{ opened: boolean; url: string }>>
         openDownloadFolder: () => Promise<IPCResponse<{ success: boolean }>>
-        selectDownloadFolder: () => Promise<IPCResponse<{ path: string }>>
+        selectDownloadFolder: () => Promise<IPCResponse<{ folderPath: string }>>
+      }
+      settings: {
+        getDownloadPath: () => Promise<IPCResponse<DownloadPathInfo>>
+        setDownloadPath: (path: string) => Promise<IPCResponse<DownloadPathInfo>>
       }
       updater: {
         checkForUpdates: () => Promise<IPCResponse<{ checking: boolean }>>
@@ -380,7 +390,41 @@ export const systemApi = {
       return null
     }
 
-    return response.data.path
+    return response.data.folderPath
+  }
+}
+
+// Settings API functions
+export const settingsApi = {
+  /**
+   * Get current download path information
+   * @returns Promise<DownloadPathInfo>
+   */
+  async getDownloadPath(): Promise<DownloadPathInfo> {
+    const electronAPI = getElectronAPI()
+    const response = await electronAPI.settings.getDownloadPath()
+
+    if (!response.success || !response.data) {
+      throw new Error(response.error?.message || "Failed to get download path")
+    }
+
+    return response.data
+  },
+
+  /**
+   * Set new download path
+   * @param path New download path
+   * @returns Promise<DownloadPathInfo>
+   */
+  async setDownloadPath(path: string): Promise<DownloadPathInfo> {
+    const electronAPI = getElectronAPI()
+    const response = await electronAPI.settings.setDownloadPath(path)
+
+    if (!response.success || !response.data) {
+      throw new Error(response.error?.message || "Failed to set download path")
+    }
+
+    return response.data
   }
 }
 

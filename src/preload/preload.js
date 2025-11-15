@@ -99,6 +99,12 @@ contextBridge.exposeInMainWorld("electronAPI", {
     selectDownloadFolder: () => invoke("system:select-download-folder")
   },
 
+  // settings operations
+  settings: {
+    getDownloadPath: () => invoke("settings:get-download-path"),
+    setDownloadPath: (path) => invoke("settings:set-download-path", { path })
+  },
+
   // menu event listeners
   menu: {
     onEvent: (event, callback) => {

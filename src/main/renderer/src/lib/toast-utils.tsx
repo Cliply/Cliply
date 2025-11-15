@@ -48,3 +48,7 @@ export const showDownloadSuccessToast = (type: "audio" | "video") => {
     }
   )
 }
+
+export const showFolderSelectedToast = () => {
+  toast.success("Download folder updated!")
+}

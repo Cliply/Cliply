@@ -1,6 +1,6 @@
 {
   "name": "cliply-desktop",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Desktop YouTube downloader with segment support",
   "main": "src/main/index.js",
   "homepage": "./",
@@ -149,6 +149,13 @@
           ]
         },
         {
+          "from": "binaries/deno/macos/",
+          "to": "binaries/deno/",
+          "filter": [
+            "deno"
+          ]
+        },
+        {
           "from": "python-runtime/darwin-arm64/",
           "to": "python-runtime/darwin-arm64/",
           "filter": [
@@ -192,6 +199,13 @@
           "to": "binaries/",
           "filter": [
             "ffmpeg.exe"
+          ]
+        },
+        {
+          "from": "binaries/deno/windows/",
+          "to": "binaries/deno/",
+          "filter": [
+            "deno.exe"
           ]
         },
         {
@@ -239,6 +253,13 @@
           "to": "binaries/",
           "filter": [
             "ffmpeg"
+          ]
+        },
+        {
+          "from": "binaries/deno/linux/",
+          "to": "binaries/deno/",
+          "filter": [
+            "deno"
           ]
         },
         {
