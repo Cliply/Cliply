@@ -132,6 +132,25 @@ def detect_ffmpeg_path():
                 return str(path)
     return None
 
+def detect_deno_path():
+    """Detect Deno binary path for yt-dlp JavaScript runtime support"""
+    script_dir = Path(__file__).parent.absolute()
+    potential_paths = []
+    
+    if platform.system() == "Darwin":
+        potential_paths.append(script_dir.parent / "binaries" / "deno" / "macos" / "deno")
+    elif platform.system() == "Windows":
+        potential_paths.append(script_dir.parent / "binaries" / "deno" / "windows" / "deno.exe")
+    elif platform.system() == "Linux":
+        potential_paths.append(script_dir.parent / "binaries" / "deno" / "linux" / "deno")
+    
+    for path in potential_paths:
+        if path.exists() and path.is_file():
+            import stat
+            if path.stat().st_mode & stat.S_IXUSR:
+                return str(path)
+    return None
+
 COOKIES_DIR = get_cookies_directory()
 COOKIES_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -139,6 +158,8 @@ COOKIES_DIR.mkdir(parents=True, exist_ok=True)
 get_downloads_directory()
 
 FFMPEG_PATH = detect_ffmpeg_path()
+DENO_PATH = detect_deno_path()
+
 if FFMPEG_PATH:
     ffmpeg_dir = str(Path(FFMPEG_PATH).parent)
     current_path = os.environ.get('PATH', '')
@@ -395,8 +416,13 @@ def get_enhanced_ydl_opts(base_opts: dict = None) -> dict:
         # removed custom headers
     }
     
+    # Add FFmpeg location if available
     if FFMPEG_PATH:
         simple_opts['ffmpeg_location'] = FFMPEG_PATH
+    
+    # Add Deno runtime for JavaScript execution (required for yt-dlp 2025.11.12+)
+    if DENO_PATH:
+        simple_opts['js_runtimes'] = {'deno': {'path': DENO_PATH}}
     
     simple_opts.update(base_opts)
     return simple_opts
@@ -569,7 +595,9 @@ async def root():
         "downloads_directory": str(get_downloads_directory()),
         "cookies": cookie_manager.has_valid_cookies(),
         "ffmpeg_available": FFMPEG_PATH is not None,
-        "ffmpeg_path": str(FFMPEG_PATH) if FFMPEG_PATH else None
+        "ffmpeg_path": str(FFMPEG_PATH) if FFMPEG_PATH else None,
+        "deno_available": DENO_PATH is not None,
+        "deno_path": str(DENO_PATH) if DENO_PATH else None
     }
 
 @app.get("/docs", response_class=HTMLResponse, include_in_schema=False)
@@ -1069,6 +1097,50 @@ async def check_ffmpeg_health():
             "available": False,
             "path": FFMPEG_PATH,
             "error": f"ffmpeg test error: {str(e)}"
+        }
+
+@app.get("/api/health/deno", include_in_schema=False)
+async def check_deno_health():
+    """Check if Deno runtime is available and working"""
+    if not DENO_PATH: 
+        return {
+            "available": False,
+            "error": "deno not found"
+        }
+    
+    try:
+        result = subprocess.run([DENO_PATH, '--version'], 
+                              capture_output=True, 
+                              timeout=10,
+                              text=True)
+        
+        if result.returncode == 0:
+            version_line = result.stdout.split('\n')[0] if result.stdout else "Unknown version"
+            return {
+                "available": True,
+                "path": DENO_PATH,
+                "version": version_line,
+                "test_passed": True
+            }
+        else:
+            return {
+                "available": False,
+                "path": DENO_PATH,
+                "error": f"deno test failed with code {result.returncode}",
+                "stderr": result.stderr[:500] if result.stderr else ""
+            }
+            
+    except subprocess.TimeoutExpired:
+        return {
+            "available": False,
+            "path": DENO_PATH,
+            "error": "deno test timeout"
+        }
+    except Exception as e:
+        return {
+            "available": False,
+            "path": DENO_PATH,
+            "error": f"deno test error: {str(e)}"
         }
 
 if __name__ == "__main__":

@@ -6,7 +6,8 @@ fastapi==0.104.1
 uvicorn[standard]==0.24.0
 
 # youtube downloader library
-yt-dlp>=2023.12.30
+# Install with [default] extra to get yt-dlp-ejs (required for YouTube)
+yt-dlp[default]>=2025.11.12
 
 # http and async support
 httpx==0.25.2
