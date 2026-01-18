@@ -43,6 +43,13 @@ from platforms.youtube import (
     get_cookies_directory
 )
 
+from platforms.pinterest import (
+    PinterestService,
+    PinterestVideoInfoRequest,
+    PinterestVideoInfoResponse,
+    PinterestDownloadRequest
+)
+
 # Initialize cookies directory
 COOKIES_DIR = get_cookies_directory()
 COOKIES_DIR.mkdir(parents=True, exist_ok=True)
@@ -64,6 +71,9 @@ if FFMPEG_PATH:
 # Initialize cookie manager and YouTube service
 cookie_manager = CookieManager()
 youtube_service = YouTubeService(FFMPEG_PATH, DENO_PATH, cookie_manager)
+
+# Initialize Pinterest service
+pinterest_service = PinterestService(FFMPEG_PATH, DENO_PATH)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -123,9 +133,17 @@ async def root():
         "message": "Cliply Desktop Server",
         "version": "1.0.0",
         "status": "running",
-        "active_downloads": youtube_service.get_active_downloads_count(),
+        "active_downloads": youtube_service.get_active_downloads_count() + pinterest_service.get_active_downloads_count(),
         "downloads_directory": str(get_downloads_directory()),
-        "cookies": cookie_manager.has_valid_cookies(),
+        "services": {
+            "youtube": {
+                "active_downloads": youtube_service.get_active_downloads_count(),
+                "cookies": cookie_manager.has_valid_cookies()
+            },
+            "pinterest": {
+                "active_downloads": pinterest_service.get_active_downloads_count()
+            }
+        },
         "ffmpeg_available": FFMPEG_PATH is not None,
         "ffmpeg_path": str(FFMPEG_PATH) if FFMPEG_PATH else None,
         "deno_available": DENO_PATH is not None,
@@ -200,6 +218,28 @@ async def download_playlist_videos(request: PlaylistDownloadRequest, background_
     """Download selected videos from playlist"""
     download_dir = get_downloads_directory()
     return await youtube_service.download_playlist(request, download_dir, background_tasks)
+
+
+# =============================================================================
+# PINTEREST ENDPOINTS
+# =============================================================================
+
+@app.post("/api/pinterest/info", response_model=PinterestVideoInfoResponse)
+async def get_pinterest_info(request: PinterestVideoInfoRequest):
+    """Get Pinterest video pin information"""
+    download_dir = get_downloads_directory()
+    return await pinterest_service.get_video_info(request, download_dir)
+
+
+@app.post("/api/pinterest/download")
+async def download_pinterest_video(request: PinterestDownloadRequest):
+    """Download Pinterest video or audio"""
+    try:
+        download_dir = get_downloads_directory()
+        result = await pinterest_service.download_video(request, download_dir)
+        return JSONResponse(result)
+    except Exception as e:
+        raise
 
 
 # =============================================================================
