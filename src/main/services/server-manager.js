@@ -245,10 +245,8 @@ class ServerManager {
           throw new Error(`Health check failed: ${response.statusCode}`)
         }
 
-        const healthData = JSON.parse(response.body)
-
-        // check if server is busy with downloads
-        // note: we track active downloads but don't use it for health status
+        // Parse response to ensure it's valid JSON (basic health check)
+        JSON.parse(response.body)
 
         if (!this.isReady) {
           this.isReady = true
@@ -257,7 +255,6 @@ class ServerManager {
       } catch (error) {
         console.warn("health check failed:", error.message)
 
-        // only mark as not ready if it's been failing consistently
         if (this.isReady) {
           this.isReady = false
           this.eventEmitter.emit("python:server:error", error)
@@ -332,26 +329,34 @@ class ServerManager {
    */
   makeHttpRequest(url) {
     return new Promise((resolve, reject) => {
-      const request = http.get(url, (response) => {
-        let body = ""
+      const request = http.get(
+        url,
+        {
+          headers: {
+            Connection: "close" // Force connection close to avoid reuse issues
+          }
+        },
+        (response) => {
+          let body = ""
 
-        response.on("data", (chunk) => {
-          body += chunk
-        })
-
-        response.on("end", () => {
-          resolve({
-            statusCode: response.statusCode,
-            body: body
+          response.on("data", (chunk) => {
+            body += chunk
           })
-        })
-      })
+
+          response.on("end", () => {
+            resolve({
+              statusCode: response.statusCode,
+              body: body
+            })
+          })
+        }
+      )
 
       request.on("error", (error) => {
         reject(error)
       })
 
-      request.setTimeout(10000, () => {
+      request.setTimeout(5000, () => {
         request.destroy()
         reject(new Error("Request timeout"))
       })
