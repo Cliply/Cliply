@@ -65,8 +65,6 @@ if FFMPEG_PATH:
 cookie_manager = CookieManager()
 youtube_service = YouTubeService(FFMPEG_PATH, DENO_PATH, cookie_manager)
 
-active_downloads = {}
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     cookie_manager.ensure_cookie_file()
@@ -125,7 +123,7 @@ async def root():
         "message": "Cliply Desktop Server",
         "version": "1.0.0",
         "status": "running",
-        "active_downloads": len(active_downloads),
+        "active_downloads": youtube_service.get_active_downloads_count(),
         "downloads_directory": str(get_downloads_directory()),
         "cookies": cookie_manager.has_valid_cookies(),
         "ffmpeg_available": FFMPEG_PATH is not None,
@@ -163,20 +161,11 @@ async def get_video_info(request: VideoInfoRequest):
 @app.post("/api/video/download-combined")
 async def download_combined_video_audio(request: CombinedDownloadRequest):
     """Download and merge video+audio with optional time range"""
-    download_id = str(uuid.uuid4())
     try:
-        active_downloads[download_id] = {
-            "type": "combined",
-            "url": request.url,
-            "started": time.time()
-        }
         download_dir = get_downloads_directory()
         result = await youtube_service.download_combined(request, download_dir)
-        result["download_id"] = download_id
-        active_downloads.pop(download_id, None)
         return JSONResponse(result)
     except Exception as e:
-        active_downloads.pop(download_id, None)
         raise
 
 
@@ -187,20 +176,11 @@ async def download_combined_video_audio(request: CombinedDownloadRequest):
 @app.post("/api/audio/download")
 async def download_audio_only(request: AudioDownloadRequest):
     """Download audio-only with optional time range"""
-    download_id = str(uuid.uuid4())
     try:
-        active_downloads[download_id] = {
-            "type": "audio",
-            "url": request.url,
-            "started": time.time()
-        }
         download_dir = get_downloads_directory()
         result = await youtube_service.download_audio(request, download_dir)
-        result["download_id"] = download_id
-        active_downloads.pop(download_id, None)
         return JSONResponse(result)
     except Exception as e:
-        active_downloads.pop(download_id, None)
         raise
 
 

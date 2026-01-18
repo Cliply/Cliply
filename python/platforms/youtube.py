@@ -458,6 +458,23 @@ class YouTubeService:
         self.deno_path = deno_path
         self.cookie_manager = cookie_manager
         self.cookie_file = cookie_manager.get_cookie_path()
+        self.active_downloads = {}
+
+    def _track_download(self, download_id: str, download_type: str, url: str):
+        """Internal helper to track an active download."""
+        self.active_downloads[download_id] = {
+            "type": download_type,
+            "url": url,
+            "started": time.time()
+        }
+
+    def _untrack_download(self, download_id: str):
+        """Internal helper to remove a completed/failed download from tracking."""
+        self.active_downloads.pop(download_id, None)
+
+    def get_active_downloads_count(self) -> int:
+        """Expose the number of active downloads."""
+        return len(self.active_downloads)
 
     async def get_video_info(self, request: VideoInfoRequest, download_dir: Path) -> VideoInfoResponse:
         """Get video information with format details."""
@@ -480,6 +497,8 @@ class YouTubeService:
 
     async def download_combined(self, request: CombinedDownloadRequest, download_dir: Path) -> dict:
         """Download and merge video+audio with optional time range."""
+        download_id = str(uuid.uuid4())
+        self._track_download(download_id, "combined", request.url)
         try:
             info = await extract_video_info_with_fallback(request.url, self.ffmpeg_path, self.deno_path)
             title = sanitize_filename(info.get('title', 'video'))
@@ -545,16 +564,21 @@ class YouTubeService:
                 "success": True,
                 "filename": actual_file.name,
                 "file_path": str(actual_file),
-                "file_size": actual_file_size
+                "file_size": actual_file_size,
+                "download_id": download_id
             }
             
         except HTTPException:
             raise
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Combined download failed: {str(e)}")
+        finally:
+            self._untrack_download(download_id)
 
     async def download_audio(self, request: AudioDownloadRequest, download_dir: Path) -> dict:
         """Download audio-only with optional time range."""
+        download_id = str(uuid.uuid4())
+        self._track_download(download_id, "audio", request.url)
         try:
             info = await extract_video_info_with_fallback(request.url, self.ffmpeg_path, self.deno_path)
             title = sanitize_filename(info.get('title', 'audio'))
@@ -618,13 +642,16 @@ class YouTubeService:
                 "success": True,
                 "filename": actual_file.name,
                 "file_path": str(actual_file),
-                "file_size": actual_file_size
+                "file_size": actual_file_size,
+                "download_id": download_id
             }
             
         except HTTPException:
             raise
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Audio download failed: {str(e)}")
+        finally:
+            self._untrack_download(download_id)
 
     async def get_playlist_info(self, request: PlaylistInfoRequest, download_dir: Path) -> PlaylistInfoResponse:
         """Get playlist information with video list."""
@@ -666,6 +693,7 @@ class YouTubeService:
     async def download_playlist(self, request: PlaylistDownloadRequest, download_dir: Path, background_tasks: BackgroundTasks) -> FileResponse:
         """Download selected videos from playlist."""
         download_id = str(uuid.uuid4())
+        self._track_download(download_id, "playlist", request.url)
         batch_dir = download_dir / f"playlist_{download_id}"
         
         try:
@@ -810,3 +838,5 @@ class YouTubeService:
             except:
                 pass
             raise HTTPException(status_code=500, detail=f"Playlist download failed: {str(e)}")
+        finally:
+            self._untrack_download(download_id)
