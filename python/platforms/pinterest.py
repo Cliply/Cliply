@@ -6,8 +6,8 @@ This module encapsulates all Pinterest-specific functionality including:
 - Video/audio downloads
 - Image vs video detection (critical for Pinterest)
 
-Note: Pinterest is simpler than YouTube - no playlists, no authentication required,
-and typically 1-2 video quality options.
+Note: Pinterest is simpler than YouTube - no playlists, no authentication required.
+Format selection is fully delegated to yt-dlp.
 """
 
 import os
@@ -25,8 +25,7 @@ from fastapi import HTTPException
 from shared_utils import (
     executor,
     sanitize_filename,
-    format_duration,
-    seconds_to_time_string
+    format_duration
 )
 
 
@@ -50,35 +49,17 @@ class PinterestVideoInfoRequest(BaseModel):
         return v
 
 
-class Format(BaseModel):
-    format_id: str
-    quality: str
-    ext: str
-    filesize: Optional[int]
-    type: str
-
-
 class PinterestVideoInfoResponse(BaseModel):
     title: str
     duration: int
     duration_string: str
     thumbnail: Optional[str]
     uploader: str
-    video_formats: List[Format]
-    audio_formats: List[Format]
 
 
 class PinterestDownloadRequest(BaseModel):
     url: str
-    format_id: str
-    download_type: str  # "video" or "audio"
-    
-    @field_validator('download_type')
-    @classmethod
-    def validate_download_type(cls, v):
-        if v not in ['video', 'audio']:
-            raise ValueError('download_type must be "video" or "audio"')
-        return v
+    format_id: Optional[str] = None
 
 
 # =============================================================================
@@ -150,21 +131,6 @@ def get_enhanced_ydl_opts(base_opts: dict = None, ffmpeg_path: Optional[str] = N
     return simple_opts
 
 
-def extract_pinterest_formats(info: dict) -> tuple[List[Format], List[Format]]:
-    """
-    Extract formats from Pinterest video info.
-    Pinterest typically has 1-2 quality options, so we keep it simple.
-    """
-    # Simple format options for Pinterest
-    video_formats = [
-        Format(format_id="auto", quality="Auto (Best)", ext="mp4", filesize=None, type="auto")
-    ]
-    
-    audio_formats = [
-        Format(format_id="auto_audio", quality="Auto", ext="m4a", filesize=None, type="audio")
-    ]
-    
-    return video_formats, audio_formats
 
 
 # =============================================================================
@@ -180,10 +146,10 @@ class PinterestService:
         self.active_downloads = {}
         # Note: No cookie manager needed for Pinterest
 
-    def _track_download(self, download_id: str, download_type: str, url: str):
+    def _track_download(self, download_id: str, url: str):
         """Internal helper to track an active download."""
         self.active_downloads[download_id] = {
-            "type": download_type,
+            "type": "video",
             "url": url,
             "started": time.time()
         }
@@ -197,7 +163,7 @@ class PinterestService:
         return len(self.active_downloads)
 
     async def get_video_info(self, request: PinterestVideoInfoRequest, download_dir: Path) -> PinterestVideoInfoResponse:
-        """Get Pinterest video information with format details."""
+        """Get Pinterest video information. Format selection is handled by yt-dlp during download."""
         try:
             base_opts = {}
             opts = get_enhanced_ydl_opts(base_opts, self.ffmpeg_path, self.deno_path)
@@ -211,16 +177,13 @@ class PinterestService:
                     detail="This Pinterest pin contains an image, not a video. Please use a pin with video content."
                 )
             
-            video_formats, audio_formats = extract_pinterest_formats(info)
-            
+            duration_raw = info.get('duration', 0) or 0
             return PinterestVideoInfoResponse(
                 title=info.get('title', 'Pinterest Video'),
-                duration=info.get('duration', 0) or 0,
-                duration_string=format_duration(info.get('duration', 0) or 0),
+                duration=int(duration_raw),
+                duration_string=format_duration(duration_raw),
                 thumbnail=info.get('thumbnail'),
-                uploader=info.get('uploader', info.get('channel', 'Unknown')),
-                video_formats=video_formats,
-                audio_formats=audio_formats
+                uploader=info.get('uploader', info.get('channel', 'Unknown'))
             )
             
         except HTTPException:
@@ -245,9 +208,9 @@ class PinterestService:
             raise HTTPException(status_code=400, detail=f"Failed to extract Pinterest video: {error_msg}")
 
     async def download_video(self, request: PinterestDownloadRequest, download_dir: Path) -> dict:
-        """Download Pinterest video or audio."""
+        """Download Pinterest video. Accepts optional format_id to override yt-dlp's default selection."""
         download_id = str(uuid.uuid4())
-        self._track_download(download_id, request.download_type, request.url)
+        self._track_download(download_id, request.url)
         
         try:
             # Extract video info to get title
@@ -265,23 +228,14 @@ class PinterestService:
             title = sanitize_filename(info.get('title', 'pinterest_video'))
             timestamp = int(time.time() * 1000) % 100000
             
-            if request.download_type == "audio":
-                final_filename = f"{title}_pinterest_audio_{timestamp}.%(ext)s"
-                base_opts = {
-                    'outtmpl': str(download_dir / final_filename),
-                    'format': 'bestaudio',
-                    'postprocessors': [{
-                        'key': 'FFmpegExtractAudio',
-                        'preferredcodec': 'm4a',
-                    }]
-                }
-            else:
-                final_filename = f"{title}_pinterest_{timestamp}.%(ext)s"
-                base_opts = {
-                    'outtmpl': str(download_dir / final_filename),
-                    'format': 'bestvideo+bestaudio/best',
-                    'merge_output_format': 'mp4'
-                }
+            # Use format_id if provided, otherwise let yt-dlp choose best video+audio
+            format_selector = request.format_id if request.format_id else 'bestvideo+bestaudio/best'
+            final_filename = f"{title}_pinterest_{timestamp}.%(ext)s"
+            base_opts = {
+                'outtmpl': str(download_dir / final_filename),
+                'format': format_selector,
+                'merge_output_format': 'mp4'
+            }
             
             download_opts = get_enhanced_ydl_opts(base_opts, self.ffmpeg_path, self.deno_path)
             await download_async(request.url, download_opts)
@@ -290,8 +244,8 @@ class PinterestService:
             base_name = final_filename.replace('.%(ext)s', '')
             possible_files = []
             
-            # Check for common video/audio extensions
-            extensions = ['mp4', 'webm', 'mkv', 'm4a', 'mp3', 'ogg'] if request.download_type == "audio" else ['mp4', 'webm', 'mkv', 'mov']
+            # Check for common video extensions
+            extensions = ['mp4', 'webm', 'mkv', 'mov']
             
             for ext in extensions:
                 pattern = f"{base_name}.{ext}"
