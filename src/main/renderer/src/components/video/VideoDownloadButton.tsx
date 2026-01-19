@@ -11,7 +11,7 @@ import {
   type VideoFormat
 } from "@/lib/api"
 import { useVideoDownload } from "@/lib/hooks/useVideoDownload"
-import { useAppStore } from "@/lib/store"
+import { useYouTubeStore } from "@/lib/youtubeStore"
 import { showDownloadSuccessToast } from "@/lib/toast-utils"
 import { cn } from "@/lib/utils"
 import { motion } from "framer-motion"
@@ -39,7 +39,7 @@ export function VideoDownloadButton({
     setIsDownloadingVideo,
     videoPreciseCut,
     setVideoPreciseCut
-  } = useAppStore()
+  } = useYouTubeStore()
 
   const videoDownloadMutation = useVideoDownload()
 

@@ -7,7 +7,7 @@ import {
   VideoPlayerFrame
 } from "@/components/video"
 import { useServerStatus } from "@/lib/hooks/useServerStatus"
-import { useAppStore } from "@/lib/store"
+import { useYouTubeStore } from "@/lib/youtubeStore"
 import {
   showServerReadyToast,
   showServerStartingToast
@@ -17,7 +17,7 @@ import { useEffect, useRef } from "react"
 import { CompactSearch } from "./CompactSearch"
 
 export function VideoLayout() {
-  const { videoInfo, url } = useAppStore()
+  const { videoInfo, url } = useYouTubeStore()
 
   // Track server status and show toasts
   const serverStatus = useServerStatus()
@@ -52,7 +52,7 @@ export function VideoLayout() {
             <div 
               className="w-8 h-8 text-slate-700 dark:text-slate-300 transition-colors duration-300 cursor-pointer hover:text-slate-900 dark:hover:text-slate-100"
               onClick={() => {
-                const { reset } = useAppStore.getState()
+                const { reset } = useYouTubeStore.getState()
                 reset()
               }}
             >
@@ -86,7 +86,7 @@ export function VideoLayout() {
             <span
               className="hidden lg:block text-lg font-light text-slate-700 dark:text-slate-300 tracking-tight cursor-pointer hover:text-slate-900 dark:hover:text-slate-100 transition-colors duration-300"
               onClick={() => {
-                const { reset } = useAppStore.getState()
+                const { reset } = useYouTubeStore.getState()
                 reset()
               }}
               style={{

@@ -1,6 +1,6 @@
 import { Button } from "@/components/ui/button"
 import type { VideoFormat } from "@/lib/api"
-import { useAppStore } from "@/lib/store"
+import { useYouTubeStore } from "@/lib/youtubeStore"
 import { cn } from "@/lib/utils"
 import { motion } from "framer-motion"
 import { Check, ChevronDown, Headphones } from "lucide-react"
@@ -18,7 +18,7 @@ export function AudioFormatDropdown({
   className
 }: AudioFormatDropdownProps) {
   const { selectedAudioFormatForDownload, setSelectedAudioFormatForDownload } =
-    useAppStore()
+    useYouTubeStore()
   const [isOpen, setIsOpen] = useState(false)
 
   if (!isVisible) return null

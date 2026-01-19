@@ -1,6 +1,6 @@
 import { useCallback } from "react"
 import { settingsApi, systemApi } from "@/lib/api"
-import { useAppStore } from "@/lib/store"
+import { useYouTubeStore } from "@/lib/youtubeStore"
 import { showFolderSelectedToast } from "@/lib/toast-utils"
 import { useServerStatus } from "./useServerStatus"
 import { toast } from "sonner"
@@ -11,7 +11,7 @@ export function useDownloadPath() {
     setDownloadPath,
     setIsLoadingDownloadPath,
     isLoadingDownloadPath
-  } = useAppStore()
+  } = useYouTubeStore()
   const { isReady: serverReady } = useServerStatus()
 
   // folder selection logic

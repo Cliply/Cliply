@@ -1,6 +1,6 @@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { validateTimeRange, type VideoFormat } from "@/lib/api"
-import { useAppStore } from "@/lib/store"
+import { useYouTubeStore } from "@/lib/youtubeStore"
 import { cn } from "@/lib/utils"
 import { motion } from "framer-motion"
 import { useState } from "react"
@@ -29,7 +29,7 @@ export function UnifiedDownloadCard({
     selectedAudioFormatForDownload,
     videoTimeRange,
     selectedVideoQuality
-  } = useAppStore()
+  } = useYouTubeStore()
 
   const [isVideoQualityDropdownOpen, setIsVideoQualityDropdownOpen] =
     useState(false)

@@ -7,7 +7,7 @@ import {
 import { formatDuration, validateTimeRange } from "@/lib/api"
 import { useAudioDownload } from "@/lib/hooks/useAudioDownload"
 import { useServerStatus } from "@/lib/hooks/useServerStatus"
-import { useAppStore } from "@/lib/store"
+import { useYouTubeStore } from "@/lib/youtubeStore"
 import {
   showDownloadSuccessToast,
   showServerOverwhelmedToast,
@@ -37,7 +37,7 @@ export function AudioDownloadButton({
     selectedAudioFormatForDownload,
     audioPreciseCut,
     setAudioPreciseCut
-  } = useAppStore()
+  } = useYouTubeStore()
 
   const audioDownloadMutation = useAudioDownload()
   const serverStatus = useServerStatus()

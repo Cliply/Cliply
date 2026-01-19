@@ -2,6 +2,7 @@ import { Button } from "@/components/ui/button"
 import { videoApi } from "@/lib/api"
 import { useServerStatus } from "@/lib/hooks/useServerStatus"
 import { useAppStore } from "@/lib/store"
+import { useYouTubeStore } from "@/lib/youtubeStore"
 import {
   showServerOverwhelmedToast,
   showServerStartingToast
@@ -25,15 +26,9 @@ export function CompactSearch({
   isLoading: externalLoading,
   className
 }: CompactSearchProps) {
-  const {
-    url,
-    setUrl,
-    setVideoInfo,
-    setShowVideoDetails,
-    setIsLoadingVideoInfo,
-    isLoadingVideoInfo,
-    reset
-  } = useAppStore()
+  const { setShowMediaDetails } = useAppStore()
+  const { url, setUrl, setVideoInfo, setIsLoadingVideoInfo, isLoadingVideoInfo, reset } =
+    useYouTubeStore()
 
   const serverStatus = useServerStatus()
   const isLoading = externalLoading || isLoadingVideoInfo
@@ -73,7 +68,7 @@ export function CompactSearch({
 
       // Update store with new video info
       setVideoInfo(newVideoInfo)
-      setShowVideoDetails(true)
+      setShowMediaDetails(true)
 
       toast.success("Video information loaded!")
     } catch (error) {

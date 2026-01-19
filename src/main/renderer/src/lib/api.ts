@@ -74,6 +74,37 @@ export interface VideoInfoResponse {
   categories?: string[]
 }
 
+export interface PinterestVideoInfoResponse {
+  title: string
+  duration: number
+  duration_string: string
+  thumbnail: string | null
+  uploader: string
+}
+
+export interface PinterestDownloadRequest {
+  url: string
+  format_id?: string
+}
+
+export interface PinterestDownloadResponse {
+  success: boolean
+  filename: string
+  file_path: string
+  file_size: number
+  download_id: string
+}
+
+export type Platform = "youtube" | "pinterest"
+
+export type MediaInfo =
+  | { platform: "youtube"; data: VideoInfoResponse }
+  | { platform: "pinterest"; data: PinterestVideoInfoResponse }
+
+export type DownloadRequest =
+  | { platform: "youtube"; data: VideoDownloadRequest | AudioDownloadRequest }
+  | { platform: "pinterest"; data: PinterestDownloadRequest }
+
 export interface TimeRange {
   start: number // seconds
   end: number // seconds
@@ -168,6 +199,12 @@ declare global {
             type: string
           }>
         >
+      }
+      pinterest: {
+        getInfo: (url: string) => Promise<IPCResponse<PinterestVideoInfoResponse>>
+        download: (
+          options: PinterestDownloadRequest
+        ) => Promise<IPCResponse<PinterestDownloadResponse>>
       }
       download: {
         cancel: (

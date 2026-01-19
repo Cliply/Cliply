@@ -6,6 +6,7 @@ import { toast } from "sonner"
 import { videoApi } from "@/lib/api"
 import { useServerStatus } from "@/lib/hooks/useServerStatus"
 import { useAppStore } from "@/lib/store"
+import { useYouTubeStore } from "@/lib/youtubeStore"
 import {
   showServerOverwhelmedToast,
   showServerStartingToast
@@ -14,14 +15,9 @@ import { youtubeUrlSchema, type YouTubeUrlFormData } from "@/lib/validation"
 import { URLInput } from "./URLInput"
 
 export function SearchCard() {
-  const {
-    url,
-    setUrl,
-    setVideoInfo,
-    setShowVideoDetails,
-    isLoadingVideoInfo,
-    setIsLoadingVideoInfo
-  } = useAppStore()
+  const { setShowMediaDetails } = useAppStore()
+  const { url, setUrl, setVideoInfo, isLoadingVideoInfo, setIsLoadingVideoInfo } =
+    useYouTubeStore()
 
   const serverStatus = useServerStatus()
 
@@ -52,7 +48,7 @@ export function SearchCard() {
 
       // Update store with video info
       setVideoInfo(videoInfo)
-      setShowVideoDetails(true)
+      setShowMediaDetails(true)
 
       toast.success("Video information loaded successfully!")
     } catch (error) {
