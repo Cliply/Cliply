@@ -1,32 +1,65 @@
 import { zodResolver } from "@hookform/resolvers/zod"
 import { motion } from "framer-motion"
+import { useEffect } from "react"
 import { useForm } from "react-hook-form"
 import { toast } from "sonner"
 
-import { videoApi } from "@/lib/api"
+import { pinterestApi, videoApi } from "@/lib/api"
 import { useServerStatus } from "@/lib/hooks/useServerStatus"
-import { useAppStore } from "@/lib/store"
+import { useAppStore, type Platform } from "@/lib/store"
+import { usePinterestStore } from "@/lib/pinterestStore"
 import { useYouTubeStore } from "@/lib/youtubeStore"
 import {
   showServerOverwhelmedToast,
   showServerStartingToast
 } from "@/lib/toast-utils"
-import { youtubeUrlSchema, type YouTubeUrlFormData } from "@/lib/validation"
+import {
+  pinterestUrlSchema,
+  type PinterestUrlFormData,
+  youtubeUrlSchema,
+  type YouTubeUrlFormData
+} from "@/lib/validation"
 import { URLInput } from "./URLInput"
 
-export function SearchCard() {
+interface SearchCardProps {
+  platform: Platform
+}
+
+export function SearchCard({ platform }: SearchCardProps) {
   const { setShowMediaDetails } = useAppStore()
-  const { url, setUrl, setVideoInfo, isLoadingVideoInfo, setIsLoadingVideoInfo } =
-    useYouTubeStore()
+  const {
+    url: youtubeUrl,
+    setUrl: setYouTubeUrl,
+    setVideoInfo,
+    isLoadingVideoInfo,
+    setIsLoadingVideoInfo
+  } = useYouTubeStore()
+  const {
+    url: pinterestUrl,
+    setUrl: setPinterestUrl,
+    setPinInfo,
+    isLoadingPinInfo,
+    setIsLoadingPinInfo
+  } = usePinterestStore()
 
   const serverStatus = useServerStatus()
 
-  const form = useForm<YouTubeUrlFormData>({
-    resolver: zodResolver(youtubeUrlSchema),
-    defaultValues: { url }
+  const schema = platform === "youtube" ? youtubeUrlSchema : pinterestUrlSchema
+
+  const form = useForm<YouTubeUrlFormData | PinterestUrlFormData>({
+    resolver: zodResolver(schema),
+    defaultValues: {
+      url: platform === "youtube" ? youtubeUrl : pinterestUrl
+    }
   })
 
-  const onSubmit = async (data: YouTubeUrlFormData) => {
+  useEffect(() => {
+    form.reset({
+      url: platform === "youtube" ? youtubeUrl : pinterestUrl
+    })
+  }, [form, pinterestUrl, platform, youtubeUrl])
+
+  const onSubmit = async (data: YouTubeUrlFormData | PinterestUrlFormData) => {
     // Check server status before making request
     if (serverStatus.isStarting) {
       showServerStartingToast()
@@ -40,45 +73,85 @@ export function SearchCard() {
       return
     }
 
+    const isYouTube = platform === "youtube"
+
     try {
-      setIsLoadingVideoInfo(true)
-      setUrl(data.url)
+      if (isYouTube) {
+        setIsLoadingVideoInfo(true)
+        setYouTubeUrl(data.url)
 
-      const videoInfo = await videoApi.getVideoInfo(data.url)
+        const videoInfo = await videoApi.getVideoInfo(data.url)
 
-      // Update store with video info
-      setVideoInfo(videoInfo)
-      setShowMediaDetails(true)
+        // Update store with video info
+        setVideoInfo(videoInfo)
+        setShowMediaDetails(true)
 
-      toast.success("Video information loaded successfully!")
+        toast.success("Video information loaded successfully!")
+      } else {
+        setIsLoadingPinInfo(true)
+        setPinterestUrl(data.url)
+
+        const pinInfo = await pinterestApi.getInfo(data.url)
+
+        setPinInfo(pinInfo)
+        setShowMediaDetails(true)
+
+        toast.success("Pin information loaded successfully!")
+      }
     } catch (error) {
       const errorMessage =
         error instanceof Error
           ? error.message
-          : "Failed to get video information"
+          : isYouTube
+            ? "Failed to get video information"
+            : "Failed to get pin information"
 
       // Handle different types of errors
-      if (errorMessage.includes("Invalid YouTube URL")) {
-        toast.error("Please enter a valid YouTube URL")
-        form.setError("url", { message: "Invalid YouTube URL" })
+      if (
+        errorMessage.includes(
+          isYouTube ? "Invalid YouTube URL" : "Invalid Pinterest URL"
+        )
+      ) {
+        const message = isYouTube
+          ? "Please enter a valid YouTube URL"
+          : "Please enter a valid Pinterest URL"
+        toast.error(message)
+        form.setError("url", {
+          message: isYouTube ? "Invalid YouTube URL" : "Invalid Pinterest URL"
+        })
       } else if (
         errorMessage.includes("Video unavailable") ||
+        errorMessage.includes("Pin unavailable") ||
         errorMessage.includes("not found")
       ) {
-        toast.error("This video is not available for download")
+        toast.error(
+          isYouTube
+            ? "This video is not available for download"
+            : "This pin is not available for download"
+        )
       } else if (errorMessage.includes("Download engine starting")) {
         showServerStartingToast()
       } else if (errorMessage.includes("Server overwhelmed")) {
         showServerOverwhelmedToast()
       } else {
-        toast.error("Failed to get video information", {
-          description: errorMessage
-        })
+        toast.error(
+          isYouTube ? "Failed to get video information" : "Failed to get pin information",
+          {
+            description: errorMessage
+          }
+        )
       }
 
-      console.error("Video info request failed:", error)
+      console.error(
+        isYouTube ? "Video info request failed:" : "Pin info request failed:",
+        error
+      )
     } finally {
-      setIsLoadingVideoInfo(false)
+      if (isYouTube) {
+        setIsLoadingVideoInfo(false)
+      } else {
+        setIsLoadingPinInfo(false)
+      }
     }
   }
 
@@ -93,7 +166,8 @@ export function SearchCard() {
         <URLInput
           form={form}
           onFocusChange={() => {}}
-          isLoading={isLoadingVideoInfo}
+          isLoading={platform === "youtube" ? isLoadingVideoInfo : isLoadingPinInfo}
+          platform={platform}
         />
       </form>
     </motion.div>

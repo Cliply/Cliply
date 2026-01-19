@@ -4,15 +4,17 @@ import type { UseFormReturn } from "react-hook-form"
 
 import { useDownloadPath } from "@/lib/hooks/useDownloadPath"
 import { cn } from "@/lib/utils"
-import type { YouTubeUrlFormData } from "@/lib/validation"
+import type { Platform } from "@/lib/store"
+import type { PinterestUrlFormData, YouTubeUrlFormData } from "@/lib/validation"
 
 interface URLInputProps {
-  form: UseFormReturn<YouTubeUrlFormData>
+  form: UseFormReturn<YouTubeUrlFormData | PinterestUrlFormData>
   onFocusChange: (focused: boolean) => void
   isLoading: boolean
+  platform: Platform
 }
 
-export function URLInput({ form, onFocusChange, isLoading }: URLInputProps) {
+export function URLInput({ form, onFocusChange, isLoading, platform }: URLInputProps) {
   const {
     register,
     formState: { errors },
@@ -25,6 +27,16 @@ export function URLInput({ form, onFocusChange, isLoading }: URLInputProps) {
   const hasError = !!errors.url
   const hasValue = urlValue && urlValue.length > 0
 
+  const placeholderText =
+    platform === "youtube" ? "paste video url here..." : "paste pin url here..."
+  const helperText =
+    platform === "youtube"
+      ? "supports youtube videos & shorts from youtube.com and youtu.be"
+      : "supports pinterest videos from pinterest.com and pin.it"
+  const loadingText =
+    platform === "youtube"
+      ? "🐋 getting video information"
+      : "📌 getting pin information"
 
   return (
     <div className="w-full max-w-2xl mx-auto space-y-4">
@@ -46,7 +58,7 @@ export function URLInput({ form, onFocusChange, isLoading }: URLInputProps) {
           <input
             {...register("url")}
             type="text"
-            placeholder="paste video url here..."
+            placeholder={placeholderText}
             disabled={isLoading}
             onFocus={() => onFocusChange(true)}
             onBlur={() => onFocusChange(false)}
@@ -157,7 +169,7 @@ export function URLInput({ form, onFocusChange, isLoading }: URLInputProps) {
                     'Geist Mono, ui-monospace, SFMono-Regular, "SF Mono", Consolas, "Liberation Mono", Menlo, monospace'
                 }}
               >
-                🐋 getting video information
+                {loadingText}
                 <motion.span
                   animate={{ opacity: [0, 1, 0] }}
                   transition={{
@@ -179,7 +191,7 @@ export function URLInput({ form, onFocusChange, isLoading }: URLInputProps) {
                   'Geist Mono, ui-monospace, SFMono-Regular, "SF Mono", Consolas, "Liberation Mono", Menlo, monospace'
               }}
             >
-              supports youtube <span className="text-cyan-500">videos</span> & <span className="text-cyan-500">shorts</span> from youtube.com and youtu.be
+              {helperText}
             </p>
           )}
         </motion.div>

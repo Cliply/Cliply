@@ -180,8 +180,12 @@ declare global {
   interface Window {
     electronAPI?: {
       video: {
-        getInfo: (url: string) => Promise<IPCResponse<VideoInfoResponse>>
-        downloadCombined: (options: VideoDownloadRequest) => Promise<
+        getInfo: (
+          options: { url: string; platform?: string } | string
+        ) => Promise<IPCResponse<VideoInfoResponse>>
+        downloadCombined: (
+          options: VideoDownloadRequest & { platform?: string }
+        ) => Promise<
           IPCResponse<{
             filename: string
             file_path: string
@@ -190,7 +194,9 @@ declare global {
             type: string
           }>
         >
-        downloadAudio: (options: AudioDownloadRequest) => Promise<
+        downloadAudio: (
+          options: AudioDownloadRequest & { platform?: string }
+        ) => Promise<
           IPCResponse<{
             filename: string
             file_path: string
@@ -325,6 +331,50 @@ export const videoApi = {
     }
 
     // Map the response to match expected format
+    return {
+      downloadId: response.data.download_id
+    }
+  }
+}
+
+export const pinterestApi = {
+  /**
+   * Get Pinterest video information
+   * @param url Pinterest URL
+   * @returns Promise<PinterestVideoInfoResponse>
+   */
+  async getInfo(url: string): Promise<PinterestVideoInfoResponse> {
+    const electronAPI = getElectronAPI()
+    const response = await electronAPI.pinterest.getInfo(url)
+
+    if (!response.success || !response.data) {
+      const errorMessage =
+        response.error?.message || "Failed to get Pinterest video info"
+      console.error("Pinterest info failed:", errorMessage)
+      throw new Error(errorMessage)
+    }
+
+    return response.data
+  },
+
+  /**
+   * Download Pinterest video
+   * @param request Pinterest download request
+   * @returns Promise<{downloadId: string}>
+   */
+  async download(
+    request: PinterestDownloadRequest
+  ): Promise<{ downloadId: string }> {
+    const electronAPI = getElectronAPI()
+    const response = await electronAPI.pinterest.download(request)
+
+    if (!response.success || !response.data) {
+      const errorMessage =
+        response.error?.message || "Failed to download Pinterest video"
+      console.error("Pinterest download failed:", errorMessage)
+      throw new Error(errorMessage)
+    }
+
     return {
       downloadId: response.data.download_id
     }
