@@ -1,5 +1,6 @@
 import { AnimatePresence } from "framer-motion"
 import { HeroSection } from "../components/hero/HeroSection"
+import { PinterestLayout } from "@/components/pinterest"
 import { VideoLayout } from "../components/video/VideoLayout"
 import { useAppStore } from "../lib/store"
 import { usePinterestStore } from "../lib/pinterestStore"
@@ -20,14 +21,10 @@ export function HomePage() {
       {shouldShowYouTubeLayout ? (
         <VideoLayout key="video-layout" />
       ) : shouldShowPinterestLayout ? (
-        <PinterestLayoutPlaceholder key="pinterest-layout" />
+        <PinterestLayout key="pinterest-layout" />
       ) : (
         <HeroSection key="hero-section" />
       )}
     </AnimatePresence>
   )
-}
-
-function PinterestLayoutPlaceholder() {
-  return null
 }

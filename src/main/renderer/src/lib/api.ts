@@ -466,6 +466,17 @@ export const systemApi = {
   },
 
   /**
+   * Open external URL in system browser
+   * @param url External URL
+   * @returns Promise<boolean>
+   */
+  async openExternal(url: string): Promise<boolean> {
+    const electronAPI = getElectronAPI()
+    const response = await electronAPI.system.openExternal(url)
+    return response.success === true
+  },
+
+  /**
    * Select download folder via file dialog
    * @returns Promise<string | null>
    */
