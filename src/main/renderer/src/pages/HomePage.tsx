@@ -1,9 +1,9 @@
+import { PinterestLayout } from "@/components/pinterest"
 import { AnimatePresence } from "framer-motion"
 import { HeroSection } from "../components/hero/HeroSection"
-import { PinterestLayout } from "@/components/pinterest"
 import { VideoLayout } from "../components/video/VideoLayout"
-import { useAppStore } from "../lib/store"
 import { usePinterestStore } from "../lib/pinterestStore"
+import { useAppStore } from "../lib/store"
 import { useYouTubeStore } from "../lib/youtubeStore"
 
 export function HomePage() {
