@@ -1,16 +1,24 @@
 import { Button } from "@/components/ui/button"
-import { videoApi } from "@/lib/api"
+import { pinterestApi, videoApi } from "@/lib/api"
 import { useServerStatus } from "@/lib/hooks/useServerStatus"
-import { useAppStore } from "@/lib/store"
+import { usePinterestStore } from "@/lib/pinterestStore"
+import { useAppStore, type Platform } from "@/lib/store"
+import { useYouTubeStore } from "@/lib/youtubeStore"
 import {
   showServerOverwhelmedToast,
   showServerStartingToast
 } from "@/lib/toast-utils"
 import { cn } from "@/lib/utils"
-import { youtubeUrlSchema, type YouTubeUrlFormData } from "@/lib/validation"
+import {
+  pinterestUrlSchema,
+  type PinterestUrlFormData,
+  youtubeUrlSchema,
+  type YouTubeUrlFormData
+} from "@/lib/validation"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { motion } from "framer-motion"
 import { Loader2, Search, Send, X } from "lucide-react"
+import { useEffect } from "react"
 import { useForm } from "react-hook-form"
 import { toast } from "sonner"
 
@@ -18,32 +26,57 @@ interface CompactSearchProps {
   onSearch?: (url: string) => void
   isLoading?: boolean
   className?: string
+  platform?: Platform
 }
 
 export function CompactSearch({
   onSearch,
   isLoading: externalLoading,
-  className
+  className,
+  platform = "youtube"
 }: CompactSearchProps) {
+  const { setShowMediaDetails } = useAppStore()
   const {
-    url,
-    setUrl,
+    url: youtubeUrl,
+    setUrl: setYouTubeUrl,
     setVideoInfo,
-    setShowVideoDetails,
     setIsLoadingVideoInfo,
     isLoadingVideoInfo,
-    reset
-  } = useAppStore()
+    reset: resetYouTube
+  } = useYouTubeStore()
+  const {
+    url: pinterestUrl,
+    setUrl: setPinterestUrl,
+    setPinInfo,
+    setIsLoadingPinInfo,
+    isLoadingPinInfo,
+    reset: resetPinterest
+  } = usePinterestStore()
 
   const serverStatus = useServerStatus()
-  const isLoading = externalLoading || isLoadingVideoInfo
+  const isLoading =
+    externalLoading ||
+    (platform === "youtube" ? isLoadingVideoInfo : isLoadingPinInfo)
 
-  const form = useForm<YouTubeUrlFormData>({
-    resolver: zodResolver(youtubeUrlSchema),
-    defaultValues: { url }
+  const schema =
+    platform === "youtube" ? youtubeUrlSchema : pinterestUrlSchema
+
+  const form = useForm<YouTubeUrlFormData | PinterestUrlFormData>({
+    resolver: zodResolver(schema),
+    defaultValues: {
+      url: platform === "youtube" ? youtubeUrl : pinterestUrl
+    }
   })
 
-  const handleSubmit = async (data: YouTubeUrlFormData) => {
+  useEffect(() => {
+    form.reset({
+      url: platform === "youtube" ? youtubeUrl : pinterestUrl
+    })
+  }, [form, pinterestUrl, platform, youtubeUrl])
+
+  const handleSubmit = async (
+    data: YouTubeUrlFormData | PinterestUrlFormData
+  ) => {
     // If an external onSearch handler is provided, use it
     if (onSearch) {
       onSearch(data.url)
@@ -63,33 +96,60 @@ export function CompactSearch({
       return
     }
 
+    const isYouTube = platform === "youtube"
+
     // Otherwise, handle the search internally
     try {
-      setIsLoadingVideoInfo(true)
-      setUrl(data.url)
+      if (isYouTube) {
+        setIsLoadingVideoInfo(true)
+        setYouTubeUrl(data.url)
 
-      // Call the backend API
-      const newVideoInfo = await videoApi.getVideoInfo(data.url)
+        const newVideoInfo = await videoApi.getVideoInfo(data.url)
 
-      // Update store with new video info
-      setVideoInfo(newVideoInfo)
-      setShowVideoDetails(true)
+        setVideoInfo(newVideoInfo)
+        setShowMediaDetails(true)
 
-      toast.success("Video information loaded!")
+        toast.success("Video information loaded!")
+      } else {
+        setIsLoadingPinInfo(true)
+        setPinterestUrl(data.url)
+
+        const newPinInfo = await pinterestApi.getInfo(data.url)
+
+        setPinInfo(newPinInfo)
+        setShowMediaDetails(true)
+
+        toast.success("Pin information loaded!")
+      }
     } catch (error) {
       // Handle different types of errors
       const errorMessage =
         error instanceof Error
           ? error.message
-          : "Failed to get video information"
+          : isYouTube
+            ? "Failed to get video information"
+            : "Failed to get pin information"
 
-      if (errorMessage.includes("Invalid YouTube URL")) {
-        toast.error("Please enter a valid YouTube URL")
+      if (
+        errorMessage.includes(
+          isYouTube ? "Invalid YouTube URL" : "Invalid Pinterest URL"
+        )
+      ) {
+        toast.error(
+          isYouTube
+            ? "Please enter a valid YouTube URL"
+            : "Please enter a valid Pinterest URL"
+        )
       } else if (
         errorMessage.includes("Video unavailable") ||
+        errorMessage.includes("Pin unavailable") ||
         errorMessage.includes("not found")
       ) {
-        toast.error("This video is not available for download")
+        toast.error(
+          isYouTube
+            ? "This video is not available for download"
+            : "This pin is not available for download"
+        )
       } else if (errorMessage.includes("Download engine starting")) {
         showServerStartingToast()
       } else if (
@@ -101,13 +161,21 @@ export function CompactSearch({
         showServerOverwhelmedToast()
       }
     } finally {
-      setIsLoadingVideoInfo(false)
+      if (isYouTube) {
+        setIsLoadingVideoInfo(false)
+      } else {
+        setIsLoadingPinInfo(false)
+      }
     }
   }
 
   const handleClear = () => {
     form.reset({ url: "" })
-    reset()
+    if (platform === "youtube") {
+      resetYouTube()
+    } else {
+      resetPinterest()
+    }
   }
 
   return (
@@ -126,7 +194,11 @@ export function CompactSearch({
           <input
             {...form.register("url")}
             type="text"
-            placeholder="Enter new YouTube URL..."
+            placeholder={
+              platform === "youtube"
+                ? "Enter new YouTube URL..."
+                : "Enter new Pinterest URL..."
+            }
             disabled={isLoading}
             className={cn(
               "w-full h-12 pl-12 pr-16 rounded-xl border transition-all duration-200",

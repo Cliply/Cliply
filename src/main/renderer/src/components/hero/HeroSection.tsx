@@ -4,9 +4,12 @@ import { updaterApi } from "@/lib/api"
 import { motion } from "framer-motion"
 import { Link } from "react-router-dom"
 import { toast } from "sonner"
+import { PlatformSelector } from "./PlatformSelector"
+import { useAppStore } from "@/lib/store"
 import { SearchCard } from "./SearchCard"
 
 export function HeroSection() {
+  const { selectedPlatform } = useAppStore()
 
   const handleCheckForUpdates = async () => {
     try {
@@ -91,13 +94,22 @@ export function HeroSection() {
             </motion.p>
           </motion.div>
 
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.6, delay: 0.4, ease: "easeOut" }}
+            className="mb-8"
+          >
+            <PlatformSelector />
+          </motion.div>
+
           {/* Search card - this will be centered in viewport */}
           <motion.div
             initial={{ opacity: 0, y: 30 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.8, delay: 0.5, ease: "easeOut" }}
           >
-            <SearchCard />
+            <SearchCard platform={selectedPlatform} />
           </motion.div>
         </div>
       </div>

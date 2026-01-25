@@ -1,25 +1,22 @@
 import { ModeToggle } from "@/components/ui/mode-toggle"
-import {
-  FeedbackCard,
-  PlaylistAccessCard,
-  UnifiedDownloadCard,
-  VideoDetailsCard,
-  VideoPlayerFrame
-} from "@/components/video"
+import { UnifiedDownloadCard } from "@/components/video"
 import { useServerStatus } from "@/lib/hooks/useServerStatus"
-import { useYouTubeStore } from "@/lib/youtubeStore"
+import { usePinterestStore } from "@/lib/pinterestStore"
+import { useAppStore } from "@/lib/store"
 import {
   showServerReadyToast,
   showServerStartingToast
 } from "@/lib/toast-utils"
 import { motion } from "framer-motion"
 import { useEffect, useRef } from "react"
-import { CompactSearch } from "./CompactSearch"
+import { CompactSearch } from "../video/CompactSearch"
+import { PinterestDetailsCard } from "./PinterestDetailsCard"
+import { PinterestThumbnail } from "./PinterestThumbnail"
 
-export function VideoLayout() {
-  const { videoInfo, url } = useYouTubeStore()
+export function PinterestLayout() {
+  const { pinInfo, url } = usePinterestStore()
+  const { setShowMediaDetails } = useAppStore()
 
-  // Track server status and show toasts
   const serverStatus = useServerStatus()
   const prevStatusRef = useRef(serverStatus.status)
 
@@ -27,7 +24,6 @@ export function VideoLayout() {
     const prevStatus = prevStatusRef.current
     const currentStatus = serverStatus.status
 
-    // Only show toasts when status actually changes
     if (prevStatus !== currentStatus) {
       if (currentStatus === "starting") {
         showServerStartingToast()
@@ -39,7 +35,13 @@ export function VideoLayout() {
     prevStatusRef.current = currentStatus
   }, [serverStatus.status])
 
-  if (!videoInfo) return null
+  if (!pinInfo) return null
+
+  const handleReset = () => {
+    const { reset } = usePinterestStore.getState()
+    reset()
+    setShowMediaDetails(false)
+  }
 
   return (
     <div className="min-h-screen xl:h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-100 dark:from-slate-900 dark:via-slate-800 dark:to-slate-900 flex flex-col xl:overflow-hidden">
@@ -48,13 +50,9 @@ export function VideoLayout() {
         <div className="max-w-7xl mx-auto flex items-center justify-between gap-4">
           {/* Left side: Logo and brand text */}
           <div className="flex items-center gap-2 flex-shrink-0">
-            {/* Small Logo */}
-            <div 
+            <div
               className="w-8 h-8 text-slate-700 dark:text-slate-300 transition-colors duration-300 cursor-pointer hover:text-slate-900 dark:hover:text-slate-100"
-              onClick={() => {
-                const { reset } = useYouTubeStore.getState()
-                reset()
-              }}
+              onClick={handleReset}
             >
               <svg
                 viewBox="0 0 100 94.27"
@@ -82,13 +80,9 @@ export function VideoLayout() {
               </svg>
             </div>
 
-            {/* Brand text - only on desktop */}
             <span
               className="hidden lg:block text-lg font-light text-slate-700 dark:text-slate-300 tracking-tight cursor-pointer hover:text-slate-900 dark:hover:text-slate-100 transition-colors duration-300"
-              onClick={() => {
-                const { reset } = useYouTubeStore.getState()
-                reset()
-              }}
+              onClick={handleReset}
               style={{
                 fontFamily:
                   'Geist Mono, ui-monospace, SFMono-Regular, "SF Mono", Consolas, "Liberation Mono", Menlo, monospace'
@@ -100,7 +94,7 @@ export function VideoLayout() {
 
           {/* Center: Search Bar */}
           <div className="flex-1 max-w-2xl mx-auto">
-            <CompactSearch />
+            <CompactSearch platform="pinterest" />
           </div>
 
           {/* Right side: Mode toggle */}
@@ -112,7 +106,7 @@ export function VideoLayout() {
 
       {/* Main Content */}
       <div className="flex-1 flex flex-col xl:flex-row xl:overflow-hidden">
-        {/* Left Column - Fixed Video Details & Player (only on xl+) */}
+        {/* Left Column - Details & Thumbnail */}
         <div className="w-full xl:w-2/3 flex flex-col p-3 lg:p-4 space-y-3 lg:space-y-4 xl:overflow-hidden">
           <motion.div
             initial={{ opacity: 0, y: 20 }}
@@ -137,32 +131,29 @@ export function VideoLayout() {
               </div>
             </motion.div>
 
-            {/* Video Details Card */}
+            {/* Pin Details Card */}
             <div className="flex-shrink-0">
-              <VideoDetailsCard videoInfo={videoInfo} />
+              <PinterestDetailsCard pinInfo={pinInfo} />
             </div>
 
-            {/* Video Player - Takes remaining space */}
+            {/* Pin Thumbnail */}
             <div className="flex-1 min-h-[250px] sm:min-h-[300px] lg:min-h-[350px]">
               <div className="h-full w-full">
-                <VideoPlayerFrame url={url} title={videoInfo.title} />
+                <PinterestThumbnail
+                  thumbnailUrl={pinInfo.thumbnail}
+                  pinUrl={url}
+                  title={pinInfo.title}
+                />
               </div>
             </div>
           </motion.div>
         </div>
 
-        {/* Right Column - Scrollable Download Options */}
+        {/* Right Column - Download Options */}
         <div className="w-full xl:w-1/3 border-t xl:border-t-0 xl:border-l border-slate-200/50 dark:border-slate-700/50 flex flex-col xl:overflow-hidden">
           <div className="flex-1 xl:overflow-y-auto">
             <div className="p-4 lg:p-6 space-y-4 lg:space-y-6">
-              {/* Feedback Card - Help us improve / Request features */}
-              <FeedbackCard />
-
-              {/* Playlist Access Card - Provides access to playlist download features */}
-              <PlaylistAccessCard />
-
-              {/* Unified Download Card - Replaces both video and audio download cards */}
-              <UnifiedDownloadCard videoInfo={videoInfo} />
+              <UnifiedDownloadCard platform="pinterest" pinInfo={pinInfo} />
             </div>
           </div>
         </div>

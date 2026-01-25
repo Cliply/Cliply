@@ -61,10 +61,24 @@ const invoke = async (channel, data) => {
 contextBridge.exposeInMainWorld("electronAPI", {
   // video operations
   video: {
-    getInfo: (url) => invoke(IPC_CHANNELS.VIDEO_GET_INFO, { url }),
+    getInfo: (options) => {
+      const payload = typeof options === "string" ? { url: options } : options
+      return invoke(IPC_CHANNELS.VIDEO_GET_INFO, payload)
+    },
     downloadCombined: (options) =>
       invoke(IPC_CHANNELS.VIDEO_DOWNLOAD_COMBINED, options),
     downloadAudio: (options) => invoke(IPC_CHANNELS.AUDIO_DOWNLOAD, options)
+  },
+
+  // pinterest operations
+  pinterest: {
+    getInfo: (url) =>
+      invoke(IPC_CHANNELS.VIDEO_GET_INFO, { url, platform: "pinterest" }),
+    download: (options) =>
+      invoke(IPC_CHANNELS.VIDEO_DOWNLOAD_COMBINED, {
+        ...options,
+        platform: "pinterest"
+      })
   },
 
   // download management

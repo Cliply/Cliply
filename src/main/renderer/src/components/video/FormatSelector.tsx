@@ -1,6 +1,6 @@
 import { Button } from "@/components/ui/button"
 import type { VideoFormat } from "@/lib/api"
-import { useAppStore } from "@/lib/store"
+import { useYouTubeStore } from "@/lib/youtubeStore"
 import { cn } from "@/lib/utils"
 import { motion } from "framer-motion"
 import { Download, Headphones, Video } from "lucide-react"
@@ -21,7 +21,7 @@ export function FormatSelector({
     selectedAudioFormat,
     setSelectedVideoFormat,
     setSelectedAudioFormat
-  } = useAppStore()
+  } = useYouTubeStore()
 
   const handleDownload = () => {
     // TODO: Implement download functionality in next phase

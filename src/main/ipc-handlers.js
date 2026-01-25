@@ -197,7 +197,8 @@ class IPCHandlers {
   async handleGetVideoInfo(event, data) {
     try {
       this.validateRequest(data, ["url"])
-      const { url } = data
+      const { url, platform } = data
+      const targetPlatform = String(platform).toLowerCase() ?? "youtube"
 
       if (!this.serverManager.isServerReady()) {
         return this.createError(
@@ -207,8 +208,17 @@ class IPCHandlers {
         )
       }
 
+      let endpoint = null
+      if (targetPlatform === "youtube") {
+        endpoint = APP_CONFIG.PYTHON_SERVER.ENDPOINTS.VIDEO_INFO
+      } else if (targetPlatform === "pinterest") {
+        endpoint = APP_CONFIG.PYTHON_SERVER.ENDPOINTS.PINTEREST_INFO
+      } else {
+        return this.createError("Unsupported platform", "Please use YouTube or Pinterest")
+      }
+
       const response = await this.serverManager.makeRequest(
-        APP_CONFIG.PYTHON_SERVER.ENDPOINTS.VIDEO_INFO,
+        endpoint,
         {
           method: "POST",
           body: JSON.stringify({ url })
@@ -234,18 +244,31 @@ class IPCHandlers {
     let video_format_id = "unknown" // default for error tracking
 
     try {
+      const targetPlatform = data?.platform ? String(data.platform).toLowerCase() : "youtube"
+      if (targetPlatform !== "youtube" && targetPlatform !== "pinterest") {
+        return this.createError("Unsupported platform", "Please use YouTube or Pinterest")
+      }
+
       // validate input
-      this.validateRequest(data, ["url", "video_format_id", "audio_format_id"])
+      if (targetPlatform === "youtube") {
+        this.validateRequest(data, ["url", "video_format_id", "audio_format_id"])
+      } else {
+        this.validateRequest(data, ["url"])
+      }
       const {
         url,
         video_format_id: videoFormatId,
         audio_format_id: audioFormatId,
         time_range,
-        title: requestTitle = "video"
+        title: requestTitle = "video",
+        format_id: pinterestFormatId
       } = data
 
       title = requestTitle
-      video_format_id = videoFormatId
+      video_format_id =
+        targetPlatform === "pinterest"
+          ? pinterestFormatId || "pinterest"
+          : videoFormatId
 
       // check python server
       if (!this.serverManager.isServerReady()) {
@@ -268,24 +291,32 @@ class IPCHandlers {
       this.activeDownloads.get(downloadId).status = "downloading"
 
       try {
-        // prepare request
-        const requestData = {
-          url,
-          video_format_id: videoFormatId,
-          audio_format_id: audioFormatId
-        }
-        if (time_range) {
-          requestData.time_range = time_range
+        let endpoint = null
+        let requestData = null
+
+        if (targetPlatform === "youtube") {
+          endpoint = APP_CONFIG.PYTHON_SERVER.ENDPOINTS.DOWNLOAD_COMBINED
+          requestData = {
+            url,
+            video_format_id: videoFormatId,
+            audio_format_id: audioFormatId
+          }
+          if (time_range) {
+            requestData.time_range = time_range
+          }
+        } else {
+          endpoint = APP_CONFIG.PYTHON_SERVER.ENDPOINTS.PINTEREST_DOWNLOAD
+          requestData = { url }
+          if (pinterestFormatId) {
+            requestData.format_id = pinterestFormatId
+          }
         }
 
         // download via python server
-        const response = await this.serverManager.makeRequest(
-          APP_CONFIG.PYTHON_SERVER.ENDPOINTS.DOWNLOAD_COMBINED,
-          {
-            method: "POST",
-            body: JSON.stringify(requestData)
-          }
-        )
+        const response = await this.serverManager.makeRequest(endpoint, {
+          method: "POST",
+          body: JSON.stringify(requestData)
+        })
 
         const result = await response.json()
 

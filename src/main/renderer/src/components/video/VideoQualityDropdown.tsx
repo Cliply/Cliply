@@ -1,7 +1,7 @@
 import { Button } from "@/components/ui/button"
 import type { VideoFormat, VideoQualityOption } from "@/lib/api"
 import { getVideoQualityOptions, selectBestAudioFormat } from "@/lib/api"
-import { useAppStore } from "@/lib/store"
+import { useYouTubeStore } from "@/lib/youtubeStore"
 import { cn } from "@/lib/utils"
 import { motion } from "framer-motion"
 import { Check, ChevronDown, Headphones, Video } from "lucide-react"
@@ -22,7 +22,7 @@ export function VideoQualityDropdown({
   className,
   onOpenChange
 }: VideoQualityDropdownProps) {
-  const { selectedVideoQuality, setSelectedVideoQuality } = useAppStore()
+  const { selectedVideoQuality, setSelectedVideoQuality } = useYouTubeStore()
   const [isOpen, setIsOpen] = useState(false)
 
   const qualityOptions = getVideoQualityOptions(videoFormats)

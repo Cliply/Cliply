@@ -28,7 +28,9 @@ const APP_CONFIG = {
       ROOT: "/",
       VIDEO_INFO: "/api/video/info",
       DOWNLOAD_COMBINED: "/api/video/download-combined",
-      DOWNLOAD_AUDIO: "/api/audio/download"
+      DOWNLOAD_AUDIO: "/api/audio/download",
+      PINTEREST_INFO: "/api/pinterest/info",
+      PINTEREST_DOWNLOAD: "/api/pinterest/download"
     }
   },
 

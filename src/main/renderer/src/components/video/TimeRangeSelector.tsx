@@ -4,7 +4,7 @@ import {
   timeToSeconds,
   validateTimeRange
 } from "@/lib/api"
-import { useAppStore } from "@/lib/store"
+import { useYouTubeStore } from "@/lib/youtubeStore"
 import { cn } from "@/lib/utils"
 import { motion } from "framer-motion"
 import { Clock } from "lucide-react"
@@ -19,7 +19,7 @@ export function TimeRangeSelector({
   maxDuration,
   className
 }: TimeRangeSelectorProps) {
-  const { audioTimeRange, setAudioTimeRange } = useAppStore()
+  const { audioTimeRange, setAudioTimeRange } = useYouTubeStore()
   const [startTimeInput, setStartTimeInput] = useState("00:00")
   const [endTimeInput, setEndTimeInput] = useState(secondsToTime(maxDuration))
   const [validationError, setValidationError] = useState<string | null>(null)
