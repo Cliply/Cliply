@@ -1,0 +1,192 @@
+name: Build Release
+
+# when to run this workflow
+on:
+  # run when you push a version tag like v0.2.0
+  push:
+    tags:
+      - 'v*'
+  
+  # also allow manual trigger from GitHub UI
+  workflow_dispatch:
+
+jobs:
+  # ============================================
+  # macOS Build (runs on Apple Silicon runner)
+  # ============================================
+  build-macos:
+    runs-on: macos-14  # Apple Silicon (arm64) runner
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Download FFmpeg for macOS
+        run: |
+          # download from our binaries release
+          mkdir -p binaries/macos
+          curl -L -o binaries/macos/ffmpeg \
+            "https://github.com/${{ github.repository }}/releases/download/binaries/ffmpeg"
+          chmod +x binaries/macos/ffmpeg
+          echo "FFmpeg installed:"
+          binaries/macos/ffmpeg -version | head -1
+
+      - name: Download Deno for macOS
+        run: |
+          # download from our binaries release
+          mkdir -p binaries/deno/macos
+          curl -L -o binaries/deno/macos/deno \
+            "https://github.com/${{ github.repository }}/releases/download/binaries/deno"
+          chmod +x binaries/deno/macos/deno
+          echo "Deno installed:"
+          binaries/deno/macos/deno --version | head -1
+
+      - name: Install root dependencies
+        run: npm ci
+
+      - name: Install renderer dependencies
+        run: npm run install:renderer
+
+      - name: Build renderer
+        run: npm run build:renderer
+
+      - name: Setup Python runtime and dependencies
+        run: |
+          # this downloads portable Python and installs all pip packages
+          npm run setup:python-runtime
+
+      - name: Install Python dependencies
+        run: npm run setup:python-deps
+
+      - name: Verify Python dependencies installed
+        run: |
+          # verify fastapi and yt-dlp are installed in the macOS Python runtime
+          PYTHON_EXE="python-runtime/darwin-arm64/bin/python3"
+          
+          echo "Checking Python installation..."
+          $PYTHON_EXE --version
+          
+          echo "Checking fastapi..."
+          $PYTHON_EXE -c "import fastapi; print(f'fastapi {fastapi.__version__}')"
+          
+          echo "Checking yt-dlp..."
+          $PYTHON_EXE -c "import yt_dlp; print(f'yt-dlp {yt_dlp.version.__version__}')"
+          
+          echo "Checking uvicorn..."
+          $PYTHON_EXE -c "import uvicorn; print('uvicorn OK')"
+          
+          echo "All Python dependencies verified!"
+
+      - name: Build macOS app
+        run: |
+          # build without publishing
+          npx electron-builder --mac --publish never
+        env:
+          # disable code signing for CI builds (optional - remove if you have signing set up)
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+
+      - name: Upload macOS artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: cliply-macos
+          path: |
+            dist/*.dmg
+            dist/*.zip
+            dist/latest-mac.yml
+          retention-days: 30
+
+  # ============================================
+  # Windows Build (runs on Windows runner)
+  # ============================================
+  build-windows:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Download FFmpeg for Windows
+        shell: pwsh
+        run: |
+          # download from our binaries release
+          New-Item -ItemType Directory -Force -Path "binaries/windows"
+          $url = "https://github.com/${{ github.repository }}/releases/download/binaries/ffmpeg.exe"
+          Invoke-WebRequest -Uri $url -OutFile "binaries/windows/ffmpeg.exe"
+          
+          Write-Host "FFmpeg installed:"
+          & "binaries/windows/ffmpeg.exe" -version | Select-Object -First 1
+
+      - name: Download Deno for Windows
+        shell: pwsh
+        run: |
+          # download from our binaries release
+          New-Item -ItemType Directory -Force -Path "binaries/deno/windows"
+          $url = "https://github.com/${{ github.repository }}/releases/download/binaries/deno.exe"
+          Invoke-WebRequest -Uri $url -OutFile "binaries/deno/windows/deno.exe"
+          
+          Write-Host "Deno installed:"
+          & "binaries/deno/windows/deno.exe" --version | Select-Object -First 1
+
+      - name: Install root dependencies
+        run: npm ci
+
+      - name: Install renderer dependencies
+        run: npm run install:renderer
+
+      - name: Build renderer
+        run: npm run build:renderer
+
+      - name: Setup Python runtime and dependencies
+        shell: pwsh
+        run: |
+          # this downloads portable Python and installs all pip packages
+          npm run setup:python-runtime
+
+      - name: Install Python dependencies
+        run: npm run setup:python-deps
+
+      - name: Verify Python dependencies installed
+        shell: pwsh
+        run: |
+          # verify fastapi and yt-dlp are installed in the Windows Python runtime
+          $pythonExe = "python-runtime/win32-x64/python.exe"
+          
+          Write-Host "Checking Python installation..."
+          & $pythonExe --version
+          
+          Write-Host "Checking fastapi..."
+          & $pythonExe -c "import fastapi; print(f'fastapi {fastapi.__version__}')"
+          
+          Write-Host "Checking yt-dlp..."
+          & $pythonExe -c "import yt_dlp; print(f'yt-dlp {yt_dlp.version.__version__}')"
+          
+          Write-Host "Checking uvicorn..."
+          & $pythonExe -c "import uvicorn; print('uvicorn OK')"
+          
+          Write-Host "All Python dependencies verified!"
+
+      - name: Build Windows app
+        run: |
+          # build without publishing
+          npx electron-builder --win --publish never
+
+      - name: Upload Windows artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: cliply-windows
+          path: |
+            dist/*.exe
+            dist/latest.yml
+          retention-days: 30
