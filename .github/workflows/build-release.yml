@@ -31,8 +31,9 @@ jobs:
         run: |
           # download from our binaries release
           mkdir -p binaries/macos
-          curl -L -o binaries/macos/ffmpeg \
+          curl -fL --retry 3 --retry-delay 2 -o binaries/macos/ffmpeg \
             "https://github.com/${{ github.repository }}/releases/download/binaries/ffmpeg"
+          test -s binaries/macos/ffmpeg
           chmod +x binaries/macos/ffmpeg
           echo "FFmpeg installed:"
           binaries/macos/ffmpeg -version | head -1
@@ -41,8 +42,9 @@ jobs:
         run: |
           # download from our binaries release
           mkdir -p binaries/deno/macos
-          curl -L -o binaries/deno/macos/deno \
+          curl -fL --retry 3 --retry-delay 2 -o binaries/deno/macos/deno \
             "https://github.com/${{ github.repository }}/releases/download/binaries/deno"
+          test -s binaries/deno/macos/deno
           chmod +x binaries/deno/macos/deno
           echo "Deno installed:"
           binaries/deno/macos/deno --version | head -1
@@ -60,9 +62,6 @@ jobs:
         run: |
           # this downloads portable Python and installs all pip packages
           npm run setup:python-runtime
-
-      - name: Install Python dependencies
-        run: npm run setup:python-deps
 
       - name: Verify Python dependencies installed
         run: |
@@ -121,9 +120,12 @@ jobs:
         shell: pwsh
         run: |
           # download from our binaries release
+          $ErrorActionPreference = "Stop"
           New-Item -ItemType Directory -Force -Path "binaries/windows"
           $url = "https://github.com/${{ github.repository }}/releases/download/binaries/ffmpeg.exe"
           Invoke-WebRequest -Uri $url -OutFile "binaries/windows/ffmpeg.exe"
+          if (-not (Test-Path "binaries/windows/ffmpeg.exe")) { throw "ffmpeg.exe download failed" }
+          if ((Get-Item "binaries/windows/ffmpeg.exe").Length -lt 1024) { throw "ffmpeg.exe looks too small (bad download?)" }
           
           Write-Host "FFmpeg installed:"
           & "binaries/windows/ffmpeg.exe" -version | Select-Object -First 1
@@ -132,9 +134,12 @@ jobs:
         shell: pwsh
         run: |
           # download from our binaries release
+          $ErrorActionPreference = "Stop"
           New-Item -ItemType Directory -Force -Path "binaries/deno/windows"
           $url = "https://github.com/${{ github.repository }}/releases/download/binaries/deno.exe"
           Invoke-WebRequest -Uri $url -OutFile "binaries/deno/windows/deno.exe"
+          if (-not (Test-Path "binaries/deno/windows/deno.exe")) { throw "deno.exe download failed" }
+          if ((Get-Item "binaries/deno/windows/deno.exe").Length -lt 1024) { throw "deno.exe looks too small (bad download?)" }
           
           Write-Host "Deno installed:"
           & "binaries/deno/windows/deno.exe" --version | Select-Object -First 1
@@ -153,9 +158,6 @@ jobs:
         run: |
           # this downloads portable Python and installs all pip packages
           npm run setup:python-runtime
-
-      - name: Install Python dependencies
-        run: npm run setup:python-deps
 
       - name: Verify Python dependencies installed
         shell: pwsh
