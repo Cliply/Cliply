@@ -1,5 +1,5 @@
-import { ModeToggle } from "@/components/ui/mode-toggle"
 import { MenuVertical } from "@/components/ui/menu-vertical"
+import { ModeToggle } from "@/components/ui/mode-toggle"
 import { updaterApi } from "@/lib/api"
 import { motion } from "framer-motion"
 import { Link } from "react-router-dom"
@@ -7,7 +7,6 @@ import { toast } from "sonner"
 import { SearchCard } from "./SearchCard"
 
 export function HeroSection() {
-
   const handleCheckForUpdates = async () => {
     try {
       await updaterApi.checkForUpdates()
@@ -45,6 +44,27 @@ export function HeroSection() {
       <div className="absolute top-6 right-6 z-20">
         <ModeToggle />
       </div>
+
+      {/* Latest announcement - top center */}
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ duration: 0.8, delay: 0.1 }}
+        className="absolute top-6 left-1/2 -translate-x-1/2 z-20"
+      >
+        <a
+          href="https://github.com/Cliply/Cliply/discussions"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-xs text-slate-500 dark:text-slate-400 hover:text-cyan-500 dark:hover:text-cyan-400 transition-colors duration-200 hover:underline underline-offset-4"
+          style={{
+            fontFamily:
+              'Geist Mono, ui-monospace, SFMono-Regular, "SF Mono", Consolas, "Liberation Mono", Menlo, monospace'
+          }}
+        >
+          latest announcement
+        </a>
+      </motion.div>
 
       {/* Dark gradient background */}
       <div className="absolute inset-0 bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 dark:opacity-100 opacity-0 transition-opacity duration-300" />
@@ -120,9 +140,9 @@ export function HeroSection() {
           >
             disclaimer
           </Link>
-          
+
           <span className="text-slate-400 dark:text-slate-600">•</span>
-          
+
           <a
             href="https://github.com/Cliply/Cliply/"
             target="_blank"
