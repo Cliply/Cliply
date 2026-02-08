@@ -33,23 +33,22 @@ class PythonRuntimeSetup {
     try {
       console.log("setting up python runtime...")
 
-      // check if we're in ci/build environment (setup all platforms)
-      const setupAll =
-        process.env.CI ||
-        process.env.BUILD_ALL_PLATFORMS ||
-        process.argv.includes("--all")
-
       // check if a specific target platform is requested
       const targetPlatform = process.env.BUILD_TARGET_PLATFORM
 
-      if (setupAll) {
-        console.log(
-          "ci/build environment detected - setting up all platforms..."
-        )
-        await this.setupAllPlatforms()
-      } else if (targetPlatform) {
+      // check if we should setup all platforms (explicit opt-in only)
+      const setupAll =
+        process.env.BUILD_ALL_PLATFORMS ||
+        process.argv.includes("--all")
+
+      if (targetPlatform) {
         console.log(`setting up target platform: ${targetPlatform}`)
         await this.setupPlatform(targetPlatform)
+      } else if (setupAll) {
+        console.log(
+          "setting up all platforms..."
+        )
+        await this.setupAllPlatforms()
       } else {
         console.log("setting up current platform only...")
         await this.setupCurrentPlatform()
@@ -350,7 +349,7 @@ class PythonRuntimeSetup {
       return new Promise((resolve, reject) => {
         console.log("installing pip...")
 
-        const pipInstallProcess = spawn(pythonExe, [getPipPath, "--user"], {
+        const pipInstallProcess = spawn(pythonExe, [getPipPath], {
           stdio: ["pipe", "pipe", "pipe"],
           cwd: runtimePath,
           env: { ...process.env, PYTHONUNBUFFERED: "1" }
@@ -401,7 +400,7 @@ class PythonRuntimeSetup {
 
       const pipProcess = spawn(
         pythonExe,
-        ["-m", "pip", "install", "--upgrade", "pip", "--user"],
+        ["-m", "pip", "install", "--upgrade", "pip"],
         {
           stdio: ["pipe", "pipe", "pipe"],
           env: { ...process.env, PYTHONUNBUFFERED: "1" }
@@ -435,7 +434,6 @@ class PythonRuntimeSetup {
         "-m",
         "pip",
         "install",
-        "--user", // install to user directory within portable python
         "--no-warn-script-location",
         "--no-cache-dir",
         "--disable-pip-version-check",
@@ -451,9 +449,7 @@ class PythonRuntimeSetup {
         cwd: path.join(__dirname, ".."),
         env: {
           ...process.env,
-          PYTHONUNBUFFERED: "1",
-          // ensure packages install to portable python user directory
-          PYTHONUSERBASE: path.dirname(pythonExe)
+          PYTHONUNBUFFERED: "1"
         }
       })
 
