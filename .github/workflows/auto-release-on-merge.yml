@@ -57,6 +57,6 @@ jobs:
         if: steps.tag_check.outputs.exists == 'true'
         run: |
           echo "Tag already existed, triggering build-release via workflow_dispatch"
-          gh workflow run build-release.yml
+          gh workflow run build-release.yml --ref "${{ steps.version.outputs.tag }}"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

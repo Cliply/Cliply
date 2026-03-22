@@ -38,7 +38,8 @@ jobs:
       - name: Get latest yt-dlp release from GitHub
         id: latest
         run: |
-          RELEASE_JSON=$(curl -sf https://api.github.com/repos/yt-dlp/yt-dlp/releases/latest)
+          RELEASE_JSON=$(curl -sf -H "Authorization: Bearer ${{ github.token }}" \
+            https://api.github.com/repos/yt-dlp/yt-dlp/releases/latest)
 
           if [ -z "$RELEASE_JSON" ]; then
             echo "::error::Failed to fetch latest yt-dlp release from GitHub"
@@ -157,30 +158,36 @@ jobs:
           RELEASE_URL="${{ steps.latest.outputs.release_url }}"
           BRANCH="auto-update/yt-dlp-${LATEST}"
 
-          PR_BODY="## yt-dlp dependency update
+          PR_BODY=$(cat <<'PRBODY'
+## yt-dlp dependency update
 
-          | | Version |
-          |---|---|
-          | **yt-dlp (old)** | \`${CURRENT}\` |
-          | **yt-dlp (new)** | \`${LATEST}\` |
-          | **App version** | \`v${APP_VERSION}\` |
+| | Version |
+|---|---|
+| **yt-dlp (old)** | `CURRENT_VERSION` |
+| **yt-dlp (new)** | `LATEST_VERSION` |
+| **App version** | `vAPP_VERSION_VAL` |
 
-          ### What changed
-          - Updated \`.github/.ytdlp-version\` tracking file
-          - Updated \`python/requirements.txt\` minimum version floor
-          - Bumped app patch version in \`package.json\`
+### What changed
+- Updated `.github/.ytdlp-version` tracking file
+- Updated `python/requirements.txt` minimum version floor
+- Bumped app patch version in `package.json`
 
-          ### yt-dlp release notes
-          ${RELEASE_URL}
+### yt-dlp release notes
+RELEASE_URL_VAL
 
-          ---
-          *This PR was created automatically by the [auto-update-ytdlp](.github/workflows/auto-update-ytdlp.yml) workflow.*
-          *Merging this PR will automatically create a release tag and trigger builds for macOS and Windows.*"
-
-          PR_BODY=$(echo "$PR_BODY" | sed 's/^          //')
+---
+*This PR was created automatically by the [auto-update-ytdlp](.github/workflows/auto-update-ytdlp.yml) workflow.*
+*Merging this PR will automatically create a release tag and trigger builds for macOS and Windows.*
+PRBODY
+)
+          PR_BODY="${PR_BODY//CURRENT_VERSION/${CURRENT}}"
+          PR_BODY="${PR_BODY//LATEST_VERSION/${LATEST}}"
+          PR_BODY="${PR_BODY//APP_VERSION_VAL/${APP_VERSION}}"
+          PR_BODY="${PR_BODY//RELEASE_URL_VAL/${RELEASE_URL}}"
 
           PR_URL=$(gh pr create \
             --head "$BRANCH" \
+            --base "${{ github.event.repository.default_branch }}" \
             --title "chore: update yt-dlp to ${LATEST}" \
             --body "$PR_BODY")
 
