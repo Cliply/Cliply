@@ -7,7 +7,7 @@ uvicorn[standard]==0.24.0
 
 # youtube downloader library
 # Install with [default] extra to get yt-dlp-ejs (required for YouTube)
-yt-dlp[default]>=2026.06.09
+yt-dlp[default]>=2026.07.04
 
 # http and async support
 httpx==0.25.2
