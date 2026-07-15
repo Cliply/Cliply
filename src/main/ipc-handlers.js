@@ -68,11 +68,12 @@ class IPCHandlers {
   createError(
     message,
     suggestion = "Please try again",
-    code = "GENERAL_ERROR"
+    code = "GENERAL_ERROR",
+    extra = null
   ) {
     return {
       success: false,
-      error: { message, suggestion, code }
+      error: { message, suggestion, code, ...(extra || {}) }
     }
   }
 
@@ -411,7 +412,12 @@ class IPCHandlers {
 
       return this.createError(
         shortErrorMessage(error.message),
-        "Please try again or check your connection"
+        "Please try again or check your connection",
+        "DOWNLOAD_FAILED",
+        {
+          details: error.message,
+          category: categorizeError(error.message)
+        }
       )
     }
   }
@@ -548,7 +554,12 @@ class IPCHandlers {
 
       return this.createError(
         shortErrorMessage(error.message),
-        "Please try again or check your connection"
+        "Please try again or check your connection",
+        "DOWNLOAD_FAILED",
+        {
+          details: error.message,
+          category: categorizeError(error.message)
+        }
       )
     }
   }

@@ -17,6 +17,7 @@ from contextlib import asynccontextmanager
 
 import platform
 import subprocess
+import yt_dlp
 from shared_utils import (
     APP_CONFIG_DIR,
     executor,
@@ -162,6 +163,7 @@ async def root():
         },
         "ffmpeg_available": FFMPEG_PATH is not None,
         "ffmpeg_path": str(FFMPEG_PATH) if FFMPEG_PATH else None,
+        "yt_dlp_version": yt_dlp.version.__version__,
         "deno_available": DENO_PATH is not None,
         "deno_path": str(DENO_PATH) if DENO_PATH else None
     }
