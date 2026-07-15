@@ -15,7 +15,7 @@
     "dev": "npm run dev:renderer & npm run dev:main",
     "dev:main": "cross-env NODE_ENV=development nodemon --watch src/main --exec electron .",
     "dev:renderer": "cd src/main/renderer && npm run dev",
-    "dev:python": "cd python && python server.py",
+    "dev:python": "cd python && { test -x venv/bin/python && venv/bin/python server.py || python server.py; }",
     "setup:python": "cd python && python -m pip install -r requirements.txt",
     "setup:python-deps": "node scripts/install-python-deps.js",
     "setup:python:venv": "cd python && python -m venv venv && source venv/bin/activate && pip install -r requirements.txt",
