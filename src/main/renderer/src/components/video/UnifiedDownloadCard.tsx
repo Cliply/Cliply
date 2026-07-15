@@ -1,6 +1,7 @@
 import { Button } from "@/components/ui/button"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import {
+  DownloadError,
   pinterestApi,
   tiktokApi,
   systemApi,
@@ -9,6 +10,7 @@ import {
   type TikTokVideoInfoResponse,
   type VideoFormat
 } from "@/lib/api"
+import { reportActions } from "@/lib/reportStore"
 import { useServerStatus } from "@/lib/hooks/useServerStatus"
 import { usePinterestStore } from "@/lib/pinterestStore"
 import { useTikTokStore } from "@/lib/tiktokStore"
@@ -286,7 +288,20 @@ function PinterestDownloadCard({
       const message = error instanceof Error ? error.message : "Failed to download video"
       if (message.includes("Download engine starting")) { showServerStartingToast() }
       else if (message.includes("network") || message.includes("fetch")) { showServerOverwhelmedToast() }
-      else { toast.error("Download failed", { description: message }) }
+      else {
+        reportActions.stage({
+          shortMessage: message,
+          details: error instanceof DownloadError ? error.details : undefined,
+          category: error instanceof DownloadError ? error.category : undefined,
+          platform: "pinterest",
+          downloadType: "video",
+          videoUrl: url
+        })
+        toast.error("Download failed", {
+          description: message,
+          action: { label: "Report", onClick: () => reportActions.open() }
+        })
+      }
     } finally {
       setIsDownloading(false)
     }
@@ -328,7 +343,20 @@ function TikTokDownloadCard({
       const message = error instanceof Error ? error.message : "Failed to download video"
       if (message.includes("Download engine starting")) { showServerStartingToast() }
       else if (message.includes("network") || message.includes("fetch")) { showServerOverwhelmedToast() }
-      else { toast.error("Download failed", { description: message }) }
+      else {
+        reportActions.stage({
+          shortMessage: message,
+          details: error instanceof DownloadError ? error.details : undefined,
+          category: error instanceof DownloadError ? error.category : undefined,
+          platform: "tiktok",
+          downloadType: "video",
+          videoUrl: url
+        })
+        toast.error("Download failed", {
+          description: message,
+          action: { label: "Report", onClick: () => reportActions.open() }
+        })
+      }
     } finally {
       setIsDownloading(false)
     }

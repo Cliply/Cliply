@@ -1,10 +1,12 @@
 import {
+  DownloadError,
   downloadApi,
   systemApi,
   videoApi,
   type DownloadProgress,
   type VideoDownloadRequest
 } from "@/lib/api"
+import { reportActions } from "@/lib/reportStore"
 import { useMutation } from "@tanstack/react-query"
 import { useEffect, useRef, useState } from "react"
 import { toast } from "sonner"
@@ -45,8 +47,11 @@ export const useVideoDownload = () => {
     }
   }, [])
 
+  const lastUrlRef = useRef<string | undefined>(undefined)
+
   const mutation = useMutation({
     mutationFn: async (request: VideoDownloadRequest) => {
+      lastUrlRef.current = request.url
       setDownloadState({
         status: "starting",
         progress: 0,
@@ -96,8 +101,15 @@ export const useVideoDownload = () => {
 
             // Handle failure
             if (progressData.status === "failed") {
+              reportActions.stage({
+                shortMessage: progressData.error || "Download failed",
+                platform: "youtube",
+                downloadType: "video",
+                videoUrl: lastUrlRef.current
+              })
               toast.error("Video download failed", {
-                description: progressData.error || "Unknown error occurred"
+                description: progressData.error || "Unknown error occurred",
+                action: { label: "Report", onClick: () => reportActions.open() }
               })
 
               // Cleanup listener after failure
@@ -122,8 +134,17 @@ export const useVideoDownload = () => {
         message: `Failed to start download: ${error.message}`
       }))
 
+      reportActions.stage({
+        shortMessage: error.message,
+        details: error instanceof DownloadError ? error.details : undefined,
+        category: error instanceof DownloadError ? error.category : undefined,
+        platform: "youtube",
+        downloadType: "video",
+        videoUrl: lastUrlRef.current
+      })
       toast.error("Failed to start video download", {
-        description: error.message
+        description: error.message,
+        action: { label: "Report", onClick: () => reportActions.open() }
       })
     }
   })
