@@ -21,7 +21,9 @@ from shared_utils import (
     sanitize_filename,
     format_duration,
     seconds_to_time_string,
-    get_downloads_directory
+    get_downloads_directory,
+    FFmpegLogger,
+    format_download_error,
 )
 
 
@@ -478,6 +480,7 @@ class YouTubeService:
     async def download_combined(self, request: CombinedDownloadRequest, download_dir: Path) -> dict:
         download_id = str(uuid.uuid4())
         self._track_download(download_id, "combined", request.url)
+        ffmpeg_logger = FFmpegLogger()
         try:
             info = await extract_video_info_with_fallback(request.url, self.ffmpeg_path, self.deno_path)
             title = sanitize_filename(info.get('title', 'video'))
@@ -499,6 +502,7 @@ class YouTubeService:
             base_opts = {
                 'outtmpl': str(final_path),
                 'merge_output_format': 'mp4',
+                'logger': ffmpeg_logger,
             }
             
             if format_string is not None:
@@ -543,13 +547,17 @@ class YouTubeService:
         except HTTPException:
             raise
         except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Combined download failed: {str(e)}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"Combined download failed: {format_download_error(e, ffmpeg_logger)}"
+            )
         finally:
             self._untrack_download(download_id)
 
     async def download_audio(self, request: AudioDownloadRequest, download_dir: Path) -> dict:
         download_id = str(uuid.uuid4())
         self._track_download(download_id, "audio", request.url)
+        ffmpeg_logger = FFmpegLogger()
         try:
             info = await extract_video_info_with_fallback(request.url, self.ffmpeg_path, self.deno_path)
             title = sanitize_filename(info.get('title', 'audio'))
@@ -570,6 +578,7 @@ class YouTubeService:
             base_opts = {
                 'format': format_string,
                 'outtmpl': str(final_path),
+                'logger': ffmpeg_logger,
             }
             
             base_opts = get_ydl_opts_with_time_range(base_opts, request.time_range, request.precise_cut)
@@ -611,7 +620,10 @@ class YouTubeService:
         except HTTPException:
             raise
         except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Audio download failed: {str(e)}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"Audio download failed: {format_download_error(e, ffmpeg_logger)}"
+            )
         finally:
             self._untrack_download(download_id)
 

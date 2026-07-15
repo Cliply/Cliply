@@ -12,6 +12,11 @@ const {
 // get trackEvent from global
 const getTrackEvent = () => global.trackEvent || (() => {})
 
+// errors from the python side come as "<short user message>\n\n<full technical>".
+// the first paragraph is shown to the user; the full string is sent to analytics.
+const shortErrorMessage = (message) =>
+  (message || "").split(/\n\s*\n/, 1)[0].trim() || "Download failed"
+
 class IPCHandlers {
   constructor(services, autoUpdater = null) {
     this.serverManager = services.serverManager
@@ -387,7 +392,7 @@ class IPCHandlers {
       try {
         const eventData = {
           error_type: categorizeError(error.message),
-          error_message: sanitizeTitle(error.message),
+          error_message: error.message,
           type: "combined",
           platform: data?.platform ? String(data.platform).toLowerCase() : "youtube",
           video_title: sanitizeTitle(title),
@@ -405,7 +410,7 @@ class IPCHandlers {
       }
 
       return this.createError(
-        error.message || "Download failed",
+        shortErrorMessage(error.message),
         "Please try again or check your connection"
       )
     }
@@ -525,7 +530,7 @@ class IPCHandlers {
         const actualFormatId = data?.format_id || format_id
         const eventData = {
           error_type: categorizeError(error.message),
-          error_message: sanitizeTitle(error.message),
+          error_message: error.message,
           type: "audio",
           video_title: sanitizeTitle(title),
           format_quality: extractQuality(actualFormatId)
@@ -542,7 +547,7 @@ class IPCHandlers {
       }
 
       return this.createError(
-        error.message || "Download failed",
+        shortErrorMessage(error.message),
         "Please try again or check your connection"
       )
     }

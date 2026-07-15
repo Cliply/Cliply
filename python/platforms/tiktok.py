@@ -15,7 +15,9 @@ from fastapi import HTTPException
 from shared_utils import (
     executor,
     sanitize_filename,
-    format_duration
+    format_duration,
+    FFmpegLogger,
+    format_download_error,
 )
 
 
@@ -196,6 +198,7 @@ class TikTokService:
     async def download_video(self, request: TikTokDownloadRequest, download_dir: Path) -> dict:
         download_id = str(uuid.uuid4())
         self._track_download(download_id, request.url)
+        ffmpeg_logger = FFmpegLogger()
 
         try:
             opts = get_tiktok_ydl_opts({}, self.ffmpeg_path, self.deno_path)
@@ -207,7 +210,8 @@ class TikTokService:
             final_filename = f"{title}_tiktok_{timestamp}.%(ext)s"
             base_opts = {
                 'outtmpl': str(download_dir / final_filename),
-                'merge_output_format': 'mp4'
+                'merge_output_format': 'mp4',
+                'logger': ffmpeg_logger,
             }
 
             download_opts = get_tiktok_ydl_opts(base_opts, self.ffmpeg_path, self.deno_path)
@@ -255,6 +259,9 @@ class TikTokService:
             mapped = _parse_tiktok_error(error_msg)
             if mapped:
                 raise mapped
-            raise HTTPException(status_code=500, detail=f"TikTok download failed: {error_msg}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"TikTok download failed: {format_download_error(e, ffmpeg_logger)}"
+            )
         finally:
             self._untrack_download(download_id)

@@ -6,7 +6,31 @@ const os = require("os")
 
 // categorize errors
 function categorizeError(errorMessage) {
-  const message = errorMessage.toLowerCase()
+  const message = (errorMessage || "").toLowerCase()
+
+  if (
+    message.includes("antivirus") ||
+    message.includes("killed") ||
+    message.includes("sigkill")
+  ) {
+    return "FFMPEG_AV_BLOCKED"
+  }
+
+  if (message.includes("ffmpeg binary is missing")) {
+    return "FFMPEG_MISSING"
+  }
+
+  if (message.includes("no space") || message.includes("disk full")) {
+    return "FFMPEG_DISK_FULL"
+  }
+
+  if (message.includes("moov atom") || message.includes("corrupted")) {
+    return "FFMPEG_CORRUPT_STREAM"
+  }
+
+  if (message.includes("ffmpeg exited with code") || message.includes("ffmpeg output:")) {
+    return "FFMPEG_ERROR"
+  }
 
   if (
     message.includes("network") ||

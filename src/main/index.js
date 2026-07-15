@@ -77,6 +77,7 @@ class CliplyApp {
   async initialize() {
     try {
       await this.validateEnvironment()
+      this.checkSupportedArchitecture()
 
       // set app properties
       app.setName("Cliply")
@@ -113,6 +114,24 @@ class CliplyApp {
       console.error("Environment validation failed:", error)
       throw error
     }
+  }
+
+  // Intel Macs are unsupported: the bundled FFmpeg is arm64-only, so a
+  // download would eventually fail with a cryptic "ffmpeg exited with code N"
+  // instead we exit early with a clear message.
+  checkSupportedArchitecture() {
+    if (process.platform !== "darwin") return
+    if (process.arch === "arm64") return
+
+    const message = "Cliply requires an Apple Silicon Mac (M1, M2, M3, or later)."
+    const detail =
+      "Intel-based Macs aren't supported by this build. " +
+      "The bundled video engine is compiled for Apple Silicon only. " +
+      "You can follow Intel support progress on our GitHub issues."
+
+    console.error(`${message} Detected arch: ${process.arch}`)
+    dialog.showErrorBox(message, detail)
+    app.exit(1)
   }
 
   // init services

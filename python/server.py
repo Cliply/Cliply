@@ -70,10 +70,13 @@ DENO_PATH = detect_deno_path()
 
 if FFMPEG_PATH:
     ffmpeg_dir = str(Path(FFMPEG_PATH).parent)
+    path_separator = os.pathsep
     current_path = os.environ.get('PATH', '')
-    if ffmpeg_dir not in current_path:
-        path_separator = ';' if platform.system() == 'Windows' else ':'
-        os.environ['PATH'] = f"{ffmpeg_dir}{path_separator}{current_path}"
+    path_entries = current_path.split(path_separator) if current_path else []
+    if ffmpeg_dir not in path_entries:
+        os.environ['PATH'] = (
+            f"{ffmpeg_dir}{path_separator}{current_path}" if current_path else ffmpeg_dir
+        )
 
 # Initialize cookie manager and YouTube service
 cookie_manager = CookieManager()
