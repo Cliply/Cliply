@@ -352,8 +352,9 @@ async def download_with_fallback(url: str, base_opts: dict, ffmpeg_path: Optiona
     await download_async(url, opts)
 
 
-async def extract_video_info_with_fallback(url: str, ffmpeg_path: Optional[str] = None, deno_path: Optional[str] = None) -> dict:
-    opts = get_enhanced_ydl_opts(None, ffmpeg_path, deno_path)
+async def extract_video_info_with_fallback(url: str, ffmpeg_path: Optional[str] = None, deno_path: Optional[str] = None, logger=None) -> dict:
+    base_opts = {'logger': logger} if logger else None
+    opts = get_enhanced_ydl_opts(base_opts, ffmpeg_path, deno_path)
     return await extract_info_async(url, opts)
 
 
@@ -482,7 +483,7 @@ class YouTubeService:
         self._track_download(download_id, "combined", request.url)
         ffmpeg_logger = FFmpegLogger()
         try:
-            info = await extract_video_info_with_fallback(request.url, self.ffmpeg_path, self.deno_path)
+            info = await extract_video_info_with_fallback(request.url, self.ffmpeg_path, self.deno_path, logger=ffmpeg_logger)
             title = sanitize_filename(info.get('title', 'video'))
             
             quality = get_quality_label(request.video_format_id)
@@ -559,7 +560,7 @@ class YouTubeService:
         self._track_download(download_id, "audio", request.url)
         ffmpeg_logger = FFmpegLogger()
         try:
-            info = await extract_video_info_with_fallback(request.url, self.ffmpeg_path, self.deno_path)
+            info = await extract_video_info_with_fallback(request.url, self.ffmpeg_path, self.deno_path, logger=ffmpeg_logger)
             title = sanitize_filename(info.get('title', 'audio'))
             
             quality = request.format_id.replace('_audio', '').replace('auto_audio', 'auto').replace('high_audio', 'high').replace('medium_audio', 'medium')

@@ -177,7 +177,7 @@ class PinterestService:
         ffmpeg_logger = FFmpegLogger()
 
         try:
-            opts = get_enhanced_ydl_opts({}, self.ffmpeg_path, self.deno_path)
+            opts = get_enhanced_ydl_opts({'logger': ffmpeg_logger}, self.ffmpeg_path, self.deno_path)
             info = await extract_info_async(request.url, opts)
             
             if not is_video_pin(info):

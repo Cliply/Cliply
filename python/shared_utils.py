@@ -234,7 +234,7 @@ def format_download_error(exc: Exception, logger: Optional['FFmpegLogger'] = Non
     if short != base:
         technical_parts.append(base)
     if tail and tail not in base:
-        technical_parts.append(f"FFmpeg output:\n{tail}")
+        technical_parts.append(f"Log output:\n{tail}")
 
     if not technical_parts:
         return redact_user_paths(short)

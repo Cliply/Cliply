@@ -201,7 +201,7 @@ class TikTokService:
         ffmpeg_logger = FFmpegLogger()
 
         try:
-            opts = get_tiktok_ydl_opts({}, self.ffmpeg_path, self.deno_path)
+            opts = get_tiktok_ydl_opts({'logger': ffmpeg_logger}, self.ffmpeg_path, self.deno_path)
             info = await extract_info_async(request.url, opts)
 
             title = sanitize_filename(info.get('title', 'tiktok_video'))
