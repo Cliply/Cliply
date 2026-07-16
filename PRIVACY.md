@@ -1,79 +1,79 @@
-# Privacy Policy
+# privacy
 
-_Last updated: April 22, 2026_
+_last updated: april 22, 2026_
 
-Cliply is an open-source desktop video downloader. We respect your privacy and keep data collection to an absolute minimum. This page explains exactly what we collect, why, and how you can opt out.
+hey. quick note on what cliply does (and doesn't) know about you.
 
-## TL;DR
+cliply started as a weekend project. it's free, open source, and we built it because we wanted a clean little app to grab videos without ads, bloat, or shady sites. that same idea carries over to privacy: we collect as little as possible, we tell you exactly what it is, and nothing is ever sold or shared.
 
-- We do **not** collect your name, email, IP address, or any account information.
-- We do **not** track browsing, see the videos you download, or scan your files.
-- We **do** collect anonymous crash and usage stats so we can fix bugs and keep the app working.
-- Everything happens on your device. Downloads go directly from the source to your disk — nothing passes through our servers.
+## the short version
 
-## What we collect
+- no logins. no accounts. no email. no ads.
+- we don't see the urls you paste, the videos you download, or anything in your folders.
+- your downloads go **directly** from the source (youtube, pinterest, tiktok, etc) to your disk. nothing passes through our servers. we don't even run one.
+- we do send a tiny bit of anonymous stats so we can spot bugs and keep the app working. details below.
 
-When the app is running, Cliply sends a small amount of anonymous telemetry to [Aptabase](https://aptabase.com) (an open-source, privacy-friendly analytics service hosted in the EU). Specifically:
+## what we send
 
-### `download_completed` event
-- Type of download (`combined`, `audio`)
-- Platform (`youtube`, `pinterest`, `tiktok`)
-- Video title (truncated, from the public metadata of the video you downloaded)
-- Selected format/quality (e.g. `1080p`)
-- File size in MB
+the app uses [aptabase](https://aptabase.com) — an open source, privacy-friendly analytics service hosted in the eu. it's the only thing that phones home. here's every single field it sends:
 
-### `download_failed` event
-- Same fields as above, plus:
-- The raw error message returned by yt-dlp or FFmpeg, with your user folder replaced by `~` before it leaves your machine (so `C:\Users\Jane Smith\...` becomes `C:\Users\~\...`).
+**when a download finishes** (`download_completed`)
+- type of download (`combined`, `audio`)
+- platform (`youtube`, `pinterest`, `tiktok`)
+- video title (from the public metadata of the video you downloaded)
+- quality you picked (e.g. `1080p`)
+- final file size in mb
 
-### Automatic metadata added by Aptabase
-- App version (e.g. `1.4.2`)
-- Operating system and version (e.g. `macOS 14.5`)
-- System locale (e.g. `en-IN`)
-- A random anonymous session ID that resets every few hours
-- Country, derived from your IP. **Your IP address itself is never stored.**
+**when a download fails** (`download_failed`)
+- same stuff as above, plus
+- the raw error from yt-dlp or ffmpeg, so we can actually fix the bug you just hit. your user folder (the one with your name in it) is stripped out before it leaves your machine — `C:\Users\Jane Smith\...` becomes `C:\Users\~\...`. always.
 
-That's the complete list. No other telemetry is emitted by the app.
+**stuff aptabase adds automatically**
+- app version (like `1.4.2`)
+- os and version (like `macOS 14.5`)
+- system locale (like `en-IN`)
+- an anonymous session id that resets every few hours
+- country, figured out from your ip. **your ip itself is never stored.**
 
-## What we do NOT collect
+that's it. that's the whole list.
 
-- Your name, email, or any login credentials (there are no accounts in Cliply).
-- The URLs you paste into the app.
-- The contents of your downloads folder.
-- Your IP address.
-- Any browsing activity outside of Cliply.
-- Any data from your browser cookies except when you explicitly enable the "Import cookies" feature — in which case the cookies are used **locally on your machine** to authenticate with YouTube and are never transmitted to us.
+## what we do NOT collect
 
-## How downloads work
+- your name, email, or anything that identifies you
+- the urls you paste
+- the contents of your downloads folder
+- your ip address
+- any browsing activity outside of cliply
 
-When you paste a URL and hit download, the request goes **directly from your machine to the video platform** (YouTube, Pinterest, TikTok, etc.). The video file lands in your chosen folder. None of this traffic passes through any Cliply server. We don't run one.
+## where your downloads go
 
-## Where the data is stored
+straight from the video platform to your computer. we don't proxy, cache, or touch the file. the app is just a friendly wrapper around yt-dlp and ffmpeg — both of which run locally.
 
-Anonymous analytics events are sent to Aptabase's EU infrastructure. Aptabase is GDPR-compliant and does not use cookies or cross-site tracking. You can read their privacy stance at <https://aptabase.com/legal/privacy>.
+## where the analytics data lives
 
-## How to opt out
+with aptabase, in the eu. they're gdpr-compliant and don't use cookies or cross-site tracking. their own privacy page is at <https://aptabase.com/legal/privacy>. events are kept for up to 12 months and then deleted.
 
-Cliply is open source. If you'd like to run a build with telemetry fully disabled, set `ANALYTICS_CONFIG.ENABLED` to `false` in [`src/main/utils/constants.js`](src/main/utils/constants.js) and build from source:
+## opting out
+
+cliply is open source, so if you'd like zero telemetry, flip `ANALYTICS_CONFIG.ENABLED` to `false` in [`src/main/utils/constants.js`](src/main/utils/constants.js) and build your own copy:
 
 ```bash
-npm run dist:mac   # or dist:win / dist:linux
+npm run dist:mac
+# or dist:win / dist:linux
 ```
 
-A settings toggle for this is on the roadmap.
+we're working on a simple toggle in the settings so you won't have to rebuild. it's on the list.
 
-## Data retention
+## your rights
 
-Analytics events are kept by Aptabase for up to 12 months for trend analysis, then deleted.
+since we don't collect anything tied to you, there's nothing we could look up, export, or delete even if you asked. still, if something's on your mind, just ping us.
 
-## Your rights
+## changes to this page
 
-Because we don't collect any personal identifiers, there's nothing tied to you that we could look up, export, or delete. If you still have a question, open an issue on GitHub or reach out via [cliply.space/hey](https://cliply.space/hey).
+if we ever change what the app collects, we'll update this file and bump the date at the top. cliply's open source, so every change is visible in the commit history too.
 
-## Changes to this policy
+## say hi
 
-If we change what the app collects, we'll update this file and note the date at the top. Since Cliply is open source, every change to telemetry is visible in the commit history.
+questions, worries, or just want to say hello? open an issue on [github](https://github.com/cliply/cliply) or drop a line at [cliply.space/hey](https://cliply.space/hey).
 
-## Contact
-
-Questions? Open an issue at <https://github.com/cliplydotspace/cliply> or contact us via [cliply.space/hey](https://cliply.space/hey).
+thanks for using cliply.
