@@ -99,4 +99,29 @@ describe("buildIssueUrl", () => {
     expect(decoded).toContain("log line 499") // keeps the tail
     expect(decoded).not.toContain("log line 0") // drops the head
   })
+
+  it("trims oversized notes so the url stays within budget", () => {
+    const { url, truncated } = buildIssueUrl({
+      ...baseInput,
+      context: { ...baseInput.context, details: "" },
+      userNotes: "n".repeat(9000)
+    })
+    expect(url.length).toBeLessThanOrEqual(8000)
+    expect(truncated).toBe(true)
+  })
+})
+
+describe("buildIssueBody log fencing", () => {
+  it("uses a fence longer than any backtick run in the logs", () => {
+    const body = buildIssueBody({
+      ...baseInput,
+      context: {
+        ...baseInput.context,
+        details: "before\n```\nmalicious @mention\n```\nafter"
+      }
+    })
+    // the wrapping fence must be at least 4 backticks so the inner ``` cannot
+    // close the block early
+    expect(body).toContain("````")
+  })
 })

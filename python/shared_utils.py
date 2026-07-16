@@ -204,7 +204,9 @@ def _short_message_for(exit_code: Optional[str], text: str) -> Optional[str]:
     t = text.lower()
     if exit_code in ("183", "251", "215", "-5", "-9") or "killed" in t or "sigkill" in t:
         return "Antivirus may have blocked FFmpeg. Add Cliply to your exclusions and try again."
-    if exit_code == "127" or "no such file" in t or "not found" in t:
+    # only an ffmpeg-specific "not found" means the binary is missing; a plain
+    # "video not found" from yt-dlp must not tell the user to reinstall.
+    if exit_code == "127" or ("ffmpeg" in t and ("no such file" in t or "not found" in t)):
         return "FFmpeg binary is missing. Please reinstall Cliply."
     if "permission denied" in t:
         return "Can't write to the download folder. Check permissions or pick a different location."

@@ -28,11 +28,17 @@ export function ReportIssueDialog() {
 
   useEffect(() => {
     if (isOpen) {
-      setNotes("")
-      setIncludeVideoUrl(false)
       systemApi.getDiagnostics().then(setEnvironment)
     }
   }, [isOpen])
+
+  // reset the form whenever the staged failure changes (or the dialog opens),
+  // so notes and the URL opt-in always belong to the error being shown even if
+  // a second download fails while this dialog is still open.
+  useEffect(() => {
+    setNotes("")
+    setIncludeVideoUrl(false)
+  }, [context, isOpen])
 
   if (!context) return null
 
@@ -93,8 +99,8 @@ export function ReportIssueDialog() {
             </DialogTitle>
           </div>
           <DialogDescription className="text-slate-500 dark:text-slate-400">
-            This opens a pre-filled issue on GitHub. Nothing is sent until you
-            review it and hit submit there.
+            This opens a pre-filled draft issue on GitHub in your browser. Look
+            it over there, then publish it when you're ready.
           </DialogDescription>
         </DialogHeader>
 

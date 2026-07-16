@@ -48,6 +48,16 @@ function environmentSection(env: ReportEnvironment | null): string {
   ].join("\n")
 }
 
+// pick a backtick fence longer than any run inside the content, so a log line
+// containing ``` can't break out of the code block and inject markdown.
+function codeFence(content: string): string {
+  const longestRun = (content.match(/`+/g) || []).reduce(
+    (max, run) => Math.max(max, run.length),
+    0
+  )
+  return "`".repeat(Math.max(3, longestRun + 1))
+}
+
 function assembleBody(input: ReportInput, logLines: string[]): string {
   const { context, environment, userNotes, includeVideoUrl } = input
   const sections: string[] = []
@@ -71,9 +81,11 @@ function assembleBody(input: ReportInput, logLines: string[]): string {
   sections.push(environmentSection(environment))
 
   if (logLines.length > 0) {
+    const body = logLines.join("\n")
+    const fence = codeFence(body)
     sections.push("### Technical details")
     sections.push(
-      `<details><summary>Logs</summary>\n\n\`\`\`\n${logLines.join("\n")}\n\`\`\`\n\n</details>`
+      `<details><summary>Logs</summary>\n\n${fence}\n${body}\n${fence}\n\n</details>`
     )
   }
 
@@ -96,22 +108,30 @@ export function buildIssueUrl(input: ReportInput): {
   let logLines = input.context.details
     ? input.context.details.split("\n")
     : []
+  let notes = input.userNotes
   let truncated = false
 
-  const toUrl = (lines: string[]) => {
+  const toUrl = (lines: string[], noteText: string) => {
     const params = new URLSearchParams({
       title,
       labels: LABELS,
-      body: assembleBody(input, lines)
+      body: assembleBody({ ...input, userNotes: noteText }, lines)
     })
     return `${ISSUES_NEW_URL}?${params.toString()}`
   }
 
-  let url = toUrl(logLines)
+  let url = toUrl(logLines, notes)
+  // first shed log lines, oldest first, keeping the most recent tail
   while (url.length > URL_BUDGET && logLines.length > 0) {
-    logLines = logLines.slice(1) // drop oldest line, keep the tail
+    logLines = logLines.slice(1)
     truncated = true
-    url = toUrl(logLines)
+    url = toUrl(logLines, notes)
+  }
+  // if still over budget, trim the user's notes (the clipboard keeps the full copy)
+  while (url.length > URL_BUDGET && notes.length > 0) {
+    notes = notes.slice(0, Math.max(0, notes.length - 500))
+    truncated = true
+    url = toUrl(logLines, notes)
   }
   return { url, truncated }
 }
