@@ -16,6 +16,7 @@ import { usePinterestStore } from "@/lib/pinterestStore"
 import { useTikTokStore } from "@/lib/tiktokStore"
 import { useYouTubeStore } from "@/lib/youtubeStore"
 import {
+  showDownloadErrorToast,
   showServerOverwhelmedToast,
   showServerStartingToast
 } from "@/lib/toast-utils"
@@ -297,10 +298,7 @@ function PinterestDownloadCard({
           downloadType: "video",
           videoUrl: url
         })
-        toast.error("Download failed", {
-          description: message,
-          action: { label: "Report", onClick: () => reportActions.open() }
-        })
+        showDownloadErrorToast("Download failed", message)
       }
     } finally {
       setIsDownloading(false)
@@ -352,10 +350,7 @@ function TikTokDownloadCard({
           downloadType: "video",
           videoUrl: url
         })
-        toast.error("Download failed", {
-          description: message,
-          action: { label: "Report", onClick: () => reportActions.open() }
-        })
+        showDownloadErrorToast("Download failed", message)
       }
     } finally {
       setIsDownloading(false)

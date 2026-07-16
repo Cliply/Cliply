@@ -7,6 +7,7 @@ import {
   type DownloadProgress
 } from "@/lib/api"
 import { reportActions } from "@/lib/reportStore"
+import { showDownloadErrorToast } from "@/lib/toast-utils"
 import { useMutation } from "@tanstack/react-query"
 import { useEffect, useRef, useState } from "react"
 import { toast } from "sonner"
@@ -106,10 +107,10 @@ export const useAudioDownload = () => {
                 downloadType: "audio",
                 videoUrl: lastUrlRef.current
               })
-              toast.error("Audio download failed", {
-                description: progressData.error || "Unknown error occurred",
-                action: { label: "Report", onClick: () => reportActions.open() }
-              })
+              showDownloadErrorToast(
+                "Audio download failed",
+                progressData.error || "Something went wrong. You can send us the details."
+              )
 
               // Cleanup listener after failure
               if (progressCleanupRef.current) {
@@ -141,10 +142,7 @@ export const useAudioDownload = () => {
         downloadType: "audio",
         videoUrl: lastUrlRef.current
       })
-      toast.error("Failed to start audio download", {
-        description: error.message,
-        action: { label: "Report", onClick: () => reportActions.open() }
-      })
+      showDownloadErrorToast("Audio download failed", error.message)
     }
   })
 

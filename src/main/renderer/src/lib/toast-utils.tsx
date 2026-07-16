@@ -1,5 +1,6 @@
 import { toast } from "sonner"
 import { Loader } from "../../@/components/ui/loader"
+import { reportActions } from "@/lib/reportStore"
 
 export const showServerOverwhelmedToast = () => {
   toast(
@@ -51,4 +52,19 @@ export const showDownloadSuccessToast = (type: "audio" | "video") => {
 
 export const showFolderSelectedToast = () => {
   toast.success("Download folder updated!")
+}
+
+// single failure toast for every download path. the stable id means repeated
+// failures replace each other instead of stacking, and the long duration gives
+// people time to hit Report before it fades.
+export const showDownloadErrorToast = (title: string, description?: string) => {
+  toast.error(title, {
+    id: "download-failed",
+    description,
+    duration: 12000,
+    action: {
+      label: "Report",
+      onClick: () => reportActions.open()
+    }
+  })
 }

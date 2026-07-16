@@ -7,6 +7,7 @@ import {
   type VideoDownloadRequest
 } from "@/lib/api"
 import { reportActions } from "@/lib/reportStore"
+import { showDownloadErrorToast } from "@/lib/toast-utils"
 import { useMutation } from "@tanstack/react-query"
 import { useEffect, useRef, useState } from "react"
 import { toast } from "sonner"
@@ -107,10 +108,10 @@ export const useVideoDownload = () => {
                 downloadType: "video",
                 videoUrl: lastUrlRef.current
               })
-              toast.error("Video download failed", {
-                description: progressData.error || "Unknown error occurred",
-                action: { label: "Report", onClick: () => reportActions.open() }
-              })
+              showDownloadErrorToast(
+                "Video download failed",
+                progressData.error || "Something went wrong. You can send us the details."
+              )
 
               // Cleanup listener after failure
               if (progressCleanupRef.current) {
@@ -142,10 +143,7 @@ export const useVideoDownload = () => {
         downloadType: "video",
         videoUrl: lastUrlRef.current
       })
-      toast.error("Failed to start video download", {
-        description: error.message,
-        action: { label: "Report", onClick: () => reportActions.open() }
-      })
+      showDownloadErrorToast("Video download failed", error.message)
     }
   })
 
