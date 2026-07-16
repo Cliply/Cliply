@@ -1,10 +1,13 @@
 import {
+  DownloadError,
   downloadApi,
   systemApi,
   videoApi,
   type AudioDownloadRequest,
   type DownloadProgress
 } from "@/lib/api"
+import { reportActions } from "@/lib/reportStore"
+import { showDownloadErrorToast } from "@/lib/toast-utils"
 import { useMutation } from "@tanstack/react-query"
 import { useEffect, useRef, useState } from "react"
 import { toast } from "sonner"
@@ -34,6 +37,7 @@ export const useAudioDownload = () => {
   })
 
   const progressCleanupRef = useRef<(() => void) | null>(null)
+  const lastUrlRef = useRef<string | undefined>(undefined)
 
   // Cleanup progress listener on unmount
   useEffect(() => {
@@ -47,6 +51,7 @@ export const useAudioDownload = () => {
 
   const mutation = useMutation({
     mutationFn: async (request: AudioDownloadRequest) => {
+      lastUrlRef.current = request.url
       setDownloadState({
         status: "starting",
         progress: 0,
@@ -96,9 +101,16 @@ export const useAudioDownload = () => {
 
             // Handle failure
             if (progressData.status === "failed") {
-              toast.error("Audio download failed", {
-                description: progressData.error || "Unknown error occurred"
+              reportActions.stage({
+                shortMessage: progressData.error || "Download failed",
+                platform: "youtube",
+                downloadType: "audio",
+                videoUrl: lastUrlRef.current
               })
+              showDownloadErrorToast(
+                "Audio download failed",
+                progressData.error || "Something went wrong. You can send us the details."
+              )
 
               // Cleanup listener after failure
               if (progressCleanupRef.current) {
@@ -122,9 +134,15 @@ export const useAudioDownload = () => {
         message: `Failed to start download: ${error.message}`
       }))
 
-      toast.error("Failed to start audio download", {
-        description: error.message
+      reportActions.stage({
+        shortMessage: error.message,
+        details: error instanceof DownloadError ? error.details : undefined,
+        category: error instanceof DownloadError ? error.category : undefined,
+        platform: "youtube",
+        downloadType: "audio",
+        videoUrl: lastUrlRef.current
       })
+      showDownloadErrorToast("Audio download failed", error.message)
     }
   })
 

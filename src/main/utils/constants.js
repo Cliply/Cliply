@@ -136,6 +136,7 @@ const IPC_CHANNELS = {
   // system operations
   SYSTEM_HEALTH: "system:health",
   SYSTEM_OPEN_EXTERNAL: "system:open-external",
+  SYSTEM_GET_DIAGNOSTICS: "system:get-diagnostics",
 
   // python server events
   PYTHON_SERVER_STARTING: "python:server:starting",

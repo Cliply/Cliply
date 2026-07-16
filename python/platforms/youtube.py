@@ -21,7 +21,9 @@ from shared_utils import (
     sanitize_filename,
     format_duration,
     seconds_to_time_string,
-    get_downloads_directory
+    get_downloads_directory,
+    FFmpegLogger,
+    format_download_error,
 )
 
 
@@ -350,8 +352,9 @@ async def download_with_fallback(url: str, base_opts: dict, ffmpeg_path: Optiona
     await download_async(url, opts)
 
 
-async def extract_video_info_with_fallback(url: str, ffmpeg_path: Optional[str] = None, deno_path: Optional[str] = None) -> dict:
-    opts = get_enhanced_ydl_opts(None, ffmpeg_path, deno_path)
+async def extract_video_info_with_fallback(url: str, ffmpeg_path: Optional[str] = None, deno_path: Optional[str] = None, logger=None) -> dict:
+    base_opts = {'logger': logger} if logger else None
+    opts = get_enhanced_ydl_opts(base_opts, ffmpeg_path, deno_path)
     return await extract_info_async(url, opts)
 
 
@@ -478,8 +481,9 @@ class YouTubeService:
     async def download_combined(self, request: CombinedDownloadRequest, download_dir: Path) -> dict:
         download_id = str(uuid.uuid4())
         self._track_download(download_id, "combined", request.url)
+        ffmpeg_logger = FFmpegLogger()
         try:
-            info = await extract_video_info_with_fallback(request.url, self.ffmpeg_path, self.deno_path)
+            info = await extract_video_info_with_fallback(request.url, self.ffmpeg_path, self.deno_path, logger=ffmpeg_logger)
             title = sanitize_filename(info.get('title', 'video'))
             
             quality = get_quality_label(request.video_format_id)
@@ -499,6 +503,7 @@ class YouTubeService:
             base_opts = {
                 'outtmpl': str(final_path),
                 'merge_output_format': 'mp4',
+                'logger': ffmpeg_logger,
             }
             
             if format_string is not None:
@@ -543,15 +548,19 @@ class YouTubeService:
         except HTTPException:
             raise
         except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Combined download failed: {str(e)}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"Combined download failed: {format_download_error(e, ffmpeg_logger)}"
+            )
         finally:
             self._untrack_download(download_id)
 
     async def download_audio(self, request: AudioDownloadRequest, download_dir: Path) -> dict:
         download_id = str(uuid.uuid4())
         self._track_download(download_id, "audio", request.url)
+        ffmpeg_logger = FFmpegLogger()
         try:
-            info = await extract_video_info_with_fallback(request.url, self.ffmpeg_path, self.deno_path)
+            info = await extract_video_info_with_fallback(request.url, self.ffmpeg_path, self.deno_path, logger=ffmpeg_logger)
             title = sanitize_filename(info.get('title', 'audio'))
             
             quality = request.format_id.replace('_audio', '').replace('auto_audio', 'auto').replace('high_audio', 'high').replace('medium_audio', 'medium')
@@ -570,6 +579,7 @@ class YouTubeService:
             base_opts = {
                 'format': format_string,
                 'outtmpl': str(final_path),
+                'logger': ffmpeg_logger,
             }
             
             base_opts = get_ydl_opts_with_time_range(base_opts, request.time_range, request.precise_cut)
@@ -611,7 +621,10 @@ class YouTubeService:
         except HTTPException:
             raise
         except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Audio download failed: {str(e)}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"Audio download failed: {format_download_error(e, ffmpeg_logger)}"
+            )
         finally:
             self._untrack_download(download_id)
 

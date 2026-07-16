@@ -17,6 +17,7 @@ from contextlib import asynccontextmanager
 
 import platform
 import subprocess
+import yt_dlp
 from shared_utils import (
     APP_CONFIG_DIR,
     executor,
@@ -70,10 +71,13 @@ DENO_PATH = detect_deno_path()
 
 if FFMPEG_PATH:
     ffmpeg_dir = str(Path(FFMPEG_PATH).parent)
+    path_separator = os.pathsep
     current_path = os.environ.get('PATH', '')
-    if ffmpeg_dir not in current_path:
-        path_separator = ';' if platform.system() == 'Windows' else ':'
-        os.environ['PATH'] = f"{ffmpeg_dir}{path_separator}{current_path}"
+    path_entries = current_path.split(path_separator) if current_path else []
+    if ffmpeg_dir not in path_entries:
+        os.environ['PATH'] = (
+            f"{ffmpeg_dir}{path_separator}{current_path}" if current_path else ffmpeg_dir
+        )
 
 # Initialize cookie manager and YouTube service
 cookie_manager = CookieManager()
@@ -159,6 +163,7 @@ async def root():
         },
         "ffmpeg_available": FFMPEG_PATH is not None,
         "ffmpeg_path": str(FFMPEG_PATH) if FFMPEG_PATH else None,
+        "yt_dlp_version": yt_dlp.version.__version__,
         "deno_available": DENO_PATH is not None,
         "deno_path": str(DENO_PATH) if DENO_PATH else None
     }

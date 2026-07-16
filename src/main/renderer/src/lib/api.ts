@@ -1,5 +1,7 @@
 // api client using electron ipc instead of http
 
+import type { ReportEnvironment } from "@/lib/report"
+
 export interface VideoFormat {
   format_id: string
   quality: string
@@ -156,6 +158,21 @@ export interface ApiError {
   type?: string
   message: string
   suggestion?: string
+  details?: string
+  category?: string
+}
+
+// download failure carrying the technical detail for issue reports
+export class DownloadError extends Error {
+  details?: string
+  category?: string
+
+  constructor(message: string, error?: ApiError) {
+    super(message)
+    this.name = "DownloadError"
+    this.details = error?.details
+    this.category = error?.category
+  }
 }
 
 export interface VideoQualityOption {
@@ -256,6 +273,7 @@ declare global {
         ) => Promise<IPCResponse<{ opened: boolean; url: string }>>
         openDownloadFolder: () => Promise<IPCResponse<{ success: boolean }>>
         selectDownloadFolder: () => Promise<IPCResponse<{ folderPath: string }>>
+        getDiagnostics: () => Promise<IPCResponse<ReportEnvironment>>
       }
       settings: {
         getDownloadPath: () => Promise<IPCResponse<DownloadPathInfo>>
@@ -333,7 +351,7 @@ export const videoApi = {
     if (!response.success || !response.data) {
       const errorMessage = response.error?.message || "Failed to download audio"
       console.error("Audio download failed:", errorMessage)
-      throw new Error(errorMessage)
+      throw new DownloadError(errorMessage, response.error)
     }
 
     // Map the response to match expected format
@@ -356,7 +374,7 @@ export const videoApi = {
     if (!response.success || !response.data) {
       const errorMessage = response.error?.message || "Failed to download video"
       console.error("Video download failed:", errorMessage)
-      throw new Error(errorMessage)
+      throw new DownloadError(errorMessage, response.error)
     }
 
     // Map the response to match expected format
@@ -401,7 +419,7 @@ export const pinterestApi = {
       const errorMessage =
         response.error?.message || "Failed to download Pinterest video"
       console.error("Pinterest download failed:", errorMessage)
-      throw new Error(errorMessage)
+      throw new DownloadError(errorMessage, response.error)
     }
 
     return {
@@ -435,7 +453,7 @@ export const tiktokApi = {
       const errorMessage =
         response.error?.message || "Failed to download TikTok video"
       console.error("TikTok download failed:", errorMessage)
-      throw new Error(errorMessage)
+      throw new DownloadError(errorMessage, response.error)
     }
 
     return {
@@ -537,6 +555,19 @@ export const systemApi = {
     const electronAPI = getElectronAPI()
     const response = await electronAPI.system.openExternal(url)
     return response.success === true
+  },
+
+  /**
+   * Environment info for issue reports (null when unavailable)
+   */
+  async getDiagnostics(): Promise<ReportEnvironment | null> {
+    try {
+      const electronAPI = getElectronAPI()
+      const response = await electronAPI.system.getDiagnostics()
+      return response.success && response.data ? response.data : null
+    } catch {
+      return null
+    }
   },
 
   /**

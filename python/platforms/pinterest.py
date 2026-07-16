@@ -15,7 +15,9 @@ from fastapi import HTTPException
 from shared_utils import (
     executor,
     sanitize_filename,
-    format_duration
+    format_duration,
+    FFmpegLogger,
+    format_download_error,
 )
 
 
@@ -172,9 +174,10 @@ class PinterestService:
     async def download_video(self, request: PinterestDownloadRequest, download_dir: Path) -> dict:
         download_id = str(uuid.uuid4())
         self._track_download(download_id, request.url)
-        
+        ffmpeg_logger = FFmpegLogger()
+
         try:
-            opts = get_enhanced_ydl_opts({}, self.ffmpeg_path, self.deno_path)
+            opts = get_enhanced_ydl_opts({'logger': ffmpeg_logger}, self.ffmpeg_path, self.deno_path)
             info = await extract_info_async(request.url, opts)
             
             if not is_video_pin(info):
@@ -191,7 +194,8 @@ class PinterestService:
             base_opts = {
                 'outtmpl': str(download_dir / final_filename),
                 'format': format_selector,
-                'merge_output_format': 'mp4'
+                'merge_output_format': 'mp4',
+                'logger': ffmpeg_logger,
             }
             
             download_opts = get_enhanced_ydl_opts(base_opts, self.ffmpeg_path, self.deno_path)
@@ -240,6 +244,9 @@ class PinterestService:
                 raise HTTPException(status_code=400, detail="Pinterest video not found, is private, or has been deleted")
             if "403" in error_msg or "Forbidden" in error_msg:
                 raise HTTPException(status_code=503, detail="Pinterest is blocking automated requests. Please try again later.")
-            raise HTTPException(status_code=500, detail=f"Pinterest download failed: {error_msg}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"Pinterest download failed: {format_download_error(e, ffmpeg_logger)}"
+            )
         finally:
             self._untrack_download(download_id)

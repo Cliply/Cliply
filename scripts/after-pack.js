@@ -1,8 +1,11 @@
-// post-build script to fix platform specific stuff
-// delete this later
+// post-build script: ensures bundled native binaries can actually run
+// - macOS: chmod +x + ad-hoc codesign (stops Gatekeeper killing nested children)
+// - linux: chmod +x
+// - windows: nothing required
 
 const fs = require("fs").promises
 const path = require("path")
+const { spawn } = require("child_process")
 
 async function afterPack(context) {
   const { electronPlatformName, appOutDir, packager } = context
@@ -11,16 +14,15 @@ async function afterPack(context) {
   console.log(`app output directory: ${appOutDir}`)
 
   try {
-    // platform-specific optimizations
     switch (electronPlatformName) {
       case "darwin":
         await optimizeMacOS(appOutDir, packager)
         break
       case "win32":
-        await optimizeWindows(appOutDir, packager)
+        await optimizeWindows()
         break
       case "linux":
-        await optimizeLinux(appOutDir, packager)
+        await optimizeLinux(appOutDir)
         break
     }
 
@@ -39,61 +41,79 @@ async function optimizeMacOS(appOutDir, packager) {
     `${packager.appInfo.productFilename}.app`
   )
   const resourcesPath = path.join(appPath, "Contents", "Resources")
-  const pythonRuntimePath = path.join(resourcesPath, "python-runtime")
 
-  // set executable permissions for python binaries
-  try {
-    const pythonExe = path.join(pythonRuntimePath, "bin", "python3")
-    if (await fileExists(pythonExe)) {
-      const { spawn } = require("child_process")
-      await new Promise((resolve, reject) => {
-        const chmod = spawn("chmod", ["+x", pythonExe], { stdio: "inherit" })
-        chmod.on("close", (code) =>
-          code === 0 ? resolve() : reject(new Error(`chmod failed: ${code}`))
-        )
-        chmod.on("error", reject)
-      })
-      console.log("set executable permissions for python")
-    }
-  } catch (error) {
-    console.warn("failed to set python permissions:", error.message)
+  // matches APP_CONFIG.PYTHON_RUNTIME.EMBEDDED_PYTHON_DIR (mac builds are arm64-only)
+  const pythonExe = path.join(
+    resourcesPath,
+    "python-runtime",
+    "darwin-arm64",
+    "bin",
+    "python3"
+  )
+  const nativeBinaries = [
+    path.join(resourcesPath, "binaries", "ffmpeg"),
+    path.join(resourcesPath, "binaries", "ffprobe"),
+    path.join(resourcesPath, "binaries", "deno", "deno"),
+    pythonExe
+  ]
+
+  for (const bin of nativeBinaries) {
+    if (!(await fileExists(bin))) continue
+    await chmodExec(bin)
+    // ad-hoc sign so the Hardened Runtime host process can exec these children
+    // even when the app itself is unsigned (free, no Apple Developer ID needed)
+    await adhocSign(bin)
   }
 }
 
-async function optimizeWindows(appOutDir, packager) {
+async function optimizeWindows() {
   console.log("applying windows optimizations...")
-
-  const resourcesPath = path.join(appOutDir, "resources")
-  const pythonRuntimePath = path.join(resourcesPath, "python-runtime")
-
-  // windows specific optimizations
-  // could add windows defender exclusions, etc.
-  console.log("windows python runtime path:", pythonRuntimePath)
+  // nothing to do: PE files don't need an executable bit,
+  // and code signing (if any) happens through electron-builder's own signing step
 }
 
-async function optimizeLinux(appOutDir, packager) {
+async function optimizeLinux(appOutDir) {
   console.log("applying linux optimizations...")
 
   const resourcesPath = path.join(appOutDir, "resources")
-  const pythonRuntimePath = path.join(resourcesPath, "python-runtime")
+  const nativeBinaries = [
+    path.join(resourcesPath, "binaries", "ffmpeg"),
+    path.join(resourcesPath, "binaries", "deno", "deno"),
+    path.join(resourcesPath, "python-runtime", "linux-x64", "bin", "python3")
+  ]
 
-  // set executable permissions for python binaries
-  try {
-    const pythonExe = path.join(pythonRuntimePath, "bin", "python3")
-    if (await fileExists(pythonExe)) {
-      const { spawn } = require("child_process")
-      await new Promise((resolve, reject) => {
-        const chmod = spawn("chmod", ["+x", pythonExe], { stdio: "inherit" })
-        chmod.on("close", (code) =>
-          code === 0 ? resolve() : reject(new Error(`chmod failed: ${code}`))
-        )
-        chmod.on("error", reject)
-      })
-      console.log("set executable permissions for python")
-    }
-  } catch (error) {
-    console.warn("failed to set python permissions:", error.message)
+  for (const bin of nativeBinaries) {
+    if (!(await fileExists(bin))) continue
+    await chmodExec(bin)
   }
+}
+
+async function chmodExec(filePath) {
+  try {
+    await fs.chmod(filePath, 0o755)
+    console.log(`chmod +x ${path.basename(filePath)}`)
+  } catch (error) {
+    console.warn(`chmod failed for ${filePath}: ${error.message}`)
+  }
+}
+
+async function adhocSign(filePath) {
+  try {
+    await runCommand("codesign", ["--force", "--sign", "-", filePath])
+    console.log(`ad-hoc signed ${path.basename(filePath)}`)
+  } catch (error) {
+    console.warn(`ad-hoc sign failed for ${filePath}: ${error.message}`)
+  }
+}
+
+function runCommand(cmd, args) {
+  return new Promise((resolve, reject) => {
+    const proc = spawn(cmd, args, { stdio: "inherit" })
+    proc.on("close", (code) =>
+      code === 0 ? resolve() : reject(new Error(`${cmd} exited with code ${code}`))
+    )
+    proc.on("error", reject)
+  })
 }
 
 async function fileExists(filePath) {

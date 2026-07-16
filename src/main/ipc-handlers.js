@@ -1,6 +1,7 @@
 // ipc handlers
 
-const { ipcMain, dialog } = require("electron")
+const { ipcMain, dialog, app } = require("electron")
+const os = require("os")
 const { IPC_CHANNELS, APP_CONFIG } = require("./utils/constants")
 const {
   categorizeError,
@@ -11,6 +12,11 @@ const {
 
 // get trackEvent from global
 const getTrackEvent = () => global.trackEvent || (() => {})
+
+// errors from the python side come as "<short user message>\n\n<full technical>".
+// the first paragraph is shown to the user; the full string is sent to analytics.
+const shortErrorMessage = (message) =>
+  (message || "").split(/\n\s*\n/, 1)[0].trim() || "Download failed"
 
 class IPCHandlers {
   constructor(services, autoUpdater = null) {
@@ -63,11 +69,12 @@ class IPCHandlers {
   createError(
     message,
     suggestion = "Please try again",
-    code = "GENERAL_ERROR"
+    code = "GENERAL_ERROR",
+    extra = null
   ) {
     return {
       success: false,
-      error: { message, suggestion, code }
+      error: { message, suggestion, code, ...(extra || {}) }
     }
   }
 
@@ -156,6 +163,10 @@ class IPCHandlers {
     ipcMain.handle(
       IPC_CHANNELS.SYSTEM_OPEN_EXTERNAL,
       this.handleOpenExternal.bind(this)
+    )
+    ipcMain.handle(
+      IPC_CHANNELS.SYSTEM_GET_DIAGNOSTICS,
+      this.handleGetDiagnostics.bind(this)
     )
     ipcMain.handle(
       "system:open-download-folder",
@@ -387,7 +398,7 @@ class IPCHandlers {
       try {
         const eventData = {
           error_type: categorizeError(error.message),
-          error_message: sanitizeTitle(error.message),
+          error_message: error.message,
           type: "combined",
           platform: data?.platform ? String(data.platform).toLowerCase() : "youtube",
           video_title: sanitizeTitle(title),
@@ -405,8 +416,13 @@ class IPCHandlers {
       }
 
       return this.createError(
-        error.message || "Download failed",
-        "Please try again or check your connection"
+        shortErrorMessage(error.message),
+        "Please try again or check your connection",
+        "DOWNLOAD_FAILED",
+        {
+          details: error.message,
+          category: categorizeError(error.message)
+        }
       )
     }
   }
@@ -525,7 +541,7 @@ class IPCHandlers {
         const actualFormatId = data?.format_id || format_id
         const eventData = {
           error_type: categorizeError(error.message),
-          error_message: sanitizeTitle(error.message),
+          error_message: error.message,
           type: "audio",
           video_title: sanitizeTitle(title),
           format_quality: extractQuality(actualFormatId)
@@ -542,8 +558,13 @@ class IPCHandlers {
       }
 
       return this.createError(
-        error.message || "Download failed",
-        "Please try again or check your connection"
+        shortErrorMessage(error.message),
+        "Please try again or check your connection",
+        "DOWNLOAD_FAILED",
+        {
+          details: error.message,
+          category: categorizeError(error.message)
+        }
       )
     }
   }
@@ -754,6 +775,35 @@ class IPCHandlers {
       console.error("Open external URL failed:", error.message)
       return this.createError("Failed to open external URL")
     }
+  }
+
+  // collect environment info for issue reports
+  async handleGetDiagnostics(_event) {
+    let ffmpegAvailable = null
+    let ytDlpVersion = null
+
+    try {
+      if (this.serverManager.isServerReady()) {
+        const response = await this.serverManager.makeRequest("/", {
+          method: "GET"
+        })
+        const status = await response.json()
+        ffmpegAvailable = status.ffmpeg_available ?? null
+        ytDlpVersion = status.yt_dlp_version ?? null
+      }
+    } catch (error) {
+      console.warn("diagnostics: server status unavailable:", error.message)
+    }
+
+    return this.createSuccess({
+      appVersion: app.getVersion(),
+      electronVersion: process.versions.electron,
+      platform: process.platform,
+      osRelease: os.release(),
+      arch: process.arch,
+      ffmpegAvailable,
+      ytDlpVersion
+    })
   }
 
   // open user's downloads folder
@@ -1018,6 +1068,7 @@ class IPCHandlers {
       "update:force-security-check",
       IPC_CHANNELS.SYSTEM_HEALTH,
       IPC_CHANNELS.SYSTEM_OPEN_EXTERNAL,
+      IPC_CHANNELS.SYSTEM_GET_DIAGNOSTICS,
       "cookies:import-file",
       "cookies:clear",
       "download:get-status",

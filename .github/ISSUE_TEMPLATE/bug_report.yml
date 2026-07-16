@@ -1,0 +1,29 @@
+name: Bug report
+description: Report a problem with Cliply
+labels: ["bug"]
+body:
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What were you doing when it failed?
+    validations:
+      required: true
+  - type: textarea
+    id: error
+    attributes:
+      label: Error message
+      description: Paste the error Cliply showed you
+  - type: input
+    id: version
+    attributes:
+      label: Cliply version
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+  - type: textarea
+    id: logs
+    attributes:
+      label: Technical logs
+      render: text

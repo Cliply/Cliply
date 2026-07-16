@@ -16,7 +16,6 @@ import { showDownloadSuccessToast } from "@/lib/toast-utils"
 import { cn } from "@/lib/utils"
 import { motion } from "framer-motion"
 import { Headphones, Scissors, Video } from "lucide-react"
-import { toast } from "sonner"
 
 interface VideoDownloadButtonProps {
   maxDuration: number
@@ -74,14 +73,8 @@ export function VideoDownloadButton({
 
       showDownloadSuccessToast("video")
     } catch (error) {
+      // the failure toast (with Report) is owned by the useVideoDownload hook
       console.error("Video download error:", error)
-
-      toast.error("Download failed", {
-        description:
-          error instanceof Error
-            ? error.message
-            : "An unexpected error occurred"
-      })
     } finally {
       setIsDownloadingVideo(false)
     }

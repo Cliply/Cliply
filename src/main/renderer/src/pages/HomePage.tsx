@@ -1,4 +1,5 @@
 import { PinterestLayout } from "@/components/pinterest"
+import { ReportIssueDialog } from "@/components/report/ReportIssueDialog"
 import { TikTokLayout } from "@/components/tiktok"
 import { AnimatePresence } from "framer-motion"
 import { HeroSection } from "../components/hero/HeroSection"
@@ -22,16 +23,19 @@ export function HomePage() {
     selectedPlatform === "tiktok" && showMediaDetails && tikTokInfo
 
   return (
-    <AnimatePresence mode="wait">
-      {shouldShowYouTubeLayout ? (
-        <VideoLayout key="video-layout" />
-      ) : shouldShowPinterestLayout ? (
-        <PinterestLayout key="pinterest-layout" />
-      ) : shouldShowTikTokLayout ? (
-        <TikTokLayout key="tiktok-layout" />
-      ) : (
-        <HeroSection key="hero-section" />
-      )}
-    </AnimatePresence>
+    <>
+      <AnimatePresence mode="wait">
+        {shouldShowYouTubeLayout ? (
+          <VideoLayout key="video-layout" />
+        ) : shouldShowPinterestLayout ? (
+          <PinterestLayout key="pinterest-layout" />
+        ) : shouldShowTikTokLayout ? (
+          <TikTokLayout key="tiktok-layout" />
+        ) : (
+          <HeroSection key="hero-section" />
+        )}
+      </AnimatePresence>
+      <ReportIssueDialog />
+    </>
   )
 }

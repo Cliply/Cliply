@@ -10,7 +10,6 @@ import { useServerStatus } from "@/lib/hooks/useServerStatus"
 import { useYouTubeStore } from "@/lib/youtubeStore"
 import {
   showDownloadSuccessToast,
-  showServerOverwhelmedToast,
   showServerStartingToast
 } from "@/lib/toast-utils"
 import { cn } from "@/lib/utils"
@@ -84,27 +83,8 @@ export function AudioDownloadButton({
 
       showDownloadSuccessToast("audio")
     } catch (error) {
+      // the failure toast (with Report) is owned by the useAudioDownload hook
       console.error("Download error:", error)
-
-      const errorMessage =
-        error instanceof Error ? error.message : "Download failed"
-
-      if (errorMessage.includes("Invalid time range")) {
-        toast.error(
-          "Invalid time range. Please check your start and end times."
-        )
-      } else if (errorMessage.includes("Format not available")) {
-        toast.error("Selected audio format is not available.")
-      } else if (errorMessage.includes("Download engine starting")) {
-        showServerStartingToast()
-      } else if (
-        errorMessage.includes("network") ||
-        errorMessage.includes("fetch")
-      ) {
-        showServerOverwhelmedToast()
-      } else {
-        toast.error("Download failed. Please try again.")
-      }
     } finally {
       setIsDownloadingAudio(false)
     }
