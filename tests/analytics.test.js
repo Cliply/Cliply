@@ -115,4 +115,78 @@ describe("Analytics", () => {
 
     expect(client.flush).toHaveBeenCalled()
   })
+
+  describe("setEngineVersion", () => {
+    it("stamps engine_version onto every later event", async () => {
+      const client = fakeClient()
+      const analytics = new Analytics({
+        settingsStore: fakeStore(),
+        createClient: () => client,
+        forceEnabled: true
+      })
+      await analytics.init()
+      analytics.setEngineVersion("2026.08.19")
+      analytics.capture("download_completed")
+      analytics.capture("download_failed")
+
+      expect(client.captured).toHaveLength(2)
+      for (const message of client.captured) {
+        expect(message.properties.engine_version).toBe("2026.08.19")
+      }
+    })
+
+    it("leaves an already-set version alone when handed a falsy one", async () => {
+      const client = fakeClient()
+      const analytics = new Analytics({
+        settingsStore: fakeStore(),
+        createClient: () => client,
+        forceEnabled: true
+      })
+      await analytics.init()
+      analytics.setEngineVersion("2026.08.19")
+
+      // a probe that failed must not erase what a successful one established
+      analytics.setEngineVersion(null)
+      analytics.setEngineVersion("")
+      analytics.setEngineVersion(undefined)
+      analytics.capture("download_completed")
+
+      expect(client.captured[0].properties.engine_version).toBe("2026.08.19")
+    })
+
+    it("survives the re-init that opting back in triggers", async () => {
+      const client = fakeClient()
+      const analytics = new Analytics({
+        settingsStore: fakeStore(),
+        createClient: () => client,
+        forceEnabled: true
+      })
+      await analytics.init()
+      analytics.setEngineVersion("2026.08.19")
+
+      // setEnabled(true) rebuilds the super properties from scratch. the
+      // engine version is probed once per run, so if the rebuild drops it
+      // nothing sets it again for the rest of the session.
+      await analytics.setEnabled(false)
+      await analytics.setEnabled(true)
+      analytics.capture("download_completed")
+
+      expect(client.captured).toHaveLength(1)
+      expect(client.captured[0].properties.engine_version).toBe("2026.08.19")
+    })
+
+    it("is carried over when it is known before init", async () => {
+      const client = fakeClient()
+      const analytics = new Analytics({
+        settingsStore: fakeStore(),
+        createClient: () => client,
+        forceEnabled: true
+      })
+      analytics.setEngineVersion("2026.08.19")
+      await analytics.init()
+      analytics.capture("download_completed")
+
+      expect(client.captured[0].properties.engine_version).toBe("2026.08.19")
+    })
+  })
 })

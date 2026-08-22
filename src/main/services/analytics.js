@@ -24,9 +24,13 @@ function defaultCreateClient(key, host) {
   const { PostHog } = require("posthog-node")
   return new PostHog(key, {
     host,
+    // do not delete this as redundant - the sdk's own jsdoc says it defaults
+    // to false, and that is wrong. the compiled source reads
+    // `options.disableGeoip ?? true` (@posthog/core, posthog-core-stateless),
+    // confirmed by constructing a client both ways: omitted gives true.
     // the node sdk assumes a server, where geoip on the server's own ip is
-    // meaningless, so it defaults this to true. in electron the machine IS the
-    // client, so this must be explicit or country/region/city never arrive.
+    // meaningless. in electron the machine IS the client, so without this
+    // line country/region/city silently never arrive.
     disableGeoip: false,
     flushAt: 20,
     flushInterval: 10000
@@ -51,6 +55,8 @@ class Analytics {
     this.installId = null
     this.enabled = false
     this.superProperties = {}
+    // kept apart from superProperties because init() rebuilds those wholesale
+    this.engineVersion = null
 
     this.allowedInThisBuild =
       typeof forceEnabled === "boolean"
@@ -79,6 +85,12 @@ class Analytics {
         locale: readLocale()
       }
 
+      // the engine is probed once per run, so whatever it reported has to be
+      // put back after the rebuild - nothing would set it a second time
+      if (this.engineVersion) {
+        this.superProperties.engine_version = this.engineVersion
+      }
+
       this.client = this.createClient(
         APP_CONFIG.ANALYTICS_CONFIG.POSTHOG_KEY,
         APP_CONFIG.ANALYTICS_CONFIG.POSTHOG_HOST
@@ -94,9 +106,16 @@ class Analytics {
     return Boolean(this.enabled && this.client)
   }
 
-  /** set once the engine version is known, so every later event carries it */
+  /**
+   * set once the engine version is known, so every later event carries it.
+   * a falsy version is ignored rather than stored: a probe that failed must
+   * not erase what a successful one already established.
+   */
   setEngineVersion(version) {
-    if (version) this.superProperties.engine_version = version
+    if (!version) return
+
+    this.engineVersion = version
+    this.superProperties.engine_version = version
   }
 
   /**
