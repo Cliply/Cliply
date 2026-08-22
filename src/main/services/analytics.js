@@ -331,6 +331,14 @@ class Analytics {
           continue
         }
 
+        // absence is free and silent. a first launch has no previous version
+        // and a cancel may have no progress yet - legitimate states, not
+        // defects. warning on those would fire on every clean install, and a
+        // channel that cries during normal operation is one people stop
+        // reading, taking the real privacy drops down with it. note this is a
+        // null check, not a truthiness one: `false` and `0` are values.
+        if (value === null || value === undefined) continue
+
         const kind = KIND_BY_PROPERTY.get(key)
 
         if (!kind) {

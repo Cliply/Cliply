@@ -633,6 +633,73 @@ describe("Analytics", () => {
       })
     })
 
+    describe("absence", () => {
+      async function captureQuietly(event, properties) {
+        const client = fakeClient()
+        const analytics = new Analytics({
+          settingsStore: fakeStore(),
+          createClient: () => client,
+          forceEnabled: true
+        })
+        await analytics.init()
+        console.warn.mockClear()
+        analytics.capture(event, properties)
+        return client.captured[0].properties
+      }
+
+      it("drops a null without a word", async () => {
+        // first launch has no previous version. that is a legitimate state,
+        // and a warning on every clean install would train people to stop
+        // reading the channel that catches real privacy drops.
+        const properties = await captureQuietly("app_launched", {
+          is_first_launch: true,
+          previous_version: null
+        })
+
+        expect(properties).not.toHaveProperty("previous_version")
+        expect(properties.is_first_launch).toBe(true)
+        expect(console.warn).not.toHaveBeenCalled()
+      })
+
+      it("drops an undefined without a word", async () => {
+        const properties = await captureQuietly("download_failed", {
+          platform: "youtube",
+          progress_at_failure: undefined
+        })
+
+        expect(properties).not.toHaveProperty("progress_at_failure")
+        expect(properties.platform).toBe("youtube")
+        expect(console.warn).not.toHaveBeenCalled()
+      })
+
+      it("still keeps false and zero", async () => {
+        // a truthiness check instead of a null check would eat both of these,
+        // which is the whole reason this test sits next to the two above
+        const flags = await captureQuietly("cookies_imported", {
+          success: false,
+          has_youtube_cookies: false
+        })
+        expect(flags.success).toBe(false)
+        expect(flags.has_youtube_cookies).toBe(false)
+
+        const counts = await captureQuietly("download_cancelled", {
+          progress_at_cancel: 0
+        })
+        expect(counts.progress_at_cancel).toBe(0)
+
+        expect(console.warn).not.toHaveBeenCalled()
+      })
+
+      it("still shouts about a wrong kind", async () => {
+        const properties = await captureQuietly("download_completed", {
+          platform: "https://private.example/v"
+        })
+
+        expect(properties).not.toHaveProperty("platform")
+        expect(console.warn).toHaveBeenCalled()
+      })
+    })
+
     it("never writes the rejected value into the warning", async () => {
       const secret = "https://private.example/watch?v=abcdef"
       await captureOne("download_completed", { platform: secret })
