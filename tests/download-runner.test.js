@@ -420,27 +420,48 @@ describe("analytics", () => {
     expect(tracked[0].trimmed).toBe(true)
   })
 
-  test("keeps a download alive when tracking it explodes", async () => {
-    // these calls sit inside run()'s try, where a throw would be caught as the
-    // download breaking - and the user would be told a finished file failed
-    const warn = jest.spyOn(console, "warn").mockImplementation(() => {})
-    const runner = new DownloadRunner({
-      engine: {},
-      sendEvent: () => {},
-      trackEvent: () => {
-        throw new Error("analytics exploded")
-      }
-    })
-    const handle = new FakeHandle()
+  // whatever the throw site produced, including the shapes that defeat a guard
+  // written as `error && error.message`: reading the property is what throws
+  const HOSTILE_THROWS = [
+    ["an Error", () => new Error("analytics exploded")],
+    ["null", () => null],
+    ["a string", () => "analytics exploded"],
+    [
+      "an object whose message getter throws",
+      () => ({
+        get message() {
+          throw new Error("not even this")
+        }
+      })
+    ]
+  ]
 
-    const running = runner.run({ ...BASE, createHandle: () => handle })
-    await settle()
+  test.each(HOSTILE_THROWS)(
+    "keeps a download alive when tracking it throws %s",
+    async (_name, thrown) => {
+      // these calls sit inside run()'s try, where a throw would be caught as
+      // the download breaking - and the user would be told a finished file
+      // failed. a throw the *catch* cannot survive lands in the same place
+      const warn = jest.spyOn(console, "warn").mockImplementation(() => {})
+      const runner = new DownloadRunner({
+        engine: {},
+        sendEvent: () => {},
+        trackEvent: () => {
+          throw thrown()
+        }
+      })
+      const handle = new FakeHandle()
 
-    handle.resolve({ filePath: "/downloads/a.mp4" })
+      const running = runner.run({ ...BASE, createHandle: () => handle })
+      await settle()
 
-    await expect(running).resolves.toMatchObject({ success: true })
-    warn.mockRestore()
-  })
+      handle.resolve({ filePath: "/downloads/a.mp4" })
+
+      await expect(running).resolves.toMatchObject({ success: true })
+      expect(warn).toHaveBeenCalled()
+      warn.mockRestore()
+    }
+  )
 
   test("reports a failure with its error code", async () => {
     const { runner, tracked } = createRunner()

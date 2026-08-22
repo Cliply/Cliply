@@ -8,6 +8,27 @@ const os = require("os")
 // matcher that used to sit here invented codes the rest of the app never had
 // (FFMPEG_DISK_FULL) and read "block" in any word as bot detection
 
+/**
+ * a message for anything a throw site may have produced, including null
+ *
+ * lives here rather than at any one of its call sites because all three of them
+ * are the same promise - that telemetry never throws into its caller - and a
+ * catch that reads `error.message` breaks it: the read is a property access,
+ * and a getter can throw from inside the catch, where nothing is left to catch
+ * it. `String(error)` is not the answer either, since a hostile toString throws
+ * the same way and a symbol throws on interpolation.
+ *
+ * @param {*} error - whatever was thrown
+ * @returns {string} something safe to print
+ */
+function describeError(error) {
+  try {
+    return error && error.message ? String(error.message) : String(error)
+  } catch {
+    return "unknown error"
+  }
+}
+
 // extract quality from format id
 function extractQuality(formatId) {
   if (!formatId) return "unknown"
@@ -283,6 +304,7 @@ function getAppVersion() {
 }
 
 module.exports = {
+  describeError,
   extractQuality,
   extractTitleFromFilename,
   elapsedBucket,

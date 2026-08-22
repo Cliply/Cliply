@@ -4,6 +4,7 @@ const { ipcMain, dialog, app } = require("electron")
 const os = require("os")
 const { IPC_CHANNELS } = require("./utils/constants")
 const {
+  describeError,
   extractQuality,
   elapsedBucket,
   speedBucket
@@ -164,6 +165,39 @@ class IPCHandlers {
   }
 
   /**
+   * hand one event to the exit point, whatever becomes of it there
+   *
+   * the exit point guards itself, so a throw out of capture() means the
+   * collaborator is not the one we think it is - and every caller below is
+   * somewhere a throw would be read as the operation failing. the cookie import
+   * calls this from inside its own try, where a throw tells the user a jar that
+   * imported did not; the download events reach it through the runner, where a
+   * throw is a finished file reported as broken; the renderer's channel would
+   * reject the ipc call. so this is where the never-throw promise is kept for
+   * all of them, rather than three times in three spellings.
+   *
+   * @param {string} event - a name ALLOWED_PROPERTIES knows
+   * @param {Object} properties - the bag for it
+   * @returns {boolean} whether it reached the exit point
+   */
+  capture(event, properties) {
+    if (!this.analytics) return false
+
+    try {
+      this.analytics.capture(event, properties)
+      return true
+    } catch (error) {
+      // reported rather than swallowed: this is a broken exit point, which is
+      // worth knowing about even though nothing here can do anything about it
+      console.warn(
+        `analytics: ${event} could not be captured:`,
+        describeError(error)
+      )
+      return false
+    }
+  }
+
+  /**
    * translate a runner event into an analytics event
    * @param {string} name - the runner's event name
    * @param {Object} payload - what the runner knows about the download
@@ -175,7 +209,7 @@ class IPCHandlers {
       // the cancel taxonomy carries three properties and no more. quality and
       // is_trimmed are not among them, and an unlisted one is dropped behind a
       // warning production never surfaces - so they are not sent
-      this.analytics.capture("download_cancelled", {
+      this.capture("download_cancelled", {
         platform: payload.platform,
         media_type: MEDIA_TYPES[payload.type],
         progress_at_cancel: Math.round(payload.progress || 0)
@@ -198,7 +232,7 @@ class IPCHandlers {
       const elapsed = elapsedBucket(payload.elapsedMs)
       const speed = speedBucket(payload.fileSize, payload.elapsedMs)
 
-      this.analytics.capture("download_completed", {
+      this.capture("download_completed", {
         ...base,
         ...(payload.fileSize
           ? { file_size_mb: Math.round(payload.fileSize / (1024 * 1024)) }
@@ -228,7 +262,7 @@ class IPCHandlers {
       ERROR_STAGES.DOWNLOAD
     )
 
-    this.analytics.capture("download_failed", {
+    this.capture("download_failed", {
       ...base,
       error_category: category,
       error_stage: stage,
@@ -266,16 +300,9 @@ class IPCHandlers {
         ? data.properties
         : {}
 
-    try {
-      this.analytics.capture(name, properties)
-    } catch (error) {
-      // capture guards itself, so this is a collaborator that is not the one we
-      // think it is. telemetry still does not get to fail a renderer call
-      console.warn(`analytics: ${name} could not be captured:`, error.message)
-      return { success: false }
-    }
-
-    return { success: true }
+    // capture() above keeps the never-throw promise for every caller, so an
+    // ipc reply is the only thing left to decide here
+    return { success: this.capture(name, properties) }
   }
 
   /**
@@ -290,7 +317,7 @@ class IPCHandlers {
   trackCookieImport(imported) {
     if (!this.analytics) return
 
-    this.analytics.capture("cookies_imported", {
+    this.capture("cookies_imported", {
       success: Boolean(imported),
       has_youtube_cookies: Boolean(this.cookieManager.hasValidCookies())
     })

@@ -598,6 +598,109 @@ describe("cookies_imported", () => {
   })
 })
 
+describe("an analytics service that throws", () => {
+  /**
+   * the exit point guards itself, so a throw out of capture() means the
+   * collaborator is not the one we think it is. it must still not reach the
+   * caller: trackCookieImport sits *inside* handleImportCookies' try, where a
+   * throw is caught as the import failing - the user is told a jar that
+   * imported did not, and the failure path then reports the opposite of what
+   * happened to analytics as well.
+   */
+  const HOSTILE_THROWS = [
+    ["an Error", () => new Error("posthog exploded")],
+    ["null", () => null],
+    [
+      "an object whose message getter throws",
+      () => ({
+        get message() {
+          throw new Error("not even this")
+        }
+      })
+    ]
+  ]
+
+  function throwingHandlers(thrown) {
+    return new IPCHandlers({
+      cookieManager: {
+        hasValidCookies: jest.fn(() => true),
+        importCookies: jest.fn().mockResolvedValue(true),
+        importCookieFile: jest.fn().mockResolvedValue(true)
+      },
+      ytdlpEngine: {},
+      ytdlpUpdater: null,
+      settingsStore: { ensureDownloadPath: jest.fn().mockResolvedValue("/tmp") },
+      analytics: {
+        capture: () => {
+          throw thrown()
+        }
+      }
+    })
+  }
+
+  it.each(HOSTILE_THROWS)(
+    "still reports the cookie import that really happened (%s)",
+    async (_name, thrown) => {
+      const handlers = throwingHandlers(thrown)
+
+      const result = await handlers.handleImportCookies(null, {
+        cookies: "# Netscape"
+      })
+
+      expect(result.success).toBe(true)
+      expect(result.data.imported).toBe(true)
+    }
+  )
+
+  it.each(HOSTILE_THROWS)(
+    "still finishes the download it was reporting on (%s)",
+    async (_name, thrown) => {
+      const handlers = throwingHandlers(thrown)
+
+      const result = await runDownload(handlers, VIDEO, (handle) =>
+        handle.resolve({ filePath: "/downloads/a.mp4" })
+      )
+
+      expect(result.success).toBe(true)
+    }
+  )
+})
+
+describe("describeError", () => {
+  // the one guard the three telemetry call sites share. `error.message` is a
+  // property read, and a property read can throw - which is why this is a
+  // function rather than the same expression written out three times
+  const { describeError } = require("../src/main/utils/analytics-helpers")
+
+  it("describes an ordinary failure by its message", () => {
+    expect(describeError(new Error("posthog exploded"))).toBe(
+      "posthog exploded"
+    )
+  })
+
+  it("describes what a throw site produced instead of an error", () => {
+    expect(describeError("posthog exploded")).toBe("posthog exploded")
+    expect(describeError(null)).toBe("null")
+    expect(describeError(undefined)).toBe("undefined")
+    expect(describeError(42)).toBe("42")
+  })
+
+  it("survives a value that refuses to be read", () => {
+    const hostile = {
+      get message() {
+        throw new Error("not even this")
+      },
+      toString() {
+        throw new Error("no string either")
+      }
+    }
+
+    expect(describeError(hostile)).toBe("unknown error")
+    // a symbol is the other half: String() on one throws
+    expect(describeError(Symbol("posthog"))).toEqual(expect.any(String))
+  })
+})
+
 describe("a missing analytics service", () => {
   it("leaves the download pipeline working", async () => {
     const handlers = new IPCHandlers({

@@ -5,7 +5,7 @@
 const os = require("os")
 const { APP_CONFIG, SUPPORTED_PLATFORMS } = require("../utils/constants")
 const { redactLogLine } = require("./ytdlp-engine")
-const { getAppVersion } = require("../utils/analytics-helpers")
+const { describeError, getAppVersion } = require("../utils/analytics-helpers")
 const {
   ERROR_CATEGORIES,
   ERROR_STAGES
@@ -599,14 +599,9 @@ function safeLabel(value) {
   }
 }
 
-/** a message for anything a throw site may have produced, including null */
-function describeError(error) {
-  try {
-    return error && error.message ? String(error.message) : String(error)
-  } catch {
-    return "unknown error"
-  }
-}
+// describeError moved to utils/analytics-helpers.js: the ipc layer and the
+// download runner make the same never-throw promise this module does, and were
+// each guarding it with a weaker spelling of the same thing
 
 // electron is not present under jest, so the locale lookup must degrade
 // instead of exploding at require time

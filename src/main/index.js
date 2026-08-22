@@ -16,7 +16,11 @@ const { SettingsStore } = require("./services/settings-store")
 const { Analytics } = require("./services/analytics")
 const IPCHandlers = require("./ipc-handlers")
 const { APP_CONFIG } = require("./utils/constants")
-const { getAppVersion, isFirstLaunch } = require("./utils/analytics-helpers")
+const {
+  describeError,
+  getAppVersion,
+  isFirstLaunch
+} = require("./utils/analytics-helpers")
 
 // let the user get their first download going before we check for updates
 const UPDATE_CHECK_DELAY_MS = 90 * 1000
@@ -209,7 +213,12 @@ class CliplyApp {
         // rename that could not be recovered. an install that cannot even ask
         // whether its engine is stale is the silent degradation this event
         // exists to surface, and nothing else in the pipeline says so
-        const message = (error && error.message) || null
+        //
+        // read through describeError, because `.message` is a property access
+        // and a getter can throw - here, inside the catch, where the event this
+        // is trying to send is what pays for it. nothing thrown at all is still
+        // absence, which is what the omitted property says
+        const message = error ? describeError(error) : null
 
         console.warn("yt-dlp update check failed:", message)
         this.reportEngineUpdate({ reason: "check-rejected", error: message })

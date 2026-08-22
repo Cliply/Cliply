@@ -93,6 +93,12 @@ jest.mock("../src/main/services/analytics", () => ({
 }))
 
 jest.mock("../src/main/utils/analytics-helpers", () => ({
+  // the real one: it is the shared guard the never-throw promise rests on, in
+  // this module and in the exit point this module's events go through. a stub
+  // here would leave both of them calling undefined, and the replays below
+  // would pass having sent nothing
+  describeError: jest.requireActual("../src/main/utils/analytics-helpers")
+    .describeError,
   getAppVersion: jest.fn(() => "1.2.3"),
   isFirstLaunch: jest.fn(() => false),
   extractQuality: jest.fn(),
@@ -590,6 +596,26 @@ describe("the deferred engine update check", () => {
     const [, properties] = captured()[0]
     expect(properties.update_reason).toBe("check-rejected")
     expect(Object.keys(properties)).not.toContain("error_message")
+
+    warn.mockRestore()
+  })
+
+  it("still resolves when the rejection refuses to be read", async () => {
+    // reading `.message` is a property access, and a getter can throw. this
+    // one throws inside the catch that exists to handle it, so the failure the
+    // event was about becomes an unhandled rejection instead of an event
+    const warn = jest.spyOn(console, "warn").mockImplementation(() => {})
+    mockUpdater.checkForUpdate.mockRejectedValue({
+      get message() {
+        throw new Error("not even this")
+      }
+    })
+
+    await expect(app.checkForEngineUpdate()).resolves.toBeUndefined()
+
+    const [, properties] = captured()[0]
+    expect(properties.update_reason).toBe("check-rejected")
+    expect(properties.error_message).toEqual(expect.any(String))
 
     warn.mockRestore()
   })

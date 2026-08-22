@@ -361,24 +361,70 @@ describe("a boundary that must not take the app down", () => {
     ).resolves.toEqual({ success: false })
   })
 
-  it("returns rather than throwing when the capture does throw", async () => {
-    const handlers = new IPCHandlers({
-      cookieManager: { hasValidCookies: () => true },
-      ytdlpEngine: {},
-      ytdlpUpdater: null,
-      settingsStore: { ensureDownloadPath: jest.fn().mockResolvedValue("/tmp") },
-      analytics: {
-        capture: () => {
-          throw new Error("posthog exploded")
+  /**
+   * every shape a throw site can produce, not just the polite one.
+   *
+   * `throw new Error(...)` is the case a naive catch survives. these are the
+   * ones that defeat it: reading `.message` off null is a TypeError, and a
+   * getter that throws takes both `error.message` and a `String(error)` that
+   * looks like it guards against it down with it - inside the catch, where
+   * there is nothing left to catch it, so the ipc call rejects and telemetry
+   * has thrown into its caller after all.
+   */
+  const HOSTILE_THROWS = [
+    ["an Error", () => new Error("posthog exploded")],
+    ["null", () => null],
+    ["undefined", () => undefined],
+    ["a string", () => "posthog exploded"],
+    ["a symbol", () => Symbol("posthog")],
+    [
+      "an object whose message getter throws",
+      () => ({
+        get message() {
+          throw new Error("not even this")
         }
-      }
-    })
-
-    await expect(
-      handlers.handleAnalyticsTrack(null, {
-        event: "url_submitted",
-        properties: { platform: "youtube" }
       })
-    ).resolves.toEqual({ success: false })
-  })
+    ],
+    [
+      "an object whose toString throws too",
+      () => ({
+        get message() {
+          throw new Error("no message")
+        },
+        toString() {
+          throw new Error("no string either")
+        }
+      })
+    ]
+  ]
+
+  it.each(HOSTILE_THROWS)(
+    "returns rather than throwing when the capture throws %s",
+    async (_name, thrown) => {
+      const handlers = new IPCHandlers({
+        cookieManager: { hasValidCookies: () => true },
+        ytdlpEngine: {},
+        ytdlpUpdater: null,
+        settingsStore: {
+          ensureDownloadPath: jest.fn().mockResolvedValue("/tmp")
+        },
+        analytics: {
+          capture: () => {
+            throw thrown()
+          }
+        }
+      })
+
+      await expect(
+        handlers.handleAnalyticsTrack(null, {
+          event: "url_submitted",
+          properties: { platform: "youtube" }
+        })
+      ).resolves.toEqual({ success: false })
+
+      // the drop is still reported - a guard that swallowed it silently would
+      // hide a broken exit point instead of a broken renderer
+      expect(warn).toHaveBeenCalled()
+    }
+  )
 })

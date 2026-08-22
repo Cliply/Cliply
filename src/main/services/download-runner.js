@@ -8,6 +8,7 @@ const path = require("path")
 const fs = require("fs")
 
 const { ERROR_CODES } = require("./ytdlp-engine")
+const { describeError } = require("../utils/analytics-helpers")
 
 // the statuses the renderer hooks already understand
 const STATUS = {
@@ -180,6 +181,10 @@ class DownloadRunner {
    * failure. the exit point never throws, but the callback is injected and
    * this is the cheapest place to be certain of it.
    *
+   * the catch reads the thrown value through describeError rather than off its
+   * own `.message`: a getter can throw, and it would throw here, inside the
+   * catch, where the download this is guarding is what pays for it.
+   *
    * @param {string} name - the runner's own event name
    * @param {Object} payload - what the translator reads
    */
@@ -187,7 +192,7 @@ class DownloadRunner {
     try {
       this.trackEvent(name, payload)
     } catch (error) {
-      console.warn(`failed to track ${name}:`, (error && error.message) || error)
+      console.warn(`failed to track ${name}:`, describeError(error))
     }
   }
 
