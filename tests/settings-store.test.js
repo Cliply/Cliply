@@ -93,6 +93,33 @@ describe("persisting a new path", () => {
   })
 })
 
+describe("analytics preferences", () => {
+  test("generates an install id once and reuses it", async () => {
+    const first = await store.getInstallId()
+    const second = await store.getInstallId()
+
+    expect(first).toMatch(/^[0-9a-f-]{36}$/)
+    expect(second).toBe(first)
+  })
+
+  test("defaults analytics to enabled and round-trips a change", async () => {
+    expect(await store.isAnalyticsEnabled()).toBe(true)
+
+    await store.setAnalyticsEnabled(false)
+    expect(await store.isAnalyticsEnabled()).toBe(false)
+  })
+
+  test("keeps the download path when analytics settings are written", async () => {
+    const chosen = path.join(root, "still-mine")
+    await store.setDownloadPath(chosen)
+    await store.setAnalyticsEnabled(false)
+
+    const all = await store.readAll()
+    expect(all.download_path).toBe(chosen)
+    expect(all.analytics_enabled).toBe(false)
+  })
+})
+
 describe("path info", () => {
   test("reports existence and writability", async () => {
     const chosen = path.join(root, "info")

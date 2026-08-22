@@ -1,12 +1,13 @@
 /**
  * settings store - the one place the main process reads and writes the
- * download folder
+ * download folder, the install id and the analytics preference
  *
  * the python server persisted this to ~/.config/app-data-7c4f/settings.json and
  * the settings ui still round-trips through it, so we read and write the very
  * same file. once the server is gone this stays the source of truth unchanged.
  */
 
+const crypto = require("crypto")
 const fs = require("fs")
 const fsp = require("fs").promises
 const os = require("os")
@@ -150,6 +151,58 @@ class SettingsStore {
     }
 
     return { path: target, exists, writable }
+  }
+
+  /**
+   * merge a patch into settings.json without clobbering other keys
+   * @param {Object} patch
+   */
+  async writeSettings(patch) {
+    const current = await this.readAll()
+    const next = { ...current, ...patch }
+
+    await fsp.mkdir(path.dirname(this.settingsFile), { recursive: true })
+    await fsp.writeFile(this.settingsFile, JSON.stringify(next, null, 2), "utf8")
+  }
+
+  /**
+   * a random id for this installation. not derived from the machine or the
+   * person - it is a dice roll, and reinstalling produces a new one.
+   * @returns {Promise<string>}
+   */
+  async getInstallId() {
+    const settings = await this.readAll()
+
+    if (typeof settings.install_id === "string" && settings.install_id.length) {
+      return settings.install_id
+    }
+
+    const installId = crypto.randomUUID()
+
+    try {
+      await this.writeSettings({ install_id: installId })
+    } catch (error) {
+      // an unwritable settings file must not break the caller - this run just
+      // gets an id that will not survive a restart
+      console.warn(`could not persist the install id (${error.message})`)
+    }
+
+    return installId
+  }
+
+  /** @returns {Promise<boolean>} analytics is on unless the user turned it off */
+  async isAnalyticsEnabled() {
+    const settings = await this.readAll()
+    return settings.analytics_enabled !== false
+  }
+
+  /** @param {boolean} enabled */
+  async setAnalyticsEnabled(enabled) {
+    try {
+      await this.writeSettings({ analytics_enabled: Boolean(enabled) })
+    } catch (error) {
+      console.warn(`could not persist the analytics preference (${error.message})`)
+    }
   }
 }
 
