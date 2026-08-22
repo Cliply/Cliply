@@ -457,14 +457,31 @@ const PATH_HEADS = [
 ]
 
 /**
- * whatever a credential's name is hung off the front of.
+ * the identifier a credential's name is a part of, wherever in it that is.
  *
- * `client_secret`, `signing_secret`, `github_access_token`, `x-api-key`: the
- * name of one of these fields is a compound far more often than it is the bare
- * word, and an anchor that only matches the bare word matches almost none of
- * them in practice.
+ * this rule has now been wrong twice for the same reason, and the reason is
+ * worth stating rather than patching around a third time. it anchored on `\b`,
+ * which missed `client_secret` because "_" is a word character. it then
+ * anchored on a prefix, which missed `aws_secret_access_key` - a standard aws
+ * field - because the marker turned out to sit in the middle. both fixes moved
+ * the position the marker was assumed to occupy; neither questioned that it
+ * occupied a fixed one.
+ *
+ * it does not. `client_secret`, `aws_secret_access_key`, `cookie_store`,
+ * `x-api-key`, `signing_secret`: the marker is a *component* of a compound
+ * name, and a component can be anywhere. so the rule is now the whole of that
+ * claim - a marker appearing anywhere in a key that is being assigned a value -
+ * and there is no position left for a later counterexample to exploit.
+ *
+ * the same shape as task 6's ipv6 rule, which required every group to be
+ * non-empty and so missed `::` - which is how one is actually written. that
+ * fix, like this one, was to stop describing where the thing sits and start
+ * matching what it is.
+ *
+ * `[=:]` on the key is what still keeps ordinary prose out, and that half has
+ * held through every version of this rule.
  */
-const CREDENTIAL_PREFIX = String.raw`\b[A-Za-z0-9_-]*`
+const CREDENTIAL_KEY_PART = String.raw`[A-Za-z0-9_-]*`
 
 const CREDENTIAL_NAMES = [
   "api[_-]?key",
@@ -507,23 +524,20 @@ const TEXT_SCRUBS = [
    * header name; "basic" and "digest" deliberately are not, because unlike
    * those two they are ordinary english and would eat the word after them.
    *
-   * the CREDENTIAL_PREFIX in front of each name is not decoration. an earlier
-   * version anchored on \b alone, and "_" is a word character - so there is no
-   * boundary inside "client_secret" and \bsecret never reached it. the names
-   * these fields really have are compounds: client_secret, signing_secret,
-   * github_access_token, x-api-key. the same mistake as the ipv6 rule made
-   * before it, which validated a grammar instead of matching a shape, and
-   * missed every compressed spelling anybody writes.
+   * see CREDENTIAL_KEY_PART above for why the name is matched as a component
+   * of the key rather than at any particular end of it.
    */
   [
-    new RegExp(CREDENTIAL_PREFIX + String.raw`authorization\s*[=:].*`, "gi"),
+    new RegExp(
+      String.raw`\b${CREDENTIAL_KEY_PART}authorization${CREDENTIAL_KEY_PART}\s*[=:].*`,
+      "gi"
+    ),
     "[credential]"
   ],
   [/\b(?:bearer|negotiate)\s+[^\s'"]+/gi, "[credential]"],
   [
     new RegExp(
-      CREDENTIAL_PREFIX +
-        String.raw`(?:${CREDENTIAL_NAMES})\s*[=:]\s*[^\s'"&]+`,
+      String.raw`\b${CREDENTIAL_KEY_PART}(?:${CREDENTIAL_NAMES})${CREDENTIAL_KEY_PART}\s*[=:]\s*[^\s'"&]+`,
       "gi"
     ),
     "[credential]"

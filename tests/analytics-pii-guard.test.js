@@ -871,11 +871,39 @@ describe("a credential, which is shapeless but not edgeless", () => {
     )
   })
 
-  it("finds the name when it is a compound, which it usually is", async () => {
-    // "_" is a word character, so a \b anchor never reaches into
-    // "client_secret" - and the bare word is the spelling these fields almost
-    // never have. the same miss as the ipv6 rule, which validated a grammar
-    // instead of matching a shape and so walked past every compressed form
+  it("finds the name wherever in the key it sits", async () => {
+    /**
+     * this rule was wrong twice for one reason. `\b` missed `client_secret`,
+     * because "_" is a word character. a prefix then missed
+     * `aws_secret_access_key` - a standard aws field - because the marker was
+     * in the middle. each fix moved the position the marker was assumed to
+     * occupy instead of dropping the assumption that it occupies one.
+     *
+     * so the cases below are deliberately spread: leading, trailing, middle,
+     * hyphenated, and two markers in one key. if any position is ever special
+     * again, one of these is where it shows.
+     */
+
+    // the marker in the middle, which is what defeated the prefix
+    expect(
+      await captureText("AWS rejected aws_secret_access_key=abc123")
+    ).toBe("AWS rejected [credential]")
+    expect(await captureText("OAuth rejected client_secret_key=abc123")).toBe(
+      "OAuth rejected [credential]"
+    )
+    expect(await captureText("cache says cookie_store=SID123")).toBe(
+      "cache says [credential]"
+    )
+
+    // trailing components after the marker
+    expect(await captureText("my_api_key_v2: abc123 rejected")).toBe(
+      "[credential] rejected"
+    )
+    expect(await captureText("refresh_token_secret_holder=zzz refused")).toBe(
+      "[credential] refused"
+    )
+
+    // and the leading-component cases the prefix already handled
     expect(await captureText("OAuth failed: client_secret=hunter2")).toBe(
       "OAuth failed: [credential]"
     )
@@ -910,10 +938,52 @@ describe("a credential, which is shapeless but not edgeless", () => {
       "Unable to extract the player token",
       "the basic settings could not be read",
       "your cookie file has no entries",
-      "a digest of the archive did not match"
+      "a digest of the archive did not match",
+      // cookie wording is the app's own bread and butter, and none of it is
+      // an assignment, so none of it is touched
+      "cookies expired, sign in again",
+      "the cookie file is missing",
+      "no cookies found for this site",
+      "cookie file: could not be read",
+      "cookie jar: empty"
     ]) {
       expect(await captureText(text)).toBe(text)
     }
+  })
+
+  /**
+   * what matching the marker anywhere in the key costs, stated rather than
+   * discovered later.
+   *
+   * a marker word directly assigned a value is taken even when the value is a
+   * count rather than a secret, because "cookies" contains "cookie" and there
+   * is no way to know from the key alone which one this is. narrowing it -
+   * requiring the marker to be a separator-delimited component, so "cookies"
+   * stops matching and "cookie_store" keeps doing so - is available and would
+   * buy these back, but it reintroduces exactly the kind of structural
+   * assumption that made this rule wrong twice, and `awssecretkey=x` would
+   * walk straight through it.
+   *
+   * so the trade is deliberate: a diagnostic loses a number, in a direction
+   * that fails closed. nothing this app actually writes is affected - the
+   * whole engine wording table is asserted untouched two blocks down, and the
+   * cookie wording above is the app's own.
+   */
+  it("takes a count as well as a secret, when the key is a marker", async () => {
+    for (const text of [
+      "cookies: 3",
+      "cookie_count: 12",
+      "cookies_found: 4",
+      "tokens: 5",
+      "passwords: 0"
+    ]) {
+      expect(await captureText(text)).toBe("[credential]")
+    }
+
+    // and it takes only the assignment, not the sentence around it
+    expect(await captureText("usable cookies: 0 for this site")).toBe(
+      "usable [credential] for this site"
+    )
   })
 })
 
