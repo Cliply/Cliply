@@ -189,6 +189,7 @@ const {
   ERROR_CODES,
   ERROR_METADATA,
   TERMINAL_ERRORS,
+  explicitError,
   mapError
 } = require("../src/main/services/ytdlp-engine")
 
@@ -288,7 +289,12 @@ describe("parity with the engine's retired pattern table", () => {
       cancelled: mapError({ cancelled: true }),
       stalled: mapError({ stalled: true }),
       classified: mapError({ exitCode: 1, stderrLines: ["ERROR: Video unavailable"] }),
-      fallback: mapError({ exitCode: 1, stderrLines: ["ERROR: nobody has seen this"] })
+      fallback: mapError({ exitCode: 1, stderrLines: ["ERROR: nobody has seen this"] }),
+      // the explicit-code path fail() takes: terminal wording carries no flags
+      // at all, so this is the one most likely to emit them as undefined
+      explicitTerminal: explicitError(ERROR_CATEGORIES.ENGINE_MISSING, null),
+      explicitClassified: explicitError(ERROR_CATEGORIES.EXTRACTION_FAILED, null),
+      explicitUnknownCode: explicitError("NOT_A_REAL_CODE", null)
     }
 
     for (const result of Object.values(paths)) {
@@ -310,10 +316,17 @@ describe("parity with the engine's retired pattern table", () => {
       expect(result.message.trim().length).toBeGreaterThan(0)
     }
 
-    // the flags still carry real values where they matter
+    // the flags still carry real values where they matter, on both routes
     expect(
       mapError({ exitCode: 1, stderrLines: ["ERROR: nsig extraction failed"] }).updateMayFix
     ).toBe(true)
+    expect(paths.explicitClassified.updateMayFix).toBe(true)
+    expect(paths.explicitTerminal.retryable).toBe(false)
+
+    // a code neither table knows still gets the non-blank fallback wording
+    expect(paths.explicitUnknownCode.message).toBe(
+      TERMINAL_ERRORS[ERROR_CATEGORIES.DOWNLOAD_FAILED].message
+    )
   })
 
   // the whole point of ungating FFMPEG_AV_BLOCKED: mapError is the only thing

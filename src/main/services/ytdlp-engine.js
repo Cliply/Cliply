@@ -173,7 +173,7 @@ function wordingFor(code) {
   )
 }
 
-// every mapError path returns the same keys. a consumer that destructures
+// every failure path returns the same keys. a consumer that destructures
 // `retryable` off a cancelled result has to get false, not undefined - task 6
 // reads these into analytics, where the two are not the same value.
 function errorShape(code, wording, details) {
@@ -186,6 +186,18 @@ function errorShape(code, wording, details) {
     needsCookies: Boolean(wording.needsCookies),
     details
   }
+}
+
+/**
+ * the failure a caller gets when it already knows the code, rather than
+ * leaving it to be read out of stderr
+ *
+ * @param {string} code - one of ERROR_CODES
+ * @param {string|null} details - redacted technical detail, if any
+ * @returns {Object} the same shape mapError returns
+ */
+function explicitError(code, details = null) {
+  return errorShape(code, wordingFor(code), details)
 }
 
 // =============================================================================
@@ -1251,12 +1263,11 @@ class YtdlpOperation extends EventEmitter {
     this.releaseGateIfHeld()
 
     const stderrLines = this.stderrBuffer.tail()
+    // both branches go through errorShape, so an explicit code carries the same
+    // seven keys a classified one does - a wording entry only defines the flags
+    // it needs, and the rest have to read as false, not as missing
     const mapped = code
-      ? {
-          code,
-          ...wordingFor(code),
-          details: cause ? redactLogLine(cause.message) : null
-        }
+      ? explicitError(code, cause ? redactLogLine(cause.message) : null)
       : mapError({
           exitCode,
           stderrLines,
@@ -1858,6 +1869,9 @@ module.exports = {
   // they must not share a key, or wordingFor would silently shadow one
   ERROR_METADATA,
   TERMINAL_ERRORS,
+  // the explicit-code half of fail(), exported so the shape contract is tested
+  // against what fail actually calls rather than a copy of it
+  explicitError,
   PROGRESS_TEMPLATE,
   FILE_TEMPLATE,
   STREAM_TEMPLATE,
