@@ -155,6 +155,14 @@ const TERMINAL_ERRORS = {
   }
 }
 
+// neither table may be rewritten after load: wordingFor resolves through both,
+// so a stray assignment would change what every failure says - and, for the
+// metadata entries, whether the download flow retries at all
+Object.freeze(ERROR_METADATA)
+Object.freeze(TERMINAL_ERRORS)
+for (const entry of Object.values(ERROR_METADATA)) Object.freeze(entry)
+for (const entry of Object.values(TERMINAL_ERRORS)) Object.freeze(entry)
+
 // wording for any code, whoever produced it, so the ui never shows a blank
 // message. terminal codes first, then the classified ones, then the catch-all.
 function wordingFor(code) {
@@ -163,6 +171,21 @@ function wordingFor(code) {
     ERROR_METADATA[code] ||
     TERMINAL_ERRORS[ERROR_CODES.DOWNLOAD_FAILED]
   )
+}
+
+// every mapError path returns the same keys. a consumer that destructures
+// `retryable` off a cancelled result has to get false, not undefined - task 6
+// reads these into analytics, where the two are not the same value.
+function errorShape(code, wording, details) {
+  return {
+    code,
+    message: wording.message,
+    suggestion: wording.suggestion,
+    retryable: Boolean(wording.retryable),
+    updateMayFix: Boolean(wording.updateMayFix),
+    needsCookies: Boolean(wording.needsCookies),
+    details
+  }
 }
 
 // =============================================================================
@@ -373,11 +396,11 @@ function mapError({
   stalled = false
 } = {}) {
   if (cancelled) {
-    return { code: ERROR_CODES.CANCELLED, ...TERMINAL_ERRORS[ERROR_CODES.CANCELLED], details: null }
+    return errorShape(ERROR_CODES.CANCELLED, TERMINAL_ERRORS[ERROR_CODES.CANCELLED], null)
   }
 
   if (stalled) {
-    return { code: ERROR_CODES.STALLED, ...TERMINAL_ERRORS[ERROR_CODES.STALLED], details: null }
+    return errorShape(ERROR_CODES.STALLED, TERMINAL_ERRORS[ERROR_CODES.STALLED], null)
   }
 
   const lines = Array.isArray(stderrLines) ? stderrLines : String(stderrLines).split("\n")
@@ -394,25 +417,14 @@ function mapError({
   const metadata = category === ERROR_CODES.UNKNOWN_ERROR ? null : ERROR_METADATA[category]
 
   if (metadata) {
-    return {
-      code: category,
-      message: metadata.message,
-      suggestion: metadata.suggestion,
-      retryable: Boolean(metadata.retryable),
-      updateMayFix: Boolean(metadata.updateMayFix),
-      needsCookies: Boolean(metadata.needsCookies),
-      details
-    }
+    return errorShape(category, metadata, details)
   }
 
-  return {
-    code: ERROR_CODES.DOWNLOAD_FAILED,
-    ...TERMINAL_ERRORS[ERROR_CODES.DOWNLOAD_FAILED],
-    retryable: false,
-    updateMayFix: false,
-    needsCookies: false,
-    details: details || (exitCode === null ? null : `yt-dlp exited with code ${exitCode}`)
-  }
+  return errorShape(
+    ERROR_CODES.DOWNLOAD_FAILED,
+    TERMINAL_ERRORS[ERROR_CODES.DOWNLOAD_FAILED],
+    details || (exitCode === null ? null : `yt-dlp exited with code ${exitCode}`)
+  )
 }
 
 // format a time-range bound for --download-sections

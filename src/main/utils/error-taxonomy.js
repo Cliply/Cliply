@@ -60,12 +60,14 @@ const CATEGORY_PATTERNS = [
     // our own cancels never reach here anyway: they carry an explicit CANCELLED
     // code, and mapError short-circuits on the cancelled flag before classifying.
     category: ERROR_CATEGORIES.FFMPEG_AV_BLOCKED,
+    // every alternative names ffmpeg: yt-dlp runs other postprocessors too
+    // (AtomicParsley for thumbnails, for one), and a kill under the
+    // "Postprocessing:" heading is not evidence that ffmpeg was the victim
     patterns: [
       // 137 is 128 + SIGKILL - nothing else exits ffmpeg that way
       /ffmpeg exited with code 137/i,
       /ffmpeg[^\n]{0,80}\b(?:killed|sigkill)\b/i,
-      /\b(?:killed|sigkill)\b[^\n]{0,80}ffmpeg/i,
-      /postprocessing:[^\n]{0,120}\b(?:killed|sigkill)\b/i
+      /\b(?:killed|sigkill)\b[^\n]{0,80}ffmpeg/i
     ]
   },
   {

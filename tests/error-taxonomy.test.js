@@ -107,7 +107,11 @@ describe("classify", () => {
     for (const text of [
       "ERROR: the process was killed",
       "Killed",
-      "sigkill received"
+      "sigkill received",
+      // yt-dlp runs postprocessors that are not ffmpeg, so the heading alone
+      // does not make a kill an ffmpeg kill
+      "ERROR: Postprocessing: thumbnail helper was killed",
+      "ERROR: Postprocessing: AtomicParsley was killed"
     ]) {
       expect(classify(text, ERROR_STAGES.POSTPROCESS).category)
         .not.toBe(ERROR_CATEGORIES.FFMPEG_AV_BLOCKED)
@@ -159,25 +163,6 @@ describe("CATEGORY_PATTERNS", () => {
       .toBe(false)
   })
 
-  // no entry is gated today - FFMPEG_AV_BLOCKED used to be, until it turned out
-  // mapError cannot tell it is postprocessing. the mechanism stays because a
-  // future entry may need it, so this holds any gated entry to its contract and
-  // starts biting the moment someone adds one.
-  it("confines a gated entry to the stages it names", () => {
-    const gated = CATEGORY_PATTERNS.filter((entry) => entry.stages)
-
-    for (const entry of gated) {
-      const sample = entry.patterns[0].source.replace(/\\b|\[\^\\n\]\{[\d,]+\}/g, "")
-      const otherStages = Object.values(ERROR_STAGES).filter(
-        (stage) => !entry.stages.includes(stage)
-      )
-
-      for (const stage of otherStages) {
-        expect(classify(sample, stage).category).not.toBe(entry.category)
-      }
-    }
-  })
-
   it("freezes each entry and its pattern list too", () => {
     for (const entry of CATEGORY_PATTERNS) {
       expect(Object.isFrozen(entry)).toBe(true)
@@ -223,11 +208,28 @@ describe("taxonomy adoption", () => {
   })
 
   it("has wording for every code either table can produce", () => {
-    for (const [code, entry] of Object.entries(ERROR_METADATA)) {
-      expect(typeof entry.message).toBe("string")
-      expect(entry.message.length).toBeGreaterThan(0)
-      expect(typeof entry.suggestion).toBe("string")
-      expect(ERROR_CATEGORIES[code]).toBe(code)
+    // both tables, not just the metadata one: wordingFor falls back through
+    // TERMINAL_ERRORS[DOWNLOAD_FAILED], so a blank message there would surface
+    // as a blank message for any code neither table knows
+    for (const table of [ERROR_METADATA, TERMINAL_ERRORS]) {
+      expect(Object.keys(table).length).toBeGreaterThan(0)
+
+      for (const [code, entry] of Object.entries(table)) {
+        expect(typeof entry.message).toBe("string")
+        expect(entry.message.trim().length).toBeGreaterThan(0)
+        expect(typeof entry.suggestion).toBe("string")
+        expect(entry.suggestion.trim().length).toBeGreaterThan(0)
+        expect(ERROR_CATEGORIES[code]).toBe(code)
+      }
+    }
+  })
+
+  it("keeps both wording tables frozen after load", () => {
+    for (const table of [ERROR_METADATA, TERMINAL_ERRORS]) {
+      expect(Object.isFrozen(table)).toBe(true)
+      for (const entry of Object.values(table)) {
+        expect(Object.isFrozen(entry)).toBe(true)
+      }
     }
   })
 
@@ -277,6 +279,41 @@ describe("parity with the engine's retired pattern table", () => {
   it.each(cases)("classifies %j as %s", (text, expected) => {
     expect(classify(text, ERROR_STAGES.DOWNLOAD).category)
       .toBe(ERROR_CATEGORIES[expected])
+  })
+
+  // task 6 reads these into analytics, where a destructured undefined is not
+  // false - so every path has to carry all three flags, cancelled included
+  it("returns the same shape on every path", () => {
+    const paths = {
+      cancelled: mapError({ cancelled: true }),
+      stalled: mapError({ stalled: true }),
+      classified: mapError({ exitCode: 1, stderrLines: ["ERROR: Video unavailable"] }),
+      fallback: mapError({ exitCode: 1, stderrLines: ["ERROR: nobody has seen this"] })
+    }
+
+    for (const result of Object.values(paths)) {
+      expect(Object.keys(result).sort()).toEqual([
+        "code",
+        "details",
+        "message",
+        "needsCookies",
+        "retryable",
+        "suggestion",
+        "updateMayFix"
+      ])
+
+      for (const flag of ["retryable", "updateMayFix", "needsCookies"]) {
+        expect(typeof result[flag]).toBe("boolean")
+      }
+
+      expect(typeof result.message).toBe("string")
+      expect(result.message.trim().length).toBeGreaterThan(0)
+    }
+
+    // the flags still carry real values where they matter
+    expect(
+      mapError({ exitCode: 1, stderrLines: ["ERROR: nsig extraction failed"] }).updateMayFix
+    ).toBe(true)
   })
 
   // the whole point of ungating FFMPEG_AV_BLOCKED: mapError is the only thing
