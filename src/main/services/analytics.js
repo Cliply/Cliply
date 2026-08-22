@@ -150,8 +150,15 @@ const SLUG_PATTERN = /^[a-z0-9][a-z0-9_-]{0,31}$/
 const VERSION_PATTERN = /^[0-9][A-Za-z0-9._-]{0,31}$/
 
 // a pre-bucketed measurement: leads with a digit or a comparison, ends in a
-// short unit. "1-5 min", "<1m", "10-50 MB"
-const BUCKET_PATTERN = /^[<>]?[0-9]+(-[0-9]+)?\s?[a-zA-Z]{0,4}$/
+// short unit. "1-5 min", "<1m", "10-50 MB", "60+ min"
+//
+// the trailing `+` is admitted because an open-ended top bucket is written
+// that way more often than any other, and a grammar that forbids the reflex
+// spelling buys nothing: ">60 min" carries the identical information, so the
+// only thing rejecting "60+ min" achieves is a dropped event behind a warning
+// production never shows anyone. still anchored on a digit or a comparison,
+// so no title or filename becomes reachable.
+const BUCKET_PATTERN = /^[<>]?[0-9]+(-[0-9]+)?\+?\s?[a-zA-Z]{0,4}$/
 
 /**
  * the error vocabularies are referenced, never copied. task 2 made the

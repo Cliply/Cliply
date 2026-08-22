@@ -674,6 +674,17 @@ describe("Analytics", () => {
     })
 
     describe("bucket", () => {
+      it("keeps an open-ended top bucket written with a plus", async () => {
+        // the commonest idiom there is, so task 6 reaches for it by reflex.
+        // ">60 min" says the same thing, but a reflex does not consult a brief
+        for (const value of ["60+ min", "100+ MB", "10+s", "1000+"]) {
+          const properties = await captureOne("download_completed", {
+            elapsed_bucket: value
+          })
+          expect(properties.elapsed_bucket).toBe(value)
+        }
+      })
+
       it("keeps the labels the taxonomy anticipates", async () => {
         for (const value of [
           "1-5 min",
