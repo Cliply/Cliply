@@ -456,6 +456,31 @@ const PATH_HEADS = [
   String.raw`/[^\s'"<>|,;)]*/`
 ]
 
+/**
+ * whatever a credential's name is hung off the front of.
+ *
+ * `client_secret`, `signing_secret`, `github_access_token`, `x-api-key`: the
+ * name of one of these fields is a compound far more often than it is the bare
+ * word, and an anchor that only matches the bare word matches almost none of
+ * them in practice.
+ */
+const CREDENTIAL_PREFIX = String.raw`\b[A-Za-z0-9_-]*`
+
+const CREDENTIAL_NAMES = [
+  "api[_-]?key",
+  "access[_-]?token",
+  "refresh[_-]?token",
+  "auth[_-]?token",
+  "id[_-]?token",
+  "token",
+  "secret",
+  "password",
+  "passwd",
+  "pwd",
+  "session[_-]?id",
+  "cookie"
+].join("|")
+
 const TEXT_SCRUBS = [
   // a scheme url first, so its own path is consumed here rather than by the
   // path patterns below. brackets end it so a parenthesised url reads
@@ -481,11 +506,26 @@ const TEXT_SCRUBS = [
    * that matters. "bearer" and "negotiate" are also matched without their
    * header name; "basic" and "digest" deliberately are not, because unlike
    * those two they are ordinary english and would eat the word after them.
+   *
+   * the CREDENTIAL_PREFIX in front of each name is not decoration. an earlier
+   * version anchored on \b alone, and "_" is a word character - so there is no
+   * boundary inside "client_secret" and \bsecret never reached it. the names
+   * these fields really have are compounds: client_secret, signing_secret,
+   * github_access_token, x-api-key. the same mistake as the ipv6 rule made
+   * before it, which validated a grammar instead of matching a shape, and
+   * missed every compressed spelling anybody writes.
    */
-  [/\bauthorization\s*[=:].*/gi, "[credential]"],
+  [
+    new RegExp(CREDENTIAL_PREFIX + String.raw`authorization\s*[=:].*`, "gi"),
+    "[credential]"
+  ],
   [/\b(?:bearer|negotiate)\s+[^\s'"]+/gi, "[credential]"],
   [
-    /\b(?:api[_-]?key|access[_-]?token|refresh[_-]?token|auth[_-]?token|id[_-]?token|token|secret|password|passwd|pwd|session[_-]?id|cookie)\s*[=:]\s*[^\s'"&]+/gi,
+    new RegExp(
+      CREDENTIAL_PREFIX +
+        String.raw`(?:${CREDENTIAL_NAMES})\s*[=:]\s*[^\s'"&]+`,
+      "gi"
+    ),
     "[credential]"
   ],
 

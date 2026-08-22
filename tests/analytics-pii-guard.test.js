@@ -346,17 +346,49 @@ describe("the shape of the boundary is pinned, so widening it is a decision", ()
    *
    * a new kind fails this test until it is written down here with a reason.
    */
+  /**
+   * `open` is the half that matters for the pin below it: does this kind admit
+   * a value that is correct for the kind and sensitive all the same? a closed
+   * kind cannot, whatever property is pointed at it. an open one can, so which
+   * properties may point at it becomes a decision rather than a detail.
+   */
   const REVIEWED_KINDS = {
-    bool: "a javascript boolean, or nothing",
-    number: "a finite non-negative number, never a coerced string",
-    platform: "a closed set of site names; anything else becomes 'unsupported'",
-    vocabulary: "a finite set of values we own, per property",
-    quality: "digit-anchored heights and bitrates, plus a closed list",
-    version: "digits and dots, letters only inside a prerelease segment",
-    bucket: "a pre-bucketed label, anchored on a digit or a comparison",
-    locale:
-      "a bcp-47 tag, anchored on case and length rather than on a list, because the values are chromium's and grow with it",
-    text: "free prose, scrubbed and then refused if any shape still stands"
+    bool: {
+      open: false,
+      why: "two values exist and neither can carry anything"
+    },
+    number: {
+      open: true,
+      why: "a finite non-negative number, never a coerced string - but an account id is one too"
+    },
+    platform: {
+      open: false,
+      why: "a closed set of site names; anything else is rewritten to 'unsupported'"
+    },
+    vocabulary: {
+      open: false,
+      why: "a finite set listed per property in analytics.js, so a new value is an edit that names it"
+    },
+    quality: {
+      open: false,
+      why: "digit-anchored heights and bitrates plus a listed set; no prose fits either"
+    },
+    version: {
+      open: true,
+      why: "digits and dots, letters only inside a prerelease - and a phone number written with dots is one"
+    },
+    bucket: {
+      open: true,
+      why: "a digit or a comparison and a short unit - which '52 kg' also is"
+    },
+    locale: {
+      open: true,
+      why: "a bcp-47 tag anchored on case and length, because the values are chromium's and grow with it - and a short name has that shape"
+    },
+    text: {
+      open: true,
+      why: "free prose, scrubbed and then refused if any shape still stands"
+    }
   }
 
   it("declares no kind that has not been argued for", () => {
@@ -365,6 +397,61 @@ describe("the shape of the boundary is pinned, so widening it is a decision", ()
     // both directions on purpose. an unreviewed kind is the leak; a reviewed
     // kind nobody uses any more is a stale claim about a boundary that moved
     expect(declared).toEqual(Object.keys(REVIEWED_KINDS).sort())
+  })
+
+  /**
+   * which properties may use a kind that admits arbitrary values.
+   *
+   * pinning which kinds *exist* is not enough, and the gap it leaves is the
+   * one that looks least like a mistake: somebody adds a property, reaches for
+   * a kind that is already there, and the boundary widens without a single
+   * line that reads as dangerous. `display_name: "locale"` passes the kind
+   * census, because "locale" was argued for long before. it passes both
+   * free-text pins, because it is not text. and no hostile value in the matrix
+   * touches it, because "amy" is a perfectly legitimate locale and only
+   * becomes a leak once the property it sits on is called display_name.
+   *
+   * no value check can see that. the value is right for the kind and sensitive
+   * for the property; only the pairing is wrong, so the pairing is what gets
+   * pinned. closed kinds are deliberately absent - a vocabulary property
+   * cannot be added without listing its values in analytics.js, a platform
+   * rewrites whatever it does not recognise, and neither can widen quietly.
+   */
+  const OPEN_KIND_PROPERTIES = {
+    formats_count: "number",
+    file_size_mb: "number",
+    progress_at_failure: "number",
+    progress_at_cancel: "number",
+
+    previous_version: "version",
+    engine_version: "version",
+    from_version: "version",
+    to_version: "version",
+    app_version: "version",
+    os_version: "version",
+
+    duration_bucket: "bucket",
+    elapsed_bucket: "bucket",
+    speed_bucket: "bucket",
+    load_ms_bucket: "bucket",
+
+    locale: "locale",
+
+    error_message: "text"
+  }
+
+  it("pins which properties may use a kind that admits arbitrary values", () => {
+    const openKinds = new Set(
+      Object.entries(REVIEWED_KINDS)
+        .filter(([, kind]) => kind.open)
+        .map(([name]) => name)
+    )
+
+    const using = Object.fromEntries(
+      Object.entries(PROPERTY_KINDS).filter(([, kind]) => openKinds.has(kind))
+    )
+
+    expect(using).toEqual(OPEN_KIND_PROPERTIES)
   })
 
   it("gives every declared property a kind", () => {
@@ -742,6 +829,17 @@ describe("locale, the one value chromium picks and we do not", () => {
       expect(await localeSentAs(value)).toBeUndefined()
     }
   })
+
+  it("cannot tell a short personal name from a language tag", async () => {
+    // two or three lowercase letters is a language and also a name, and no
+    // amount of tightening separates them - "amy" is exactly as well-formed a
+    // tag as "ami" is a real one. harmless on `locale`, which is what this
+    // grammar exists for, and a leak the moment a later task points a
+    // `display_name` at the same kind. OPEN_KIND_PROPERTIES is what stops that
+    for (const name of ["amy", "ana", "ali", "bob"]) {
+      expect(await localeSentAs(name)).toBe(name)
+    }
+  })
 })
 
 describe("a credential, which is shapeless but not edgeless", () => {
@@ -771,6 +869,36 @@ describe("a credential, which is shapeless but not edgeless", () => {
     expect(await captureText("password=hunter2 rejected")).toBe(
       "[credential] rejected"
     )
+  })
+
+  it("finds the name when it is a compound, which it usually is", async () => {
+    // "_" is a word character, so a \b anchor never reaches into
+    // "client_secret" - and the bare word is the spelling these fields almost
+    // never have. the same miss as the ipv6 rule, which validated a grammar
+    // instead of matching a shape and so walked past every compressed form
+    expect(await captureText("OAuth failed: client_secret=hunter2")).toBe(
+      "OAuth failed: [credential]"
+    )
+    expect(await captureText("request rejected: signing_secret=abc123")).toBe(
+      "request rejected: [credential]"
+    )
+    expect(
+      await captureText("github_access_token=ghp_abcdef123456 was revoked")
+    ).toBe("[credential] was revoked")
+    expect(await captureText("x-api-key: abcdef123456 rejected")).toBe(
+      "[credential] rejected"
+    )
+    expect(await captureText("app_session_id: abc123 expired")).toBe(
+      "[credential] expired"
+    )
+
+    // the header name composes too, and hyphenated or not
+    for (const text of [
+      "Proxy-Authorization: Basic dXNlcjpwYXNz",
+      "proxy_authorization: Basic dXNlcjpwYXNz"
+    ]) {
+      expect(await captureText(text)).toBe("[credential]")
+    }
   })
 
   it("does not fire on the words those markers are made of", async () => {
@@ -815,6 +943,55 @@ describe("what the sanitizer may not cost us", () => {
     for (const text of WORDING) {
       expect(await captureText(text)).toBe(text)
     }
+  })
+})
+
+describe("what an open kind admits, which is what the pairing pin is for", () => {
+  /**
+   * the evidence behind OPEN_KIND_PROPERTIES, in the same spirit as the floor
+   * block below: a limit is only weighable once somebody can see it.
+   *
+   * each of these is a sensitive value that is *correct* for the kind holding
+   * it, and each is sent. that is not a defect to fix at the value level -
+   * there is nothing about `1.234.567.8901` that distinguishes a phone number
+   * from a version, and a rule that could tell them apart would have to know
+   * which property it was looking at. which is the pin.
+   *
+   * so these assert what really happens rather than what we would like to. if
+   * one of them ever stops being sent, the kind got narrower and both this and
+   * the pin want re-reading.
+   */
+  async function sentOn(event, properties) {
+    const { analytics, sent } = await ready()
+    analytics.capture(event, properties)
+    expect(sent).toHaveLength(1)
+    return sent[0].properties
+  }
+
+  it("takes a phone number as a version, because it is one", async () => {
+    const properties = await sentOn("engine_updated", {
+      to_version: "1.234.567.8901"
+    })
+
+    expect(properties.to_version).toBe("1.234.567.8901")
+  })
+
+  it("takes an identifier as a number, because it is one", async () => {
+    // a row id, an account number, a date of birth written as digits: all
+    // finite, all non-negative, all under the ceiling
+    const properties = await sentOn("download_completed", {
+      file_size_mb: 19870514
+    })
+
+    expect(properties.file_size_mb).toBe(19870514)
+  })
+
+  it("takes a measurement of a person as a bucket, because it is one", async () => {
+    const properties = await sentOn("download_completed", {
+      elapsed_bucket: "52 kg"
+    })
+
+    expect(properties.elapsed_bucket).toBe("52 kg")
   })
 })
 
