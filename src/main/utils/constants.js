@@ -34,17 +34,12 @@ const APP_CONFIG = {
 
   // analytics configuration
   ANALYTICS_CONFIG: {
-    // aptabase app key
-    APP_KEY: "A-EU-7558244378",
+    // posthog project token - write-only, safe to ship in a client app
+    POSTHOG_KEY: "phc_ojaWgWDpqKCTwLym4U6b4pa6br6H5X7a7vRmLXkhMVmk",
+    POSTHOG_HOST: "https://us.i.posthog.com",
 
-    // enable analytics
-    ENABLED: true,
-
-    // events to track
-    EVENTS: {
-      DOWNLOAD_COMPLETED: "download_completed",
-      DOWNLOAD_FAILED: "download_failed"
-    }
+    // build-time kill switch - flip to false for a telemetry-free build
+    ENABLED: true
   }
 }
 

@@ -42,9 +42,9 @@
     "generate:icons": "node scripts/generate-icons.js"
   },
   "dependencies": {
-    "@aptabase/electron": "^0.3.1",
     "dotenv": "^16.5.0",
     "electron-updater": "^6.1.8",
+    "posthog-node": "^5.50.0",
     "uuid": "^9.0.1"
   },
   "devDependencies": {
