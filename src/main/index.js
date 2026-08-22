@@ -12,35 +12,23 @@ const isDev = process.env.NODE_ENV === "development"
 const CookieManager = require("./services/cookie-manager")
 const { YtdlpEngine } = require("./services/ytdlp-engine")
 const { YtdlpUpdater } = require("./services/ytdlp-updater")
+const { SettingsStore } = require("./services/settings-store")
+const { Analytics } = require("./services/analytics")
 const IPCHandlers = require("./ipc-handlers")
 const { APP_CONFIG } = require("./utils/constants")
-const { getAppVersion } = require("./utils/analytics-helpers")
+const { getAppVersion, isFirstLaunch } = require("./utils/analytics-helpers")
 
 // let the user get their first download going before we check for updates
 const UPDATE_CHECK_DELAY_MS = 90 * 1000
 
-// analytics
-let trackEvent = null
-if (APP_CONFIG.ANALYTICS_CONFIG.ENABLED) {
-  try {
-    const {
-      initialize,
-      trackEvent: aptabaseTrackEvent
-    } = require("@aptabase/electron/main")
-    initialize(APP_CONFIG.ANALYTICS_CONFIG.APP_KEY)
-    trackEvent = aptabaseTrackEvent
-    // make globally available
-    global.trackEvent = trackEvent
-    console.log("Analytics initialized")
-  } catch (error) {
-    console.warn("Failed to initialize analytics:", error.message)
-    trackEvent = () => {}
-    global.trackEvent = trackEvent
-  }
-} else {
-  trackEvent = () => {}
-  global.trackEvent = trackEvent
-}
+// what getAppVersion() reports when it cannot read package.json. persisting it
+// would poison the launch after this one: it comes back as previous_version,
+// where the version grammar rejects it and the property is dropped
+const UNKNOWN_VERSION = "unknown"
+
+// how long a drain may hold the quit open. two seconds is a batch leaving on a
+// working connection; past that the events are worth less than the wait
+const QUIT_FLUSH_TIMEOUT_MS = 2000
 
 class CliplyApp {
   constructor() {
@@ -48,6 +36,9 @@ class CliplyApp {
     this.services = {}
     this.ipcHandlers = null
     this.isQuitting = false
+    // set once the shutdown drain has run, so the quit it re-issues is not
+    // cancelled a second time
+    this.hasShutDown = false
 
     // update handling
     this.updateState = {
@@ -128,6 +119,20 @@ class CliplyApp {
       const resourcesPath = isDev
         ? path.join(__dirname, "..", "..")
         : process.resourcesPath
+
+      // one settings store for the whole main process. ipc-handlers falls back
+      // to constructing its own when the bag does not carry one, and two of
+      // them means two install id mints racing over the same file - so it is
+      // built here, before anything that reads it
+      this.services.settingsStore = new SettingsStore()
+
+      // analytics - one exit point for all telemetry. first, so that everything
+      // below it can report, and awaited, so nothing captures into a service
+      // that has not read the opt-out yet
+      this.services.analytics = new Analytics({
+        settingsStore: this.services.settingsStore
+      })
+      await this.services.analytics.init()
 
       // init cookie manager
       this.services.cookieManager = new CookieManager()
@@ -368,6 +373,7 @@ class CliplyApp {
     // app ready
     app.whenReady().then(() => {
       this.createWindow()
+      this.reportLaunch()
 
       // macos: re-create window when dock icon clicked
       app.on("activate", () => {
@@ -420,6 +426,42 @@ class CliplyApp {
         event.preventDefault()
       })
     })
+  }
+
+  /**
+   * send app_launched, then record this version for the next launch to read.
+   *
+   * the stored version has to be read before it is overwritten - that ordering
+   * is the whole of what makes previous_version meaningful, and it is how an
+   * upgrade becomes visible in the data.
+   */
+  reportLaunch() {
+    return this.services.settingsStore
+      .readAll()
+      .then((settings) => {
+        const previousVersion = settings.last_version
+
+        this.services.analytics.capture("app_launched", {
+          is_first_launch: isFirstLaunch(),
+          // spread rather than `|| null`: a first launch genuinely has no
+          // previous version, and absence says that where a null pretends
+          // there was a value to send
+          ...(previousVersion ? { previous_version: previousVersion } : {})
+        })
+
+        const version = getAppVersion()
+
+        if (!version || version === UNKNOWN_VERSION) {
+          return
+        }
+
+        return this.services.settingsStore.writeSettings({
+          last_version: version
+        })
+      })
+      .catch(() => {
+        // a settings read or write failure must never stop the app launching
+      })
   }
 
   // create main window
@@ -539,13 +581,33 @@ class CliplyApp {
     this.mainWindow = null
   }
 
-  // handle before quit
-  async onBeforeQuit() {
+  /**
+   * handle before quit
+   *
+   * electron does not await an async before-quit listener: it carries on
+   * tearing the process down the moment this returns at its first await, which
+   * is before a batched analytics flush has left the machine. so the first pass
+   * cancels the quit, drains, and quits again - the second pass sees the flag
+   * and lets it through.
+   * @param {Object} [event] - electron's before-quit event
+   */
+  async onBeforeQuit(event) {
     this.isQuitting = true
 
     // skip cleanup if updating
     if (global.isUpdating) {
       return
+    }
+
+    // the quit we re-issued below, arriving back here
+    if (this.hasShutDown) {
+      return
+    }
+
+    this.hasShutDown = true
+
+    if (event && typeof event.preventDefault === "function") {
+      event.preventDefault()
     }
 
     try {
@@ -560,6 +622,24 @@ class CliplyApp {
         }
       }
 
+      // batched events are lost if we exit without draining them. capped,
+      // because a flush that cannot finish must not leave the app refusing to
+      // close - telemetry is never worth that
+      if (this.services.analytics) {
+        let flushTimer = null
+
+        await Promise.race([
+          this.services.analytics.flush(),
+          new Promise((resolve) => {
+            flushTimer = setTimeout(resolve, QUIT_FLUSH_TIMEOUT_MS)
+          })
+        ])
+
+        // the cap loses the race far more often than it wins it, and a timer
+        // left armed behind a won race holds the loop open for two more seconds
+        clearTimeout(flushTimer)
+      }
+
       // cleanup ipc handlers
       if (this.ipcHandlers) {
         this.ipcHandlers.cleanup()
@@ -567,6 +647,9 @@ class CliplyApp {
     } catch (error) {
       console.error("Error during shutdown:", error)
     }
+
+    // outside the try: whatever went wrong above, the app still has to quit
+    app.quit()
   }
 
   // get app icon path
@@ -660,6 +743,33 @@ class CliplyApp {
               } catch (error) {
                 console.error("Manual update check failed:", error)
                 dialog.showErrorBox("Error", "Failed to check for updates.")
+              }
+            }
+          },
+          { type: "separator" },
+          {
+            label: "Send anonymous usage data",
+            type: "checkbox",
+            checked: this.services.analytics.isEnabled(),
+            click: async (menuItem) => {
+              // through the service, never the store: the opt-out gate is only
+              // re-read at init(), so writing the preference behind its back
+              // leaves this session sending for the rest of its life
+              const result = await this.services.analytics.setEnabled(
+                menuItem.checked
+              )
+
+              // a privacy control that silently fails to persist would come
+              // back on at the next launch - say so rather than pretend
+              if (result && result.success === false) {
+                menuItem.checked = !menuItem.checked
+                dialog.showMessageBox(this.mainWindow, {
+                  type: "error",
+                  title: "Couldn't save that preference",
+                  message: "Your analytics preference could not be saved.",
+                  detail: result.error || "Please try again.",
+                  buttons: ["OK"]
+                })
               }
             }
           }

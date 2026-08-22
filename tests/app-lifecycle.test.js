@@ -1,0 +1,507 @@
+/**
+ * index.js is wiring, so these tests drive the real class against a mocked
+ * electron and mocked services. what is under test is the order things happen
+ * in and what is handed to what - never the services themselves, which have
+ * their own suites.
+ *
+ * the module self-starts at require time, so the single instance lock is mocked
+ * to refuse: the module then quits instead of constructing an app, and the
+ * class it exports is ours to instantiate per test.
+ */
+
+const mockWindow = {
+  on: jest.fn(),
+  once: jest.fn(),
+  show: jest.fn(),
+  isDestroyed: jest.fn(() => false),
+  loadURL: jest.fn(),
+  loadFile: jest.fn(() => Promise.resolve()),
+  webContents: { send: jest.fn(), openDevTools: jest.fn() }
+}
+
+const mockElectron = {
+  app: {
+    setName: jest.fn(),
+    setVersion: jest.fn(),
+    getName: jest.fn(() => "Cliply"),
+    getLocale: jest.fn(() => "en-US"),
+    whenReady: jest.fn(() => Promise.resolve()),
+    on: jest.fn(),
+    quit: jest.fn(),
+    exit: jest.fn(),
+    requestSingleInstanceLock: jest.fn(() => false)
+  },
+  BrowserWindow: Object.assign(
+    jest.fn(() => mockWindow),
+    { getAllWindows: jest.fn(() => []) }
+  ),
+  Menu: {
+    buildFromTemplate: jest.fn((template) => template),
+    setApplicationMenu: jest.fn()
+  },
+  shell: { openExternal: jest.fn() },
+  dialog: { showMessageBox: jest.fn(), showErrorBox: jest.fn() }
+}
+
+let mockAnalytics = null
+let mockSettingsStore = null
+let mockIpcHandlers = null
+
+// what IPCHandlers was handed at the moment it was constructed - a snapshot,
+// because the services object keeps being filled in afterwards
+let servicesAtIpcConstruction = null
+
+jest.mock("electron", () => mockElectron)
+jest.mock("electron-updater", () => ({ autoUpdater: { on: jest.fn() } }))
+
+jest.mock("../src/main/services/cookie-manager", () =>
+  jest.fn(() => ({ initialize: jest.fn().mockResolvedValue(undefined) }))
+)
+
+jest.mock("../src/main/services/ytdlp-engine", () => ({
+  YtdlpEngine: jest.fn(() => ({
+    getBinaryPath: jest.fn(() => "/tmp/yt-dlp"),
+    cancelAll: jest.fn(() => 0)
+  }))
+}))
+
+jest.mock("../src/main/services/ytdlp-updater", () => ({
+  YtdlpUpdater: jest.fn(() => ({
+    seed: jest.fn().mockResolvedValue({ reason: "up-to-date" }),
+    checkForUpdate: jest.fn().mockResolvedValue({ reason: "up-to-date" })
+  }))
+}))
+
+jest.mock("../src/main/ipc-handlers", () =>
+  jest.fn((services) => {
+    servicesAtIpcConstruction = { ...services }
+    return mockIpcHandlers
+  })
+)
+
+jest.mock("../src/main/services/settings-store", () => ({
+  SettingsStore: jest.fn(() => mockSettingsStore)
+}))
+
+jest.mock("../src/main/services/analytics", () => ({
+  Analytics: jest.fn(() => mockAnalytics)
+}))
+
+jest.mock("../src/main/utils/analytics-helpers", () => ({
+  getAppVersion: jest.fn(() => "1.2.3"),
+  isFirstLaunch: jest.fn(() => false),
+  extractQuality: jest.fn(),
+  extractTitleFromFilename: jest.fn(),
+  sanitizeTitle: jest.fn()
+}))
+
+const CliplyApp = require("../src/main/index")
+const { Analytics } = require("../src/main/services/analytics")
+const { SettingsStore } = require("../src/main/services/settings-store")
+const IPCHandlers = require("../src/main/ipc-handlers")
+const helpers = require("../src/main/utils/analytics-helpers")
+
+// the promise chains hang several thens deep; one macrotask drains them all
+const settle = () => new Promise((resolve) => setImmediate(resolve))
+
+function toolsSubmenu() {
+  const [template] = mockElectron.Menu.buildFromTemplate.mock.calls.at(-1)
+  return template.find((entry) => entry.label === "Tools").submenu
+}
+
+function analyticsMenuItem() {
+  return toolsSubmenu().find(
+    (entry) => entry.label === "Send anonymous usage data"
+  )
+}
+
+let app
+
+beforeEach(() => {
+  jest.clearAllMocks()
+
+  servicesAtIpcConstruction = null
+
+  mockAnalytics = {
+    init: jest.fn().mockResolvedValue(undefined),
+    capture: jest.fn(),
+    flush: jest.fn().mockResolvedValue(undefined),
+    setEnabled: jest.fn().mockResolvedValue({ success: true }),
+    setEngineVersion: jest.fn(),
+    isEnabled: jest.fn(() => true)
+  }
+
+  mockSettingsStore = {
+    readAll: jest.fn().mockResolvedValue({}),
+    writeSettings: jest.fn().mockResolvedValue(undefined),
+    setAnalyticsEnabled: jest.fn().mockResolvedValue({ success: true }),
+    isAnalyticsEnabled: jest.fn().mockResolvedValue(true),
+    getInstallId: jest.fn().mockResolvedValue("install-id")
+  }
+
+  mockIpcHandlers = {
+    setMainWindow: jest.fn(),
+    cleanup: jest.fn()
+  }
+
+  helpers.getAppVersion.mockReturnValue("1.2.3")
+  helpers.isFirstLaunch.mockReturnValue(false)
+
+  app = new CliplyApp()
+  app.ipcHandlers = mockIpcHandlers
+  app.services.analytics = mockAnalytics
+  app.services.settingsStore = mockSettingsStore
+})
+
+describe("the aptabase bootstrap is gone", () => {
+  it("leaves no trackEvent on the global", () => {
+    // the old block installed one at require time whether or not the sdk
+    // loaded. nothing may reach telemetry except through the analytics service
+    expect(global.trackEvent).toBeUndefined()
+  })
+})
+
+describe("initializeServices", () => {
+  it("builds one settings store and hands it to analytics", async () => {
+    app.services = {}
+    await app.initializeServices()
+
+    expect(SettingsStore).toHaveBeenCalledTimes(1)
+    expect(app.services.settingsStore).toBe(mockSettingsStore)
+    expect(Analytics).toHaveBeenCalledWith({ settingsStore: mockSettingsStore })
+    expect(app.services.analytics).toBe(mockAnalytics)
+  })
+
+  it("initialises analytics before anything can capture through it", async () => {
+    app.services = {}
+    await app.initializeServices()
+
+    expect(mockAnalytics.init).toHaveBeenCalledTimes(1)
+  })
+
+  it("gives ipc handlers the same store, not one of their own", async () => {
+    app.services = {}
+    await app.initializeServices()
+
+    expect(IPCHandlers).toHaveBeenCalledTimes(1)
+    // the store must already be on the services bag when ipc-handlers reads it:
+    // it falls back to constructing its own, and two stores mean two install
+    // id mints racing the same file
+    expect(servicesAtIpcConstruction.settingsStore).toBe(mockSettingsStore)
+    expect(servicesAtIpcConstruction.analytics).toBe(mockAnalytics)
+  })
+})
+
+describe("initialize", () => {
+  it("has services up before the ready handlers are registered", async () => {
+    const order = []
+
+    jest
+      .spyOn(CliplyApp.prototype, "initializeServices")
+      .mockImplementation(async () => order.push("services"))
+    jest
+      .spyOn(CliplyApp.prototype, "setupAppEvents")
+      .mockImplementation(() => order.push("events"))
+    jest
+      .spyOn(CliplyApp.prototype, "createMenu")
+      .mockImplementation(() => order.push("menu"))
+    jest
+      .spyOn(CliplyApp.prototype, "setupAutoUpdater")
+      .mockImplementation(() => {})
+    jest
+      .spyOn(CliplyApp.prototype, "checkSupportedArchitecture")
+      .mockImplementation(() => {})
+
+    await new CliplyApp().initialize()
+
+    // analytics is constructed in initializeServices, and app_launched fires
+    // from a whenReady handler registered in setupAppEvents. reversed, the
+    // event would fire into an undefined service
+    expect(order).toEqual(["services", "events", "menu"])
+
+    jest.restoreAllMocks()
+  })
+})
+
+describe("app_launched", () => {
+  async function launch() {
+    app.setupAppEvents()
+    await settle()
+  }
+
+  it("fires once the app is ready", async () => {
+    helpers.isFirstLaunch.mockReturnValue(true)
+    await launch()
+
+    expect(mockAnalytics.capture).toHaveBeenCalledTimes(1)
+    const [event, properties] = mockAnalytics.capture.mock.calls[0]
+    expect(event).toBe("app_launched")
+    expect(properties.is_first_launch).toBe(true)
+  })
+
+  it("reports the stored version as the previous one", async () => {
+    mockSettingsStore.readAll.mockResolvedValue({ last_version: "1.2.2" })
+    await launch()
+
+    const [, properties] = mockAnalytics.capture.mock.calls[0]
+    expect(properties.previous_version).toBe("1.2.2")
+  })
+
+  it("omits previous_version rather than sending a null", async () => {
+    await launch()
+
+    const [, properties] = mockAnalytics.capture.mock.calls[0]
+    // null and undefined are both skipped by the service, so this is about
+    // saying the true thing: a first launch has no previous version
+    expect(Object.keys(properties)).not.toContain("previous_version")
+  })
+
+  it("records the running version for the next launch to read", async () => {
+    mockSettingsStore.readAll.mockResolvedValue({ last_version: "1.2.2" })
+    await launch()
+
+    expect(mockSettingsStore.writeSettings).toHaveBeenCalledWith({
+      last_version: "1.2.3"
+    })
+  })
+
+  it("reads the stored version before overwriting it", async () => {
+    mockSettingsStore.readAll.mockResolvedValue({ last_version: "1.2.2" })
+    await launch()
+
+    const capturedAt = mockAnalytics.capture.mock.invocationCallOrder[0]
+    const writtenAt = mockSettingsStore.writeSettings.mock.invocationCallOrder[0]
+    expect(capturedAt).toBeLessThan(writtenAt)
+  })
+
+  it("does not persist an unknown version", async () => {
+    // getAppVersion falls back to "unknown" when package.json cannot be read.
+    // stored, the *next* launch reads it back as previous_version, where it
+    // fails the version grammar and is dropped - one bad launch spoiling the
+    // one after it. absence is handled silently, so absence is what it gets
+    helpers.getAppVersion.mockReturnValue("unknown")
+    await launch()
+
+    expect(mockSettingsStore.writeSettings).not.toHaveBeenCalled()
+    expect(mockAnalytics.capture).toHaveBeenCalledTimes(1)
+  })
+
+  it("still launches when the settings write fails", async () => {
+    mockSettingsStore.writeSettings.mockRejectedValue(new Error("read-only"))
+    await launch()
+
+    expect(mockWindow.show).not.toThrow()
+    expect(mockElectron.BrowserWindow).toHaveBeenCalledTimes(1)
+  })
+
+  it("still creates the window when the settings read fails", async () => {
+    mockSettingsStore.readAll.mockRejectedValue(new Error("gone"))
+    await launch()
+
+    expect(mockElectron.BrowserWindow).toHaveBeenCalledTimes(1)
+  })
+})
+
+/**
+ * everything above drives a mocked analytics service, which will accept any
+ * property bag at all. these replay the bag the launch actually builds through
+ * the real one, because an allowed property name is only half the contract -
+ * previous_version has a grammar, and a value that fails it is dropped behind a
+ * console.warn production never shows anyone.
+ */
+describe("the launch payload survives the real validator", () => {
+  const { Analytics: RealAnalytics } = jest.requireActual(
+    "../src/main/services/analytics"
+  )
+
+  async function replayThroughRealAnalytics(stored) {
+    mockSettingsStore.readAll.mockResolvedValue(stored)
+    app.setupAppEvents()
+    await settle()
+
+    const [event, properties] = mockAnalytics.capture.mock.calls[0]
+    const sent = []
+
+    const real = new RealAnalytics({
+      settingsStore: {
+        isAnalyticsEnabled: async () => true,
+        getInstallId: async () => "install-id",
+        setAnalyticsEnabled: async () => ({ success: true })
+      },
+      createClient: () => ({
+        capture: (message) => sent.push(message),
+        flush: async () => {}
+      }),
+      forceEnabled: true
+    })
+
+    await real.init()
+    real.capture(event, properties)
+
+    return sent
+  }
+
+  let warn
+
+  beforeEach(() => {
+    warn = jest.spyOn(console, "warn").mockImplementation(() => {})
+  })
+
+  afterEach(() => {
+    warn.mockRestore()
+  })
+
+  it("sends an upgrade's previous version without dropping anything", async () => {
+    const [message] = await replayThroughRealAnalytics({
+      last_version: "1.2.2"
+    })
+
+    expect(message.event).toBe("app_launched")
+    expect(message.properties.previous_version).toBe("1.2.2")
+    expect(message.properties.is_first_launch).toBe(false)
+    // every drop and every normalisation warns, so silence is the assertion
+    expect(warn).not.toHaveBeenCalled()
+  })
+
+  it("says nothing at all about a first launch's missing version", async () => {
+    const [message] = await replayThroughRealAnalytics({})
+
+    expect(message.properties).not.toHaveProperty("previous_version")
+    expect(warn).not.toHaveBeenCalled()
+  })
+
+  it("would drop an unknown that reached the store some other way", async () => {
+    // the write guard keeps this out, so it can only arrive from a hand-edited
+    // settings file. pinned so the cost of that guard slipping stays visible:
+    // the launch still sends, minus its previous_version
+    const [message] = await replayThroughRealAnalytics({
+      last_version: "unknown"
+    })
+
+    expect(message.properties).not.toHaveProperty("previous_version")
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining("expected version")
+    )
+  })
+})
+
+describe("the analytics opt-out menu item", () => {
+  it("sits in the Tools menu as a checkbox", () => {
+    app.createMenu()
+
+    const item = analyticsMenuItem()
+    expect(item).toBeDefined()
+    expect(item.type).toBe("checkbox")
+  })
+
+  it("shows the current preference", () => {
+    mockAnalytics.isEnabled.mockReturnValue(false)
+    app.createMenu()
+
+    expect(analyticsMenuItem().checked).toBe(false)
+  })
+
+  it("routes the change through the analytics service", async () => {
+    app.createMenu()
+    await analyticsMenuItem().click({ checked: false })
+
+    expect(mockAnalytics.setEnabled).toHaveBeenCalledWith(false)
+    // going straight to the store would leave the running instance sending for
+    // the rest of the session: the gate is only re-read at init()
+    expect(mockSettingsStore.setAnalyticsEnabled).not.toHaveBeenCalled()
+  })
+
+  it("says nothing when the preference saved", async () => {
+    app.createMenu()
+    const menuItem = { checked: false }
+    await analyticsMenuItem().click(menuItem)
+
+    expect(mockElectron.dialog.showMessageBox).not.toHaveBeenCalled()
+    expect(menuItem.checked).toBe(false)
+  })
+
+  it("reverts the tick and says so when the preference did not save", async () => {
+    mockAnalytics.setEnabled.mockResolvedValue({
+      success: false,
+      error: "disk full"
+    })
+    app.createMenu()
+
+    const menuItem = { checked: false }
+    await analyticsMenuItem().click(menuItem)
+
+    // a privacy control that silently fails to persist comes back on at the
+    // next launch - the tick must not claim otherwise
+    expect(menuItem.checked).toBe(true)
+    expect(mockElectron.dialog.showMessageBox).toHaveBeenCalledTimes(1)
+    const [, options] = mockElectron.dialog.showMessageBox.mock.calls[0]
+    expect(options.type).toBe("error")
+    expect(options.detail).toBe("disk full")
+  })
+})
+
+describe("quitting", () => {
+  const quitEvent = () => ({ preventDefault: jest.fn() })
+
+  it("drains queued events before the ipc handlers go", async () => {
+    await app.onBeforeQuit(quitEvent())
+
+    expect(mockAnalytics.flush).toHaveBeenCalledTimes(1)
+    expect(mockAnalytics.flush.mock.invocationCallOrder[0]).toBeLessThan(
+      mockIpcHandlers.cleanup.mock.invocationCallOrder[0]
+    )
+  })
+
+  it("holds the quit open until the drain finishes", async () => {
+    // before-quit does not await an async listener, so without cancelling the
+    // quit first the flush races the process teardown and loses
+    const event = quitEvent()
+    await app.onBeforeQuit(event)
+
+    expect(event.preventDefault).toHaveBeenCalledTimes(1)
+    expect(mockElectron.app.quit).toHaveBeenCalledTimes(1)
+    expect(mockAnalytics.flush.mock.invocationCallOrder[0]).toBeLessThan(
+      mockElectron.app.quit.mock.invocationCallOrder[0]
+    )
+  })
+
+  it("lets the second pass through instead of cancelling forever", async () => {
+    await app.onBeforeQuit(quitEvent())
+
+    const second = quitEvent()
+    await app.onBeforeQuit(second)
+
+    expect(second.preventDefault).not.toHaveBeenCalled()
+    expect(mockAnalytics.flush).toHaveBeenCalledTimes(1)
+  })
+
+  it("skips the drain when an update is installing", async () => {
+    global.isUpdating = true
+
+    try {
+      const event = quitEvent()
+      await app.onBeforeQuit(event)
+
+      expect(mockAnalytics.flush).not.toHaveBeenCalled()
+      expect(event.preventDefault).not.toHaveBeenCalled()
+    } finally {
+      global.isUpdating = false
+    }
+  })
+
+  it("does not let a stalled flush hold the app open", async () => {
+    jest.useFakeTimers()
+    mockAnalytics.flush.mockImplementation(() => new Promise(() => {}))
+
+    try {
+      const quitting = app.onBeforeQuit(quitEvent())
+      jest.advanceTimersByTime(10000)
+      await quitting
+
+      expect(mockElectron.app.quit).toHaveBeenCalledTimes(1)
+      expect(mockIpcHandlers.cleanup).toHaveBeenCalledTimes(1)
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+})
