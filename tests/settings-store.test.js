@@ -97,6 +97,11 @@ describe("persisting a new path", () => {
 // check would pass an id source that stopped being random
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
 
+// scratch files from an atomic write, which must never outlive it
+function tempFilesIn(dir) {
+  return fs.readdirSync(dir).filter((name) => name.endsWith(".tmp"))
+}
+
 describe("analytics preferences", () => {
   test("generates an install id once and reuses it", async () => {
     const first = await store.getInstallId()
@@ -177,6 +182,45 @@ describe("analytics preferences", () => {
 
     expect(await store.isAnalyticsEnabled()).toBe(false)
   })
+
+  test("leaves no temp file behind after a successful write", async () => {
+    expect(await store.setAnalyticsEnabled(false)).toEqual({ success: true })
+
+    expect(tempFilesIn(root)).toEqual([])
+    expect(JSON.parse(fs.readFileSync(store.settingsFile, "utf8"))).toEqual({
+      analytics_enabled: false
+    })
+  })
+
+  // chmod does not restrict the superuser, and is a no-op on windows
+  const canRevokeWrite =
+    typeof process.getuid === "function" && process.getuid() !== 0
+
+  ;(canRevokeWrite ? test : test.skip)(
+    "leaves the previous settings whole when a write fails",
+    async () => {
+      const chosen = path.join(root, "chosen")
+      fs.writeFileSync(
+        store.settingsFile,
+        JSON.stringify({ download_path: chosen })
+      )
+
+      // revoke the right to create the temp file, so the write dies at the
+      // point where a crash would have truncated settings.json
+      fs.chmodSync(root, 0o555)
+
+      try {
+        expect((await store.setAnalyticsEnabled(false)).success).toBe(false)
+      } finally {
+        fs.chmodSync(root, 0o755)
+      }
+
+      // a reader still finds the old file, parseable and complete
+      const saved = JSON.parse(fs.readFileSync(store.settingsFile, "utf8"))
+      expect(saved.download_path).toBe(chosen)
+      expect(tempFilesIn(root)).toEqual([])
+    }
+  )
 
   test("keeps the download path when analytics settings are written", async () => {
     const chosen = path.join(root, "still-mine")

@@ -158,14 +158,34 @@ class SettingsStore {
 
   /**
    * merge a patch into settings.json without clobbering other keys
+   *
+   * the new contents go to a scratch file first and are renamed over the
+   * target, so a reader finds either the old file or the new one and never a
+   * half-written one. writing in place would truncate settings.json before
+   * refilling it, and a crash in that window loses the download folder - or an
+   * opt-out, which then quietly reads as analytics-enabled at the next launch.
    * @param {Object} patch
    */
   async writeSettings(patch) {
     const current = await this.readAll()
     const next = { ...current, ...patch }
 
-    await fsp.mkdir(path.dirname(this.settingsFile), { recursive: true })
-    await fsp.writeFile(this.settingsFile, JSON.stringify(next, null, 2), "utf8")
+    const dir = path.dirname(this.settingsFile)
+    await fsp.mkdir(dir, { recursive: true })
+
+    // beside the target, so the rename stays within one filesystem, and
+    // uniquely named so concurrent writers cannot share a scratch file
+    const temp = path.join(dir, `.settings-${crypto.randomUUID()}.tmp`)
+
+    try {
+      await fsp.writeFile(temp, JSON.stringify(next, null, 2), "utf8")
+      await fsp.rename(temp, this.settingsFile)
+    } catch (error) {
+      // never leave scratch files behind, and never report the cleanup's
+      // problem in place of the one that actually failed the write
+      await fsp.rm(temp, { force: true }).catch(() => {})
+      throw error
+    }
   }
 
   /**
