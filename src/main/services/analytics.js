@@ -84,10 +84,8 @@ const ALLOWED_BY_EVENT = new Map(
  * the shape each property is allowed to have. an allowed name is only half a
  * privacy boundary - `platform` set to a url would have left verbatim.
  *
- * kinds rather than per-property enums on purpose: an enum would have to list
- * every platform, quality and bucket label this app will ever produce, and
- * would silently drop the ones a later task adds without updating this file.
- * a shape check stays true as the vocabulary grows.
+ * see the note above the patterns below for why the string kinds are
+ * vocabularies and numeric grammars rather than one general-purpose charset.
  */
 const PROPERTY_KINDS = {
   // flags
@@ -105,13 +103,17 @@ const PROPERTY_KINDS = {
   // a controlled vocabulary that normalizes instead of dropping
   platform: "platform",
 
-  // lowercase identifiers from a vocabulary this app controls
-  url_kind: "slug",
-  media_type: "slug",
-  quality: "slug",
-  audio_format: "slug",
-  reason: "slug",
-  update_reason: "slug",
+  // finite vocabularies, listed in PROPERTY_VOCABULARIES
+  url_kind: "vocabulary",
+  media_type: "vocabulary",
+  audio_format: "vocabulary",
+  reason: "vocabulary",
+  update_reason: "vocabulary",
+  error_category: "vocabulary",
+  error_stage: "vocabulary",
+
+  // part grammar, part vocabulary - see checkKind
+  quality: "quality",
 
   // version strings, which must lead with a digit - that is what a filename
   // cannot do
@@ -126,10 +128,6 @@ const PROPERTY_KINDS = {
   speed_bucket: "bucket",
   load_ms_bucket: "bucket",
 
-  // checked against the taxonomy itself, not a copy of it
-  error_category: "error_category",
-  error_stage: "error_stage",
-
   // free text, scrubbed and clipped
   error_message: "text"
 }
@@ -137,22 +135,55 @@ const PROPERTY_KINDS = {
 const KIND_BY_PROPERTY = new Map(Object.entries(PROPERTY_KINDS))
 
 /**
- * one charset for all short strings could not work, and did not: a single
- * grammar wide enough for "1-5 min" also admitted "My Holiday Video", and one
- * that allowed "2026.08.19" also allowed "vacation.mp4". a character allowlist
- * cannot tell a controlled label from prose or a basename - only a grammar
- * shaped like the specific thing can.
+ * there is no general-purpose grammar for a short label, and six rounds of
+ * counterexamples were the proof. a charset wide enough for "1-5 min" admits
+ * "My Holiday Video"; narrow it to a lowercase identifier and it still admits
+ * "holiday". a single word is indistinguishable from a title by inspection,
+ * because it may *be* one.
+ *
+ * so every string property is now one of three things, and none of them is a
+ * general grammar:
+ *
+ *   - a vocabulary, when the values are ours and finite
+ *   - a numerically anchored grammar, when the values genuinely grow but only
+ *     along a numeric axis (heights, bitrates, versions, buckets)
+ *   - redacted text, when the value is free prose and treated as such
+ *
+ * the enumeration cost is real, and it is the same cost ALLOWED_PROPERTIES
+ * already pays on property names: a later task that sends something new has
+ * to come here and say so. that friction is the feature.
  */
 
-// a lowercase identifier. no spaces and no dots, which is what stops a title
-// and a filename respectively
-const SLUG_PATTERN = /^[a-z0-9][a-z0-9_-]{0,31}$/
+// heights and bitrates grow with the format list, so they are matched rather
+// than listed - but both are anchored on digits, which "holiday" cannot fake
+const QUALITY_HEIGHT_PATTERN = /^\d{2,4}p$/
+const QUALITY_BITRATE_PATTERN = /^\d{1,4}kbps$/
+
+// everything else extractQuality() can return (analytics-helpers.js). these
+// are fixed outputs of its own branches, not values a format list supplies,
+// so they are listed rather than matched
+const QUALITY_VALUES = new Set([
+  "audio",
+  "best_audio",
+  "best_available",
+  "high_quality",
+  "low_quality",
+  "m4a",
+  "medium_quality",
+  "mp3",
+  "original_audio",
+  "unknown"
+])
 
 // digits and dots, with an optional prerelease tail. leading with a digit was
-// not enough on its own: "2024.mp4" leads with one too. letters are only
-// reachable after a `-`, which is the one place a version legitimately has
-// them ("1.2.3-beta.1"), and a filename extension cannot get there.
-const VERSION_PATTERN = /^[0-9][0-9.]{0,30}(?:-[A-Za-z0-9.]{1,16})?$/
+// not enough on its own: "2024.mp4" leads with one too.
+//
+// letters are confined to the prerelease's *first* segment; every later
+// dot-segment is numeric. an earlier version of this allowed dots inside the
+// tail, which let "1-holiday.mp4" through - "1" satisfied the head and the
+// extension rode along behind the dash.
+const VERSION_PATTERN =
+  /^[0-9][0-9.]{0,30}(?:-[A-Za-z0-9]{1,16}(?:\.[0-9]+)*)?$/
 
 // a pre-bucketed measurement: leads with a digit or a comparison, ends in a
 // short unit. "1-5 min", "<1m", "10-50 MB", "60+ min"
@@ -170,13 +201,65 @@ const VERSION_PATTERN = /^[0-9][0-9.]{0,30}(?:-[A-Za-z0-9.]{1,16})?$/
 const BUCKET_PATTERN = /^[<>]?[0-9]+(-[0-9]+)?\+?\s?[a-zA-Z]{1,4}$/
 
 /**
- * the error vocabularies are referenced, never copied. task 2 made the
- * taxonomy the single source of truth, so a category added there validates
- * here for free - and a typo'd one becomes a loud drop instead of a bad
- * segment sitting in posthog forever.
+ * the finite vocabularies, one per property.
+ *
+ * the two error vocabularies are read from the taxonomy module rather than
+ * copied, so a category added there is accepted here for free. the rest are
+ * listed because their sources are scattered literals rather than an exported
+ * table - each is noted with where it comes from, so it can be re-derived.
+ *
+ * an empty set is a deliberate state, not an oversight: it means the values
+ * do not exist yet, and the first task to send one has to come here first.
  */
-const ERROR_CATEGORY_VALUES = new Set(Object.values(ERROR_CATEGORIES))
-const ERROR_STAGE_VALUES = new Set(Object.values(ERROR_STAGES))
+const PROPERTY_VOCABULARIES = {
+  error_category: new Set(Object.values(ERROR_CATEGORIES)),
+  error_stage: new Set(Object.values(ERROR_STAGES)),
+
+  // ipc-handlers passes the runner's own `type` through. a video download is
+  // "combined" - video and audio merged - and there is no "video" today.
+  // "video" is listed because it is what the taxonomy's name implies task 6
+  // will normalize to, and admitting both costs nothing while it decides
+  media_type: new Set(["combined", "audio", "video"]),
+
+  // the keys of AUDIO_MODE_PRESETS - normalizeAudioMode returns the key, not
+  // the codec it maps to (ytdlp-engine.js:536, :617)
+  audio_format: new Set(["mp3", "m4a", "original"]),
+
+  // every reason ytdlp-updater can report: its `reason:` literals plus the
+  // three passed positionally to installDirectory()
+  reason: new Set([
+    "asset-layout-unexpected",
+    "bundled-newer",
+    "busy",
+    "cancelled",
+    "check-failed",
+    "checksum-mismatch",
+    "checksum-missing",
+    "completed",
+    "copy-failed",
+    "corrupt",
+    "corrupt-and-no-bundle",
+    "engine-dir-failed",
+    "missing",
+    "no-binary-available",
+    "probe-failed",
+    "repaired",
+    "swap-failed",
+    "swap-stranded",
+    "unsupported-platform",
+    "up-to-date",
+    "version-mismatch"
+  ]),
+
+  // deliberately empty - these values do not exist yet. task 7 invents the
+  // url kinds and task 6 the update reasons, and each has to add them here
+  // before they will send. a test failure at that moment is the intended
+  // outcome; a silent drop in production is not
+  url_kind: new Set([]),
+  update_reason: new Set([])
+}
+
+const VOCABULARY_BY_PROPERTY = new Map(Object.entries(PROPERTY_VOCABULARIES))
 
 // what an unrecognised platform becomes. it is not a drop: which unsupported
 // sites people paste is one of the questions analytics exists to answer
@@ -214,9 +297,12 @@ const MAX_NUMBER = 1e9
  *
  * never coerces and never stringifies: the input may be a hostile object from
  * the renderer, and asking it for a string is asking it to run code.
- * @returns {{ok: boolean, value?: *}}
+ * @param {string} kind
+ * @param {*} value
+ * @param {string} key - the property name, for the per-property vocabularies
+ * @returns {{ok: boolean, value?: *, normalized?: boolean, because?: string}}
  */
-function checkKind(kind, value) {
+function checkKind(kind, value, key) {
   switch (kind) {
     case "bool":
       return typeof value === "boolean" ? { ok: true, value } : { ok: false }
@@ -227,8 +313,27 @@ function checkKind(kind, value) {
         ? { ok: true, value }
         : { ok: false }
 
-    case "slug":
-      return typeof value === "string" && SLUG_PATTERN.test(value)
+    // a finite set of values we own. an empty one is reported differently,
+    // because "nobody has declared these yet" needs a different fix from
+    // "that is not one of them"
+    case "vocabulary": {
+      const vocabulary = VOCABULARY_BY_PROPERTY.get(key)
+
+      if (!vocabulary) return { ok: false }
+      if (vocabulary.size === 0) return { ok: false, because: "empty" }
+      if (typeof value !== "string") return { ok: false }
+
+      return vocabulary.has(value) ? { ok: true, value } : { ok: false }
+    }
+
+    // heights and bitrates are matched because they grow; everything else
+    // extractQuality can return is listed because it does not
+    case "quality":
+      if (typeof value !== "string") return { ok: false }
+
+      return QUALITY_HEIGHT_PATTERN.test(value) ||
+        QUALITY_BITRATE_PATTERN.test(value) ||
+        QUALITY_VALUES.has(value)
         ? { ok: true, value }
         : { ok: false }
 
@@ -252,15 +357,6 @@ function checkKind(kind, value) {
         ? { ok: true, value }
         : { ok: false }
 
-    case "error_category":
-      return typeof value === "string" && ERROR_CATEGORY_VALUES.has(value)
-        ? { ok: true, value }
-        : { ok: false }
-
-    case "error_stage":
-      return typeof value === "string" && ERROR_STAGE_VALUES.has(value)
-        ? { ok: true, value }
-        : { ok: false }
 
     case "text":
       return typeof value === "string"
@@ -404,7 +500,7 @@ class Analytics {
   setEngineVersion(version) {
     if (!version) return
 
-    const checked = checkKind("version", version)
+    const checked = checkKind("version", version, "engine_version")
 
     if (!checked.ok) {
       console.warn("analytics: ignored an engine version, expected version")
@@ -467,13 +563,15 @@ class Analytics {
           continue
         }
 
-        const checked = checkKind(kind, value)
+        const checked = checkKind(kind, value, key)
 
         if (!checked.ok) {
           // the key and the expected kind, never the value: the value is the
           // suspected pii, and this warning may end up in a log a user sends us
           console.warn(
-            `analytics: dropped ${safeLabel(key)} on ${label}, expected ${kind}`
+            checked.because === "empty"
+              ? `analytics: dropped ${safeLabel(key)} on ${label} - its vocabulary is empty. add the value to PROPERTY_VOCABULARIES.${safeLabel(key)} in services/analytics.js before sending it.`
+              : `analytics: dropped ${safeLabel(key)} on ${label}, expected ${kind}`
           )
           continue
         }

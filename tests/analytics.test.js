@@ -631,6 +631,97 @@ describe("Analytics", () => {
       })
     })
 
+    describe("the values that defeated the grammars, round 7", () => {
+      it("does not ship a one-word title as a quality", async () => {
+        // "holiday" passed SLUG_PATTERN, and was equally reachable through
+        // url_kind, media_type, audio_format, reason and update_reason.
+        // no character grammar can exclude it - which is why slug is gone
+        const properties = await captureOne("download_completed", {
+          quality: "holiday"
+        })
+        expect(properties).not.toHaveProperty("quality")
+      })
+
+      it("does not ship a filename hidden in a prerelease tail", async () => {
+        // "1-holiday.mp4": "1" satisfied the numeric head and "holiday.mp4"
+        // satisfied a prerelease tail that admitted dots
+        const properties = await captureOne("engine_updated", {
+          to_version: "1-holiday.mp4"
+        })
+        expect(properties).not.toHaveProperty("to_version")
+      })
+
+      it("has no slug kind left to reach", () => {
+        // the convergence test. every string property is now a vocabulary, a
+        // numerically anchored grammar, or redacted text - so there is no
+        // kind left that an arbitrary word can satisfy
+        expect(Object.values(PROPERTY_KINDS)).not.toContain("slug")
+      })
+    })
+
+    describe("vocabularies", () => {
+      it("keeps both media types the app actually produces", async () => {
+        // the code emits "combined" for a video download, not "video"
+        for (const value of ["combined", "audio"]) {
+          const properties = await captureOne("download_started", {
+            media_type: value
+          })
+          expect(properties.media_type).toBe(value)
+        }
+      })
+
+      it("keeps every audio format normalizeAudioMode can return", async () => {
+        for (const value of ["mp3", "m4a", "original"]) {
+          const properties = await captureOne("download_started", {
+            audio_format: value
+          })
+          expect(properties.audio_format).toBe(value)
+        }
+      })
+
+      it("keeps every reason the updater can report", async () => {
+        for (const value of [
+          "asset-layout-unexpected", "busy", "cancelled", "check-failed",
+          "checksum-mismatch", "checksum-missing", "completed", "copy-failed",
+          "corrupt-and-no-bundle", "engine-dir-failed", "no-binary-available",
+          "probe-failed", "repaired", "swap-failed", "swap-stranded",
+          "unsupported-platform", "up-to-date", "version-mismatch",
+          "missing", "corrupt", "bundled-newer"
+        ]) {
+          const properties = await captureOne("engine_seeded", { reason: value })
+          expect(properties.reason).toBe(value)
+        }
+      })
+
+      it("rejects a word that is merely well-formed", async () => {
+        for (const [event, key] of [
+          ["download_started", "media_type"],
+          ["download_started", "audio_format"],
+          ["engine_seeded", "reason"]
+        ]) {
+          const properties = await captureOne(event, { [key]: "holiday" })
+          expect(properties).not.toHaveProperty(key)
+        }
+      })
+
+      it("tells the next implementer what to do about an empty one", async () => {
+        // url_kind and update_reason have no values yet. failing loudly at
+        // test time is the friction working; a silent production drop is not
+        for (const [event, key] of [
+          ["url_submitted", "url_kind"],
+          ["engine_update_failed", "update_reason"]
+        ]) {
+          const properties = await captureOne(event, { [key]: "anything" })
+          expect(properties).not.toHaveProperty(key)
+        }
+
+        const logged = console.warn.mock.calls.flat().join(" ")
+        expect(logged).toContain("url_kind")
+        expect(logged).toContain("empty")
+        expect(logged).toContain("analytics.js")
+      })
+    })
+
     describe("platform normalizes rather than drops", () => {
       it("keeps every platform the app actually supports", async () => {
         const {
@@ -673,14 +764,12 @@ describe("Analytics", () => {
           forceEnabled: true
         })
         await analytics.init()
-        analytics.capture("url_submitted", {
-          platform: "vimeo",
-          url_kind: "video"
-        })
+        analytics.capture("url_submitted", { platform: "vimeo" })
 
         expect(client.captured).toHaveLength(1)
         expect(client.captured[0].properties.platform).toBe("unsupported")
-        expect(client.captured[0].properties.url_kind).toBe("video")
+        // and the super properties still ride along, so the event is usable
+        expect(client.captured[0].properties.app_version).toBeDefined()
       })
 
       it("normalizes a url instead of shipping it", async () => {
@@ -707,7 +796,37 @@ describe("Analytics", () => {
       })
     })
 
-    describe("slug", () => {
+    describe("quality — grammar for what grows, vocabulary for what does not", () => {
+      it("keeps heights the format list has not offered yet", async () => {
+        // task 6 sends whatever the real format list offers, so heights are
+        // open-ended - but numerically anchored, which is what lets a grammar
+        // cover exactly the part that grows
+        for (const value of ["1440p", "2160p", "4320p", "90p"]) {
+          const properties = await captureOne("download_completed", {
+            quality: value
+          })
+          expect(properties.quality).toBe(value)
+        }
+      })
+
+      it("keeps arbitrary bitrates", async () => {
+        for (const value of ["1kbps", "96kbps", "1411kbps"]) {
+          const properties = await captureOne("download_completed", {
+            quality: value
+          })
+          expect(properties.quality).toBe(value)
+        }
+      })
+
+      it("rejects a word that is neither a height nor a bitrate", async () => {
+        for (const value of ["holiday", "p", "kbps", "1080", "1080px", "abcp"]) {
+          const properties = await captureOne("download_completed", {
+            quality: value
+          })
+          expect(properties).not.toHaveProperty("quality")
+        }
+      })
+
       it("keeps every quality extractQuality can produce", async () => {
         const { extractQuality } = require("../src/main/utils/analytics-helpers")
         const produced = [
@@ -716,6 +835,8 @@ describe("Analytics", () => {
               "1080p", "720p", "480p", "360p", "240p", "144p", "mp3", "m4a",
               "original", "pinterest", "tiktok", "137", "22", "140", "251",
               "bestaudio", "bestaudio[abr<=70]", "worstaudio", "[quality<=low]",
+              // reaches the bare "audio" fallback, which no other input does
+              "someaudiothing",
               "garbage", ""
             ].map(extractQuality)
           )
@@ -1145,7 +1266,7 @@ describe("Analytics", () => {
       await captureOne("download_completed", { media_type: 42 })
       logged = console.warn.mock.calls.flat().join(" ")
       expect(logged).toContain("media_type")
-      expect(logged).toContain("slug")
+      expect(logged).toContain("vocabulary")
     })
   })
 })
