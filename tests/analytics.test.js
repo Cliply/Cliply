@@ -1,7 +1,13 @@
+// the default factory is private, so the geoip assertion goes through the
+// constructor the app really uses
+jest.mock("posthog-node", () => ({ PostHog: jest.fn() }))
+
 const {
   Analytics,
-  defaultCreateClient
+  ALLOWED_PROPERTIES,
+  PROPERTY_KINDS
 } = require("../src/main/services/analytics")
+const { APP_CONFIG } = require("../src/main/utils/constants")
 
 // the module warns on every drop, which is the point of it - but it would
 // bury the actual test output
@@ -470,21 +476,215 @@ describe("Analytics", () => {
       expect(created).toBe(0)
     })
 
-    it("sets disableGeoip to false on the real client", () => {
-      const client = defaultCreateClient("phc_test", "https://us.i.posthog.com")
-
-      // pinned against the real sdk, not against our call site. posthog's own
-      // jsdoc claims this defaults to false; the compiled source reads
-      // `options.disableGeoip ?? true`. the second assertion is what makes
-      // deleting the line as "redundant" fail loudly instead of silently
-      // dropping country/region/city.
-      expect(client.disableGeoip).toBe(false)
-
+    it("sets disableGeoip false on the client it builds for itself", async () => {
       const { PostHog } = require("posthog-node")
-      const withoutTheOption = new PostHog("phc_test", {
+      PostHog.mockClear()
+
+      // no createClient injected: this exercises the factory the app really
+      // uses, which is the only version of this assertion worth having
+      const analytics = new Analytics({
+        settingsStore: fakeStore(),
+        forceEnabled: true
+      })
+      await analytics.init()
+
+      expect(PostHog).toHaveBeenCalledTimes(1)
+      const [key, options] = PostHog.mock.calls[0]
+      expect(key).toBe(APP_CONFIG.ANALYTICS_CONFIG.POSTHOG_KEY)
+      expect(options.host).toBe(APP_CONFIG.ANALYTICS_CONFIG.POSTHOG_HOST)
+      expect(options.disableGeoip).toBe(false)
+    })
+
+    it("would lose geoip if that option were dropped", () => {
+      // the companion half: posthog's jsdoc claims disableGeoip defaults to
+      // false, and the compiled source reads `options.disableGeoip ?? true`.
+      // this is what makes deleting the line as "redundant" fail loudly
+      // rather than silently dropping country/region/city.
+      const { PostHog: RealPostHog } = jest.requireActual("posthog-node")
+      const bare = new RealPostHog("phc_test", {
         host: "https://us.i.posthog.com"
       })
-      expect(withoutTheOption.disableGeoip).toBe(true)
+
+      expect(bare.disableGeoip).toBe(true)
+    })
+  })
+
+  describe("property values", () => {
+    async function captureOne(event, properties) {
+      const client = fakeClient()
+      const analytics = new Analytics({
+        settingsStore: fakeStore(),
+        createClient: () => client,
+        forceEnabled: true
+      })
+      await analytics.init()
+      analytics.capture(event, properties)
+      return client.captured[0] ? client.captured[0].properties : null
+    }
+
+    it("gives every allowed property a kind", () => {
+      // an allowed but unkinded property would sail through unvalidated.
+      // this is the test that stops tasks 5-7 adding one.
+      const unkinded = []
+
+      for (const [event, keys] of Object.entries(ALLOWED_PROPERTIES)) {
+        for (const key of keys) {
+          if (!PROPERTY_KINDS[key]) unkinded.push(`${event}.${key}`)
+        }
+      }
+
+      expect(unkinded).toEqual([])
+    })
+
+    describe("token", () => {
+      it("keeps the bucket labels tasks 5-6 will produce", async () => {
+        for (const value of [
+          "1-5 min",
+          "<1m",
+          ">10m",
+          "~5m",
+          "10-50 MB",
+          "1080p",
+          "youtube",
+          "NETWORK_ERROR",
+          "fetch_info",
+          "2026.08.19",
+          "0.3.3"
+        ]) {
+          const properties = await captureOne("download_completed", {
+            quality: value
+          })
+          expect(properties.quality).toBe(value)
+        }
+      })
+
+      it("rejects anything that looks like a location or an identity", async () => {
+        for (const value of [
+          "https://private.example/video",
+          "C:\\Users\\someone\\Movies",
+          "/Users/someone/Movies/x.mp4",
+          "someone@example.com",
+          "café",
+          "a".repeat(65),
+          ""
+        ]) {
+          const properties = await captureOne("download_completed", {
+            platform: value
+          })
+          expect(properties).not.toHaveProperty("platform")
+        }
+      })
+    })
+
+    describe("bool", () => {
+      it("keeps a real boolean", async () => {
+        const properties = await captureOne("app_launched", {
+          is_first_launch: false
+        })
+        expect(properties.is_first_launch).toBe(false)
+      })
+
+      it("rejects a stringy or numeric stand-in", async () => {
+        for (const value of ["true", 1, 0, null]) {
+          const properties = await captureOne("app_launched", {
+            is_first_launch: value
+          })
+          expect(properties).not.toHaveProperty("is_first_launch")
+        }
+      })
+    })
+
+    describe("number", () => {
+      it("keeps a finite count, including zero", async () => {
+        for (const value of [0, 42, 1e9]) {
+          const properties = await captureOne("download_completed", {
+            file_size_mb: value
+          })
+          expect(properties.file_size_mb).toBe(value)
+        }
+      })
+
+      it("rejects NaN, infinities, negatives, overflow and numeric strings", async () => {
+        for (const value of [NaN, Infinity, -Infinity, -1, 1e9 + 1, "5"]) {
+          const properties = await captureOne("download_completed", {
+            file_size_mb: value
+          })
+          expect(properties).not.toHaveProperty("file_size_mb")
+        }
+      })
+    })
+
+    describe("text", () => {
+      it("redacts and then truncates", async () => {
+        const home = require("os").homedir()
+        const properties = await captureOne("download_failed", {
+          error_message: `ERROR at ${home}/Movies/x.mp4 ` + "y".repeat(1000)
+        })
+
+        expect(properties.error_message).not.toContain(home)
+        expect(properties.error_message.length).toBe(500)
+      })
+
+      it("rejects a non-string", async () => {
+        const properties = await captureOne("download_failed", {
+          error_message: { message: "an object" }
+        })
+        expect(properties).not.toHaveProperty("error_message")
+      })
+    })
+
+    it("never writes the rejected value into the warning", async () => {
+      const secret = "https://private.example/watch?v=abcdef"
+      await captureOne("download_completed", { platform: secret })
+
+      // the value is the suspected pii - logging it to report the drop would
+      // write the leak into a log file the user might send us
+      const logged = console.warn.mock.calls.flat().join(" ")
+      expect(logged).toContain("platform")
+      expect(logged).not.toContain(secret)
+      expect(logged).not.toContain("private.example")
+    })
+
+    it("does not throw on a value that explodes when read", async () => {
+      const client = fakeClient()
+      const analytics = new Analytics({
+        settingsStore: fakeStore(),
+        createClient: () => client,
+        forceEnabled: true
+      })
+      await analytics.init()
+
+      const hostile = {}
+      Object.defineProperty(hostile, "platform", {
+        enumerable: true,
+        get() {
+          throw new Error("getter exploded")
+        }
+      })
+
+      expect(() =>
+        analytics.capture("download_completed", hostile)
+      ).not.toThrow()
+    })
+
+    it("checks the event, then the key, then the kind", async () => {
+      // an unlisted key on an unknown event must report the event, not the
+      // key - the layers have to resolve in that order
+      await captureOne("not_an_event", { platform: 42 })
+      let logged = console.warn.mock.calls.flat().join(" ")
+      expect(logged).toContain("not_an_event")
+      expect(logged).not.toContain("platform")
+
+      console.warn.mockClear()
+      await captureOne("download_completed", { not_a_key: 42 })
+      logged = console.warn.mock.calls.flat().join(" ")
+      expect(logged).toContain("not_a_key")
+
+      console.warn.mockClear()
+      await captureOne("download_completed", { platform: 42 })
+      logged = console.warn.mock.calls.flat().join(" ")
+      expect(logged).toContain("platform")
+      expect(logged).toContain("token")
     })
   })
 })

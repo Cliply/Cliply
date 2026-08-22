@@ -76,8 +76,96 @@ const ALLOWED_BY_EVENT = new Map(
   ])
 )
 
-// properties whose values are free text and must be scrubbed before sending
-const REDACTED_PROPERTIES = new Set(["error_message"])
+/**
+ * the shape each property is allowed to have. an allowed name is only half a
+ * privacy boundary - `platform` set to a url would have left verbatim.
+ *
+ * kinds rather than per-property enums on purpose: an enum would have to list
+ * every platform, quality and bucket label this app will ever produce, and
+ * would silently drop the ones a later task adds without updating this file.
+ * a shape check stays true as the vocabulary grows.
+ */
+const PROPERTY_KINDS = {
+  // flags
+  is_first_launch: "bool",
+  is_trimmed: "bool",
+  success: "bool",
+  has_youtube_cookies: "bool",
+
+  // counts and measures
+  formats_count: "number",
+  file_size_mb: "number",
+  progress_at_failure: "number",
+  progress_at_cancel: "number",
+
+  // short labels from a vocabulary this app controls
+  platform: "token",
+  url_kind: "token",
+  media_type: "token",
+  quality: "token",
+  audio_format: "token",
+  duration_bucket: "token",
+  elapsed_bucket: "token",
+  speed_bucket: "token",
+  load_ms_bucket: "token",
+  error_category: "token",
+  error_stage: "token",
+  reason: "token",
+  update_reason: "token",
+  previous_version: "token",
+  engine_version: "token",
+  from_version: "token",
+  to_version: "token",
+
+  // free text, scrubbed and clipped
+  error_message: "text"
+}
+
+const KIND_BY_PROPERTY = new Map(Object.entries(PROPERTY_KINDS))
+
+/**
+ * what a token may contain. spaces and `<>=~` are admitted so bucket labels
+ * ("1-5 min", "<1m", ">10m") survive; the work is done by what is missing -
+ * `/`, `\`, `:`, `@`, quotes and everything non-ascii. that is what a url, a
+ * path and an email address all need in order to be one.
+ */
+const TOKEN_PATTERN = /^[A-Za-z0-9 ._+<>=~-]{1,64}$/
+
+const MAX_TEXT_LENGTH = 500
+const MAX_NUMBER = 1e9
+
+/**
+ * check a value against its kind, returning the value to send.
+ *
+ * never coerces and never stringifies: the input may be a hostile object from
+ * the renderer, and asking it for a string is asking it to run code.
+ * @returns {{ok: boolean, value?: *}}
+ */
+function checkKind(kind, value) {
+  switch (kind) {
+    case "bool":
+      return typeof value === "boolean" ? { ok: true, value } : { ok: false }
+
+    case "number":
+      // isFinite does not coerce, so "5" and NaN both fail here
+      return Number.isFinite(value) && value >= 0 && value <= MAX_NUMBER
+        ? { ok: true, value }
+        : { ok: false }
+
+    case "token":
+      return typeof value === "string" && TOKEN_PATTERN.test(value)
+        ? { ok: true, value }
+        : { ok: false }
+
+    case "text":
+      return typeof value === "string"
+        ? { ok: true, value: redactLogLine(value).slice(0, MAX_TEXT_LENGTH) }
+        : { ok: false }
+
+    default:
+      return { ok: false }
+  }
+}
 
 /**
  * a printable label for something that may not be printable. a Symbol event
@@ -243,10 +331,29 @@ class Analytics {
           continue
         }
 
-        safe[key] =
-          REDACTED_PROPERTIES.has(key) && typeof value === "string"
-            ? redactLogLine(value)
-            : value
+        const kind = KIND_BY_PROPERTY.get(key)
+
+        if (!kind) {
+          // allowed but unkinded - a gap in this file, not a caller's fault.
+          // the test that walks ALLOWED_PROPERTIES exists to prevent it
+          console.warn(
+            `analytics: dropped ${safeLabel(key)} on ${label}, no kind declared`
+          )
+          continue
+        }
+
+        const checked = checkKind(kind, value)
+
+        if (!checked.ok) {
+          // the key and the expected kind, never the value: the value is the
+          // suspected pii, and this warning may end up in a log a user sends us
+          console.warn(
+            `analytics: dropped ${safeLabel(key)} on ${label}, expected ${kind}`
+          )
+          continue
+        }
+
+        safe[key] = checked.value
       }
 
       // super properties last: this module sets them itself, so a caller
@@ -312,6 +419,7 @@ class Analytics {
   }
 }
 
-// defaultCreateClient is exported so a test can pin the real client's options
-// - disableGeoip in particular cannot be protected by a comment alone
-module.exports = { Analytics, defaultCreateClient, ALLOWED_PROPERTIES }
+// the client factory stays private: this module being the only way out is the
+// whole basis of the privacy argument. the schema is exported because it emits
+// nothing and later tasks need to assert against it.
+module.exports = { Analytics, ALLOWED_PROPERTIES, PROPERTY_KINDS }
