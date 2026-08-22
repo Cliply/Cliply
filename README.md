@@ -9,7 +9,7 @@
 </div>
 </p>
 
-cliply started as a small weekend project, just wanted a simple way to grab videos without ads, bloat, or shady sites. it's free, fast, and respects your privacy. no logins, no tracking, no bs.
+cliply started as a small weekend project, just wanted a simple way to grab videos without ads, bloat, or shady sites. it's free, fast, and respects your privacy. no logins, no ads, no cross-site tracking, no bs. it does send a little anonymous usage data so we can find bugs, and one click in the Tools menu turns that off — [what it sends, exactly](PRIVACY.md).
 
 ## what it is
 

@@ -1,0 +1,123 @@
+# analytics — notes for whoever reads the charts
+
+[`PRIVACY.md`](../PRIVACY.md) is the user-facing document and says what leaves the
+machine. this one is for the person looking at a dashboard, and it is about how to
+read what arrives. everything here is a property of how the data is *produced*, so
+none of it is visible from inside posthog.
+
+the authority for what exists is [`src/main/services/analytics.js`](../src/main/services/analytics.js):
+`ALLOWED_PROPERTIES` is the exhaustive event and property list, `PROPERTY_KINDS`
+and `PROPERTY_VOCABULARIES` say what values are permitted, and
+[`tests/analytics-pii-guard.test.js`](../tests/analytics-pii-guard.test.js) pins the
+shape of the boundary. this file does not repeat those lists, because a second copy
+would be the one that goes stale.
+
+## metrics that will mislead you if you take them at face value
+
+### `elapsed_bucket` on `download_completed` is not engine throughput
+
+the clock starts in `DownloadRunner.reserve()` (`src/main/services/download-runner.js`),
+which runs when the renderer asks for the download, and stops when the finished file
+settles. that span includes waiting on the engine gate, creating the handle, an
+engine repair-and-retry if one happened, and ffmpeg's merge or trim pass.
+
+it is the right number for "how long did this feel to the person", which is what it
+is for. it is the wrong number for "how fast is yt-dlp".
+
+### `speed_bucket` understates whenever a repair ran
+
+`speedBucket(fileSize, elapsedMs)` divides the finished file's size by that same
+wall clock. a download that failed on a stale engine, triggered a repair, and
+succeeded on the second attempt divides the bytes of *one* download by the elapsed
+time of two attempts plus an engine update. the bucket that comes out is real but it
+is not a measurement of the connection.
+
+there is no flag on the event saying a repair happened, so a low `speed_bucket`
+cannot be told from a repaired one after the fact. read the distribution's shape
+rather than its tail.
+
+### `engine_update_failed` is not a failure count
+
+`update_reason` includes `busy`, which means the update check refused to run at all
+because a download held the engine gate — nothing failed, the check was skipped. it
+is on the event on purpose: an install whose engine therefore never updates is
+exactly what this event exists to find. but it is a different thing from
+`checksum-mismatch` or `download-failed`.
+
+**always split this metric by `update_reason`.** the raw event count answers no
+question anybody has.
+
+`check-rejected` is also worth separating: it means `checkForUpdate()` threw rather
+than returned, which points at a bug in our own code, while `check-failed` is the
+ordinary network blip of a tag lookup that failed and returned normally. they are
+deliberately not merged.
+
+### `error_message` is lossy in a way that is not uniform
+
+the sanitizer's scrub-then-refuse design (see the long comment above `TEXT_PLACEHOLDER`
+in `analytics.js`) means some messages arrive whole, some arrive with `[path]` or
+`[file]` markers in them, and some arrive as the literal `[redacted]`. the split is
+not random — it depends on what shapes the message happened to contain — so
+`[redacted]` counting high for one `error_category` says something about that error's
+wording, not about how often it happens.
+
+there is one known over-catch: the credential rule matches a marker word anywhere in
+a key being assigned a value, so `cookies: 3` becomes `[credential]`. that is a
+data-quality cost, taken deliberately in the fail-closed direction, and it is
+asserted in the pii guard so it stays visible. don't try to read cookie counts out of
+error text.
+
+## declared but never sent
+
+two properties are on the allow-list and no caller populates them. they are not
+broken; nothing produces a value for them yet.
+
+| property | event | why it's empty |
+| --- | --- | --- |
+| `load_ms_bucket` | `media_info_loaded` | the renderer sends `duration_bucket` and `formats_count` and does not time the lookup |
+| `elapsed_bucket` | `engine_seeded` | `index.js` sends `reason` and `engine_version` only |
+
+if a chart on either of these is flat, that is why. removing them from
+`ALLOWED_PROPERTIES` is also fine — the allow-list is a permission, not a promise.
+
+## the funnel, and where it can lie
+
+`app_launched` → `url_submitted` → `media_info_loaded` → `download_started` →
+`download_completed`.
+
+- `url_submitted` fires before the lookup, so `media_info_loaded` + `media_info_failed`
+  should roughly account for it. a shortfall is a lookup that was still running when
+  the app quit.
+- `download_started` is raised by the renderer, `download_completed` / `_failed` /
+  `_cancelled` by the main process through the runner. a quit mid-download produces a
+  `download_started` with no terminal event — the app flushes at quit, but only for
+  events that were already captured.
+- `platform` is normalized rather than dropped: an unrecognised site arrives as
+  `unsupported`, so that bucket is a real signal about which sites people try, not an
+  error bucket.
+
+## which builds send anything
+
+`Analytics` only initializes when `NODE_ENV === "production"` or
+`CLIPLY_ANALYTICS_DEV === "1"`. a plain `npm run dev` sends nothing, which is why the
+dev-mode check needs the env var:
+
+```bash
+CLIPLY_ANALYTICS_DEV=1 npm run dev
+```
+
+on top of that, `APP_CONFIG.ANALYTICS_CONFIG.ENABLED` in
+[`src/main/utils/constants.js`](../src/main/utils/constants.js) is a build-time kill
+switch, and the user's own preference is read once at `init()`.
+
+## two things this repo cannot tell you
+
+both are settings on the posthog project rather than anything in the code, so they
+have to be checked in posthog and kept in step with `PRIVACY.md`:
+
+- **whether the raw client ip is discarded.** the app sets `disableGeoip: false` so
+  posthog resolves country/region/city, and never sends an address as a property of
+  its own. whether `$ip` is retained alongside the derived location is the project's
+  "discard client ip data" setting. `PRIVACY.md` states that it is discarded.
+- **retention.** nothing in the app configures one. `PRIVACY.md` says only that it is
+  a project setting; if the number is ever pinned down, say it there.

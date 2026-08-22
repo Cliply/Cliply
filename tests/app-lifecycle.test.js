@@ -101,9 +101,7 @@ jest.mock("../src/main/utils/analytics-helpers", () => ({
     .describeError,
   getAppVersion: jest.fn(() => "1.2.3"),
   isFirstLaunch: jest.fn(() => false),
-  extractQuality: jest.fn(),
-  extractTitleFromFilename: jest.fn(),
-  sanitizeTitle: jest.fn()
+  extractQuality: jest.fn()
 }))
 
 const CliplyApp = require("../src/main/index")

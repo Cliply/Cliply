@@ -239,59 +239,12 @@ function isFirstLaunch() {
   }
 }
 
-// sanitize title (remove pii)
-function sanitizeTitle(title) {
-  if (!title || typeof title !== "string") {
-    return "unknown"
-  }
-
-  // limit length and remove pii
-  let sanitized = title
-    .slice(0, 100)
-    .replace(/\b\d{4,}\b/g, "[number]")
-    .replace(/\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b/g, "[email]")
-
-  return sanitized
-}
-
-// extract title from filename
-function extractTitleFromFilename(filename) {
-  if (!filename) return "unknown"
-
-  // remove extension
-  const nameWithoutExt = filename.replace(
-    /\.(mp4|m4a|webm|mkv|avi|mov|mp3|wav|opus|aac|flac)$/i,
-    ""
-  )
-
-  // filename patterns:
-  // audio: {title}_audio_{quality}_{timestamp}
-  // video: {title}_{quality}_{timestamp}
-
-  let titlePart = nameWithoutExt
-
-  // remove timestamp
-  titlePart = titlePart.replace(/_\d{5}$/, "")
-
-  // remove trimmed section
-  titlePart = titlePart.replace(/_trimmed_[\d-]+$/, "")
-
-  // audio files
-  if (titlePart.includes("_audio_")) {
-    const parts = titlePart.split("_audio_")
-    if (parts.length >= 2) {
-      titlePart = parts[0]
-    }
-  } else {
-    // video files
-    titlePart = titlePart.replace(
-      /_(1080p|720p|480p|360p|240p|144p|high|medium|low)$/,
-      ""
-    )
-  }
-
-  return titlePart || "unknown"
-}
+// sanitizeTitle and extractTitleFromFilename lived here to feed a video title
+// into the old aptabase events. no event has a property for a title any more -
+// ALLOWED_PROPERTIES (services/analytics.js) is the whole list - so the pair
+// was two ready-made ways to derive one with nowhere left to send it. deleted
+// rather than left dead: the privacy claim in PRIVACY.md is that a title has no
+// route out, and a helper that produces one is a route waiting for a caller
 
 // get app version
 function getAppVersion() {
@@ -306,10 +259,8 @@ function getAppVersion() {
 module.exports = {
   describeError,
   extractQuality,
-  extractTitleFromFilename,
   elapsedBucket,
   speedBucket,
   isFirstLaunch,
-  sanitizeTitle,
   getAppVersion
 }
