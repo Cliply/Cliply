@@ -105,8 +105,25 @@ describe("analytics preferences", () => {
   test("defaults analytics to enabled and round-trips a change", async () => {
     expect(await store.isAnalyticsEnabled()).toBe(true)
 
-    await store.setAnalyticsEnabled(false)
+    expect(await store.setAnalyticsEnabled(false)).toEqual({ success: true })
     expect(await store.isAnalyticsEnabled()).toBe(false)
+  })
+
+  test("reports a failed opt-out instead of swallowing it", async () => {
+    // a file where the settings folder should be
+    const blocked = path.join(root, "not-a-dir")
+    fs.writeFileSync(blocked, "x")
+    const unwritable = new SettingsStore({
+      settingsFile: path.join(blocked, "settings.json")
+    })
+
+    const result = await unwritable.setAnalyticsEnabled(false)
+
+    expect(result.success).toBe(false)
+    expect(typeof result.error).toBe("string")
+    expect(result.error.length).toBeGreaterThan(0)
+    // the opt-out really did not stick - the caller has to be told
+    expect(await unwritable.isAnalyticsEnabled()).toBe(true)
   })
 
   test("keeps the download path when analytics settings are written", async () => {

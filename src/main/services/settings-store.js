@@ -196,12 +196,19 @@ class SettingsStore {
     return settings.analytics_enabled !== false
   }
 
-  /** @param {boolean} enabled */
+  /**
+   * a privacy control, so a failed write must be reported rather than
+   * swallowed - an opt-out that silently fails to persist comes back on at
+   * the next launch
+   * @param {boolean} enabled
+   * @returns {Promise<{success: boolean, error?: string}>}
+   */
   async setAnalyticsEnabled(enabled) {
     try {
       await this.writeSettings({ analytics_enabled: Boolean(enabled) })
+      return { success: true }
     } catch (error) {
-      console.warn(`could not persist the analytics preference (${error.message})`)
+      return { success: false, error: error.message }
     }
   }
 }
