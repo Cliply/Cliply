@@ -220,6 +220,7 @@ export function VideoDownloadButton({
         <DownloadProgressBar
           state={videoDownloadMutation.downloadState}
           label="video"
+          onCancel={videoDownloadMutation.cancelDownload}
         />
       )}
 

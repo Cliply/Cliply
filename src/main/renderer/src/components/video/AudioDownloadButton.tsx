@@ -192,6 +192,7 @@ export function AudioDownloadButton({
         <DownloadProgressBar
           state={audioDownloadMutation.downloadState}
           label="audio"
+          onCancel={audioDownloadMutation.cancelDownload}
         />
       )}
 
