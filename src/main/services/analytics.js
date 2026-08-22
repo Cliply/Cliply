@@ -215,11 +215,12 @@ const PROPERTY_VOCABULARIES = {
   error_category: new Set(Object.values(ERROR_CATEGORIES)),
   error_stage: new Set(Object.values(ERROR_STAGES)),
 
-  // ipc-handlers passes the runner's own `type` through. a video download is
-  // "combined" - video and audio merged - and there is no "video" today.
-  // "video" is listed because it is what the taxonomy's name implies task 6
-  // will normalize to, and admitting both costs nothing while it decides
-  media_type: new Set(["combined", "audio", "video"]),
+  // the runner emits "combined" for a video download - an ffmpeg detail
+  // meaning two streams were merged - and task 6 normalizes that to "video"
+  // before sending. the raw term is deliberately absent rather than missing:
+  // this taxonomy answers whether people take video or audio, and should not
+  // carry a word that describes how the engine assembled the file
+  media_type: new Set(["video", "audio"]),
 
   // the keys of AUDIO_MODE_PRESETS - normalizeAudioMode returns the key, not
   // the codec it maps to (ytdlp-engine.js:536, :617)

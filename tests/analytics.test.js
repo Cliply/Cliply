@@ -660,14 +660,23 @@ describe("Analytics", () => {
     })
 
     describe("vocabularies", () => {
-      it("keeps both media types the app actually produces", async () => {
-        // the code emits "combined" for a video download, not "video"
-        for (const value of ["combined", "audio"]) {
+      it("keeps the two media types the taxonomy answers with", async () => {
+        for (const value of ["video", "audio"]) {
           const properties = await captureOne("download_started", {
             media_type: value
           })
           expect(properties.media_type).toBe(value)
         }
+      })
+
+      it("rejects the engine's own word for a merged download", async () => {
+        // the runner says "combined" - an ffmpeg detail meaning two streams
+        // were merged. analytics answers whether people take video or audio,
+        // so task 6 normalizes it and this vocabulary refuses the raw term
+        const properties = await captureOne("download_started", {
+          media_type: "combined"
+        })
+        expect(properties).not.toHaveProperty("media_type")
       })
 
       it("keeps every audio format normalizeAudioMode can return", async () => {
