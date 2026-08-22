@@ -226,8 +226,11 @@ const PROPERTY_VOCABULARIES = {
   // the codec it maps to (ytdlp-engine.js:536, :617)
   audio_format: new Set(["mp3", "m4a", "original"]),
 
-  // every reason ytdlp-updater can report: its `reason:` literals plus the
-  // three passed positionally to installDirectory()
+  // every reason ytdlp-updater can report: its `reason:` literals, the three
+  // passed positionally to installDirectory(), and "download-failed", which is
+  // written as a ternary arm (ytdlp-updater.js:567) and so is invisible to a
+  // grep for the keyword. engine_seeded only ever sends the three positional
+  // ones - the rest are here because this set claims to be the whole list
   reason: new Set([
     "asset-layout-unexpected",
     "bundled-newer",
@@ -240,6 +243,7 @@ const PROPERTY_VOCABULARIES = {
     "copy-failed",
     "corrupt",
     "corrupt-and-no-bundle",
+    "download-failed",
     "engine-dir-failed",
     "missing",
     "no-binary-available",
@@ -252,12 +256,38 @@ const PROPERTY_VOCABULARIES = {
     "version-mismatch"
   ]),
 
+  // why an engine update did not happen: every reason checkForUpdate() can
+  // return except the two that mean nothing went wrong, "up-to-date" and
+  // "completed", which index.js sends no event for at all. read off its return
+  // sites rather than seed()'s - the seeding-only reasons (missing, corrupt,
+  // bundled-newer, copy-failed, engine-dir-failed, corrupt-and-no-bundle)
+  // cannot reach this property, because runUpdateLocked ignores what
+  // seedLocked said and returns its own.
+  //
+  // "busy" is one of these on purpose: the check refused because a download
+  // held the engine gate, so it never ran - and an install whose engine
+  // therefore never updates is exactly what this event exists to find
+  update_reason: new Set([
+    "asset-layout-unexpected",
+    "busy",
+    "cancelled",
+    "check-failed",
+    "checksum-mismatch",
+    "checksum-missing",
+    "download-failed",
+    "no-binary-available",
+    "probe-failed",
+    "repaired",
+    "swap-failed",
+    "swap-stranded",
+    "unsupported-platform",
+    "version-mismatch"
+  ]),
+
   // deliberately empty - these values do not exist yet. task 7 invents the
-  // url kinds and task 6 the update reasons, and each has to add them here
-  // before they will send. a test failure at that moment is the intended
-  // outcome; a silent drop in production is not
-  url_kind: new Set([]),
-  update_reason: new Set([])
+  // url kinds, and has to add them here before they will send. a test failure
+  // at that moment is the intended outcome; a silent drop in production is not
+  url_kind: new Set([])
 }
 
 const VOCABULARY_BY_PROPERTY = new Map(Object.entries(PROPERTY_VOCABULARIES))

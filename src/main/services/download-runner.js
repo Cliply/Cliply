@@ -59,7 +59,11 @@ class DownloadRunner {
       started: Date.now(),
       status: STATUS.DOWNLOADING,
       handle: null,
-      cancelled: false
+      cancelled: false,
+      // how far the engine got, kept for the two terminal states that report
+      // it. a cancel arrives from another call stack entirely, so there is
+      // nowhere else it could be read from by then
+      progress: 0
     })
 
     return true
@@ -117,6 +121,10 @@ class DownloadRunner {
       entry.handle = handle
 
       handle.on("progress", (update) => {
+        if (Number.isFinite(update.progress)) {
+          entry.progress = update.progress
+        }
+
         // a trimmed download is one ffmpeg pass that only reports at the end,
         // so a percentage would sit at 0 and then jump - say "working" instead
         this.sendEvent(downloadId, {
@@ -130,7 +138,7 @@ class DownloadRunner {
 
       try {
         const result = await handle.promise
-        return this.settleCompleted({ downloadId, type, platform, title, formatId, result })
+        return this.settleCompleted({ downloadId, type, platform, formatId, trimmed, result })
       } catch (error) {
         lastError = error
 
@@ -161,10 +169,29 @@ class DownloadRunner {
       }
     }
 
-    return this.settleFailed({ downloadId, type, platform, title, formatId, error: lastError })
+    return this.settleFailed({ downloadId, type, platform, formatId, trimmed, error: lastError })
   }
 
-  settleCompleted({ downloadId, type, platform, title, formatId, result }) {
+  /**
+   * hand an analytics event to the ipc layer's translator
+   *
+   * these calls sit inside run()'s try, where a throw would be caught as the
+   * download itself breaking - a finished download reported to the user as a
+   * failure. the exit point never throws, but the callback is injected and
+   * this is the cheapest place to be certain of it.
+   *
+   * @param {string} name - the runner's own event name
+   * @param {Object} payload - what the translator reads
+   */
+  track(name, payload) {
+    try {
+      this.trackEvent(name, payload)
+    } catch (error) {
+      console.warn(`failed to track ${name}:`, (error && error.message) || error)
+    }
+  }
+
+  settleCompleted({ downloadId, type, platform, formatId, trimmed, result }) {
     this.active.delete(downloadId)
 
     const filePath = result.filePath || null
@@ -179,17 +206,15 @@ class DownloadRunner {
       filename
     })
 
-    try {
-      this.trackEvent("download_completed", {
-        type,
-        platform,
-        title: filename || title,
-        formatId,
-        fileSize
-      })
-    } catch (error) {
-      console.warn("failed to track download completion:", error.message)
-    }
+    // no title and no filename: what was downloaded is not a question
+    // telemetry asks, and the two of them were the only free text here
+    this.track("download_completed", {
+      type,
+      platform,
+      formatId,
+      trimmed,
+      fileSize
+    })
 
     return {
       success: true,
@@ -202,6 +227,10 @@ class DownloadRunner {
   }
 
   settleCancelled(downloadId) {
+    // read before the delete: a cancel can land in any of four places, and the
+    // reservation is the one thing all four of them have
+    const entry = this.active.get(downloadId)
+
     this.active.delete(downloadId)
     this.logAudit("download_cancelled", true, {})
 
@@ -210,10 +239,19 @@ class DownloadRunner {
       progress: 0
     })
 
+    this.track("download_cancelled", {
+      type: entry && entry.type,
+      platform: entry && entry.platform,
+      progress: entry ? entry.progress : 0
+    })
+
     return { success: false, cancelled: true, download_id: downloadId }
   }
 
-  settleFailed({ downloadId, type, platform, title, formatId, error }) {
+  settleFailed({ downloadId, type, platform, formatId, trimmed, error }) {
+    const entry = this.active.get(downloadId)
+    const progress = entry ? entry.progress : 0
+
     this.active.delete(downloadId)
 
     const message = (error && error.message) || "Download failed"
@@ -229,18 +267,19 @@ class DownloadRunner {
       category: (error && error.code) || "DOWNLOAD_FAILED"
     })
 
-    try {
-      this.trackEvent("download_failed", {
-        type,
-        platform,
-        title,
-        formatId,
-        errorCode: (error && error.code) || "DOWNLOAD_FAILED",
-        errorMessage: message
-      })
-    } catch (analyticsError) {
-      console.warn("failed to track download failure:", analyticsError.message)
-    }
+    // the code goes over as-is, absent and all: the engine sets DOWNLOAD_FAILED
+    // itself when it ran and broke unrecognisably, and defaulting to the same
+    // string here would make a failure that never reached the engine at all
+    // indistinguishable from one that did
+    this.track("download_failed", {
+      type,
+      platform,
+      formatId,
+      trimmed,
+      progress,
+      errorCode: error && error.code,
+      errorMessage: message
+    })
 
     return { success: false, error, message, details, download_id: downloadId }
   }

@@ -30,6 +30,14 @@ const UNKNOWN_VERSION = "unknown"
 // working connection; past that the events are worth less than the wait
 const QUIT_FLUSH_TIMEOUT_MS = 2000
 
+/**
+ * what an update check reports when nothing went wrong: the engine was already
+ * current, or it just became current without the version changing. every other
+ * reason is one the engine did not update, which is what engine_update_failed
+ * exists to explain - including "busy", where the check never ran at all.
+ */
+const ENGINE_CURRENT_REASONS = new Set(["up-to-date", "completed"])
+
 class CliplyApp {
   constructor() {
     this.mainWindow = null
@@ -151,6 +159,19 @@ class CliplyApp {
       const seeded = await this.services.ytdlpUpdater.seed()
       console.log("yt-dlp engine:", this.services.ytdlpEngine.getBinaryPath(), seeded)
 
+      // whatever the seed decided, the version it reports is the engine this
+      // session runs on - and the probe happens once, so this is the only
+      // chance to put it on every later event. a refusal reports no version
+      // at all, which setEngineVersion ignores rather than storing
+      this.services.analytics.setEngineVersion(seeded.version)
+
+      if (seeded.seeded) {
+        this.services.analytics.capture("engine_seeded", {
+          reason: seeded.reason,
+          engine_version: seeded.version
+        })
+      }
+
       // init ipc handlers
       this.autoUpdater = autoUpdater
       this.ipcHandlers = new IPCHandlers(this.services, this.autoUpdater)
@@ -163,18 +184,60 @@ class CliplyApp {
       // they are busy when the timer fires the check simply refuses and runs
       // next launch.
       const updateCheckTimer = setTimeout(() => {
-        this.services.ytdlpUpdater
-          .checkForUpdate()
-          .then((result) => console.log("yt-dlp update check:", result))
-          .catch((error) =>
-            console.warn("yt-dlp update check failed:", error.message)
-          )
+        this.checkForEngineUpdate()
       }, UPDATE_CHECK_DELAY_MS)
       updateCheckTimer.unref()
     } catch (error) {
       console.error("Service initialization failed:", error)
       throw error
     }
+  }
+
+  /**
+   * run the deferred engine update check and say what came of it
+   * @returns {Promise<void>} resolves however the check went
+   */
+  checkForEngineUpdate() {
+    return this.services.ytdlpUpdater
+      .checkForUpdate()
+      .then((result) => {
+        console.log("yt-dlp update check:", result)
+        this.reportEngineUpdate(result)
+      })
+      .catch((error) =>
+        console.warn("yt-dlp update check failed:", error.message)
+      )
+  }
+
+  /**
+   * turn an update check's result into at most one event
+   *
+   * a stale engine is what breaks downloads, so the question here is not "did
+   * the update work" but "is there a reason this install is not on the newest
+   * engine". a refusal counts as one; being current already does not.
+   *
+   * @param {Object} result - what checkForUpdate() returned
+   */
+  reportEngineUpdate(result) {
+    if (!result) return
+
+    if (result.updated) {
+      this.services.analytics.capture("engine_updated", {
+        // a probe that failed leaves no from-version. absence says that,
+        // where a null pretends there was a value to send
+        ...(result.from ? { from_version: result.from } : {}),
+        to_version: result.to
+      })
+      this.services.analytics.setEngineVersion(result.to)
+      return
+    }
+
+    if (!result.reason || ENGINE_CURRENT_REASONS.has(result.reason)) return
+
+    this.services.analytics.capture("engine_update_failed", {
+      update_reason: result.reason,
+      ...(result.error ? { error_message: result.error } : {})
+    })
   }
 
   // setup auto-updater

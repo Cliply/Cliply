@@ -346,7 +346,7 @@ describe("bookkeeping", () => {
 })
 
 describe("analytics", () => {
-  test("reports a completion with the resulting filename", async () => {
+  test("reports a completion with its platform and format", async () => {
     const { runner, tracked } = createRunner()
     const handle = new FakeHandle()
 
@@ -359,6 +359,87 @@ describe("analytics", () => {
     expect(tracked[0].name).toBe("download_completed")
     expect(tracked[0].platform).toBe("youtube")
     expect(tracked[0].formatId).toBe("720p")
+  })
+
+  test("reports neither the title nor the file it wrote", async () => {
+    // the two of them were the only free text the runner ever sent, and what
+    // was downloaded is not a question telemetry asks
+    const { runner, tracked } = createRunner()
+    const handle = new FakeHandle()
+
+    const running = runner.run({ ...BASE, createHandle: () => handle })
+    await settle()
+
+    handle.resolve({ filePath: "/downloads/My Video_720p_123.mp4" })
+    await running
+
+    expect(tracked[0]).not.toHaveProperty("title")
+    expect(JSON.stringify(tracked[0])).not.toContain("My Video")
+  })
+
+  test("reports a cancel with how far it had got", async () => {
+    // a cancel arrives from another call stack, so the reservation is the only
+    // place the last progress could be read from by then
+    const { runner, tracked } = createRunner()
+    const handle = new FakeHandle()
+
+    const running = runner.run({ ...BASE, createHandle: () => handle })
+    await settle()
+
+    handle.emit("progress", { progress: 61.2 })
+    runner.cancel("combined_1")
+
+    const error = new Error("Download cancelled.")
+    error.code = ERROR_CODES.CANCELLED
+    handle.reject(error)
+    await running
+
+    expect(tracked).toHaveLength(1)
+    expect(tracked[0].name).toBe("download_cancelled")
+    expect(tracked[0].type).toBe("combined")
+    expect(tracked[0].platform).toBe("youtube")
+    expect(tracked[0].progress).toBe(61.2)
+  })
+
+  test("carries whether the download was trimmed", async () => {
+    // the flag lives on the run options and nowhere else - the engine result
+    // has no idea a time range was asked for
+    const { runner, tracked } = createRunner()
+    const handle = new FakeHandle()
+
+    const running = runner.run({
+      ...BASE,
+      trimmed: true,
+      createHandle: () => handle
+    })
+    await settle()
+
+    handle.resolve({ filePath: "/downloads/a.mp4" })
+    await running
+
+    expect(tracked[0].trimmed).toBe(true)
+  })
+
+  test("keeps a download alive when tracking it explodes", async () => {
+    // these calls sit inside run()'s try, where a throw would be caught as the
+    // download breaking - and the user would be told a finished file failed
+    const warn = jest.spyOn(console, "warn").mockImplementation(() => {})
+    const runner = new DownloadRunner({
+      engine: {},
+      sendEvent: () => {},
+      trackEvent: () => {
+        throw new Error("analytics exploded")
+      }
+    })
+    const handle = new FakeHandle()
+
+    const running = runner.run({ ...BASE, createHandle: () => handle })
+    await settle()
+
+    handle.resolve({ filePath: "/downloads/a.mp4" })
+
+    await expect(running).resolves.toMatchObject({ success: true })
+    warn.mockRestore()
   })
 
   test("reports a failure with its error code", async () => {

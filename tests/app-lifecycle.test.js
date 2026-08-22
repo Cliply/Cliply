@@ -46,6 +46,7 @@ const mockElectron = {
 let mockAnalytics = null
 let mockSettingsStore = null
 let mockIpcHandlers = null
+let mockUpdater = null
 
 // what IPCHandlers was handed at the moment it was constructed - a snapshot,
 // because the services object keeps being filled in afterwards
@@ -59,6 +60,13 @@ jest.mock("../src/main/services/cookie-manager", () =>
 )
 
 jest.mock("../src/main/services/ytdlp-engine", () => ({
+  // the real redaction, not a stand-in: analytics scrubs its one free-text
+  // property through this module, and a requireActual on analytics still
+  // resolves *its* dependencies through this mock. left out, every event
+  // carrying an error_message dies in capture()'s catch instead of being
+  // validated - which reads as a passing replay that sent nothing at all
+  redactLogLine: jest.requireActual("../src/main/services/ytdlp-engine")
+    .redactLogLine,
   YtdlpEngine: jest.fn(() => ({
     getBinaryPath: jest.fn(() => "/tmp/yt-dlp"),
     cancelAll: jest.fn(() => 0)
@@ -66,10 +74,7 @@ jest.mock("../src/main/services/ytdlp-engine", () => ({
 }))
 
 jest.mock("../src/main/services/ytdlp-updater", () => ({
-  YtdlpUpdater: jest.fn(() => ({
-    seed: jest.fn().mockResolvedValue({ reason: "up-to-date" }),
-    checkForUpdate: jest.fn().mockResolvedValue({ reason: "up-to-date" })
-  }))
+  YtdlpUpdater: jest.fn(() => mockUpdater)
 }))
 
 jest.mock("../src/main/ipc-handlers", () =>
@@ -142,6 +147,19 @@ beforeEach(() => {
   mockIpcHandlers = {
     setMainWindow: jest.fn(),
     cleanup: jest.fn()
+  }
+
+  mockUpdater = {
+    seed: jest.fn().mockResolvedValue({
+      seeded: false,
+      reason: "up-to-date",
+      version: "2026.08.19"
+    }),
+    checkForUpdate: jest.fn().mockResolvedValue({
+      started: true,
+      updated: false,
+      reason: "up-to-date"
+    })
   }
 
   helpers.getAppVersion.mockReturnValue("1.2.3")
@@ -382,6 +400,320 @@ describe("the launch payload survives the real validator", () => {
     expect(warn).toHaveBeenCalledWith(
       expect.stringContaining("expected version")
     )
+  })
+})
+
+describe("seeding the engine", () => {
+  async function seedWith(result) {
+    mockUpdater.seed.mockResolvedValue(result)
+    app.services = {}
+    await app.initializeServices()
+  }
+
+  function captures(event) {
+    return mockAnalytics.capture.mock.calls.filter(([name]) => name === event)
+  }
+
+  it("stamps the engine version onto everything sent afterwards", async () => {
+    await seedWith({ seeded: false, reason: "up-to-date", version: "2026.08.19" })
+
+    // the engine is probed once per run, so this is the only chance to say
+    expect(mockAnalytics.setEngineVersion).toHaveBeenCalledWith("2026.08.19")
+  })
+
+  it("reports a seed that actually installed an engine", async () => {
+    await seedWith({ seeded: true, reason: "missing", version: "2026.08.19" })
+
+    expect(captures("engine_seeded")).toHaveLength(1)
+    const [, properties] = captures("engine_seeded")[0]
+    expect(properties.reason).toBe("missing")
+    expect(properties.engine_version).toBe("2026.08.19")
+  })
+
+  it("says nothing when there was nothing to install", async () => {
+    await seedWith({ seeded: false, reason: "up-to-date", version: "2026.08.19" })
+
+    expect(captures("engine_seeded")).toHaveLength(0)
+  })
+
+  it("stamps no version when the seed could not say what runs", async () => {
+    // a refused seed reports {seeded, reason} and nothing else. a probe that
+    // never happened must not erase a version some other call established
+    await seedWith({ seeded: false, reason: "busy" })
+
+    expect(mockAnalytics.setEngineVersion).toHaveBeenCalledWith(undefined)
+    expect(captures("engine_seeded")).toHaveLength(0)
+  })
+})
+
+describe("the deferred engine update check", () => {
+  let log
+
+  beforeEach(() => {
+    log = jest.spyOn(console, "log").mockImplementation(() => {})
+    app.services.ytdlpUpdater = mockUpdater
+  })
+
+  afterEach(() => {
+    log.mockRestore()
+  })
+
+  async function check(result) {
+    mockUpdater.checkForUpdate.mockResolvedValue(result)
+    await app.checkForEngineUpdate()
+  }
+
+  function captured() {
+    return mockAnalytics.capture.mock.calls
+  }
+
+  it("reports an update that landed", async () => {
+    await check({
+      started: true,
+      updated: true,
+      from: "2026.08.19",
+      to: "2026.09.01",
+      reason: "completed"
+    })
+
+    expect(captured()).toHaveLength(1)
+    const [event, properties] = captured()[0]
+    expect(event).toBe("engine_updated")
+    expect(properties.from_version).toBe("2026.08.19")
+    expect(properties.to_version).toBe("2026.09.01")
+  })
+
+  it("moves later events onto the engine that is now running", async () => {
+    await check({
+      started: true,
+      updated: true,
+      from: "2026.08.19",
+      to: "2026.09.01",
+      reason: "completed"
+    })
+
+    expect(mockAnalytics.setEngineVersion).toHaveBeenCalledWith("2026.09.01")
+  })
+
+  it("omits a from_version the updater could not probe", async () => {
+    await check({
+      started: true,
+      updated: true,
+      from: null,
+      to: "2026.09.01",
+      reason: "completed"
+    })
+
+    const [, properties] = captured()[0]
+    expect(Object.keys(properties)).not.toContain("from_version")
+  })
+
+  it("says nothing when the engine was already current", async () => {
+    await check({ started: true, updated: false, reason: "up-to-date" })
+
+    expect(captured()).toHaveLength(0)
+  })
+
+  it("says nothing when a completed swap changed no version", async () => {
+    // "completed" with updated:false means the swap worked and the engine is
+    // current. nothing failed, so there is nothing for a failure event to say
+    await check({
+      started: true,
+      updated: false,
+      from: "2026.09.01",
+      to: "2026.09.01",
+      reason: "completed"
+    })
+
+    expect(captured()).toHaveLength(0)
+  })
+
+  it("reports a check that failed, with the reason and the message", async () => {
+    await check({
+      started: true,
+      updated: false,
+      reason: "check-failed",
+      error: "could not read the latest yt-dlp release tag"
+    })
+
+    const [event, properties] = captured()[0]
+    expect(event).toBe("engine_update_failed")
+    expect(properties.update_reason).toBe("check-failed")
+    expect(properties.error_message).toBe(
+      "could not read the latest yt-dlp release tag"
+    )
+  })
+
+  it("omits the message when the failure carried none", async () => {
+    await check({ started: true, updated: false, reason: "checksum-missing" })
+
+    const [, properties] = captured()[0]
+    expect(Object.keys(properties)).not.toContain("error_message")
+  })
+
+  it("reports a check that never ran because a download held the gate", async () => {
+    // the update did not happen and this is why - which is the whole question
+    await check({ started: false, reason: "busy" })
+
+    const [event, properties] = captured()[0]
+    expect(event).toBe("engine_update_failed")
+    expect(properties.update_reason).toBe("busy")
+  })
+
+  it("survives the check rejecting outright", async () => {
+    const warn = jest.spyOn(console, "warn").mockImplementation(() => {})
+    mockUpdater.checkForUpdate.mockRejectedValue(new Error("offline"))
+
+    await expect(app.checkForEngineUpdate()).resolves.toBeUndefined()
+    expect(mockAnalytics.capture).not.toHaveBeenCalled()
+
+    warn.mockRestore()
+  })
+})
+
+/**
+ * as with the launch payload: the tests above drive a mocked service, which
+ * accepts anything. these replay the bags the engine lifecycle really builds
+ * through the real one, where update_reason is a vocabulary that has to have
+ * been told about each value before it will send it.
+ */
+describe("the engine payloads survive the real validator", () => {
+  const { Analytics: RealAnalytics } = jest.requireActual(
+    "../src/main/services/analytics"
+  )
+
+  let warn
+  let log
+
+  beforeEach(() => {
+    warn = jest.spyOn(console, "warn").mockImplementation(() => {})
+    log = jest.spyOn(console, "log").mockImplementation(() => {})
+    app.services.ytdlpUpdater = mockUpdater
+  })
+
+  afterEach(() => {
+    warn.mockRestore()
+    log.mockRestore()
+  })
+
+  async function replay() {
+    const sent = []
+
+    const real = new RealAnalytics({
+      settingsStore: {
+        isAnalyticsEnabled: async () => true,
+        getInstallId: async () => "install-id",
+        setAnalyticsEnabled: async () => ({ success: true })
+      },
+      createClient: () => ({
+        capture: (message) => sent.push(message),
+        flush: async () => {}
+      }),
+      forceEnabled: true
+    })
+
+    await real.init()
+    warn.mockClear()
+
+    for (const [event, properties] of mockAnalytics.capture.mock.calls) {
+      real.capture(event, properties)
+    }
+
+    return sent
+  }
+
+  it("sends a seed whole", async () => {
+    mockUpdater.seed.mockResolvedValue({
+      seeded: true,
+      reason: "corrupt",
+      version: "2026.08.19"
+    })
+    app.services = {}
+    await app.initializeServices()
+
+    const [message] = await replay()
+
+    expect(message.event).toBe("engine_seeded")
+    expect(message.properties.reason).toBe("corrupt")
+    expect(message.properties.engine_version).toBe("2026.08.19")
+    expect(warn).not.toHaveBeenCalled()
+  })
+
+  it("sends every reason a seed can install for", async () => {
+    // installDirectory() takes its reason positionally, so these three are the
+    // ones a grep for `reason:` in the updater never finds
+    for (const reason of ["missing", "corrupt", "bundled-newer"]) {
+      mockAnalytics.capture.mockClear()
+      mockUpdater.seed.mockResolvedValue({
+        seeded: true,
+        reason,
+        version: "2026.08.19"
+      })
+      app.services = {}
+      await app.initializeServices()
+
+      const [message] = await replay()
+      expect(message.properties.reason).toBe(reason)
+    }
+
+    expect(warn).not.toHaveBeenCalled()
+  })
+
+  it("sends an update whole", async () => {
+    mockUpdater.checkForUpdate.mockResolvedValue({
+      started: true,
+      updated: true,
+      from: "2026.08.19",
+      to: "2026.09.01",
+      reason: "completed"
+    })
+    await app.checkForEngineUpdate()
+
+    const [message] = await replay()
+
+    expect(message.event).toBe("engine_updated")
+    expect(message.properties.from_version).toBe("2026.08.19")
+    expect(message.properties.to_version).toBe("2026.09.01")
+    expect(warn).not.toHaveBeenCalled()
+  })
+
+  it("sends every reason an update can fail for", async () => {
+    // every reason checkForUpdate() can return except the two that mean the
+    // engine is current. each has to be in update_reason's vocabulary before
+    // it will send, and an empty vocabulary is what fails this loudly
+    const reasons = [
+      "asset-layout-unexpected",
+      "busy",
+      "cancelled",
+      "check-failed",
+      "checksum-mismatch",
+      "checksum-missing",
+      "download-failed",
+      "no-binary-available",
+      "probe-failed",
+      "repaired",
+      "swap-failed",
+      "swap-stranded",
+      "unsupported-platform",
+      "version-mismatch"
+    ]
+
+    for (const reason of reasons) {
+      mockUpdater.checkForUpdate.mockResolvedValue({
+        started: true,
+        updated: false,
+        reason,
+        error: "something the updater said"
+      })
+      await app.checkForEngineUpdate()
+    }
+
+    const sent = await replay()
+
+    expect(sent.map((message) => message.properties.update_reason)).toEqual(
+      reasons
+    )
+    expect(warn).not.toHaveBeenCalled()
   })
 })
 

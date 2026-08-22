@@ -2,12 +2,8 @@
 
 const { ipcMain, dialog, app } = require("electron")
 const os = require("os")
-const { IPC_CHANNELS, APP_CONFIG } = require("./utils/constants")
-const {
-  extractQuality,
-  extractTitleFromFilename,
-  sanitizeTitle
-} = require("./utils/analytics-helpers")
+const { IPC_CHANNELS } = require("./utils/constants")
+const { extractQuality } = require("./utils/analytics-helpers")
 const { ERROR_STAGES, classify } = require("./utils/error-taxonomy")
 const {
   mapVideoInfo,
@@ -80,11 +76,19 @@ function cookieJarProblem({ total, youtube, expired }) {
   return "No usable YouTube cookies"
 }
 
-// get trackEvent from global
-const getTrackEvent = () => global.trackEvent || (() => {})
+/**
+ * what the runner calls a download, in the words the taxonomy answers in.
+ *
+ * the runner says "combined" for a merged video+audio download and never
+ * "video" - an ffmpeg detail about how the file was assembled, where analytics
+ * answers what the user took away. anything else is left out rather than
+ * guessed at: absence is silent, and a value outside the vocabulary is not.
+ */
+const MEDIA_TYPES = { combined: "video", video: "video", audio: "audio" }
 
-// engine errors come as "<short user message>\n\n<full technical>".
-// the first paragraph is shown to the user; the full string is sent to analytics.
+// an error message may arrive as "<short user message>\n\n<full technical>".
+// the first paragraph is what the user is shown; the rest travels as details.
+// analytics no longer reads this path at all - it takes the runner's payload.
 const shortErrorMessage = (message) =>
   (message || "").split(/\n\s*\n/, 1)[0].trim() || "Download failed"
 
@@ -94,6 +98,9 @@ class IPCHandlers {
     // every download flow runs on the binary engine
     this.engine = services.ytdlpEngine
     this.updater = services.ytdlpUpdater
+    // the one exit point telemetry leaves through. absent in a build that
+    // never constructed one, and nothing here may depend on it existing
+    this.analytics = services.analytics || null
     this.autoUpdater = autoUpdater
     this.mainWindow = null
 
@@ -129,34 +136,85 @@ class IPCHandlers {
     })
   }
 
-  // translate a runner event into the analytics shape used before the migration
+  /**
+   * translate a runner event into an analytics event
+   * @param {string} name - the runner's event name
+   * @param {Object} payload - what the runner knows about the download
+   */
   trackDownloadEvent(name, payload) {
-    const eventName =
-      name === "download_completed"
-        ? APP_CONFIG.ANALYTICS_CONFIG.EVENTS.DOWNLOAD_COMPLETED
-        : APP_CONFIG.ANALYTICS_CONFIG.EVENTS.DOWNLOAD_FAILED
+    if (!this.analytics) return
 
-    const eventData = {
-      type: payload.type,
+    if (name === "download_cancelled") {
+      // the cancel taxonomy carries three properties and no more. quality and
+      // is_trimmed are not among them, and an unlisted one is dropped behind a
+      // warning production never surfaces - so they are not sent
+      this.analytics.capture("download_cancelled", {
+        platform: payload.platform,
+        media_type: MEDIA_TYPES[payload.type],
+        progress_at_cancel: Math.round(payload.progress || 0)
+      })
+      return
+    }
+
+    const base = {
       platform: payload.platform,
-      video_title: sanitizeTitle(
-        payload.filename
-          ? extractTitleFromFilename(payload.filename)
-          : payload.title
-      ),
-      format_quality: extractQuality(payload.formatId)
+      media_type: MEDIA_TYPES[payload.type],
+      quality: extractQuality(payload.formatId),
+      is_trimmed: Boolean(payload.trimmed)
     }
 
     if (name === "download_completed") {
-      eventData.file_size_mb = Math.round((payload.fileSize || 0) / (1024 * 1024))
-    } else {
-      eventData.error_type =
-        payload.errorCode ||
-        classify(payload.errorMessage, ERROR_STAGES.DOWNLOAD).category
-      eventData.error_message = payload.errorMessage
+      this.analytics.capture("download_completed", {
+        ...base,
+        file_size_mb: Math.round((payload.fileSize || 0) / (1024 * 1024))
+      })
+      return
     }
 
-    getTrackEvent()(eventName, eventData)
+    /**
+     * the code carries the pattern detail here, not the message.
+     *
+     * mapError already classified the raw stderr through this same taxonomy
+     * and put the answer in error.code; what it puts in error.message is the
+     * user-facing wording, and the raw text stays behind in error.details.
+     * classifying that wording instead reports UNKNOWN_ERROR for twelve of the
+     * fourteen failures the engine can name - "Your antivirus stopped the
+     * video processor" matches no pattern, least of all the antivirus one.
+     *
+     * handing classify() both is the taxonomy's own contract: an explicit code
+     * we own wins, and the patterns are still there for a failure that arrived
+     * without one, which is what a throw from outside the engine looks like.
+     */
+    const { category, stage } = classify(
+      { code: payload.errorCode, message: payload.errorMessage },
+      ERROR_STAGES.DOWNLOAD
+    )
+
+    this.analytics.capture("download_failed", {
+      ...base,
+      error_category: category,
+      error_stage: stage,
+      error_message: payload.errorMessage,
+      progress_at_failure: Math.round(payload.progress || 0)
+    })
+  }
+
+  /**
+   * report a cookie import, whichever of the two routes it came in by
+   *
+   * one shape for both so they cannot drift, and called on the failure paths
+   * too: an import that did not take is the more interesting half of the
+   * question this event exists to answer.
+   *
+   * @param {boolean} imported - whether the jar was written
+   */
+  trackCookieImport(imported) {
+    if (!this.analytics) return
+
+    this.analytics.capture("cookies_imported", {
+      success: Boolean(imported),
+      has_youtube_cookies: Boolean(this.cookieManager.hasValidCookies())
+    })
   }
 
   // audit logging
@@ -682,6 +740,7 @@ class IPCHandlers {
       const { cookies } = data
 
       const success = await this.cookieManager.importCookies(cookies)
+      this.trackCookieImport(success)
 
       return this.createSuccess({
         imported: success,
@@ -689,6 +748,7 @@ class IPCHandlers {
       })
     } catch (error) {
       console.error("Cookie import failed:", error.message)
+      this.trackCookieImport(false)
       return this.createError("Failed to import cookies", error.message)
     }
   }
@@ -711,6 +771,7 @@ class IPCHandlers {
 
       const filePath = result.filePaths[0]
       const success = await this.cookieManager.importCookieFile(filePath)
+      this.trackCookieImport(success)
 
       return this.createSuccess({
         imported: success,
@@ -719,6 +780,7 @@ class IPCHandlers {
       })
     } catch (error) {
       console.error("Cookie file import failed:", error.message)
+      this.trackCookieImport(false)
       return this.createError("Failed to import cookie file", error.message)
     }
   }

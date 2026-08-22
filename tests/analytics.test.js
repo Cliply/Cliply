@@ -695,10 +695,30 @@ describe("Analytics", () => {
           "corrupt-and-no-bundle", "engine-dir-failed", "no-binary-available",
           "probe-failed", "repaired", "swap-failed", "swap-stranded",
           "unsupported-platform", "up-to-date", "version-mismatch",
-          "missing", "corrupt", "bundled-newer"
+          "missing", "corrupt", "bundled-newer",
+          // written as a ternary arm rather than a `reason:` literal
+          // (ytdlp-updater.js:567), so a grep for the keyword walks past it
+          "download-failed"
         ]) {
           const properties = await captureOne("engine_seeded", { reason: value })
           expect(properties.reason).toBe(value)
+        }
+      })
+
+      it("keeps every reason an engine update can fail for", async () => {
+        // what checkForUpdate() returns, minus "up-to-date" and "completed":
+        // those two mean the engine is current, and index.js sends no failure
+        // event for them at all
+        for (const value of [
+          "asset-layout-unexpected", "busy", "cancelled", "check-failed",
+          "checksum-mismatch", "checksum-missing", "download-failed",
+          "no-binary-available", "probe-failed", "repaired", "swap-failed",
+          "swap-stranded", "unsupported-platform", "version-mismatch"
+        ]) {
+          const properties = await captureOne("engine_update_failed", {
+            update_reason: value
+          })
+          expect(properties.update_reason).toBe(value)
         }
       })
 
@@ -706,7 +726,8 @@ describe("Analytics", () => {
         for (const [event, key] of [
           ["download_started", "media_type"],
           ["download_started", "audio_format"],
-          ["engine_seeded", "reason"]
+          ["engine_seeded", "reason"],
+          ["engine_update_failed", "update_reason"]
         ]) {
           const properties = await captureOne(event, { [key]: "holiday" })
           expect(properties).not.toHaveProperty(key)
@@ -714,15 +735,12 @@ describe("Analytics", () => {
       })
 
       it("tells the next implementer what to do about an empty one", async () => {
-        // url_kind and update_reason have no values yet. failing loudly at
+        // url_kind has no values yet - task 7 invents them. failing loudly at
         // test time is the friction working; a silent production drop is not
-        for (const [event, key] of [
-          ["url_submitted", "url_kind"],
-          ["engine_update_failed", "update_reason"]
-        ]) {
-          const properties = await captureOne(event, { [key]: "anything" })
-          expect(properties).not.toHaveProperty(key)
-        }
+        const properties = await captureOne("url_submitted", {
+          url_kind: "anything"
+        })
+        expect(properties).not.toHaveProperty("url_kind")
 
         const logged = console.warn.mock.calls.flat().join(" ")
         expect(logged).toContain("url_kind")
