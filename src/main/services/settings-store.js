@@ -22,6 +22,9 @@ class SettingsStore {
   constructor(options = {}) {
     this.settingsFile = options.settingsFile || SETTINGS_FILE
     this.defaultPath = options.defaultPath || APP_CONFIG.DOWNLOADS_DIR
+    // a mint in progress, so racing callers share one id rather than each
+    // rolling their own. it is the work in flight, never a cached result
+    this.installIdInFlight = null
   }
 
   /**
@@ -168,9 +171,35 @@ class SettingsStore {
   /**
    * a random id for this installation. not derived from the machine or the
    * person - it is a dice roll, and reinstalling produces a new one.
+   *
+   * callers arriving together share one mint. without that, each would read
+   * an absent id and roll its own, and a single installation would report
+   * itself as several - only the last write surviving to the next launch.
    * @returns {Promise<string>}
    */
   async getInstallId() {
+    if (!this.installIdInFlight) {
+      this.installIdInFlight = this.resolveInstallId()
+    }
+
+    const inFlight = this.installIdInFlight
+
+    try {
+      return await inFlight
+    } finally {
+      // cleared once it settles rather than kept: a later call re-reads the
+      // file, so an id the settings ui changed underneath is still picked up
+      if (this.installIdInFlight === inFlight) {
+        this.installIdInFlight = null
+      }
+    }
+  }
+
+  /**
+   * read the stored id, or mint and persist one. never rejects
+   * @returns {Promise<string>}
+   */
+  async resolveInstallId() {
     const settings = await this.readAll()
 
     if (typeof settings.install_id === "string" && settings.install_id.length) {

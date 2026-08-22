@@ -93,13 +93,41 @@ describe("persisting a new path", () => {
   })
 })
 
+// a real v4 uuid, not just 36 characters of the right alphabet - a shape-only
+// check would pass an id source that stopped being random
+const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
+
 describe("analytics preferences", () => {
   test("generates an install id once and reuses it", async () => {
     const first = await store.getInstallId()
     const second = await store.getInstallId()
 
-    expect(first).toMatch(/^[0-9a-f-]{36}$/)
+    expect(first).toMatch(UUID_V4)
     expect(second).toBe(first)
+  })
+
+  test("gives two installs two different ids", async () => {
+    const other = new SettingsStore({
+      settingsFile: path.join(root, "other-install", "settings.json")
+    })
+
+    const mine = await store.getInstallId()
+    const theirs = await other.getInstallId()
+
+    expect(theirs).toMatch(UUID_V4)
+    expect(theirs).not.toBe(mine)
+  })
+
+  test("mints a single id even when callers race", async () => {
+    const ids = await Promise.all(
+      Array.from({ length: 10 }, () => store.getInstallId())
+    )
+
+    // one installation is one identity - a mint already underway has to win
+    expect(new Set(ids).size).toBe(1)
+    // and the id they all got is the one that actually landed on disk
+    expect((await store.readAll()).install_id).toBe(ids[0])
+    expect(await store.getInstallId()).toBe(ids[0])
   })
 
   test("defaults analytics to enabled and round-trips a change", async () => {
@@ -124,6 +152,30 @@ describe("analytics preferences", () => {
     expect(result.error.length).toBeGreaterThan(0)
     // the opt-out really did not stick - the caller has to be told
     expect(await unwritable.isAnalyticsEnabled()).toBe(true)
+  })
+
+  // analytics is on by default, so anything that is not a literal false has to
+  // read as enabled. a regression here flips a privacy default silently
+  test.each([
+    ["no key at all", JSON.stringify({ download_path: "/tmp" })],
+    ["an empty file", ""],
+    ["malformed json", "{ not json"],
+    ["a null", JSON.stringify({ analytics_enabled: null })],
+    ["a zero", JSON.stringify({ analytics_enabled: 0 })],
+    ['the string "false"', JSON.stringify({ analytics_enabled: "false" })]
+  ])("stays enabled for %s", async (_label, contents) => {
+    fs.writeFileSync(store.settingsFile, contents)
+
+    expect(await store.isAnalyticsEnabled()).toBe(true)
+  })
+
+  test("only a literal false turns analytics off", async () => {
+    fs.writeFileSync(
+      store.settingsFile,
+      JSON.stringify({ analytics_enabled: false })
+    )
+
+    expect(await store.isAnalyticsEnabled()).toBe(false)
   })
 
   test("keeps the download path when analytics settings are written", async () => {
