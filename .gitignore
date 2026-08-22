@@ -4,38 +4,12 @@
 /release
 # Note: Keep package-lock.json, yarn.lock, pnpm-lock.yaml for reproducible builds
 /bun.lockb
-/python-runtime
-.python-cache
 .env
 # /binaries - commented out to allow documentation
 
-# Python cache and compiled files
-__pycache__/
-*.py[cod]
-*$py.class
-*.so
-.Python
 build/
-develop-eggs/
 dist/
 downloads/
-eggs/
-.eggs/
-python/lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
-MANIFEST
-
-# Virtual environments
-venv/
-env/
-ENV/
 
 # macOS
 .DS_Store
@@ -55,12 +29,21 @@ Thumbs.db
 *.pkg
 *.msi
 
-# FFmpeg binaries (keep .gitkeep and README.md)
+# FFmpeg and deno binaries (keep .gitkeep and README.md)
 binaries/linux/ffmpeg
 binaries/macos/ffmpeg
 binaries/windows/ffmpeg.exe
-binaries/deno/linux/deno.exe
+binaries/deno/linux/deno
 binaries/deno/macos/deno
+binaries/deno/windows/deno.exe
+
+# yt-dlp engine (fetched at build time by scripts/fetch-ytdlp.js)
+# the onedir builds unpack into binaries/<platform>/ytdlp/; the bare files are
+# the single-file builds older checkouts fetched
+binaries/*/ytdlp/
+binaries/linux/yt-dlp
+binaries/macos/yt-dlp
+binaries/windows/yt-dlp.exe
 !binaries/**/.gitkeep
 !binaries/README.md
 
@@ -77,14 +60,7 @@ screenshot_*.png
 temp-ico/
 /scripts/temp-ico/
 
-# Downloads folder
-python/downloads/
-/python/downloads/
 /CLAUDE.md
-
-# Cookies
-python/cookies/
-/python/cookies/
 
 # Log files
 *.log

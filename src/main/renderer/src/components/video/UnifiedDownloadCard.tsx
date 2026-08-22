@@ -11,14 +11,12 @@ import {
   type VideoFormat
 } from "@/lib/api"
 import { reportActions } from "@/lib/reportStore"
-import { useServerStatus } from "@/lib/hooks/useServerStatus"
 import { usePinterestStore } from "@/lib/pinterestStore"
 import { useTikTokStore } from "@/lib/tiktokStore"
 import { useYouTubeStore } from "@/lib/youtubeStore"
 import {
   showDownloadErrorToast,
-  showServerOverwhelmedToast,
-  showServerStartingToast
+  showServerOverwhelmedToast
 } from "@/lib/toast-utils"
 import { cn } from "@/lib/utils"
 import { motion } from "framer-motion"
@@ -272,23 +270,16 @@ function PinterestDownloadCard({
   className?: string
 }) {
   const { url, isDownloading, setIsDownloading } = usePinterestStore()
-  const serverStatus = useServerStatus()
 
   const handleDownload = async () => {
     if (!url || isDownloading) return
-    if (serverStatus.isStarting) { showServerStartingToast(); return }
-    if (!serverStatus.isReady && !serverStatus.isUnknown) {
-      toast.error("Download engine not ready", { description: "Please wait for the download engine to start" })
-      return
-    }
     try {
       setIsDownloading(true)
-      await pinterestApi.download({ url })
+      await pinterestApi.download({ url, title: pinInfo?.title })
       toast.success("Download complete!", { action: { label: "Open Folder", onClick: () => systemApi.openDownloadFolder() } })
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to download video"
-      if (message.includes("Download engine starting")) { showServerStartingToast() }
-      else if (message.includes("network") || message.includes("fetch")) { showServerOverwhelmedToast() }
+      if (message.includes("network") || message.includes("fetch")) { showServerOverwhelmedToast() }
       else {
         reportActions.stage({
           shortMessage: message,
@@ -324,23 +315,16 @@ function TikTokDownloadCard({
   className?: string
 }) {
   const { url, isDownloading, setIsDownloading } = useTikTokStore()
-  const serverStatus = useServerStatus()
 
   const handleDownload = async () => {
     if (!url || isDownloading) return
-    if (serverStatus.isStarting) { showServerStartingToast(); return }
-    if (!serverStatus.isReady && !serverStatus.isUnknown) {
-      toast.error("Download engine not ready", { description: "Please wait for the download engine to start" })
-      return
-    }
     try {
       setIsDownloading(true)
-      await tiktokApi.download({ url })
+      await tiktokApi.download({ url, title: tikTokInfo?.title })
       toast.success("Download complete!", { action: { label: "Open Folder", onClick: () => systemApi.openDownloadFolder() } })
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to download video"
-      if (message.includes("Download engine starting")) { showServerStartingToast() }
-      else if (message.includes("network") || message.includes("fetch")) { showServerOverwhelmedToast() }
+      if (message.includes("network") || message.includes("fetch")) { showServerOverwhelmedToast() }
       else {
         reportActions.stage({
           shortMessage: message,

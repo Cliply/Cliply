@@ -202,27 +202,6 @@ contextBridge.exposeInMainWorld("electronAPI", {
     }
   },
 
-  // server status events
-  server: {
-    onStarting: (callback) => {
-      const handler = () => callback()
-      ipcRenderer.on("python:server:starting", handler)
-      return () => ipcRenderer.removeListener("python:server:starting", handler)
-    },
-
-    onReady: (callback) => {
-      const handler = () => callback()
-      ipcRenderer.on("python:server:ready", handler)
-      return () => ipcRenderer.removeListener("python:server:ready", handler)
-    },
-
-    onError: (callback) => {
-      const handler = (_, data) => callback(data)
-      ipcRenderer.on("python:server:error", handler)
-      return () => ipcRenderer.removeListener("python:server:error", handler)
-    }
-  },
-
   // platform info
   platform: {
     isWindows: process.platform === "win32",

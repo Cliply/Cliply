@@ -34,6 +34,13 @@ export interface DownloadProgress {
   eta?: string
   filename?: string
   error?: string
+  // failures now arrive as events rather than a rejected invoke, so the report
+  // payload's technical detail rides along with them
+  details?: string
+  category?: string
+  // trimmed downloads report one sweep at the end, so there is no meaningful
+  // percentage to show while ffmpeg works
+  indeterminate?: boolean
 }
 
 export interface DownloadStatus {
@@ -47,11 +54,17 @@ export interface DownloadStatus {
 }
 
 export interface SystemHealth {
-  ytDlpVersion?: string
-  ffmpegVersion?: string
-  downloadFolder: string
-  diskSpace?: number
-  activeDownloads: number
+  timestamp: string
+  engine: {
+    binaryPath: string
+    version: string | null
+    ready: boolean
+    ffmpeg: boolean
+    deno: boolean
+  }
+  cookies: { hasValid: boolean; fileSize: number }
+  downloads: { active: number; total: number }
+  performance: { uptime: number; memory: number }
 }
 
 export interface DownloadPathInfo {
@@ -87,6 +100,8 @@ export interface PinterestVideoInfoResponse {
 export interface PinterestDownloadRequest {
   url: string
   format_id?: string
+  // keeps the media title in the output filename
+  title?: string
 }
 
 export interface PinterestDownloadResponse {
@@ -108,6 +123,8 @@ export interface TikTokVideoInfoResponse {
 export interface TikTokDownloadRequest {
   url: string
   format_id?: string
+  // keeps the media title in the output filename
+  title?: string
 }
 
 export interface TikTokDownloadResponse {
@@ -138,7 +155,13 @@ export interface TimeRange {
 export interface AudioDownloadRequest {
   url: string
   format_id: string
-  time_range: TimeRange
+  // renderer-generated correlation id, so progress events can be filtered from
+  // the moment the listener subscribes
+  download_id?: string
+  // omitted when the selection covers the whole video: yt-dlp only reports a
+  // single progress sweep for a section download, and re-muxing the full video
+  // through ffmpeg is slower than just downloading it
+  time_range?: TimeRange
   precise_cut?: boolean
   title?: string
   output_path?: string
@@ -148,7 +171,10 @@ export interface VideoDownloadRequest {
   url: string
   video_format_id: string
   audio_format_id: string
-  time_range: TimeRange
+  // see AudioDownloadRequest.download_id
+  download_id?: string
+  // see AudioDownloadRequest.time_range
+  time_range?: TimeRange
   precise_cut?: boolean
   title?: string
   output_path?: string
@@ -294,11 +320,6 @@ declare global {
           callback: (error: { message: string }) => void
         ) => () => void
         onUpdateChecking: (callback: () => void) => () => void
-      }
-      server: {
-        onStarting: (callback: () => void) => () => void
-        onReady: (callback: () => void) => () => void
-        onError: (callback: (error: { message: string }) => void) => () => void
       }
     }
   }

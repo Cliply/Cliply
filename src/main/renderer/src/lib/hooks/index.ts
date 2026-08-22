@@ -1,6 +1,5 @@
 export { useAudioDownload } from "./useAudioDownload"
 export { useDownloadPath } from "./useDownloadPath"
 export { useMediaSearch } from "./useMediaSearch"
-export { useServerStatus } from "./useServerStatus"
 export { useVideoDownload } from "./useVideoDownload"
 export { useVideoInfo, useVideoInfoMutation } from "./useVideoInfo"

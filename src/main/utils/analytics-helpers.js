@@ -58,10 +58,6 @@ function categorizeError(errorMessage) {
     return "VIDEO_UNAVAILABLE"
   }
 
-  if (message.includes("python") || message.includes("server")) {
-    return "PYTHON_SERVER_ERROR"
-  }
-
   if (message.includes("permission") || message.includes("access")) {
     return "PERMISSION_ERROR"
   }

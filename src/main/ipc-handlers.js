@@ -9,29 +9,155 @@ const {
   extractTitleFromFilename,
   sanitizeTitle
 } = require("./utils/analytics-helpers")
+const {
+  mapVideoInfo,
+  mapSimpleInfo,
+  hasPlayableVideo,
+  buildVideoOutputTemplate,
+  buildAudioOutputTemplate,
+  buildSimpleOutputTemplate
+} = require("./utils/ytdlp-mappers")
+const {
+  getAudioFormatSelector,
+  getSimplePlatformOptions
+} = require("./utils/ytdlp-formats")
+const { resolveDownloadId } = require("./utils/download-id")
+
+const { DownloadRunner } = require("./services/download-runner")
+const { SettingsStore } = require("./services/settings-store")
+const { ERROR_CODES } = require("./services/ytdlp-engine")
+
+/**
+ * urls the cookie test probes, tried in order
+ *
+ * a probe target can die upstream - yt-dlp's own long-standing test video
+ * (BaW_jenozKc) is gone - and a dead target must never be read as "your
+ * cookies failed". so an unavailable video moves on to the next url instead of
+ * deciding anything, and only a real extraction result ends the probe.
+ */
+const COOKIE_TEST_URLS = [
+  "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+  // the oldest video on youtube - about as unlikely to vanish as they come
+  "https://www.youtube.com/watch?v=jNQXAC9IVRw",
+  "https://www.youtube.com/watch?v=9bZkp7q19f0"
+]
+
+// platforms served by the binary engine's single-video flows
+const SUPPORTED_DOWNLOAD_PLATFORMS = ["youtube", "pinterest", "tiktok"]
+
+/**
+ * treat an empty or zero-length selection as "no time range"
+ *
+ * the renderer only sends a range for a real segment now, but a stale client
+ * (or the {start:0,end:0} the store starts with) must not turn a full download
+ * into an ffmpeg section download, which costs granular progress and speed.
+ *
+ * @param {Object} range - {start, end} in seconds, or nothing
+ * @returns {Object|undefined} the range, or undefined when it is not a segment
+ */
+function normalizeTimeRange(range) {
+  if (!range) return undefined
+
+  const start = Number(range.start) || 0
+  const end = Number(range.end) || 0
+
+  if (end <= start) return undefined
+
+  return { start, end }
+}
+
+// say which way the jar is unusable, so "not working" is actionable
+function cookieJarProblem({ total, youtube, expired }) {
+  if (total === 0) {
+    return "No cookies imported"
+  }
+
+  if (youtube === 0) {
+    return "This file has no YouTube cookies in it"
+  }
+
+  if (expired >= youtube) {
+    return "Your YouTube cookies have expired - export them again"
+  }
+
+  return "No usable YouTube cookies"
+}
 
 // get trackEvent from global
 const getTrackEvent = () => global.trackEvent || (() => {})
 
-// errors from the python side come as "<short user message>\n\n<full technical>".
+// engine errors come as "<short user message>\n\n<full technical>".
 // the first paragraph is shown to the user; the full string is sent to analytics.
 const shortErrorMessage = (message) =>
   (message || "").split(/\n\s*\n/, 1)[0].trim() || "Download failed"
 
 class IPCHandlers {
   constructor(services, autoUpdater = null) {
-    this.serverManager = services.serverManager
     this.cookieManager = services.cookieManager
+    // every download flow runs on the binary engine
+    this.engine = services.ytdlpEngine
+    this.updater = services.ytdlpUpdater
     this.autoUpdater = autoUpdater
     this.mainWindow = null
 
     // audit logging
     this.auditLog = []
 
-    // active downloads
-    this.activeDownloads = new Map()
+    // one source of truth for the download folder, shared with the settings ipc
+    this.settings = services.settingsStore || new SettingsStore()
+
+    // drives engine downloads and forwards their progress to the renderer
+    this.runner = new DownloadRunner({
+      engine: this.engine,
+      updater: this.updater,
+      sendEvent: (downloadId, payload) =>
+        this.sendDownloadEvent(downloadId, payload),
+      trackEvent: (name, payload) => this.trackDownloadEvent(name, payload),
+      logAudit: (operation, success, data) =>
+        this.logAudit(operation, success, data)
+    })
 
     this.registerHandlers()
+  }
+
+  // send one download:progress event - the channel the renderer hooks listen on
+  sendDownloadEvent(downloadId, payload) {
+    if (!this.mainWindow || this.mainWindow.isDestroyed()) {
+      return
+    }
+
+    this.mainWindow.webContents.send(IPC_CHANNELS.DOWNLOAD_PROGRESS, {
+      downloadId,
+      ...payload
+    })
+  }
+
+  // translate a runner event into the analytics shape used before the migration
+  trackDownloadEvent(name, payload) {
+    const eventName =
+      name === "download_completed"
+        ? APP_CONFIG.ANALYTICS_CONFIG.EVENTS.DOWNLOAD_COMPLETED
+        : APP_CONFIG.ANALYTICS_CONFIG.EVENTS.DOWNLOAD_FAILED
+
+    const eventData = {
+      type: payload.type,
+      platform: payload.platform,
+      video_title: sanitizeTitle(
+        payload.filename
+          ? extractTitleFromFilename(payload.filename)
+          : payload.title
+      ),
+      format_quality: extractQuality(payload.formatId)
+    }
+
+    if (name === "download_completed") {
+      eventData.file_size_mb = Math.round((payload.fileSize || 0) / (1024 * 1024))
+    } else {
+      eventData.error_type = payload.errorCode || categorizeError(payload.errorMessage)
+      eventData.error_message = payload.errorMessage
+    }
+
+    getTrackEvent()(eventName, eventData)
   }
 
   // audit logging
@@ -89,27 +215,6 @@ class IPCHandlers {
   // set main window reference
   setMainWindow(mainWindow) {
     this.mainWindow = mainWindow
-
-    // forward python server events
-    this.serverManager.eventEmitter.on("python:server:starting", () => {
-      if (this.mainWindow && !this.mainWindow.isDestroyed()) {
-        this.mainWindow.webContents.send("python:server:starting")
-      }
-    })
-
-    this.serverManager.eventEmitter.on("python:server:ready", () => {
-      if (this.mainWindow && !this.mainWindow.isDestroyed()) {
-        this.mainWindow.webContents.send("python:server:ready")
-      }
-    })
-
-    this.serverManager.eventEmitter.on("python:server:error", (error) => {
-      if (this.mainWindow && !this.mainWindow.isDestroyed()) {
-        this.mainWindow.webContents.send("python:server:error", {
-          message: error.message
-        })
-      }
-    })
   }
 
   // register all ipc handlers
@@ -211,382 +316,330 @@ class IPCHandlers {
       const { url, platform } = data
       const targetPlatform = platform ? String(platform).toLowerCase() : "youtube"
 
-      if (!this.serverManager.isServerReady()) {
-        return this.createError(
-          "download engine starting",
-          "please wait a moment and try again",
-          "ENGINE_STARTING"
-        )
-      }
-
-      let endpoint = null
-      if (targetPlatform === "youtube") {
-        endpoint = APP_CONFIG.PYTHON_SERVER.ENDPOINTS.VIDEO_INFO
-      } else if (targetPlatform === "pinterest") {
-        endpoint = APP_CONFIG.PYTHON_SERVER.ENDPOINTS.PINTEREST_INFO
-      } else if (targetPlatform === "tiktok") {
-        endpoint = APP_CONFIG.PYTHON_SERVER.ENDPOINTS.TIKTOK_INFO
-      } else {
+      if (!SUPPORTED_DOWNLOAD_PLATFORMS.includes(targetPlatform)) {
         return this.createError("Unsupported platform", "Please use YouTube, Pinterest, or TikTok")
       }
 
-      const response = await this.serverManager.makeRequest(
-        endpoint,
-        {
-          method: "POST",
-          body: JSON.stringify({ url })
-        }
-      )
+      // one spawn, no server to wait for
+      const info = await this.engine.getInfo(url)
 
-      const videoInfo = await response.json()
+      // the python pinterest service refused image pins by inspecting formats
+      if (targetPlatform === "pinterest" && !hasPlayableVideo(info)) {
+        return this.createError(
+          "This Pinterest pin contains an image, not a video.",
+          "The Pinterest downloader only works with video pins.",
+          "NOT_A_VIDEO"
+        )
+      }
+
+      const videoInfo =
+        targetPlatform === "youtube"
+          ? mapVideoInfo(info, url)
+          : mapSimpleInfo(info, `${targetPlatform}_video`)
 
       return this.createSuccess(videoInfo)
     } catch (error) {
       console.error("Info extraction failed:", error.message)
       return this.createError(
         error.message || "Failed to get media information",
-        "Please check the URL and try again"
+        error.suggestion || "Please check the URL and try again",
+        error.code || "GENERAL_ERROR",
+        {
+          details: error.details || undefined,
+          category: categorizeError(error.message)
+        }
       )
     }
   }
 
-  // combined download with single atomic tracking
+  // combined video download - resolves as soon as the process is running,
+  // completion and failure arrive as download:progress events
   async handleDownloadCombined(event, data) {
-    const downloadId = `combined_${Date.now()}`
-    let title = "unknown" // default title for error tracking
-    let video_format_id = "unknown" // default for error tracking
+    const targetPlatform = data?.platform
+      ? String(data.platform).toLowerCase()
+      : "youtube"
+
+    if (!SUPPORTED_DOWNLOAD_PLATFORMS.includes(targetPlatform)) {
+      return this.createError(
+        "Unsupported platform",
+        "Please use YouTube, Pinterest, or TikTok"
+      )
+    }
+
+    // the renderer generates the id so its listener can filter events from the
+    // moment it subscribes, before this acknowledgement even arrives
+    const downloadId = resolveDownloadId(data && data.download_id, "combined")
+
+    if (!downloadId) {
+      return this.createError(
+        "Invalid download id",
+        "Please restart the app and try again",
+        "INVALID_DOWNLOAD_ID"
+      )
+    }
 
     try {
-      const targetPlatform = data?.platform ? String(data.platform).toLowerCase() : "youtube"
-      if (targetPlatform !== "youtube" && targetPlatform !== "pinterest" && targetPlatform !== "tiktok") {
-        return this.createError("Unsupported platform", "Please use YouTube, Pinterest, or TikTok")
-      }
-
-      // validate input
       if (targetPlatform === "youtube") {
         this.validateRequest(data, ["url", "video_format_id", "audio_format_id"])
       } else {
         // pinterest and tiktok only need the url
         this.validateRequest(data, ["url"])
       }
+
       const {
         url,
         video_format_id: videoFormatId,
         audio_format_id: audioFormatId,
-        time_range,
-        title: requestTitle = "video",
+        time_range: rawTimeRange,
+        precise_cut: preciseCut,
+        title = "video",
         format_id: simpleFormatId
       } = data
 
-      title = requestTitle
-      video_format_id =
-        targetPlatform === "pinterest"
-          ? simpleFormatId || "pinterest"
-          : targetPlatform === "tiktok"
-          ? simpleFormatId || "tiktok"
-          : videoFormatId
+      const outputDir = await this.getDownloadDirectory()
+      const timeRange = normalizeTimeRange(rawTimeRange)
 
-      // check python server
-      if (!this.serverManager.isServerReady()) {
-        return this.createError(
-          "download engine starting",
-          "please wait a moment and try again",
-          "ENGINE_STARTING"
-        )
+      if (targetPlatform === "youtube") {
+        const outputTemplate = buildVideoOutputTemplate({
+          title,
+          videoFormatId,
+          timeRange
+        })
+
+        const createHandle = () =>
+          this.engine.downloadCombined({
+            url,
+            videoFormatId,
+            audioFormatId,
+            outputDir,
+            outputTemplate,
+            timeRange,
+            preciseCut
+          })
+
+        // claim the id before acking so a cancel arriving immediately after
+        // cannot slip through the gap
+        if (
+          !this.runner.reserve(downloadId, {
+            type: "combined",
+            platform: targetPlatform,
+            title
+          })
+        ) {
+          return this.duplicateDownloadError(downloadId)
+        }
+
+        // fire and forget: the renderer follows the rest over progress events
+        this.startDownload({
+          downloadId,
+          type: "combined",
+          platform: targetPlatform,
+          title,
+          formatId: videoFormatId,
+          trimmed: Boolean(timeRange),
+          createHandle
+        })
+
+        return this.createSuccess({
+          download_id: downloadId,
+          status: "started",
+          type: "combined"
+        })
       }
 
-      // track active download
-      this.activeDownloads.set(downloadId, {
-        type: "combined",
+      // tiktok / pinterest have no progress ui and their components still await
+      // completion, so these keep resolving when the file is on disk
+      const outputTemplate = buildSimpleOutputTemplate({
         title,
-        url,
-        started: Date.now(),
-        status: "starting"
+        platform: targetPlatform
       })
 
-      this.activeDownloads.get(downloadId).status = "downloading"
+      // each platform keeps the options its python service used
+      const preset = getSimplePlatformOptions(targetPlatform)
 
-      try {
-        let endpoint = null
-        let requestData = null
-
-        if (targetPlatform === "youtube") {
-          endpoint = APP_CONFIG.PYTHON_SERVER.ENDPOINTS.DOWNLOAD_COMBINED
-          requestData = {
-            url,
-            video_format_id: videoFormatId,
-            audio_format_id: audioFormatId
-          }
-          if (time_range) {
-            requestData.time_range = time_range
-          }
-        } else if (targetPlatform === "tiktok") {
-          endpoint = APP_CONFIG.PYTHON_SERVER.ENDPOINTS.TIKTOK_DOWNLOAD
-          requestData = { url }
-          if (simpleFormatId) {
-            requestData.format_id = simpleFormatId
-          }
-        } else {
-          endpoint = APP_CONFIG.PYTHON_SERVER.ENDPOINTS.PINTEREST_DOWNLOAD
-          requestData = { url }
-          if (simpleFormatId) {
-            requestData.format_id = simpleFormatId
-          }
-        }
-
-        // download via python server
-        const response = await this.serverManager.makeRequest(endpoint, {
-          method: "POST",
-          body: JSON.stringify(requestData)
+      const createHandle = () =>
+        this.engine.downloadSimple({
+          url,
+          outputDir,
+          outputTemplate,
+          formatSelector: simpleFormatId || preset.formatSelector,
+          extraArgs: preset.extraArgs
         })
 
-        const result = await response.json()
-
-        if (result.success) {
-          this.activeDownloads.delete(downloadId)
-          this.logAudit("download_success", true, {
-            type: "combined",
-            filename: result.filename
-          })
-
-          // track success
-          try {
-            const actualTitle = result.filename
-              ? extractTitleFromFilename(result.filename)
-              : title
-            const eventData = {
-              type: "combined",
-              platform: targetPlatform,
-              video_title: sanitizeTitle(actualTitle),
-              format_quality: extractQuality(video_format_id),
-              file_size_mb: Math.round((result.file_size || 0) / (1024 * 1024))
-            }
-            getTrackEvent()(
-              APP_CONFIG.ANALYTICS_CONFIG.EVENTS.DOWNLOAD_COMPLETED,
-              eventData
-            )
-          } catch (analyticsError) {
-            console.warn(
-              "Failed to track download completion:",
-              analyticsError.message
-            )
-          }
-
-          return this.createSuccess({
-            filename: result.filename,
-            file_path: result.file_path,
-            file_size: result.file_size,
-            type: "combined",
-            download_id: downloadId
-          })
-        } else {
-          throw new Error(result.error || "Download failed")
-        }
-      } catch (downloadError) {
-        this.activeDownloads.delete(downloadId)
-        this.logAudit("download_failed", false, {
+      if (
+        !this.runner.reserve(downloadId, {
           type: "combined",
-          error: downloadError.message
+          platform: targetPlatform,
+          title
         })
-        throw downloadError
+      ) {
+        return this.duplicateDownloadError(downloadId)
       }
+
+      const result = await this.runner.run({
+        downloadId,
+        type: "combined",
+        platform: targetPlatform,
+        title,
+        formatId: simpleFormatId || targetPlatform,
+        createHandle
+      })
+
+      if (!result.success) {
+        return this.createError(
+          result.message || "Download failed",
+          "Please try again or check your connection",
+          "DOWNLOAD_FAILED",
+          { details: result.details, category: categorizeError(result.message) }
+        )
+      }
+
+      return this.createSuccess(result)
     } catch (error) {
-      this.activeDownloads.delete(downloadId)
       console.error(`[${downloadId}] Combined download failed:`, error.message)
-
-      // track failure
-      try {
-        const eventData = {
-          error_type: categorizeError(error.message),
-          error_message: error.message,
-          type: "combined",
-          platform: data?.platform ? String(data.platform).toLowerCase() : "youtube",
-          video_title: sanitizeTitle(title),
-          format_quality: extractQuality(video_format_id)
-        }
-        getTrackEvent()(
-          APP_CONFIG.ANALYTICS_CONFIG.EVENTS.DOWNLOAD_FAILED,
-          eventData
-        )
-      } catch (analyticsError) {
-        console.warn(
-          "Failed to track download failure:",
-          analyticsError.message
-        )
-      }
 
       return this.createError(
         shortErrorMessage(error.message),
-        "Please try again or check your connection",
-        "DOWNLOAD_FAILED",
+        error.suggestion || "Please try again or check your connection",
+        error.code || "DOWNLOAD_FAILED",
         {
-          details: error.message,
+          details: error.details || error.message,
           category: categorizeError(error.message)
         }
       )
     }
   }
 
-  // audio download with single atomic tracking
+  // audio download - same start-then-events contract as the video flow
   async handleDownloadAudio(event, data) {
-    const downloadId = `audio_${Date.now()}`
-    let title = "unknown" // default title for error tracking
-    let format_id = "unknown" // default for error tracking
+    const downloadId = resolveDownloadId(data && data.download_id, "audio")
+
+    if (!downloadId) {
+      return this.createError(
+        "Invalid download id",
+        "Please restart the app and try again",
+        "INVALID_DOWNLOAD_ID"
+      )
+    }
 
     try {
-      // validate input
       this.validateRequest(data, ["url", "format_id"])
+
       const {
         url,
         format_id: formatId,
-        time_range,
-        title: requestTitle = "audio"
+        time_range: rawTimeRange,
+        title = "audio",
+        audio_format: audioFormat
       } = data
 
-      title = requestTitle
-      format_id = formatId
-
-      // check python server
-      if (!this.serverManager.isServerReady()) {
-        return this.createError(
-          "download engine starting",
-          "please wait a moment and try again",
-          "ENGINE_STARTING"
-        )
-      }
-
-      // track active download
-      this.activeDownloads.set(downloadId, {
-        type: "audio",
+      const outputDir = await this.getDownloadDirectory()
+      const timeRange = normalizeTimeRange(rawTimeRange)
+      const outputTemplate = buildAudioOutputTemplate({
         title,
-        url,
-        started: Date.now(),
-        status: "starting"
+        formatId,
+        timeRange
       })
 
-      this.activeDownloads.get(downloadId).status = "downloading"
-
-      try {
-        // prepare request
-        const requestData = { url, format_id: formatId }
-        if (time_range) {
-          requestData.time_range = time_range
-        }
-
-        // download via python server
-        const response = await this.serverManager.makeRequest(
-          APP_CONFIG.PYTHON_SERVER.ENDPOINTS.DOWNLOAD_AUDIO,
-          {
-            method: "POST",
-            body: JSON.stringify(requestData)
-          }
-        )
-
-        const result = await response.json()
-
-        if (result.success) {
-          this.activeDownloads.delete(downloadId)
-          this.logAudit("download_success", true, {
-            type: "audio",
-            filename: result.filename
-          })
-
-          // track success
-          try {
-            const actualTitle = result.filename
-              ? extractTitleFromFilename(result.filename)
-              : title
-            const eventData = {
-              type: "audio",
-              video_title: sanitizeTitle(actualTitle),
-              format_quality: extractQuality(formatId),
-              file_size_mb: Math.round((result.file_size || 0) / (1024 * 1024))
-            }
-            getTrackEvent()(
-              APP_CONFIG.ANALYTICS_CONFIG.EVENTS.DOWNLOAD_COMPLETED,
-              eventData
-            )
-          } catch (analyticsError) {
-            console.warn(
-              "Failed to track audio download completion:",
-              analyticsError.message
-            )
-          }
-
-          return this.createSuccess({
-            filename: result.filename,
-            file_path: result.file_path,
-            file_size: result.file_size,
-            type: "audio",
-            download_id: downloadId
-          })
-        } else {
-          throw new Error(result.error || "Download failed")
-        }
-      } catch (downloadError) {
-        this.activeDownloads.delete(downloadId)
-        this.logAudit("download_failed", false, {
-          type: "audio",
-          error: downloadError.message
+      const createHandle = () =>
+        this.engine.downloadAudio({
+          url,
+          formatSelector: getAudioFormatSelector(formatId),
+          audioFormat,
+          outputDir,
+          outputTemplate,
+          timeRange,
+          // audio-only formats ignore the start time unless cuts are forced;
+          // extraction re-encodes anyway, so this is free (ticket 1 finding)
+          preciseCut: Boolean(timeRange)
         })
-        throw downloadError
-      }
-    } catch (error) {
-      this.activeDownloads.delete(downloadId)
-      console.error(`[${downloadId}] Audio download failed:`, error.message)
 
-      // track failure
-      try {
-        // use actual format id
-        const actualFormatId = data?.format_id || format_id
-        const eventData = {
-          error_type: categorizeError(error.message),
-          error_message: error.message,
+      if (
+        !this.runner.reserve(downloadId, {
           type: "audio",
-          video_title: sanitizeTitle(title),
-          format_quality: extractQuality(actualFormatId)
-        }
-        getTrackEvent()(
-          APP_CONFIG.ANALYTICS_CONFIG.EVENTS.DOWNLOAD_FAILED,
-          eventData
-        )
-      } catch (analyticsError) {
-        console.warn(
-          "Failed to track audio download failure:",
-          analyticsError.message
-        )
+          platform: "youtube",
+          title
+        })
+      ) {
+        return this.duplicateDownloadError(downloadId)
       }
+
+      this.startDownload({
+        downloadId,
+        type: "audio",
+        platform: "youtube",
+        title,
+        formatId,
+        trimmed: Boolean(timeRange),
+        createHandle
+      })
+
+      return this.createSuccess({
+        download_id: downloadId,
+        status: "started",
+        type: "audio"
+      })
+    } catch (error) {
+      console.error(`[${downloadId}] Audio download failed:`, error.message)
 
       return this.createError(
         shortErrorMessage(error.message),
-        "Please try again or check your connection",
-        "DOWNLOAD_FAILED",
+        error.suggestion || "Please try again or check your connection",
+        error.code || "DOWNLOAD_FAILED",
         {
-          details: error.message,
+          details: error.details || error.message,
           category: categorizeError(error.message)
         }
       )
     }
   }
 
-  // cancel a download
+  // refusing is the safe half of the trade: replacing a live reservation would
+  // cross-wire two event streams onto one id and lose the first download's
+  // bookkeeping when the second finishes
+  duplicateDownloadError(downloadId) {
+    console.warn(`[${downloadId}] refused: that download id is already running`)
+
+    return this.createError(
+      "That download is already running",
+      "Wait for it to finish, or cancel it first",
+      "DUPLICATE_DOWNLOAD"
+    )
+  }
+
+  // start a download after the ipc reply has gone out, so the renderer always
+  // knows the download id before the first progress event reaches it
+  startDownload(options) {
+    setImmediate(() => {
+      this.runner.run(options).catch((error) => {
+        console.error("download runner crashed:", error.message)
+      })
+    })
+  }
+
+  // resolve the folder downloads are written to - the same one the settings ui
+  // persists and "open folder" opens
+  async getDownloadDirectory() {
+    return this.settings.ensureDownloadPath()
+  }
+
+  // cancel a download - the engine kills the process for real
   async handleCancelDownload(event, data) {
     try {
       this.validateRequest(data, ["downloadId"])
       const { downloadId } = data
 
-      if (this.activeDownloads.has(downloadId)) {
-        this.activeDownloads.delete(downloadId)
-        // note: python server handles cancellation internally
+      if (this.runner.cancel(downloadId)) {
         return this.createSuccess({ cancelled: true })
-      } else {
-        return this.createError("Download not found")
       }
+
+      return this.createError("Download not found")
     } catch (error) {
       console.error("Cancel download failed:", error.message)
       return this.createError("Failed to cancel download")
     }
   }
+
 
   // get download status
   async handleGetDownloadStatus(event, data) {
@@ -594,7 +647,9 @@ class IPCHandlers {
       this.validateRequest(data, ["downloadId"])
       const { downloadId } = data
 
-      const download = this.activeDownloads.get(downloadId)
+      const download = this.runner
+        .list()
+        .find((entry) => entry.id === downloadId)
       if (download) {
         return this.createSuccess(download)
       } else {
@@ -609,12 +664,7 @@ class IPCHandlers {
   // get all active downloads
   async handleGetAllDownloads(_event) {
     try {
-      const downloads = Array.from(this.activeDownloads.entries()).map(
-        ([id, data]) => ({
-          id,
-          ...data
-        })
-      )
+      const downloads = this.runner.list()
 
       return this.createSuccess({ downloads })
     } catch (error) {
@@ -671,20 +721,128 @@ class IPCHandlers {
     }
   }
 
-  // test cookies
+  /**
+   * test cookies
+   *
+   * this deliberately does not claim "your cookies work". Extracting a public
+   * video with the jar attached proves extraction succeeded, not that youtube
+   * accepted the cookies as a login - the same probe passes with no cookies at
+   * all. So two separate facts are reported: whether the jar holds live youtube
+   * cookies, and what a real extraction did with them. The one strong negative
+   * signal is bot detection *while sending the cookies*, which does mean they
+   * are not being honoured.
+   */
   async handleTestCookies(_event) {
     try {
-      const working = await this.cookieManager.testCookies()
-      const status = await this.cookieManager.getStatus()
+      // the jar may have changed (or expired) since it was imported
+      await this.cookieManager.refresh()
+      const inspection = await this.cookieManager.inspectCookieFile()
+
+      if (!inspection.usable) {
+        const note = cookieJarProblem(inspection)
+
+        await this.cookieManager.updateStatus({
+          lastTest: new Date().toISOString(),
+          cookiesLoaded: false,
+          extractionCheck: "skipped",
+          note
+        })
+
+        return this.createSuccess({
+          cookiesLoaded: false,
+          extractionCheck: "skipped",
+          note,
+          status: await this.cookieManager.getStatus(),
+          hasValidCookies: false
+        })
+      }
+
+      // probe with the cookie file forced on, so the result depends on it
+      const { extractionCheck, note } = await this.probeCookies(
+        this.cookieManager.getCookieFilePath()
+      )
+
+      await this.cookieManager.updateStatus({
+        lastTest: new Date().toISOString(),
+        cookiesLoaded: true,
+        extractionCheck,
+        note
+      })
 
       return this.createSuccess({
-        working,
-        status,
+        cookiesLoaded: true,
+        extractionCheck,
+        note,
+        status: await this.cookieManager.getStatus(),
         hasValidCookies: this.cookieManager.hasValidCookies()
       })
     } catch (error) {
       console.error("Cookie test failed:", error.message)
       return this.createError("Cookie test failed", error.message)
+    }
+  }
+
+  /**
+   * run a real extraction with the jar attached and report what happened
+   *
+   * walks COOKIE_TEST_URLS, treating an unavailable target as "this probe told
+   * us nothing" rather than a verdict. anything else - a success, bot
+   * detection, a network failure - is about the cookies, so it ends the walk.
+   *
+   * @param {string|null} cookieFile - the jar to force on for the probe
+   * @returns {Promise<Object>} {extractionCheck, note}
+   */
+  async probeCookies(cookieFile) {
+    let deadTargets = 0
+
+    for (const url of COOKIE_TEST_URLS) {
+      try {
+        const info = await this.engine.getInfo(url, { cookieFile })
+
+        if (info && info.title) {
+          return {
+            extractionCheck: "passed",
+            note: "Extraction worked with your cookies attached. This does not by itself prove YouTube accepted them."
+          }
+        }
+
+        return {
+          extractionCheck: "unknown",
+          note: "The test video returned no details."
+        }
+      } catch (probeError) {
+        console.warn(`cookie probe failed for ${url}:`, probeError.message)
+
+        if (probeError.code === ERROR_CODES.VIDEO_UNAVAILABLE) {
+          // the target is gone, not a statement about the cookies - next one
+          deadTargets++
+          continue
+        }
+
+        if (probeError.code === ERROR_CODES.BOT_DETECTION) {
+          return {
+            extractionCheck: "rejected",
+            note: "YouTube still asked us to confirm you're not a bot while sending your cookies - they are expired or not being accepted."
+          }
+        }
+
+        if (probeError.code === ERROR_CODES.NETWORK_ERROR) {
+          return {
+            extractionCheck: "unknown",
+            note: "Couldn't reach YouTube, so the cookies weren't tested."
+          }
+        }
+
+        return {
+          extractionCheck: "unknown",
+          note: `The test couldn't complete: ${probeError.message}`
+        }
+      }
+    }
+
+    return {
+      extractionCheck: "unknown",
+      note: `All ${deadTargets} of our test videos are unavailable right now, so this test says nothing about your cookies.`
     }
   }
 
@@ -723,21 +881,24 @@ class IPCHandlers {
   // system health check
   async handleSystemHealth(_event) {
     try {
-      const serverStatus = this.serverManager.getStatus()
       const cookieStatus = await this.cookieManager.getStatus()
+      const engineVersion = await this.engine.getVersion().catch(() => null)
 
       return this.createSuccess({
         timestamp: new Date().toISOString(),
-        pythonServer: {
-          isReady: serverStatus.isReady,
-          serverUrl: serverStatus.serverUrl
+        engine: {
+          binaryPath: this.engine.getBinaryPath(),
+          version: engineVersion,
+          ready: Boolean(engineVersion),
+          ffmpeg: Boolean(this.engine.getFfmpegPath()),
+          deno: Boolean(this.engine.getDenoPath())
         },
         cookies: {
           hasValid: this.cookieManager.hasValidCookies(),
           fileSize: cookieStatus?.fileSize || 0
         },
         downloads: {
-          active: this.activeDownloads.size,
+          active: this.runner.size,
           total: this.auditLog.filter(
             (log) => log.operation === "download_success"
           ).length
@@ -745,14 +906,6 @@ class IPCHandlers {
         performance: {
           uptime: Math.floor(process.uptime()),
           memory: process.memoryUsage().heapUsed
-        },
-        auditSummary: {
-          totalEvents: this.auditLog.length,
-          recentEvents: this.auditLog.slice(-3).map((event) => ({
-            operation: event.operation,
-            success: event.success,
-            timestamp: event.timestamp
-          }))
         }
       })
     } catch (error) {
@@ -783,16 +936,10 @@ class IPCHandlers {
     let ytDlpVersion = null
 
     try {
-      if (this.serverManager.isServerReady()) {
-        const response = await this.serverManager.makeRequest("/", {
-          method: "GET"
-        })
-        const status = await response.json()
-        ffmpegAvailable = status.ffmpeg_available ?? null
-        ytDlpVersion = status.yt_dlp_version ?? null
-      }
+      ffmpegAvailable = Boolean(this.engine.getFfmpegPath())
+      ytDlpVersion = await this.engine.getVersion()
     } catch (error) {
-      console.warn("diagnostics: server status unavailable:", error.message)
+      console.warn("diagnostics: engine status unavailable:", error.message)
     }
 
     return this.createSuccess({
@@ -809,28 +956,13 @@ class IPCHandlers {
   // open user's downloads folder
   async handleOpenDownloadFolder(_event) {
     try {
-      if (!this.serverManager.isServerReady()) {
-        return this.createError(
-          "download engine starting",
-          "please wait a moment and try again",
-          "ENGINE_STARTING"
-        )
-      }
-
-      // Get current download path from Python server
-      const response = await this.serverManager.makeRequest(
-        "/api/settings/download-path",
-        { method: "GET" }
-      )
-
-      const pathInfo = await response.json()
-      
+      const target = await this.settings.ensureDownloadPath()
       const { shell } = require("electron")
-      await shell.openPath(pathInfo.path)
-      return this.createSuccess({ opened: true })
+      await shell.openPath(target)
+      return this.createSuccess({ opened: true, path: target })
     } catch (error) {
-      console.error("open download folder failed:", error.message)
-      return this.createError("failed to open downloads folder")
+      console.error("Open download folder failed:", error.message)
+      return this.createError("Failed to open download folder")
     }
   }
 
@@ -859,21 +991,7 @@ class IPCHandlers {
   // get current download path
   async handleGetDownloadPath(_event) {
     try {
-      if (!this.serverManager.isServerReady()) {
-        return this.createError(
-          "download engine starting",
-          "please wait a moment and try again",
-          "ENGINE_STARTING"
-        )
-      }
-
-      const response = await this.serverManager.makeRequest(
-        "/api/settings/download-path",
-        { method: "GET" }
-      )
-
-      const pathInfo = await response.json()
-      return this.createSuccess(pathInfo)
+      return this.createSuccess(await this.settings.getDownloadPathInfo())
     } catch (error) {
       console.error("get download path failed:", error.message)
       return this.createError("failed to get download path")
@@ -884,31 +1002,14 @@ class IPCHandlers {
   async handleSetDownloadPath(_event, data) {
     try {
       this.validateRequest(data, ["path"])
-      const { path } = data
 
-      if (!this.serverManager.isServerReady()) {
-        return this.createError(
-          "download engine starting",
-          "please wait a moment and try again",
-          "ENGINE_STARTING"
-        )
-      }
+      const result = await this.settings.setDownloadPath(data.path)
 
-      const response = await this.serverManager.makeRequest(
-        "/api/settings/download-path",
-        {
-          method: "POST",
-          body: JSON.stringify({ path })
-        }
-      )
-
-      const result = await response.json()
-      
-      if (result.success) {
-        return this.createSuccess(result)
-      } else {
+      if (!result.success) {
         return this.createError(result.error || "failed to set download path")
       }
+
+      return this.createSuccess(await this.settings.getDownloadPathInfo())
     } catch (error) {
       console.error("set download path failed:", error.message)
       return this.createError("failed to set download path")
@@ -1022,16 +1123,9 @@ class IPCHandlers {
     }
   }
 
-  // clean up expired downloads
+  // downloads now end with their process, so nothing can linger here
   cleanupExpiredDownloads() {
-    const now = Date.now()
-    const maxAge = 5 * 60 * 1000 // 5 minutes
-
-    for (const [downloadId, download] of this.activeDownloads.entries()) {
-      if (now - download.started > maxAge) {
-        this.activeDownloads.delete(downloadId)
-      }
-    }
+    return this.runner.size
   }
 
   // get audit statistics
@@ -1050,8 +1144,8 @@ class IPCHandlers {
 
   // cleanup ipc handlers
   cleanup() {
-    // clean up active downloads
-    this.activeDownloads.clear()
+    // stop any process still running
+    this.runner.cancelAll()
 
     // remove all listeners
     const channels = [

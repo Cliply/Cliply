@@ -6,16 +6,12 @@ import {
 } from "@/components/ui/tooltip"
 import { formatDuration, validateTimeRange } from "@/lib/api"
 import { useAudioDownload } from "@/lib/hooks/useAudioDownload"
-import { useServerStatus } from "@/lib/hooks/useServerStatus"
 import { useYouTubeStore } from "@/lib/youtubeStore"
-import {
-  showDownloadSuccessToast,
-  showServerStartingToast
-} from "@/lib/toast-utils"
+import { isTerminalReason } from "@/lib/downloadOutcome"
 import { cn } from "@/lib/utils"
+import { DownloadProgressBar } from "./DownloadProgressBar"
 import { motion } from "framer-motion"
 import { Scissors } from "lucide-react"
-import { toast } from "sonner"
 
 interface AudioDownloadButtonProps {
   isVisible: boolean
@@ -39,7 +35,6 @@ export function AudioDownloadButton({
   } = useYouTubeStore()
 
   const audioDownloadMutation = useAudioDownload()
-  const serverStatus = useServerStatus()
 
   const selectedDuration = audioTimeRange.end - audioTimeRange.start
 
@@ -51,6 +46,10 @@ export function AudioDownloadButton({
     maxDuration
   ).isValid
 
+  // Check if user is downloading a specific segment (not full audio)
+  const isSegmentDownload =
+    audioTimeRange.start !== 0 || audioTimeRange.end !== maxDuration
+
   const handleDownload = async () => {
     if (!selectedAudioFormatForDownload || !isValidRange) return
 
@@ -58,17 +57,7 @@ export function AudioDownloadButton({
     if (audioDownloadMutation.isPending) return
 
     // Check server status before attempting download
-    if (serverStatus.isStarting) {
-      showServerStartingToast()
-      return
-    }
 
-    if (!serverStatus.isReady && !serverStatus.isUnknown) {
-      toast.error("Download engine not ready", {
-        description: "Please wait for the download engine to start"
-      })
-      return
-    }
 
     try {
       setIsDownloadingAudio(true)
@@ -76,23 +65,22 @@ export function AudioDownloadButton({
       await audioDownloadMutation.mutateAsync({
         url,
         format_id: selectedAudioFormatForDownload.format_id,
-        time_range: audioTimeRange,
+        time_range: isSegmentDownload ? audioTimeRange : undefined,
         precise_cut: audioPreciseCut,
         title: videoInfo?.title || "audio"
       })
 
-      showDownloadSuccessToast("audio")
+      // the completion toast (with the filename and Open Folder) belongs to the
+      // hook's progress-event path - toasting here too would double it
     } catch (error) {
-      // the failure toast (with Report) is owned by the useAudioDownload hook
-      console.error("Download error:", error)
+      // terminal outcomes (failure, cancellation) are owned by the hook
+      if (!isTerminalReason(error)) {
+        console.error("Audio download error:", error)
+      }
     } finally {
       setIsDownloadingAudio(false)
     }
   }
-
-  // Check if user is downloading a specific segment (not full audio)
-  const isSegmentDownload =
-    audioTimeRange.start !== 0 || audioTimeRange.end !== maxDuration
 
   return (
     <motion.div
@@ -199,10 +187,20 @@ export function AudioDownloadButton({
         )}
       </Button>
 
+      {/* Download Progress */}
+      {audioDownloadMutation.isPending && (
+        <DownloadProgressBar
+          state={audioDownloadMutation.downloadState}
+          label="audio"
+        />
+      )}
+
       {/* Helper Text */}
-      <div className="text-xs text-slate-500 dark:text-slate-500 text-center">
-        Audio will be downloaded with the selected time range and format
-      </div>
+      {!audioDownloadMutation.isPending && (
+        <div className="text-xs text-slate-500 dark:text-slate-500 text-center">
+          Audio will be downloaded with the selected time range and format
+        </div>
+      )}
     </motion.div>
   )
 }

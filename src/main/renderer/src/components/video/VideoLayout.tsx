@@ -1,43 +1,16 @@
 import { ModeToggle } from "@/components/ui/mode-toggle"
 import {
   FeedbackCard,
-  PlaylistAccessCard,
   UnifiedDownloadCard,
   VideoDetailsCard,
   VideoPlayerFrame
 } from "@/components/video"
-import { useServerStatus } from "@/lib/hooks/useServerStatus"
 import { useYouTubeStore } from "@/lib/youtubeStore"
-import {
-  showServerReadyToast,
-  showServerStartingToast
-} from "@/lib/toast-utils"
 import { motion } from "framer-motion"
-import { useEffect, useRef } from "react"
 import { CompactSearch } from "./CompactSearch"
 
 export function VideoLayout() {
   const { videoInfo, url } = useYouTubeStore()
-
-  // Track server status and show toasts
-  const serverStatus = useServerStatus()
-  const prevStatusRef = useRef(serverStatus.status)
-
-  useEffect(() => {
-    const prevStatus = prevStatusRef.current
-    const currentStatus = serverStatus.status
-
-    // Only show toasts when status actually changes
-    if (prevStatus !== currentStatus) {
-      if (currentStatus === "starting") {
-        showServerStartingToast()
-      } else if (currentStatus === "ready" && prevStatus === "starting") {
-        showServerReadyToast()
-      }
-    }
-
-    prevStatusRef.current = currentStatus
-  }, [serverStatus.status])
 
   if (!videoInfo) return null
 
@@ -157,9 +130,6 @@ export function VideoLayout() {
             <div className="p-4 lg:p-6 space-y-4 lg:space-y-6">
               {/* Feedback Card - Help us improve / Request features */}
               <FeedbackCard />
-
-              {/* Playlist Access Card - Provides access to playlist download features */}
-              <PlaylistAccessCard />
 
               {/* Unified Download Card - Replaces both video and audio download cards */}
               <UnifiedDownloadCard videoInfo={videoInfo} />

@@ -11,6 +11,7 @@ class FileUtils {
     // remove unsafe characters
     let sanitized = filename
       // remove path separators and other unsafe characters
+      // eslint-disable-next-line no-control-regex
       .replace(/[<>:"/\\|?*\x00-\x1f]/g, "")
       // replace multiple spaces with single space
       .replace(/\s+/g, " ")

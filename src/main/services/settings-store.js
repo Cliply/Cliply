@@ -1,0 +1,156 @@
+/**
+ * settings store - the one place the main process reads and writes the
+ * download folder
+ *
+ * the python server persisted this to ~/.config/app-data-7c4f/settings.json and
+ * the settings ui still round-trips through it, so we read and write the very
+ * same file. once the server is gone this stays the source of truth unchanged.
+ */
+
+const fs = require("fs")
+const fsp = require("fs").promises
+const os = require("os")
+const path = require("path")
+
+const { APP_CONFIG } = require("../utils/constants")
+
+const SETTINGS_DIR = path.join(os.homedir(), ".config", "app-data-7c4f")
+const SETTINGS_FILE = path.join(SETTINGS_DIR, "settings.json")
+
+class SettingsStore {
+  constructor(options = {}) {
+    this.settingsFile = options.settingsFile || SETTINGS_FILE
+    this.defaultPath = options.defaultPath || APP_CONFIG.DOWNLOADS_DIR
+  }
+
+  /**
+   * the folder downloads should be written to
+   * @returns {string} an existing, writable directory
+   */
+  getDownloadPath() {
+    const configured = this.readDownloadPath()
+
+    if (configured) {
+      return configured
+    }
+
+    return this.defaultPath
+  }
+
+  // read is sync so the download handlers can resolve a path without awaiting
+  readDownloadPath() {
+    try {
+      const raw = fs.readFileSync(this.settingsFile, "utf8")
+      const parsed = JSON.parse(raw)
+      const configured = parsed && parsed.download_path
+
+      return typeof configured === "string" && configured.trim()
+        ? configured
+        : null
+    } catch {
+      // no settings yet, or unreadable - the default applies
+      return null
+    }
+  }
+
+  /**
+   * make sure the download folder exists, falling back when it cannot be used
+   * @returns {Promise<string>} the directory downloads will land in
+   */
+  async ensureDownloadPath() {
+    const target = this.getDownloadPath()
+
+    try {
+      await fsp.mkdir(target, { recursive: true })
+      return target
+    } catch (error) {
+      console.warn(
+        `download folder ${target} is unusable (${error.message}), falling back`
+      )
+      await fsp.mkdir(this.defaultPath, { recursive: true })
+      return this.defaultPath
+    }
+  }
+
+  /**
+   * persist a new download folder
+   * @param {string} newPath - absolute directory
+   * @returns {Promise<Object>} {success, path} or {success:false, error}
+   */
+  async setDownloadPath(newPath) {
+    if (!newPath || typeof newPath !== "string") {
+      return { success: false, error: "A folder path is required" }
+    }
+
+    try {
+      await fsp.mkdir(newPath, { recursive: true })
+
+      // prove we can actually write there before saving it
+      const probe = path.join(newPath, ".cliply-write-test")
+      await fsp.writeFile(probe, "test")
+      await fsp.rm(probe, { force: true })
+    } catch (error) {
+      return {
+        success: false,
+        error: `Can't write to that folder: ${error.message}`
+      }
+    }
+
+    try {
+      await fsp.mkdir(path.dirname(this.settingsFile), { recursive: true })
+
+      const current = await this.readAll()
+      current.download_path = newPath
+
+      await fsp.writeFile(
+        this.settingsFile,
+        JSON.stringify(current, null, 2),
+        "utf8"
+      )
+    } catch (error) {
+      return { success: false, error: error.message }
+    }
+
+    return { success: true, path: newPath }
+  }
+
+  async readAll() {
+    try {
+      const raw = await fsp.readFile(this.settingsFile, "utf8")
+      const parsed = JSON.parse(raw)
+      return parsed && typeof parsed === "object" ? parsed : {}
+    } catch {
+      return {}
+    }
+  }
+
+  /**
+   * the shape the settings ipc returns
+   * @returns {Promise<Object>} {path, exists, writable}
+   */
+  async getDownloadPathInfo() {
+    const target = this.getDownloadPath()
+    let exists = false
+    let writable = false
+
+    try {
+      const stats = await fsp.stat(target)
+      exists = stats.isDirectory()
+    } catch {
+      exists = false
+    }
+
+    if (exists) {
+      try {
+        await fsp.access(target, fs.constants.W_OK)
+        writable = true
+      } catch {
+        writable = false
+      }
+    }
+
+    return { path: target, exists, writable }
+  }
+}
+
+module.exports = { SettingsStore, SETTINGS_FILE }

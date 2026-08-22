@@ -22,7 +22,7 @@ interface URLInputProps {
 
 export function URLInput({ form, onFocusChange, isLoading, platform }: URLInputProps) {
   const { register, formState: { errors }, watch } = form
-  const { selectFolder, isLoading: folderLoading, serverReady } = useDownloadPath()
+  const { selectFolder, isLoading: folderLoading } = useDownloadPath()
   const { selectedPlatform, setSelectedPlatform, setShowMediaDetails } = useAppStore()
   const [isOpen, setIsOpen] = useState(false)
 
@@ -81,7 +81,7 @@ export function URLInput({ form, onFocusChange, isLoading, platform }: URLInputP
           <button
             type="button"
             onClick={selectFolder}
-            disabled={!serverReady || folderLoading || isLoading}
+            disabled={folderLoading || isLoading}
             title="Select folder"
             className={cn(
               "w-7 h-7 rounded-lg border transition-all duration-200 ease-out",

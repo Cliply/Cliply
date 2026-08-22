@@ -9,12 +9,8 @@ import {
 import { usePinterestStore } from "@/lib/pinterestStore"
 import { useAppStore, type Platform } from "@/lib/store"
 import { useTikTokStore } from "@/lib/tiktokStore"
-import {
-  showServerOverwhelmedToast,
-  showServerStartingToast
-} from "@/lib/toast-utils"
+import { showServerOverwhelmedToast } from "@/lib/toast-utils"
 import { useYouTubeStore } from "@/lib/youtubeStore"
-import { useServerStatus } from "./useServerStatus"
 
 interface MediaSearchOptions {
   onSearch?: (url: string) => void
@@ -41,7 +37,6 @@ export function useMediaSearch(
 ): MediaSearchResult {
   const config = PLATFORM_REGISTRY[platform]
   const { setShowMediaDetails } = useAppStore()
-  const serverStatus = useServerStatus()
 
   // Always subscribe to all stores (rules of hooks: constant call count)
   const ytUrl = useYouTubeStore((s) => s.url)
@@ -69,18 +64,6 @@ export function useMediaSearch(
   const onSubmit = async (data: { url: string }) => {
     if (options?.onSearch) {
       options.onSearch(data.url)
-      return
-    }
-
-    if (serverStatus.isStarting) {
-      showServerStartingToast()
-      return
-    }
-
-    if (!serverStatus.isReady && !serverStatus.isUnknown) {
-      toast.error("Download engine not ready", {
-        description: "Please wait for the download engine to start"
-      })
       return
     }
 
@@ -125,10 +108,7 @@ function handleSearchError(
     toast.error("This is an image, not a video", {
       description: "Only videos can be downloaded"
     })
-  } else if (errorMessage.includes("Download engine starting")) {
-    showServerStartingToast()
   } else if (
-    errorMessage.includes("Server overwhelmed") ||
     errorMessage.includes("network") ||
     errorMessage.includes("fetch")
   ) {

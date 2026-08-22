@@ -12,8 +12,9 @@ import {
 } from "@/lib/api"
 import { useVideoDownload } from "@/lib/hooks/useVideoDownload"
 import { useYouTubeStore } from "@/lib/youtubeStore"
-import { showDownloadSuccessToast } from "@/lib/toast-utils"
+import { isTerminalReason } from "@/lib/downloadOutcome"
 import { cn } from "@/lib/utils"
+import { DownloadProgressBar } from "./DownloadProgressBar"
 import { motion } from "framer-motion"
 import { Headphones, Scissors, Video } from "lucide-react"
 
@@ -53,6 +54,10 @@ export function VideoDownloadButton({
     maxDuration
   ).isValid
 
+  // Check if user is downloading a specific segment (not full video)
+  const isSegmentDownload =
+    videoTimeRange.start !== 0 || videoTimeRange.end !== maxDuration
+
   const handleDownload = async () => {
     if (!selectedVideoQuality || !bestAudioFormat || !isValidRange) return
 
@@ -66,23 +71,22 @@ export function VideoDownloadButton({
         url,
         video_format_id: selectedVideoQuality.format.format_id,
         audio_format_id: bestAudioFormat.format_id,
-        time_range: videoTimeRange,
+        time_range: isSegmentDownload ? videoTimeRange : undefined,
         precise_cut: videoPreciseCut,
         title: videoInfo?.title || "video"
       })
 
-      showDownloadSuccessToast("video")
+      // the completion toast (with the filename and Open Folder) belongs to the
+      // hook's progress-event path - toasting here too would double it
     } catch (error) {
-      // the failure toast (with Report) is owned by the useVideoDownload hook
-      console.error("Video download error:", error)
+      // terminal outcomes (failure, cancellation) are owned by the hook
+      if (!isTerminalReason(error)) {
+        console.error("Video download error:", error)
+      }
     } finally {
       setIsDownloadingVideo(false)
     }
   }
-
-  // Check if user is downloading a specific segment (not full video)
-  const isSegmentDownload =
-    videoTimeRange.start !== 0 || videoTimeRange.end !== maxDuration
 
   return (
     <motion.div
@@ -213,9 +217,10 @@ export function VideoDownloadButton({
 
       {/* Download Progress */}
       {videoDownloadMutation.isPending && (
-        <div className="text-xs text-slate-500 dark:text-slate-500 text-center">
-          Processing your video download...
-        </div>
+        <DownloadProgressBar
+          state={videoDownloadMutation.downloadState}
+          label="video"
+        />
       )}
 
       {/* Helper Text */}

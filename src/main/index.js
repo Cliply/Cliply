@@ -5,16 +5,19 @@ if (process.env.NODE_ENV !== "production") {
 
 const { app, BrowserWindow, Menu, shell, dialog } = require("electron")
 const { autoUpdater } = require("electron-updater")
-const { EventEmitter } = require("events")
 const path = require("path")
 const isDev = process.env.NODE_ENV === "development"
 
 // import services
-const ServerManager = require("./services/server-manager")
 const CookieManager = require("./services/cookie-manager")
+const { YtdlpEngine } = require("./services/ytdlp-engine")
+const { YtdlpUpdater } = require("./services/ytdlp-updater")
 const IPCHandlers = require("./ipc-handlers")
 const { APP_CONFIG } = require("./utils/constants")
 const { getAppVersion } = require("./utils/analytics-helpers")
+
+// let the user get their first download going before we check for updates
+const UPDATE_CHECK_DELAY_MS = 90 * 1000
 
 // analytics
 let trackEvent = null
@@ -39,27 +42,12 @@ if (APP_CONFIG.ANALYTICS_CONFIG.ENABLED) {
   global.trackEvent = trackEvent
 }
 
-// Configure undici defaults globally to prevent HeadersTimeoutError
-const { setGlobalDispatcher, Agent } = require("undici")
-
-// Create agent with no timeouts for long downloads
-const agent = new Agent({
-  headersTimeout: 0, // No headers timeout
-  bodyTimeout: 0, // No body timeout
-  connectTimeout: 30000 // Keep connection timeout only
-})
-
-setGlobalDispatcher(agent)
-
 class CliplyApp {
   constructor() {
     this.mainWindow = null
     this.services = {}
     this.ipcHandlers = null
     this.isQuitting = false
-
-    // event emitter for service communication
-    this.eventEmitter = new EventEmitter()
 
     // update handling
     this.updateState = {
@@ -141,17 +129,43 @@ class CliplyApp {
         ? path.join(__dirname, "..", "..")
         : process.resourcesPath
 
-      // init server manager
-      this.services.serverManager = new ServerManager(this.eventEmitter)
-      await this.services.serverManager.initialize(resourcesPath)
-
       // init cookie manager
       this.services.cookieManager = new CookieManager()
       await this.services.cookieManager.initialize()
 
+      // init the yt-dlp engine - every download flow runs on the binary
+      this.services.ytdlpEngine = new YtdlpEngine({
+        resourcesPath,
+        cookieManager: this.services.cookieManager
+      })
+      this.services.ytdlpUpdater = new YtdlpUpdater({
+        engine: this.services.ytdlpEngine
+      })
+
+      // make sure userData holds a runnable binary before anything needs it
+      const seeded = await this.services.ytdlpUpdater.seed()
+      console.log("yt-dlp engine:", this.services.ytdlpEngine.getBinaryPath(), seeded)
+
       // init ipc handlers
       this.autoUpdater = autoUpdater
       this.ipcHandlers = new IPCHandlers(this.services, this.autoUpdater)
+
+      // background update check, deferred
+      //
+      // the update holds the engine gate until it finishes, and the user's very
+      // first action would otherwise queue behind it - which reads as a frozen
+      // app on a slow connection. giving them a head start costs nothing: if
+      // they are busy when the timer fires the check simply refuses and runs
+      // next launch.
+      const updateCheckTimer = setTimeout(() => {
+        this.services.ytdlpUpdater
+          .checkForUpdate()
+          .then((result) => console.log("yt-dlp update check:", result))
+          .catch((error) =>
+            console.warn("yt-dlp update check failed:", error.message)
+          )
+      }, UPDATE_CHECK_DELAY_MS)
+      updateCheckTimer.unref()
     } catch (error) {
       console.error("Service initialization failed:", error)
       throw error
@@ -354,7 +368,6 @@ class CliplyApp {
     // app ready
     app.whenReady().then(() => {
       this.createWindow()
-      this.startPythonServer()
 
       // macos: re-create window when dock icon clicked
       app.on("activate", () => {
@@ -521,48 +534,6 @@ class CliplyApp {
     }
   }
 
-  // start python server
-  async startPythonServer() {
-    try {
-      // server event listeners
-      this.eventEmitter.on("python:server:ready", () => {
-        // notify renderer that download functionality is available
-        if (this.mainWindow && !this.mainWindow.isDestroyed()) {
-          this.mainWindow.webContents.send("python:server:ready")
-        }
-      })
-
-      this.eventEmitter.on("python:server:error", (error) => {
-        console.error("Python server error:", error.message)
-
-        // show user-friendly error
-        if (this.mainWindow && !this.mainWindow.isDestroyed()) {
-          dialog.showErrorBox(
-            "Download Engine Error",
-            `The download engine encountered an error:\n\n${error.message}\n\nSome features may not work correctly.`
-          )
-        }
-      })
-
-      // start the server
-      const success = await this.services.serverManager.startServer()
-
-      if (!success) {
-        console.warn("Python server failed to start")
-      }
-    } catch (error) {
-      console.error("Failed to start Python server:", error)
-
-      // show user-friendly error
-      if (this.mainWindow && !this.mainWindow.isDestroyed()) {
-        dialog.showErrorBox(
-          "Download Engine Error",
-          `Failed to start the download engine:\n\n${error.message}\n\nThe app will continue to work, but downloads may not be available.`
-        )
-      }
-    }
-  }
-
   // handle main window closed
   onWindowClosed() {
     this.mainWindow = null
@@ -581,9 +552,12 @@ class CliplyApp {
       // update cleanup
       this.updateState.isCheckingForUpdates = false
 
-      // stop python server
-      if (this.services.serverManager) {
-        await this.services.serverManager.stopServer()
+      // kill any running yt-dlp process - partial .part files stay resumable
+      if (this.services.ytdlpEngine) {
+        const cancelled = this.services.ytdlpEngine.cancelAll()
+        if (cancelled > 0) {
+          console.log(`cancelled ${cancelled} running download(s) on quit`)
+        }
       }
 
       // cleanup ipc handlers
@@ -751,10 +725,14 @@ class CliplyApp {
                   const health = await this.ipcHandlers.handleSystemHealth()
 
                   const message = health.success
-                    ? `System Status: Healthy\n\nPython Server: ${
-                        health.data.pythonServer.isReady ? "Ready" : "Not Ready"
+                    ? `System Status: Healthy\n\nDownloader: ${
+                        health.data.engine.version || "Unknown"
+                      }\nFFmpeg: ${
+                        health.data.engine.ffmpeg ? "Found" : "Missing"
                       }\nCookies: ${
                         health.data.cookies.hasValid ? "Valid" : "Invalid"
+                      }\nActive downloads: ${
+                        health.data.downloads.active
                       }\nUptime: ${Math.floor(
                         health.data.performance.uptime / 60
                       )} minutes`
