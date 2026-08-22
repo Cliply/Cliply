@@ -41,6 +41,12 @@ const {
   ERROR_CATEGORIES,
   ERROR_STAGES
 } = require("../src/main/utils/error-taxonomy")
+// required for real, which is the whole point: these two tables are what the
+// sanitizer must not cost us, and a mocked engine would hand back an empty one
+const {
+  ERROR_METADATA,
+  TERMINAL_ERRORS
+} = require("../src/main/services/ytdlp-engine")
 
 const HOME = os.homedir()
 
@@ -74,6 +80,14 @@ async function ready() {
   await analytics.init()
 
   return { analytics, sent }
+}
+
+/** one free-text capture, returning what the client received */
+async function captureText(text) {
+  const { analytics, sent } = await ready()
+  analytics.capture("download_failed", { error_message: text })
+  expect(sent).toHaveLength(1)
+  return sent[0].properties.error_message
 }
 
 /**
@@ -334,6 +348,8 @@ describe("the shape of the boundary is pinned, so widening it is a decision", ()
     quality: "digit-anchored heights and bitrates, plus a closed list",
     version: "digits and dots, letters only inside a prerelease segment",
     bucket: "a pre-bucketed label, anchored on a digit or a comparison",
+    locale:
+      "a bcp-47 tag, anchored on case and length rather than on a list, because the values are chromium's and grow with it",
     text: "free prose, scrubbed and then refused if any shape still stands"
   }
 
@@ -419,6 +435,70 @@ describe("the shape of the boundary is pinned, so widening it is a decision", ()
     assertShapesClean(sent[0], "the super properties")
   })
 
+  it("holds the platform and the architecture this actually runs on", async () => {
+    // the vocabularies for `os` and `arch` are written out from node's
+    // documented range, which is the kind of list that goes stale quietly.
+    // asserting against the running process makes every machine that runs this
+    // suite check one entry of it for real
+    const { analytics, sent } = await ready()
+
+    analytics.capture("app_launched")
+
+    expect(sent[0].properties.os).toBe(process.platform)
+    expect(sent[0].properties.arch).toBe(process.arch)
+  })
+
+  it("drops a super property that fails its kind, and keeps the event", async () => {
+    // the amplification argument made concrete: one bad value here would ride
+    // every event this app ever sends, so it goes through the same gate a
+    // caller's does - and dropping it costs one dimension rather than the event
+    jest.spyOn(os, "release").mockReturnValue("My Holiday Video")
+
+    const { analytics, sent } = await ready()
+    analytics.capture("app_launched")
+
+    expect(sent[0].properties).not.toHaveProperty("os_version")
+    expect(JSON.stringify(sent[0])).not.toContain("Holiday")
+
+    // still attributable and still useful: distinctId is a field on the
+    // message rather than a super property, so nothing about it moved, and
+    // every other dimension is where it was
+    expect(sent[0].distinctId).toBe("11111111-2222-3333-4444-555555555555")
+    expect(sent[0].properties.app_version).toBeDefined()
+    expect(sent[0].properties.os).toBe(process.platform)
+  })
+
+  it("keeps a linux kernel release rather than dropping os_version on linux", async () => {
+    // validating os.release() as it comes would have dropped this property on
+    // every linux install, silently and forever - the packaging tail is not a
+    // version and no grammar admits it without admitting "1-holiday.mp4"
+    const cases = [
+      ["25.5.0", "25.5.0"],
+      ["10.0.22631", "10.0.22631"],
+      ["5.15.0-91-generic", "5.15.0"],
+      ["6.6.9-200.fc39.x86_64", "6.6.9"],
+      ["5.15.153.1-microsoft-standard-WSL2", "5.15.153.1"],
+      ["4.18.0-513.9.1.el8_5.x86_64", "4.18.0"]
+    ]
+
+    for (const [release, expected] of cases) {
+      jest.spyOn(os, "release").mockReturnValue(release)
+
+      const { analytics, sent } = await ready()
+      analytics.capture("app_launched")
+
+      expect(sent[0].properties.os_version).toBe(expected)
+    }
+
+    // and a release that is not a release at all is dropped, not cut
+    jest.spyOn(os, "release").mockReturnValue("/Users/someone/Movies")
+
+    const { analytics, sent } = await ready()
+    analytics.capture("app_launched")
+
+    expect(sent[0].properties).not.toHaveProperty("os_version")
+  })
+
   it("pins the one super property a caller can reach", async () => {
     // setEngineVersion is the only path from outside into that bag, and it is
     // the only key allowed to appear beyond the five above
@@ -479,6 +559,170 @@ describe("the vocabularies that widen without this module being touched", () => 
       expect(message.properties[key]).toBe(value)
       expect(message.properties[key]).toMatch(IDENTIFIER)
       assertShapesClean(message, `${key} = ${value}`)
+    }
+  })
+})
+
+describe("locale, the one value chromium picks and we do not", () => {
+  /**
+   * every ui locale this electron build ships, read off
+   * node_modules/electron/dist/Electron.app/Contents/Resources/*.lproj and
+   * written in the hyphenated form app.getLocale() returns rather than the
+   * underscored form the directories use.
+   *
+   * this is the evidence for the grammar rather than the grammar itself. a
+   * vocabulary of these would go stale the first time an electron upgrade
+   * added one, and would then drop the locale of everybody running it - which
+   * is why the kind is anchored on shape. the list's job is to prove the shape
+   * covers what really arrives.
+   */
+  const SHIPPED = [
+    "af", "am", "ar", "bg", "bn", "ca", "cs", "da", "de", "el", "en",
+    "en-GB", "es", "es-419", "et", "fa", "fi", "fil", "fr", "gu", "he",
+    "hi", "hr", "hu", "id", "it", "ja", "kn", "ko", "lt", "lv", "ml",
+    "mr", "ms", "nb", "nl", "pl", "pt-BR", "pt-PT", "ro", "ru", "sk",
+    "sl", "sr", "sv", "sw", "ta", "te", "th", "tr", "uk", "ur", "vi",
+    "zh-CN", "zh-TW",
+    // returned rather than shipped: getLocale() resolves american english to
+    // en-US even where the resource directory is named "en"
+    "en-US",
+    // and the two shapes chromium has that this build does not ship, which the
+    // grammar has to hold or the next upgrade drops them
+    "sr-Latn", "zh-Hans-CN"
+  ]
+
+  /** drive init() with the locale electron would have handed it */
+  async function localeSentAs(locale) {
+    jest.resetModules()
+    jest.doMock("electron", () => ({ app: { getLocale: () => locale } }))
+
+    try {
+      const { Analytics: Fresh } = require("../src/main/services/analytics")
+      const sent = []
+      const analytics = new Fresh({
+        settingsStore: {
+          getInstallId: async () => "11111111-2222-3333-4444-555555555555",
+          isAnalyticsEnabled: async () => true,
+          setAnalyticsEnabled: async () => ({ success: true })
+        },
+        createClient: () => ({
+          capture: (message) => sent.push(message),
+          flush: async () => {}
+        }),
+        forceEnabled: true
+      })
+
+      await analytics.init()
+      analytics.capture("app_launched")
+
+      return sent[0].properties.locale
+    } finally {
+      jest.dontMock("electron")
+      jest.resetModules()
+    }
+  }
+
+  it("keeps every locale this build can hand it", async () => {
+    expect(SHIPPED.length).toBeGreaterThan(50)
+
+    for (const locale of SHIPPED) {
+      expect(await localeSentAs(locale)).toBe(locale)
+    }
+  })
+
+  it("keeps the reserved value for a lookup that could not run", async () => {
+    // electron is absent under jest, so this is what every other test in this
+    // file is really sending - it has to be accepted or the property vanishes
+    expect(await localeSentAs("unknown")).toBe("unknown")
+  })
+
+  it("drops the words a slug grammar would have taken", async () => {
+    // the pair that defeated every general-purpose short-label grammar tried
+    // before this one, plus the shapes a careless edit would put in this slot
+    for (const value of [
+      "holiday",
+      "my-video",
+      "My Holiday Video",
+      "en-US/Movies",
+      `${HOME}/Movies`,
+      "https://private.example",
+      "someone@example.com"
+    ]) {
+      expect(await localeSentAs(value)).toBeUndefined()
+    }
+  })
+})
+
+describe("a credential, which is shapeless but not edgeless", () => {
+  /**
+   * an opaque token stands where a bare title stands: no separator, no dot, no
+   * host. it is taken anyway, because the two are not the same case twice - a
+   * credential carries a marker beside it that no wording of ours, node's or
+   * yt-dlp's uses, and a leaked token is a different category of harm from a
+   * leaked title. the block below this one measures what that costs.
+   */
+  it("takes the token and leaves the diagnosis", async () => {
+    expect(await captureText("Authorization: Bearer abc123def456")).toBe(
+      "[credential]"
+    )
+    expect(await captureText("Bearer abc123def456 was rejected")).toBe(
+      "[credential] was rejected"
+    )
+    expect(await captureText("request failed with api_key=abc123def456")).toBe(
+      "request failed with [credential]"
+    )
+    expect(await captureText("refresh_token: abc123def456 expired")).toBe(
+      "[credential] expired"
+    )
+    expect(await captureText("cookie: SID=g.a000abcdEFGHijkl0123")).toBe(
+      "[credential]"
+    )
+    expect(await captureText("password=hunter2 rejected")).toBe(
+      "[credential] rejected"
+    )
+  })
+
+  it("does not fire on the words those markers are made of", async () => {
+    // the cost side. a keyword only counts as a credential when something is
+    // being assigned to it, so ordinary wording that happens to use the word
+    // is untouched - and "basic" and "digest" are not matched as schemes at
+    // all, because unlike "bearer" they are ordinary english
+    for (const text of [
+      "Unable to extract the player token",
+      "the basic settings could not be read",
+      "your cookie file has no entries",
+      "a digest of the archive did not match"
+    ]) {
+      expect(await captureText(text)).toBe(text)
+    }
+  })
+})
+
+describe("what the sanitizer may not cost us", () => {
+  /**
+   * every message and suggestion the app can put in front of a person, read
+   * off the engine's two wording tables rather than sampled from them.
+   *
+   * a scrub rule is only ever added on the argument that it costs nothing, and
+   * "nothing" was measured by hand until now - the previous version of this
+   * assertion picked five entries out of thirty-three. derived, it holds the
+   * next rule to the same standard on the day it is written, including the
+   * credential rules above.
+   */
+  const WORDING = [
+    ...new Set(
+      [...Object.values(ERROR_METADATA), ...Object.values(TERMINAL_ERRORS)]
+        .flatMap((entry) => [entry.message, entry.suggestion])
+        .filter((text) => typeof text === "string" && text.length > 0)
+    )
+  ]
+
+  it("leaves the engine's whole wording table exactly as it is", async () => {
+    // a table that came back empty would make this pass having checked nothing
+    expect(WORDING.length).toBeGreaterThan(20)
+
+    for (const text of WORDING) {
+      expect(await captureText(text)).toBe(text)
     }
   })
 })

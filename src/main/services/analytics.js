@@ -129,7 +129,22 @@ const PROPERTY_KINDS = {
   load_ms_bucket: "bucket",
 
   // free text, scrubbed and clipped
-  error_message: "text"
+  error_message: "text",
+
+  /**
+   * the super properties.
+   *
+   * these are never named in ALLOWED_PROPERTIES, because no caller may send
+   * one - init() builds them and capture() spreads them last, over the
+   * validated bag. they are kinded all the same: that placement is exactly
+   * what makes them worth checking, since one of them rides every event this
+   * app will ever send, and a leak there is the most amplified one available.
+   */
+  app_version: "version",
+  os: "vocabulary",
+  os_version: "version",
+  arch: "vocabulary",
+  locale: "locale"
 }
 
 const KIND_BY_PROPERTY = new Map(Object.entries(PROPERTY_KINDS))
@@ -201,6 +216,28 @@ const VERSION_PATTERN =
 const BUCKET_PATTERN = /^[<>]?[0-9]+(-[0-9]+)?\+?\s?[a-zA-Z]{1,4}$/
 
 /**
+ * a bcp-47 language tag, anchored on case and length.
+ *
+ * this one is neither a vocabulary nor numerically anchored, and the reason is
+ * that the values are chromium's rather than ours: app.getLocale() returns
+ * whichever ui locale it resolved, and that set grows with electron upgrades.
+ * a listed set would silently stop reporting the locale of everybody who ran
+ * the version that added one - a drop nobody triggered and nobody would see,
+ * which is a different thing from the deliberate friction the other lists buy.
+ *
+ * so it is anchored on shape, but on a shape prose does not have: two or three
+ * lowercase letters, then at most a titlecase four-letter script and a
+ * two-letter uppercase or three-digit region. "my-video" fails on the second
+ * segment's case and "holiday" on the first one's length, which is the pair
+ * that defeated every general-purpose slug grammar tried before this.
+ */
+const LOCALE_PATTERN =
+  /^[a-z]{2,3}(?:-[A-Z][a-z]{3})?(?:-(?:[A-Z]{2}|[0-9]{3}))?$/
+
+// what readLocale() reports when electron is not there to ask
+const LOCALE_UNKNOWN = "unknown"
+
+/**
  * the finite vocabularies, one per property.
  *
  * the two error vocabularies are read from the taxonomy module rather than
@@ -214,6 +251,40 @@ const BUCKET_PATTERN = /^[<>]?[0-9]+(-[0-9]+)?\+?\s?[a-zA-Z]{1,4}$/
 const PROPERTY_VOCABULARIES = {
   error_category: new Set(Object.values(ERROR_CATEGORIES)),
   error_stage: new Set(Object.values(ERROR_STAGES)),
+
+  // node's whole documented range for process.platform and process.arch. both
+  // are genuinely finite and genuinely not ours to invent, and node adds to
+  // them about once a decade - which is the case a list is for. the app runs
+  // on three of these; the rest are here because this set claims to be the
+  // whole list, and a drop on an unusual platform would take that install's
+  // os off every event it ever sends
+  os: new Set([
+    "aix",
+    "android",
+    "cygwin",
+    "darwin",
+    "freebsd",
+    "haiku",
+    "linux",
+    "netbsd",
+    "openbsd",
+    "sunos",
+    "win32"
+  ]),
+  arch: new Set([
+    "arm",
+    "arm64",
+    "ia32",
+    "loong64",
+    "mips",
+    "mipsel",
+    "ppc",
+    "ppc64",
+    "riscv64",
+    "s390",
+    "s390x",
+    "x64"
+  ]),
 
   // the runner emits "combined" for a video download - an ffmpeg detail
   // meaning two streams were merged - and task 6 normalizes that to "video"
@@ -392,6 +463,32 @@ const TEXT_SCRUBS = [
   // "?<redacted>" tail behind that belongs to the url it came from
   [/\b[a-z][a-z0-9+.-]*:\/\/[^\s'"()[\]]+/gi, "[url]"],
   [/\bwww\.[^\s'"()[\]]+/gi, "[url]"],
+
+  /**
+   * a credential.
+   *
+   * an opaque token is prose to every rule below this one - no separator, no
+   * dot, no host - which is the same position a bare title is in, and the
+   * floor this module accepts for titles. it is admitted here anyway, because
+   * the two are not the same thing twice: a token has a findable edge that a
+   * title does not. no wording of ours, of node's or of yt-dlp's says "Bearer"
+   * or "api_key=", so keying on the marker costs nothing, while a leaked
+   * credential is a different category of harm from a leaked video title.
+   *
+   * an Authorization value is a secret in its entirety, so that one runs to
+   * the end of the line rather than to the end of a token - a scheme and its
+   * payload are two tokens, and stopping between them would publish the half
+   * that matters. "bearer" and "negotiate" are also matched without their
+   * header name; "basic" and "digest" deliberately are not, because unlike
+   * those two they are ordinary english and would eat the word after them.
+   */
+  [/\bauthorization\s*[=:].*/gi, "[credential]"],
+  [/\b(?:bearer|negotiate)\s+[^\s'"]+/gi, "[credential]"],
+  [
+    /\b(?:api[_-]?key|access[_-]?token|refresh[_-]?token|auth[_-]?token|id[_-]?token|token|secret|password|passwd|pwd|session[_-]?id|cookie)\s*[=:]\s*[^\s'"&]+/gi,
+    "[credential]"
+  ],
+
   [/[^\s'"<>@]+@[^\s'"<>@]+\.[^\s'"<>@]+/g, "[email]"],
 
   // an address. the updater says "could not connect to <address> for <url>",
@@ -421,7 +518,8 @@ const TEXT_SCRUBS = [
 
 // a span that holds nothing but markers has already been cleaned, and keeping
 // it is what leaves node's "open '[path]'" readable instead of "open [text]"
-const MARKERS_ONLY = /^(?:\s|\[(?:url|path|file|email|address|text)\])*$/
+const MARKERS_ONLY =
+  /^(?:\s|\[(?:url|path|file|email|address|credential|text)\])*$/
 
 /**
  * what may not survive the scrub above.
@@ -563,6 +661,13 @@ function checkKind(kind, value, key) {
         ? { ok: true, value }
         : { ok: false }
 
+    case "locale":
+      if (typeof value !== "string") return { ok: false }
+
+      return value === LOCALE_UNKNOWN || LOCALE_PATTERN.test(value)
+        ? { ok: true, value }
+        : { ok: false }
+
 
     // scrubbed, then re-checked, and only then truncated: cutting first would
     // leave the front half of a path behind, which no pattern then matches
@@ -608,10 +713,73 @@ function safeLabel(value) {
 function readLocale() {
   try {
     const { app } = require("electron")
-    return typeof app?.getLocale === "function" ? app.getLocale() : "unknown"
+    return typeof app?.getLocale === "function"
+      ? app.getLocale()
+      : LOCALE_UNKNOWN
   } catch {
-    return "unknown"
+    return LOCALE_UNKNOWN
   }
+}
+
+/**
+ * the kernel release, cut back to the part of it that is a version.
+ *
+ * os.release() is already one on darwin ("25.5.0") and on windows
+ * ("10.0.22631"), but on linux it carries the distribution's packaging behind
+ * a dash - "5.15.0-91-generic", "6.6.9-200.fc39.x86_64". no grammar admits
+ * that tail without also admitting "1-holiday.mp4", which is the
+ * counterexample VERSION_PATTERN was narrowed against in the first place; and
+ * validating os.release() as-is would simply drop os_version on every linux
+ * install, silently, for the life of the property.
+ *
+ * so it is cut rather than matched. the kernel version is the answer to "which
+ * os version"; the suffix is packaging that differs per distribution and makes
+ * the two harder to compare rather than easier.
+ *
+ * @returns {string|null} the leading numeric release, or null if there is none
+ */
+function kernelVersion() {
+  const match = /^\d+(?:\.\d+)*/.exec(os.release())
+  return match ? match[0] : null
+}
+
+/**
+ * check the module's own super properties the way a caller's bag is checked.
+ *
+ * they were never checked before, and their placement is exactly the argument
+ * for checking them: capture() spreads them last, over the validated bag, onto
+ * every event the app sends. a leak in one is the most amplified leak
+ * available here, and nothing in ALLOWED_PROPERTIES governs them - that list
+ * says what a caller may send, and no caller sends these.
+ *
+ * a value that fails its kind is dropped, exactly as a caller's would be. that
+ * costs one dimension on the events that follow and nothing else: distinctId
+ * is a separate field on the message rather than a super property, so the
+ * events stay attributable, and every other property is unaffected.
+ *
+ * @param {Object} candidates - the property bag init() assembled
+ * @returns {Object} the ones that passed
+ */
+function checkSuperProperties(candidates) {
+  const safe = {}
+
+  for (const [key, value] of Object.entries(candidates)) {
+    const kind = KIND_BY_PROPERTY.get(key)
+    const checked = checkKind(kind, value, key)
+
+    if (!checked.ok) {
+      // the key and the kind, never the value - the same rule capture() keeps,
+      // for the same reason: the value is the thing we could not vouch for
+      console.warn(
+        `analytics: dropped the ${key} super property, expected ${kind}`
+      )
+      continue
+    }
+
+    safe[key] = checked.value
+  }
+
+  return safe
 }
 
 function defaultCreateClient(key, host) {
@@ -671,13 +839,13 @@ class Analytics {
       // read once, not per event: the store deliberately re-reads settings on
       // every call so the settings ui cannot go stale against it
       this.installId = await this.settingsStore.getInstallId()
-      this.superProperties = {
+      this.superProperties = checkSuperProperties({
         app_version: getAppVersion(),
         os: process.platform,
-        os_version: os.release(),
+        os_version: kernelVersion(),
         arch: process.arch,
         locale: readLocale()
-      }
+      })
 
       // the engine is probed once per run, so whatever it reported has to be
       // put back after the rebuild - nothing would set it a second time
