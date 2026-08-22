@@ -31,7 +31,9 @@
  * the bottom of the census are what would notice.
  */
 
+const fs = require("fs")
 const os = require("os")
+const path = require("path")
 const {
   Analytics,
   ALLOWED_PROPERTIES,
@@ -47,6 +49,10 @@ const {
   ERROR_METADATA,
   TERMINAL_ERRORS
 } = require("../src/main/services/ytdlp-engine")
+// the real store, because every other test in this file hands Analytics a fake
+// one that returns a uuid a test wrote. this is the half that asks what
+// happens when the file on disk does not
+const { SettingsStore } = require("../src/main/services/settings-store")
 
 const HOME = os.homedir()
 
@@ -560,6 +566,91 @@ describe("the vocabularies that widen without this module being touched", () => 
       expect(message.properties[key]).toMatch(IDENTIFIER)
       assertShapesClean(message, `${key} = ${value}`)
     }
+  })
+})
+
+describe("the identity every event is filed under", () => {
+  /**
+   * distinctId is neither a super property nor an allowed one. it is a field
+   * on the message, nothing in capture() looks at it, and it is the most
+   * amplified value in the whole system: one stable identity carried by every
+   * event this installation will ever send.
+   *
+   * and it comes out of a json file a person can open and edit. the store used
+   * to return whatever was in there so long as it was a non-empty string, so a
+   * name, an address or a hostname typed into that field became the identity
+   * the install reported itself by. it is repaired now - treated as absent and
+   * minted over, because the field has only ever held what randomUUID() put
+   * there and so a value that is not one is corruption in a file we own.
+   *
+   * driven end to end here, through the real store into the real Analytics,
+   * because the assertion worth having is about what leaves rather than about
+   * what the store returns.
+   */
+  const UUID =
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+  let root
+  let counter
+
+  beforeEach(() => {
+    root = fs.mkdtempSync(path.join(os.tmpdir(), "cliply-pii-guard-"))
+    counter = 0
+  })
+
+  afterEach(() => {
+    fs.rmSync(root, { recursive: true, force: true })
+  })
+
+  /** what the client is handed when the settings file holds `stored` */
+  async function messageFor(stored) {
+    const settingsFile = path.join(root, `settings-${(counter += 1)}.json`)
+    fs.writeFileSync(settingsFile, JSON.stringify({ install_id: stored }))
+
+    const sent = []
+    const analytics = new Analytics({
+      settingsStore: new SettingsStore({
+        settingsFile,
+        defaultPath: path.join(root, "downloads")
+      }),
+      createClient: () => ({
+        capture: (message) => sent.push(message),
+        flush: async () => {}
+      }),
+      forceEnabled: true
+    })
+
+    await analytics.init()
+    analytics.capture("app_launched", { is_first_launch: true })
+
+    expect(sent).toHaveLength(1)
+    return sent[0]
+  }
+
+  it("is a uuid whatever the settings file was holding", async () => {
+    const corrupt = [
+      "devansh@example.com",
+      "Devansh's MacBook Pro",
+      "/Users/devansh",
+      "https://private.example/u/devansh",
+      "user-1234"
+    ]
+
+    for (const stored of corrupt) {
+      const message = await messageFor(stored)
+
+      expect(message.distinctId).toMatch(UUID)
+      expect(JSON.stringify(message)).not.toContain(stored)
+    }
+  })
+
+  it("keeps an identity the store really minted", async () => {
+    // the other direction, so the repair above cannot be a blanket reset that
+    // gives everybody a new identity on every launch
+    const stored = "11111111-2222-3333-4444-555555555555"
+    const message = await messageFor(stored)
+
+    expect(message.distinctId).toBe(stored)
   })
 })
 

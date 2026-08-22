@@ -18,6 +18,27 @@ const { APP_CONFIG } = require("../utils/constants")
 const SETTINGS_DIR = path.join(os.homedir(), ".config", "app-data-7c4f")
 const SETTINGS_FILE = path.join(SETTINGS_DIR, "settings.json")
 
+/**
+ * the layout crypto.randomUUID() produces, which is the only thing the
+ * install id field has ever held.
+ *
+ * the version and variant nibbles are deliberately not pinned. what this check
+ * is for is excluding the things a name, a path or an address could be, and
+ * eight-four-four-four-twelve hex excludes every one of them; pinning v4 on
+ * top of that would buy nothing and would churn everybody's identity the day
+ * the mint moved to a newer uuid version.
+ */
+const INSTALL_ID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+/**
+ * @param {*} value - whatever the settings file held
+ * @returns {boolean} true if it is an id we could have minted
+ */
+function isInstallId(value) {
+  return typeof value === "string" && INSTALL_ID_PATTERN.test(value)
+}
+
 class SettingsStore {
   constructor(options = {}) {
     this.settingsFile = options.settingsFile || SETTINGS_FILE
@@ -25,6 +46,9 @@ class SettingsStore {
     // a mint in progress, so racing callers share one id rather than each
     // rolling their own. it is the work in flight, never a cached result
     this.installIdInFlight = null
+    // the replacement minted for an unusable stored id, kept only so a
+    // settings file we cannot write to still reports one identity per run
+    this.mintedInstallId = null
   }
 
   /**
@@ -223,16 +247,40 @@ class SettingsStore {
 
   /**
    * read the stored id, or mint and persist one. never rejects
+   *
+   * a stored value that is not a uuid is treated as absent rather than
+   * returned. this field has only ever held what crypto.randomUUID() put
+   * there, so anything else in it is a corrupt entry in a file we own and
+   * minting over it is a repair rather than an overwrite of something the user
+   * chose. what makes that worth doing at all is downstream: analytics uses
+   * this as the distinct id on every event it sends, so whatever sits here is
+   * the stable identity the whole installation reports itself by - and a
+   * non-empty-string check would have let a name or an address become one.
+   *
    * @returns {Promise<string>}
    */
   async resolveInstallId() {
     const settings = await this.readAll()
 
-    if (typeof settings.install_id === "string" && settings.install_id.length) {
+    if (isInstallId(settings.install_id)) {
       return settings.install_id
     }
 
-    const installId = crypto.randomUUID()
+    if (settings.install_id !== undefined) {
+      // never the value itself: it is the thing we could not vouch for, and
+      // this warning goes to a log people attach to bug reports
+      console.warn("the stored install id is not a uuid - minting a new one")
+    }
+
+    // minted once per run rather than per read. without this a settings file
+    // we cannot write to would hand a different identity to every caller in
+    // the same session, and analytics asks for one again whenever the user
+    // turns it back on
+    if (!this.mintedInstallId) {
+      this.mintedInstallId = crypto.randomUUID()
+    }
+
+    const installId = this.mintedInstallId
 
     try {
       await this.writeSettings({ install_id: installId })

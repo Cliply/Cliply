@@ -135,6 +135,109 @@ describe("analytics preferences", () => {
     expect(await store.getInstallId()).toBe(ids[0])
   })
 
+  /**
+   * this field is the distinct id on every event analytics sends, and it comes
+   * out of a json file a person can open and edit. a non-empty-string check
+   * let anything in there become the stable identity the whole installation
+   * reports itself by - a name, an email, a machine's hostname.
+   *
+   * so an entry that is not a uuid is treated as absent and repaired. it is
+   * not something the user chose: this field has only ever held what
+   * randomUUID() put there.
+   */
+  describe("an install id that is not one", () => {
+    const NOT_IDS = [
+      "devansh@example.com",
+      "Devansh's MacBook Pro",
+      "/Users/devansh",
+      "user-1234",
+      "",
+      "   ",
+      42,
+      null,
+      { id: "11111111-2222-3333-4444-555555555555" },
+      // uuid-shaped but not: too short, and a non-hex character
+      "11111111-2222-3333-4444-55555555555",
+      "gggggggg-2222-3333-4444-555555555555"
+    ]
+
+    test("replaces it rather than reporting it", async () => {
+      jest.spyOn(console, "warn").mockImplementation(() => {})
+
+      for (const stored of NOT_IDS) {
+        const file = path.join(root, `stored-${NOT_IDS.indexOf(stored)}.json`)
+        fs.writeFileSync(file, JSON.stringify({ install_id: stored }))
+
+        const other = new SettingsStore({ settingsFile: file })
+        const resolved = await other.getInstallId()
+
+        expect(resolved).toMatch(UUID_V4)
+        // repaired on disk, so the next launch is the same install
+        expect(JSON.parse(fs.readFileSync(file, "utf8")).install_id).toBe(
+          resolved
+        )
+      }
+
+      // and the thing it could not vouch for is never written to the log
+      const logged = console.warn.mock.calls.flat().map(String).join(" ")
+      expect(logged).not.toContain("devansh")
+      expect(logged).not.toContain("MacBook")
+
+      jest.restoreAllMocks()
+    })
+
+    test("leaves a real one exactly where it is", async () => {
+      const stored = "11111111-2222-3333-4444-555555555555"
+      fs.writeFileSync(store.settingsFile, JSON.stringify({ install_id: stored }))
+
+      expect(await store.getInstallId()).toBe(stored)
+      expect((await store.readAll()).install_id).toBe(stored)
+    })
+
+    test("reports one identity per run when the repair cannot be written", async () => {
+      // a file where the settings directory should be, so every write fails.
+      // without a remembered mint each read would roll a fresh id, and a
+      // single session would report itself as several people
+      jest.spyOn(console, "warn").mockImplementation(() => {})
+
+      const blocked = path.join(root, "blocked")
+      fs.writeFileSync(blocked, "not a directory")
+
+      const other = new SettingsStore({
+        settingsFile: path.join(blocked, "settings.json")
+      })
+
+      const ids = [
+        await other.getInstallId(),
+        await other.getInstallId(),
+        await other.getInstallId()
+      ]
+
+      expect(ids[0]).toMatch(UUID_V4)
+      expect(new Set(ids).size).toBe(1)
+
+      jest.restoreAllMocks()
+    })
+
+    test("still prefers a stored id that appears after a failed repair", async () => {
+      // the mint is remembered only for want of anything better. an id that
+      // turns up in the file afterwards is the installation's real identity
+      // and has to win, which is what the re-read on every call is for
+      jest.spyOn(console, "warn").mockImplementation(() => {})
+
+      fs.writeFileSync(store.settingsFile, JSON.stringify({ install_id: "nope" }))
+      const minted = await store.getInstallId()
+      expect(minted).toMatch(UUID_V4)
+
+      const stored = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+      fs.writeFileSync(store.settingsFile, JSON.stringify({ install_id: stored }))
+
+      expect(await store.getInstallId()).toBe(stored)
+
+      jest.restoreAllMocks()
+    })
+  })
+
   test("defaults analytics to enabled and round-trips a change", async () => {
     expect(await store.isAnalyticsEnabled()).toBe(true)
 
