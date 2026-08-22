@@ -3,7 +3,7 @@
 // bypassed.
 
 const os = require("os")
-const { APP_CONFIG } = require("../utils/constants")
+const { APP_CONFIG, SUPPORTED_PLATFORMS } = require("../utils/constants")
 const { redactLogLine } = require("./ytdlp-engine")
 const { getAppVersion } = require("../utils/analytics-helpers")
 const {
@@ -102,8 +102,10 @@ const PROPERTY_KINDS = {
   progress_at_failure: "number",
   progress_at_cancel: "number",
 
+  // a controlled vocabulary that normalizes instead of dropping
+  platform: "platform",
+
   // lowercase identifiers from a vocabulary this app controls
-  platform: "slug",
   url_kind: "slug",
   media_type: "slug",
   quality: "slug",
@@ -146,8 +148,11 @@ const KIND_BY_PROPERTY = new Map(Object.entries(PROPERTY_KINDS))
 // and a filename respectively
 const SLUG_PATTERN = /^[a-z0-9][a-z0-9_-]{0,31}$/
 
-// must lead with a digit - "vacation.mp4" cannot, "2026.08.19" must
-const VERSION_PATTERN = /^[0-9][A-Za-z0-9._-]{0,31}$/
+// digits and dots, with an optional prerelease tail. leading with a digit was
+// not enough on its own: "2024.mp4" leads with one too. letters are only
+// reachable after a `-`, which is the one place a version legitimately has
+// them ("1.2.3-beta.1"), and a filename extension cannot get there.
+const VERSION_PATTERN = /^[0-9][0-9.]{0,30}(?:-[A-Za-z0-9.]{1,16})?$/
 
 // a pre-bucketed measurement: leads with a digit or a comparison, ends in a
 // short unit. "1-5 min", "<1m", "10-50 MB", "60+ min"
@@ -158,7 +163,11 @@ const VERSION_PATTERN = /^[0-9][A-Za-z0-9._-]{0,31}$/
 // only thing rejecting "60+ min" achieves is a dropped event behind a warning
 // production never shows anyone. still anchored on a digit or a comparison,
 // so no title or filename becomes reachable.
-const BUCKET_PATTERN = /^[<>]?[0-9]+(-[0-9]+)?\+?\s?[a-zA-Z]{0,4}$/
+//
+// the unit is required, not optional: without it a bare "2024" was a valid
+// bucket, and a unitless label is unreadable in a chart anyway - so demanding
+// one tightens the boundary and improves the data at the same time.
+const BUCKET_PATTERN = /^[<>]?[0-9]+(-[0-9]+)?\+?\s?[a-zA-Z]{1,4}$/
 
 /**
  * the error vocabularies are referenced, never copied. task 2 made the
@@ -168,6 +177,34 @@ const BUCKET_PATTERN = /^[<>]?[0-9]+(-[0-9]+)?\+?\s?[a-zA-Z]{0,4}$/
  */
 const ERROR_CATEGORY_VALUES = new Set(Object.values(ERROR_CATEGORIES))
 const ERROR_STAGE_VALUES = new Set(Object.values(ERROR_STAGES))
+
+// what an unrecognised platform becomes. it is not a drop: which unsupported
+// sites people paste is one of the questions analytics exists to answer
+const PLATFORM_UNSUPPORTED = "unsupported"
+
+/**
+ * the platforms a value may name.
+ *
+ * SUPPORTED_PLATFORMS is imported rather than copied, but it is not the whole
+ * set: it lists youtube, instagram and tiktok, while the engine's own
+ * download list (SUPPORTED_DOWNLOAD_PLATFORMS, ipc-handlers.js:43) lists
+ * youtube, pinterest and tiktok. the two are not mirrors. pinterest is fully
+ * supported - it has dedicated handling in ipc-handlers and its own
+ * extractQuality mapping - so validating against SUPPORTED_PLATFORMS alone
+ * would relabel a real platform as unsupported.
+ *
+ * pinterest is therefore the one name written out here. that list is
+ * module-local to ipc-handlers and cannot be imported: analytics is about to
+ * become one of ipc-handlers' dependencies, so requiring it back would be a
+ * cycle, and it pulls in electron besides. the real fix is one list instead
+ * of two, which is not this task's to make.
+ */
+const KNOWN_PLATFORMS = new Set([
+  ...Object.keys(SUPPORTED_PLATFORMS).map((key) => key.toLowerCase()),
+  "pinterest",
+  "unknown",
+  PLATFORM_UNSUPPORTED
+])
 
 const MAX_TEXT_LENGTH = 500
 const MAX_NUMBER = 1e9
@@ -194,6 +231,16 @@ function checkKind(kind, value) {
       return typeof value === "string" && SLUG_PATTERN.test(value)
         ? { ok: true, value }
         : { ok: false }
+
+    // the one kind that rewrites rather than rejects. a name we do not know
+    // is far more likely to be an unsupported site than a leak, and which
+    // sites people try is data worth having - so the event goes out carrying
+    // "unsupported" rather than being dropped over its platform. a non-string
+    // is still a plain drop: that is a caller bug, not an unknown site.
+    case "platform":
+      if (typeof value !== "string") return { ok: false }
+      if (KNOWN_PLATFORMS.has(value)) return { ok: true, value }
+      return { ok: true, value: PLATFORM_UNSUPPORTED, normalized: true }
 
     case "version":
       return typeof value === "string" && VERSION_PATTERN.test(value)
@@ -348,12 +395,24 @@ class Analytics {
    * set once the engine version is known, so every later event carries it.
    * a falsy version is ignored rather than stored: a probe that failed must
    * not erase what a successful one already established.
+   *
+   * validated here rather than trusted, because this is the only caller
+   * supplied value that reaches superProperties - and capture() spreads those
+   * last, so an unchecked one would ride every event and outrank even a
+   * validated caller value.
    */
   setEngineVersion(version) {
     if (!version) return
 
-    this.engineVersion = version
-    this.superProperties.engine_version = version
+    const checked = checkKind("version", version)
+
+    if (!checked.ok) {
+      console.warn("analytics: ignored an engine version, expected version")
+      return
+    }
+
+    this.engineVersion = checked.value
+    this.superProperties.engine_version = checked.value
   }
 
   /**
@@ -417,6 +476,15 @@ class Analytics {
             `analytics: dropped ${safeLabel(key)} on ${label}, expected ${kind}`
           )
           continue
+        }
+
+        if (checked.normalized) {
+          // a normalization is information, so it is still reported - naming
+          // the replacement, which is a reserved constant, and never the
+          // original, which is the value we could not vouch for
+          console.warn(
+            `analytics: normalized ${safeLabel(key)} on ${label} to ${checked.value}`
+          )
         }
 
         safe[key] = checked.value

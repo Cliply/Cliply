@@ -546,14 +546,16 @@ describe("Analytics", () => {
     })
 
     describe("the values that defeated the token charset", () => {
-      it("drops a video title in platform", async () => {
-        // "My Holiday Video" matched the old token grammar and shipped
+      it("does not ship a video title in platform", async () => {
+        // "My Holiday Video" matched the old token grammar and shipped.
+        // platform normalizes now rather than dropping, so the assertion is
+        // that the title is gone - not that the property is
         const properties = await captureOne("download_completed", {
           platform: "My Holiday Video",
           media_type: "video"
         })
 
-        expect(properties).not.toHaveProperty("platform")
+        expect(properties.platform).toBe("unsupported")
         expect(properties.media_type).toBe("video")
       })
 
@@ -571,9 +573,16 @@ describe("Analytics", () => {
       it("drops them from every kind that takes a string", async () => {
         for (const value of ["My Holiday Video", "vacation.mp4"]) {
           const slug = await captureOne("download_completed", {
+            quality: value
+          })
+          expect(slug).not.toHaveProperty("quality")
+
+          // platform is the exception: it normalizes, so the check is that
+          // the value did not survive rather than that the key did not
+          const platform = await captureOne("url_submitted", {
             platform: value
           })
-          expect(slug).not.toHaveProperty("platform")
+          expect(platform.platform).toBe("unsupported")
 
           const version = await captureOne("engine_updated", {
             to_version: value
@@ -584,6 +593,116 @@ describe("Analytics", () => {
             elapsed_bucket: value
           })
           expect(bucket).not.toHaveProperty("elapsed_bucket")
+        }
+      })
+    })
+
+    describe("the values that defeated the four grammars", () => {
+      it("does not ship a one-word title as a platform", async () => {
+        // "holiday" passed SLUG_PATTERN - a plausible one-word title
+        const properties = await captureOne("url_submitted", {
+          platform: "holiday"
+        })
+        expect(properties.platform).toBe("unsupported")
+      })
+
+      it("does not ship a slugified basename as a platform", async () => {
+        // "my_video" passed too, for the same reason
+        const properties = await captureOne("url_submitted", {
+          platform: "my_video"
+        })
+        expect(properties.platform).toBe("unsupported")
+      })
+
+      it("does not ship a digit-leading filename as a version", async () => {
+        // "2024.mp4" passed VERSION_PATTERN: it starts with a digit
+        const properties = await captureOne("engine_updated", {
+          to_version: "2024.mp4"
+        })
+        expect(properties).not.toHaveProperty("to_version")
+      })
+
+      it("does not ship a bare year as a bucket", async () => {
+        // "2024" passed BUCKET_PATTERN because the unit was optional
+        const properties = await captureOne("download_completed", {
+          elapsed_bucket: "2024"
+        })
+        expect(properties).not.toHaveProperty("elapsed_bucket")
+      })
+    })
+
+    describe("platform normalizes rather than drops", () => {
+      it("keeps every platform the app actually supports", async () => {
+        const {
+          SUPPORTED_PLATFORMS
+        } = require("../src/main/utils/constants")
+
+        const supported = [
+          ...Object.keys(SUPPORTED_PLATFORMS).map((k) => k.toLowerCase()),
+          // ipc-handlers.js:43 - the engine's own download list, which is not
+          // the same set. pinterest lives only here
+          "youtube",
+          "pinterest",
+          "tiktok"
+        ]
+
+        for (const value of [...new Set(supported)]) {
+          const properties = await captureOne("url_submitted", {
+            platform: value
+          })
+          expect(properties.platform).toBe(value)
+        }
+      })
+
+      it("keeps the reserved values", async () => {
+        for (const value of ["unknown", "unsupported"]) {
+          const properties = await captureOne("url_submitted", {
+            platform: value
+          })
+          expect(properties.platform).toBe(value)
+        }
+      })
+
+      it("still sends the event when it normalizes", async () => {
+        // the whole point: which unsupported sites people try is data we want,
+        // so an unrecognised platform must not take the event down with it
+        const client = fakeClient()
+        const analytics = new Analytics({
+          settingsStore: fakeStore(),
+          createClient: () => client,
+          forceEnabled: true
+        })
+        await analytics.init()
+        analytics.capture("url_submitted", {
+          platform: "vimeo",
+          url_kind: "video"
+        })
+
+        expect(client.captured).toHaveLength(1)
+        expect(client.captured[0].properties.platform).toBe("unsupported")
+        expect(client.captured[0].properties.url_kind).toBe("video")
+      })
+
+      it("normalizes a url instead of shipping it", async () => {
+        const secret = "https://private.example/watch?v=abcdef"
+        const properties = await captureOne("url_submitted", {
+          platform: secret
+        })
+
+        expect(properties.platform).toBe("unsupported")
+
+        const logged = console.warn.mock.calls.flat().join(" ")
+        expect(logged).not.toContain(secret)
+        expect(logged).not.toContain("private.example")
+      })
+
+      it("drops a non-string rather than normalizing it", async () => {
+        // a wrong type is a caller bug, not an unrecognised site
+        for (const value of [42, true, { name: "youtube" }]) {
+          const properties = await captureOne("url_submitted", {
+            platform: value
+          })
+          expect(properties).not.toHaveProperty("platform")
         }
       })
     })
@@ -631,18 +750,20 @@ describe("Analytics", () => {
       })
 
       it("rejects uppercase, spaces, dots and a leading dash", async () => {
+        // checked on quality, a pure slug - platform normalizes instead of
+        // dropping and has its own block below
         for (const value of [
-          "YouTube",
+          "MP3",
           "my video",
           "clip.mp4",
           "-leading",
           "_leading",
           "a".repeat(33)
         ]) {
-          const properties = await captureOne("url_submitted", {
-            platform: value
+          const properties = await captureOne("download_completed", {
+            quality: value
           })
-          expect(properties).not.toHaveProperty("platform")
+          expect(properties).not.toHaveProperty("quality")
         }
       })
     })
@@ -663,8 +784,26 @@ describe("Analytics", () => {
         }
       })
 
-      it("rejects anything that does not start with a digit", async () => {
-        for (const value of ["vacation.mp4", "v1.2.3", "unknown", "beta"]) {
+      it("keeps a yt-dlp nightly, which carries a timestamp segment", async () => {
+        for (const value of ["2025.01.12.232805", "2023.12.30", "2024.04.09"]) {
+          const properties = await captureOne("engine_updated", {
+            to_version: value
+          })
+          expect(properties.to_version).toBe(value)
+        }
+      })
+
+      it("rejects anything carrying letters outside a prerelease", async () => {
+        for (const value of [
+          "vacation.mp4",
+          "2024.mp4",
+          "2024.mp4.exe",
+          "v1.2.3",
+          "unknown",
+          "beta",
+          "holiday2024",
+          "1.2.3 beta"
+        ]) {
           const properties = await captureOne("engine_updated", {
             to_version: value
           })
@@ -673,15 +812,63 @@ describe("Analytics", () => {
       })
     })
 
+    describe("setEngineVersion", () => {
+      it("validates before stamping it on every event", async () => {
+        // this is the one caller-supplied value that reaches superProperties,
+        // which capture() spreads last - so an unchecked one would ride every
+        // event and outrank a validated caller value
+        const client = fakeClient()
+        const analytics = new Analytics({
+          settingsStore: fakeStore(),
+          createClient: () => client,
+          forceEnabled: true
+        })
+        await analytics.init()
+
+        analytics.setEngineVersion("/Users/someone/Movies/x.mp4")
+        analytics.capture("download_completed", { media_type: "video" })
+
+        expect(client.captured[0].properties).not.toHaveProperty(
+          "engine_version"
+        )
+      })
+
+      it("still accepts a real engine version", async () => {
+        const client = fakeClient()
+        const analytics = new Analytics({
+          settingsStore: fakeStore(),
+          createClient: () => client,
+          forceEnabled: true
+        })
+        await analytics.init()
+
+        analytics.setEngineVersion("2026.08.19")
+        analytics.capture("download_completed", { media_type: "video" })
+
+        expect(client.captured[0].properties.engine_version).toBe("2026.08.19")
+      })
+    })
+
     describe("bucket", () => {
       it("keeps an open-ended top bucket written with a plus", async () => {
         // the commonest idiom there is, so task 6 reaches for it by reflex.
         // ">60 min" says the same thing, but a reflex does not consult a brief
-        for (const value of ["60+ min", "100+ MB", "10+s", "1000+"]) {
+        for (const value of ["60+ min", "100+ MB", "10+s"]) {
           const properties = await captureOne("download_completed", {
             elapsed_bucket: value
           })
           expect(properties.elapsed_bucket).toBe(value)
+        }
+      })
+
+      it("requires a unit, so a bare number is not a bucket", async () => {
+        // "1000+" was accepted before the unit became mandatory. a unitless
+        // label is unreadable in a chart anyway, so this costs nothing
+        for (const value of ["2024", "1000+", "0", "1-5", "<1"]) {
+          const properties = await captureOne("download_completed", {
+            elapsed_bucket: value
+          })
+          expect(properties).not.toHaveProperty("elapsed_bucket")
         }
       })
 
@@ -776,9 +963,9 @@ describe("Analytics", () => {
           ""
         ]) {
           const properties = await captureOne("download_completed", {
-            platform: value
+            quality: value
           })
-          expect(properties).not.toHaveProperty("platform")
+          expect(properties).not.toHaveProperty("quality")
         }
       })
     })
@@ -899,10 +1086,10 @@ describe("Analytics", () => {
 
       it("still shouts about a wrong kind", async () => {
         const properties = await captureQuietly("download_completed", {
-          platform: "https://private.example/v"
+          quality: "https://private.example/v"
         })
 
-        expect(properties).not.toHaveProperty("platform")
+        expect(properties).not.toHaveProperty("quality")
         expect(console.warn).toHaveBeenCalled()
       })
     })
@@ -955,9 +1142,9 @@ describe("Analytics", () => {
       expect(logged).toContain("not_a_key")
 
       console.warn.mockClear()
-      await captureOne("download_completed", { platform: 42 })
+      await captureOne("download_completed", { media_type: 42 })
       logged = console.warn.mock.calls.flat().join(" ")
-      expect(logged).toContain("platform")
+      expect(logged).toContain("media_type")
       expect(logged).toContain("slug")
     })
   })
