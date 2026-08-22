@@ -77,7 +77,10 @@ const IPC_CHANNELS = {
   // system operations
   SYSTEM_HEALTH: "system:health",
   SYSTEM_OPEN_EXTERNAL: "system:open-external",
-  SYSTEM_GET_DIAGNOSTICS: "system:get-diagnostics"
+  SYSTEM_GET_DIAGNOSTICS: "system:get-diagnostics",
+
+  // telemetry the renderer reports, which main gates before anything is sent
+  ANALYTICS_TRACK: "analytics:track"
 }
 
 // supported platforms

@@ -1,3 +1,4 @@
+import { isTrimmedRange, track, videoQuality } from "@/lib/analytics"
 import {
   DownloadError,
   downloadApi,
@@ -159,6 +160,15 @@ export const useVideoDownload = () => {
       )
 
       progressCleanupRef.current = cleanup
+
+      // the hook only ever serves youtube - the other platforms have their own
+      // components and never reach this mutation
+      track("download_started", {
+        platform: "youtube",
+        media_type: "video",
+        quality: videoQuality(request.height),
+        is_trimmed: isTrimmedRange(request.time_range)
+      })
 
       try {
         // resolves once the process is running; the download itself is followed

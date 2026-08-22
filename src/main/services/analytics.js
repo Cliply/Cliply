@@ -292,10 +292,15 @@ const PROPERTY_VOCABULARIES = {
     "check-rejected"
   ]),
 
-  // deliberately empty - these values do not exist yet. task 7 invents the
-  // url kinds, and has to add them here before they will send. a test failure
-  // at that moment is the intended outcome; a silent drop in production is not
-  url_kind: new Set([])
+  // the shape of a submitted link, named by urlKind() in the renderer's
+  // lib/analytics.ts - these are ours to invent, and this is the whole list.
+  //
+  // "playlist" is the one that pays for the rest: we take the single video out
+  // of a playlist url, and how often somebody expected otherwise is a question
+  // nothing else here answers. "short-link" is the redirect hosts (youtu.be,
+  // pin.it, vm/vt.tiktok.com, tiktok.com/t), which cost a resolution step
+  // before anything else can happen
+  url_kind: new Set(["video", "shorts", "playlist", "short-link", "embed"])
 }
 
 const VOCABULARY_BY_PROPERTY = new Map(Object.entries(PROPERTY_VOCABULARIES))

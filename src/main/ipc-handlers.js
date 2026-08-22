@@ -43,6 +43,25 @@ const COOKIE_TEST_URLS = [
 const SUPPORTED_DOWNLOAD_PLATFORMS = ["youtube", "pinterest", "tiktok"]
 
 /**
+ * the only events the renderer may report.
+ *
+ * these are the four it knows first-hand: what was pasted, what came back, and
+ * that a download was asked for. everything after that is main's own - it
+ * watches the engine, and a renderer that could name download_completed could
+ * report a download that never happened.
+ *
+ * this is not the property allowlist. that lives in services/analytics.js and
+ * runs on every bag regardless, which is what makes forwarding the renderer's
+ * properties wholesale safe.
+ */
+const RENDERER_EVENTS = new Set([
+  "url_submitted",
+  "media_info_loaded",
+  "media_info_failed",
+  "download_started"
+])
+
+/**
  * treat an empty or zero-length selection as "no time range"
  *
  * the renderer only sends a range for a real segment now, but a stale client
@@ -215,6 +234,47 @@ class IPCHandlers {
   }
 
   /**
+   * report an event the renderer saw
+   *
+   * the bag is forwarded as it arrived. capture() reads it defensively, keeps
+   * only the properties that event declares and checks each value against its
+   * kind, so filtering here would be a second, weaker copy of that - and the
+   * copy that goes stale. what this owes it is a real event name: a Symbol or
+   * an object would otherwise be reported as "<unprintable>" by the very
+   * warning meant to explain the drop.
+   *
+   * @param {Object} _event - the ipc event, unused
+   * @param {Object} data - {event, properties} as the preload bridge sent it
+   * @returns {Promise<Object>} {success} - the renderer does not act on it
+   */
+  async handleAnalyticsTrack(_event, data) {
+    if (!this.analytics) return { success: false }
+
+    const name = data && data.event
+
+    if (typeof name !== "string" || !RENDERER_EVENTS.has(name)) {
+      console.warn("analytics: refused an event the renderer may not send")
+      return { success: false }
+    }
+
+    const properties =
+      data.properties && typeof data.properties === "object"
+        ? data.properties
+        : {}
+
+    try {
+      this.analytics.capture(name, properties)
+    } catch (error) {
+      // capture guards itself, so this is a collaborator that is not the one we
+      // think it is. telemetry still does not get to fail a renderer call
+      console.warn(`analytics: ${name} could not be captured:`, error.message)
+      return { success: false }
+    }
+
+    return { success: true }
+  }
+
+  /**
    * report a cookie import, whichever of the two routes it came in by
    *
    * one shape for both so they cannot drift, and called on the failure paths
@@ -344,6 +404,12 @@ class IPCHandlers {
     ipcMain.handle(
       IPC_CHANNELS.SYSTEM_GET_DIAGNOSTICS,
       this.handleGetDiagnostics.bind(this)
+    )
+
+    // telemetry
+    ipcMain.handle(
+      IPC_CHANNELS.ANALYTICS_TRACK,
+      this.handleAnalyticsTrack.bind(this)
     )
     ipcMain.handle(
       "system:open-download-folder",
@@ -1242,6 +1308,7 @@ class IPCHandlers {
       IPC_CHANNELS.SYSTEM_HEALTH,
       IPC_CHANNELS.SYSTEM_OPEN_EXTERNAL,
       IPC_CHANNELS.SYSTEM_GET_DIAGNOSTICS,
+      IPC_CHANNELS.ANALYTICS_TRACK,
       "cookies:import-file",
       "cookies:clear",
       "download:get-status",

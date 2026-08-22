@@ -17,6 +17,19 @@ interface PlatformStoreAccessor {
   reset: () => void
 }
 
+/**
+ * what a loaded media is, in the only terms telemetry may know it in
+ *
+ * the title, the uploader and the url stay in the store this came from. a
+ * duration is bucketed before it is sent, and a count is a count.
+ */
+export interface MediaSummary {
+  durationSeconds: number | null
+  // youtube is the only platform that offers a choice of quality; the others
+  // report nothing rather than a fabricated 1
+  formatsCount: number | null
+}
+
 export interface PlatformConfig {
   id: Platform
   label: string
@@ -33,7 +46,7 @@ export interface PlatformConfig {
     genericFail: string
     logPrefix: string
   }
-  fetchAndStore: (url: string) => Promise<void>
+  fetchAndStore: (url: string) => Promise<MediaSummary>
   store: PlatformStoreAccessor
 }
 
@@ -58,6 +71,11 @@ export const PLATFORM_REGISTRY: Record<Platform, PlatformConfig> = {
     fetchAndStore: async (url: string) => {
       const info = await videoApi.getVideoInfo(url)
       useYouTubeStore.getState().setVideoInfo(info)
+
+      return {
+        durationSeconds: info.duration ?? null,
+        formatsCount: info.quality_tiers?.length ?? null
+      }
     },
     store: {
       getUrl: () => useYouTubeStore.getState().url,
@@ -88,6 +106,8 @@ export const PLATFORM_REGISTRY: Record<Platform, PlatformConfig> = {
     fetchAndStore: async (url: string) => {
       const info = await pinterestApi.getInfo(url)
       usePinterestStore.getState().setPinInfo(info)
+
+      return { durationSeconds: info.duration ?? null, formatsCount: null }
     },
     store: {
       getUrl: () => usePinterestStore.getState().url,
@@ -118,6 +138,8 @@ export const PLATFORM_REGISTRY: Record<Platform, PlatformConfig> = {
     fetchAndStore: async (url: string) => {
       const info = await tiktokApi.getInfo(url)
       useTikTokStore.getState().setVideoInfo(info)
+
+      return { durationSeconds: info.duration ?? null, formatsCount: null }
     },
     store: {
       getUrl: () => useTikTokStore.getState().url,

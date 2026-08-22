@@ -737,18 +737,31 @@ describe("Analytics", () => {
         }
       })
 
-      it("tells the next implementer what to do about an empty one", async () => {
-        // url_kind has no values yet - task 7 invents them. failing loudly at
-        // test time is the friction working; a silent production drop is not
+      it("keeps every link shape the renderer can name", async () => {
+        // this vocabulary shipped empty on purpose - the values did not exist
+        // until the renderer invented them, and an empty set fails loudly here
+        // rather than dropping silently in production. these are urlKind()'s
+        // whole range (renderer's lib/analytics.ts), and the renderer suite is
+        // what proves the list is still that
+        for (const value of [
+          "video",
+          "shorts",
+          "playlist",
+          "short-link",
+          "embed"
+        ]) {
+          const properties = await captureOne("url_submitted", {
+            url_kind: value
+          })
+          expect(properties.url_kind).toBe(value)
+        }
+      })
+
+      it("rejects a link shape nobody declared", async () => {
         const properties = await captureOne("url_submitted", {
-          url_kind: "anything"
+          url_kind: "playlist-link"
         })
         expect(properties).not.toHaveProperty("url_kind")
-
-        const logged = console.warn.mock.calls.flat().join(" ")
-        expect(logged).toContain("url_kind")
-        expect(logged).toContain("empty")
-        expect(logged).toContain("analytics.js")
       })
     })
 

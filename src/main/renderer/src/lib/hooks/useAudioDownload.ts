@@ -1,3 +1,4 @@
+import { audioQuality, isTrimmedRange, track } from "@/lib/analytics"
 import {
   DownloadError,
   downloadApi,
@@ -158,6 +159,16 @@ export const useAudioDownload = () => {
       )
 
       progressCleanupRef.current = cleanup
+
+      // audio_format is the mode itself; quality is the same mode in the words
+      // main's later events for this download will use
+      track("download_started", {
+        platform: "youtube",
+        media_type: "audio",
+        quality: audioQuality(request.audio_mode),
+        audio_format: request.audio_mode,
+        is_trimmed: isTrimmedRange(request.time_range)
+      })
 
       try {
         // resolves once the process is running; the download itself is followed

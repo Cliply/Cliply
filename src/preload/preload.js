@@ -39,7 +39,10 @@ const IPC_CHANNELS = {
   // system
   SYSTEM_HEALTH: "system:health",
   SYSTEM_OPEN_EXTERNAL: "system:open-external",
-  SYSTEM_GET_DIAGNOSTICS: "system:get-diagnostics"
+  SYSTEM_GET_DIAGNOSTICS: "system:get-diagnostics",
+
+  // telemetry
+  ANALYTICS_TRACK: "analytics:track"
 }
 
 // simple invoke wrapper
@@ -124,6 +127,13 @@ contextBridge.exposeInMainWorld("electronAPI", {
     getDiagnostics: () => invoke(IPC_CHANNELS.SYSTEM_GET_DIAGNOSTICS),
     openDownloadFolder: () => invoke("system:open-download-folder"),
     selectDownloadFolder: () => invoke("system:select-download-folder")
+  },
+
+  // telemetry. main owns the opt-out gate, the event allowlist and the
+  // redaction, so this is a pipe and nothing more
+  analytics: {
+    track: (event, properties) =>
+      invoke(IPC_CHANNELS.ANALYTICS_TRACK, { event, properties })
   },
 
   // settings operations

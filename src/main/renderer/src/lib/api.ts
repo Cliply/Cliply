@@ -196,7 +196,18 @@ export interface ApiError {
   category?: string
 }
 
-// download failure carrying the technical detail for issue reports
+/**
+ * a failure carrying what main knew about it
+ *
+ * `details` is the technical text issue reports quote, and `category` is main's
+ * own taxonomy answer - the field to read, because `code` beside it in the same
+ * payload is either the engine's code or the "GENERAL_ERROR" placeholder, which
+ * is not a taxonomy value.
+ *
+ * named for downloads because that is where it started; the info requests throw
+ * it too, since a failure that arrives as a bare Error has thrown both fields
+ * away before any caller can see them.
+ */
 export class DownloadError extends Error {
   details?: string
   category?: string
@@ -307,6 +318,14 @@ declare global {
         getDownloadPath: () => Promise<IPCResponse<DownloadPathInfo>>
         setDownloadPath: (path: string) => Promise<IPCResponse<DownloadPathInfo>>
       }
+      // telemetry. optional because the browser dev server has no preload at
+      // all, and because lib/analytics.ts must survive an older one
+      analytics?: {
+        track: (
+          event: string,
+          properties: Record<string, string | number | boolean>
+        ) => Promise<{ success: boolean }>
+      }
       updater: {
         checkForUpdates: () => Promise<IPCResponse<{ checking: boolean }>>
         downloadUpdate: () => Promise<IPCResponse<{ downloading: boolean }>>
@@ -354,7 +373,7 @@ export const videoApi = {
     if (!response.success || !response.data) {
       const errorMessage = response.error?.message || "Failed to get video info"
       console.error("Video info failed:", errorMessage)
-      throw new Error(errorMessage)
+      throw new DownloadError(errorMessage, response.error)
     }
 
     return response.data
@@ -421,7 +440,7 @@ export const pinterestApi = {
       const errorMessage =
         response.error?.message || "Failed to get Pinterest video info"
       console.error("Pinterest info failed:", errorMessage)
-      throw new Error(errorMessage)
+      throw new DownloadError(errorMessage, response.error)
     }
 
     return response.data
@@ -460,7 +479,7 @@ export const tiktokApi = {
       const errorMessage =
         response.error?.message || "Failed to get TikTok video info"
       console.error("TikTok info failed:", errorMessage)
-      throw new Error(errorMessage)
+      throw new DownloadError(errorMessage, response.error)
     }
 
     return response.data
