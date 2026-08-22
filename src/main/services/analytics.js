@@ -395,7 +395,17 @@ const TEXT_SCRUBS = [
   // filename rule reads it as harmless and lets it through. four groups of
   // digits is more than a version string has, so "2026.08.19" is untouched
   [/\b\d{1,3}(?:\.\d{1,3}){3}\b/g, "[address]"],
-  [/\b[0-9a-f]{0,4}(?::[0-9a-f]{1,4}){2,7}\b/gi, "[address]"],
+
+  // ipv6, matched as "hex and colons around a ::" rather than by validating
+  // the grammar. validating it is what went wrong the first time: requiring
+  // every group after a colon to be non-empty excluded ::1, 2001:db8::1 and
+  // fe80::a - which is to say every compressed form, which is to say every
+  // ipv6 anyone writes. a generous match here can only ever replace more.
+  // the brackets are the url spelling and %zone is a link-local's interface,
+  // which names the machine's own hardware
+  [/\[?[0-9a-f:]*::[0-9a-f:]*(?:%[A-Za-z0-9._-]+)?\]?/gi, "[address]"],
+  // and the uncompressed eight-group form, which has no :: to find
+  [/\b(?:[0-9a-f]{1,4}:){7}[0-9a-f]{1,4}\b/gi, "[address]"],
 
   ...PATH_HEADS.map((head) => [new RegExp(head + PATH_TAIL, "g"), "[path]"]),
 
@@ -423,6 +433,17 @@ const TEXT_UNSAFE = [
   // a dotted token carrying a letter: a filename whose extension the scrub
   // did not recognise. a version string is digits either side and survives
   /\S*\p{L}\S*\.[\p{L}\p{N}]/u,
+
+  // two colons with nothing but hex between them: an address in a spelling
+  // the scrub above did not name. this is the general answer to the shape,
+  // rather than a longer list of address grammars - a mac address is not an
+  // ip and no rule above would have caught one.
+  //
+  // it costs the messages that carry a second colon of their own: a
+  // "10:30:45" clock, an ffmpeg "00:01:23" duration, an iso timestamp. one
+  // colon is untouched, so "ERROR:", "reason: value", "code 137: Killed",
+  // "10:30" and a windows drive letter all still send
+  /[0-9a-f]*:[0-9a-f]*:/i,
   // something hanging off a home marker. a bare "~" is a whole home directory
   // and says nothing; "~something" is a path we did not parse
   /~\S/

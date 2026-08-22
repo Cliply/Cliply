@@ -1273,20 +1273,57 @@ describe("Analytics", () => {
           await sent("could not connect to 140.82.121.4 for the release")
         ).toBe("could not connect to [address] for the release")
 
-        expect(await sent("could not connect to 2606:2800:220:1:248::25c8")).not.toContain(
-          "2606:2800"
-        )
+        expect(
+          await sent("could not connect to 2606:2800:220:1:248:1893:25c8:1946")
+        ).toBe("could not connect to [address]")
       })
 
-      it("leaves a version string alone next to an address rule", async () => {
-        // four groups of digits is more than a version has, and an exit code
-        // after a colon is not an ipv6 host
-        expect(await sent("engine reports 2026.08.19")).toBe(
-          "engine reports 2026.08.19"
-        )
-        expect(await sent("yt-dlp exited with code 137: Killed")).toBe(
-          "yt-dlp exited with code 137: Killed"
-        )
+      it("takes out an ipv6 in every spelling it compresses to", async () => {
+        // the first version of this rule required each group after a colon to
+        // be non-empty, so every compressed form - which is to say every ipv6
+        // anyone actually writes - walked straight through it
+        const cases = [
+          ["could not connect to 2001:db8::1", "2001:db8"],
+          ["could not connect to ::1", "::1"],
+          ["could not connect to [::1]:443", "::1"],
+          ["could not connect to [2001:db8::1]:443", "2001:db8"],
+          ["could not connect to fe80::a%en0", "fe80"],
+          ["could not connect to fe80::a%en0", "en0"]
+        ]
+
+        for (const [text, secret] of cases) {
+          const message = await sent(text)
+
+          expect(message).not.toContain(secret)
+          expect(message).toContain("[address]")
+        }
+      })
+
+      it("refuses a colon-separated address it did not recognise", async () => {
+        // the backstop for whatever address shape neither of us thought of:
+        // two colons with nothing but hex between them, which no wording of
+        // ours produces. a mac address is the one that matters here - it is
+        // an identity, and no rule above this one would have caught it
+        for (const text of [
+          "hardware id 00:1b:44:11:3a:b7 refused",
+          "at 10:30:45 the transfer stopped"
+        ]) {
+          expect(await sent(text)).toBe("[redacted]")
+        }
+      })
+
+      it("leaves the colons our own messages carry", async () => {
+        // what the rule above must not cost: a key, a label, an exit code, a
+        // clock time with one separator, and a version, which is dots
+        for (const text of [
+          "yt-dlp exited with code 137: Killed",
+          "ERROR: [youtube] abc: Video unavailable",
+          "engine reports 2026.08.19",
+          "gave up at 10:30",
+          "reason: the connection was reset"
+        ]) {
+          expect(await sent(text)).toBe(text)
+        }
       })
 
       it("takes out a filename that is not written in latin script", async () => {
