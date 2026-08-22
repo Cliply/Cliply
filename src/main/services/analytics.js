@@ -478,10 +478,32 @@ const PATH_HEADS = [
  * fix, like this one, was to stop describing where the thing sits and start
  * matching what it is.
  *
+ * the punctuation in the class is the second half of the same lesson, learned
+ * the same way. a flat identifier is one spelling of a key and not the only
+ * one: `credentials[secret]`, `creds[0][secret]`, `config%5Bapi_key%5D`,
+ * `"api_key"`, `'secret'` and `auth.client_secret` are all one key with a
+ * marker in it, written by a form serializer, a query encoder or a json dump.
+ * enumerating those serializations would be the position mistake again in a
+ * different costume, so the class says what a key character is and lets any
+ * arrangement of them count.
+ *
+ * the lookbehind rather than `\b` is what makes the match start at the real
+ * beginning of the key. with `\b` a quoted key began at the letter and left
+ * its opening quote stranded, which then had nothing to pair with.
+ *
  * `[=:]` on the key is what still keeps ordinary prose out, and that half has
  * held through every version of this rule.
  */
-const CREDENTIAL_KEY_PART = String.raw`[A-Za-z0-9_-]*`
+const CREDENTIAL_KEY_CHAR = String.raw`[A-Za-z0-9_\-.%\[\]"']`
+const CREDENTIAL_KEY_PART = CREDENTIAL_KEY_CHAR + "*"
+const CREDENTIAL_KEY_START = String.raw`(?<!${CREDENTIAL_KEY_CHAR})`
+
+/**
+ * and the value, which may be quoted or bare. a json dump writes
+ * `"secret": "hunter2"`, and stopping at the opening quote would publish
+ * everything after it.
+ */
+const CREDENTIAL_VALUE = String.raw`(?:"[^"]*"|'[^']*'|[^\s'"&]+)`
 
 const CREDENTIAL_NAMES = [
   "api[_-]?key",
@@ -529,7 +551,8 @@ const TEXT_SCRUBS = [
    */
   [
     new RegExp(
-      String.raw`\b${CREDENTIAL_KEY_PART}authorization${CREDENTIAL_KEY_PART}\s*[=:].*`,
+      CREDENTIAL_KEY_START +
+        String.raw`${CREDENTIAL_KEY_PART}authorization${CREDENTIAL_KEY_PART}\s*[=:].*`,
       "gi"
     ),
     "[credential]"
@@ -537,7 +560,8 @@ const TEXT_SCRUBS = [
   [/\b(?:bearer|negotiate)\s+[^\s'"]+/gi, "[credential]"],
   [
     new RegExp(
-      String.raw`\b${CREDENTIAL_KEY_PART}(?:${CREDENTIAL_NAMES})${CREDENTIAL_KEY_PART}\s*[=:]\s*[^\s'"&]+`,
+      CREDENTIAL_KEY_START +
+        String.raw`${CREDENTIAL_KEY_PART}(?:${CREDENTIAL_NAMES})${CREDENTIAL_KEY_PART}\s*[=:]\s*${CREDENTIAL_VALUE}`,
       "gi"
     ),
     "[credential]"

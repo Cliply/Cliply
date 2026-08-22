@@ -929,6 +929,57 @@ describe("a credential, which is shapeless but not edgeless", () => {
     }
   })
 
+  it("finds the key however the serializer spelled it", async () => {
+    /**
+     * a flat identifier is one spelling of a key and not the only one. a form
+     * serializer writes brackets, a query encoder percent-escapes them, a json
+     * dump quotes them, and an object dump quotes them the other way. none of
+     * those is a new *position* for the marker - the position argument closed
+     * with the previous fix - they are different notations for the same key,
+     * and enumerating notations would be that same mistake in a new costume.
+     *
+     * so the key is a run of key characters and any arrangement of them counts.
+     */
+    const cases = [
+      // bracket notation, which is ordinary nested form serialization
+      ["nested credentials[secret]=hunter2", "nested [credential]"],
+      ["form config[api_key]=abc123", "form [credential]"],
+      ["creds[0][secret]=hunter2", "[credential]"],
+      // the same thing after a query encoder has been at it
+      ["config%5Bapi_key%5D=abc123", "[credential]"],
+      // a json dump, quoted on both sides - and the value has to go with it,
+      // since stopping at the opening quote would publish what follows
+      ['{"secret": "hunter2"}', "{[credential]}"],
+      // and an object dump, which quotes the other way
+      ["{'secret': 'hunter2'}", "{[credential]}"],
+      // a dotted key, which is neither bracketed nor quoted
+      ["auth.client_secret=hunter2", "[credential]"]
+    ]
+
+    for (const [text, expected] of cases) {
+      expect(await captureText(text)).toBe(expected)
+    }
+  })
+
+  it("leaves the quotes it did not take in a state the span rule can read", async () => {
+    // the key grammar consumes quotes now, so it has to consume them in pairs -
+    // a stranded one would pair up with the next quote in the message and take
+    // the safe text between them, or worse, fail to
+    expect(
+      await captureText('"My Holiday Video" failed with api_key=abc123')
+    ).toBe("[text] failed with [credential]")
+
+    expect(
+      await captureText('token="abc123" and "My Holiday Video"')
+    ).toBe("[credential] and [text]")
+
+    // and the span rule's own job is untouched: node writes its file errors
+    // this way and "open '[path]'" is worth more than "open [text]"
+    expect(
+      await captureText("ENOENT: no such file or directory, open '/tmp/x.mp4'")
+    ).toBe("ENOENT: no such file or directory, open '[path]'")
+  })
+
   it("does not fire on the words those markers are made of", async () => {
     // the cost side. a keyword only counts as a credential when something is
     // being assigned to it, so ordinary wording that happens to use the word
