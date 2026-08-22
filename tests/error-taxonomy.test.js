@@ -51,15 +51,31 @@ describe("classify", () => {
       .toBe(ERROR_CATEGORIES.BOT_DETECTION)
   })
 
-  it("only blames antivirus during postprocessing", () => {
-    // "killed" outside the ffmpeg stage is some other process dying - calling
-    // that an av block would send us chasing a defender bug that isn't there
-    const result = classify(
-      "ffmpeg exited with code 137: Killed",
-      ERROR_STAGES.DOWNLOAD
-    )
-    expect(result.category).not.toBe(ERROR_CATEGORIES.FFMPEG_AV_BLOCKED)
-    expect(result.category).toBe(ERROR_CATEGORIES.FFMPEG_ERROR)
+  it("recognises an av kill from the text, at any stage", () => {
+    // mapError reads a stderr tail without knowing which stage produced it, so
+    // this has to work at the stage it actually classifies at
+    for (const stage of Object.values(ERROR_STAGES)) {
+      expect(classify("ffmpeg exited with code 137: Killed", stage).category)
+        .toBe(ERROR_CATEGORIES.FFMPEG_AV_BLOCKED)
+    }
+  })
+
+  it("needs a kill token next to ffmpeg, not just anywhere", () => {
+    // "killed" on its own is some other process dying - calling that an av
+    // block would send us chasing a defender bug that isn't there
+    for (const text of [
+      "ERROR: the process was killed",
+      "Killed",
+      "sigkill received"
+    ]) {
+      expect(classify(text, ERROR_STAGES.POSTPROCESS).category)
+        .not.toBe(ERROR_CATEGORIES.FFMPEG_AV_BLOCKED)
+    }
+  })
+
+  it("leaves an ordinary ffmpeg failure generic", () => {
+    expect(classify("ffmpeg exited with code 1", ERROR_STAGES.POSTPROCESS).category)
+      .toBe(ERROR_CATEGORIES.FFMPEG_ERROR)
   })
 
   it("keeps ungated patterns matching at every stage", () => {
@@ -102,6 +118,25 @@ describe("CATEGORY_PATTERNS", () => {
       .toBe(false)
   })
 
+  // no entry is gated today - FFMPEG_AV_BLOCKED used to be, until it turned out
+  // mapError cannot tell it is postprocessing. the mechanism stays because a
+  // future entry may need it, so this holds any gated entry to its contract and
+  // starts biting the moment someone adds one.
+  it("confines a gated entry to the stages it names", () => {
+    const gated = CATEGORY_PATTERNS.filter((entry) => entry.stages)
+
+    for (const entry of gated) {
+      const sample = entry.patterns[0].source.replace(/\\b|\[\^\\n\]\{[\d,]+\}/g, "")
+      const otherStages = Object.values(ERROR_STAGES).filter(
+        (stage) => !entry.stages.includes(stage)
+      )
+
+      for (const stage of otherStages) {
+        expect(classify(sample, stage).category).not.toBe(entry.category)
+      }
+    }
+  })
+
   it("freezes each entry and its pattern list too", () => {
     for (const entry of CATEGORY_PATTERNS) {
       expect(Object.isFrozen(entry)).toBe(true)
@@ -124,11 +159,35 @@ describe("CATEGORY_PATTERNS", () => {
   })
 })
 
-const { ERROR_CODES } = require("../src/main/services/ytdlp-engine")
+const {
+  ERROR_CODES,
+  ERROR_METADATA,
+  TERMINAL_ERRORS,
+  mapError
+} = require("../src/main/services/ytdlp-engine")
 
 describe("taxonomy adoption", () => {
   it("engine ERROR_CODES is the taxonomy, not a second list", () => {
     expect(ERROR_CODES).toBe(ERROR_CATEGORIES)
+  })
+
+  it("keeps the two wording tables from shadowing each other", () => {
+    // wordingFor prefers TERMINAL_ERRORS, so a key in both would silently hide
+    // the ERROR_METADATA entry - and its behaviour flags with it
+    const overlap = Object.keys(TERMINAL_ERRORS).filter(
+      (code) => code in ERROR_METADATA
+    )
+
+    expect(overlap).toEqual([])
+  })
+
+  it("has wording for every code either table can produce", () => {
+    for (const [code, entry] of Object.entries(ERROR_METADATA)) {
+      expect(typeof entry.message).toBe("string")
+      expect(entry.message.length).toBeGreaterThan(0)
+      expect(typeof entry.suggestion).toBe("string")
+      expect(ERROR_CATEGORIES[code]).toBe(code)
+    }
   })
 
   it("constants no longer exports a rival vocabulary", () => {
@@ -177,6 +236,30 @@ describe("parity with the engine's retired pattern table", () => {
   it.each(cases)("classifies %j as %s", (text, expected) => {
     expect(classify(text, ERROR_STAGES.DOWNLOAD).category)
       .toBe(ERROR_CATEGORIES[expected])
+  })
+
+  // the whole point of ungating FFMPEG_AV_BLOCKED: mapError is the only thing
+  // that classifies real stderr, so a category it can never produce is dead
+  it("reaches FFMPEG_AV_BLOCKED through mapError, not just classify", () => {
+    const result = mapError({
+      exitCode: 137,
+      stderrLines: [
+        "[Merger] Merging formats into \"video.mp4\"",
+        "ERROR: Postprocessing: ffmpeg exited with code 137: Killed"
+      ]
+    })
+
+    expect(result.code).toBe(ERROR_CATEGORIES.FFMPEG_AV_BLOCKED)
+    expect(result.message).toMatch(/antivirus/i)
+  })
+
+  it("does not call an unrelated kill an av block through mapError", () => {
+    const result = mapError({
+      exitCode: 1,
+      stderrLines: ["ERROR: the helper process was killed"]
+    })
+
+    expect(result.code).not.toBe(ERROR_CATEGORIES.FFMPEG_AV_BLOCKED)
   })
 
   it("still carries every code the engine used to define", () => {

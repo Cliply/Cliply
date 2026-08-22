@@ -50,11 +50,23 @@ const ERROR_CATEGORIES = Object.freeze({
 const CATEGORY_PATTERNS = [
   // --- postprocess: specific ffmpeg causes before generic ffmpeg ---
   {
-    // gated to postprocess: "killed" anywhere else is some other process
-    // dying, and blaming antivirus for it invents a defender bug to chase
+    // an av kill has to be recognised from the text alone: the only caller that
+    // classifies real stderr is mapError, which cannot know it was postprocessing
+    // when it reads the tail. so instead of gating this entry to a stage, every
+    // pattern requires a kill token to sit next to ffmpeg (or next to yt-dlp's
+    // own postprocessing framing) on the same line - a cancel worded "process
+    // killed" still cannot match, which was the point of the gate.
+    //
+    // our own cancels never reach here anyway: they carry an explicit CANCELLED
+    // code, and mapError short-circuits on the cancelled flag before classifying.
     category: ERROR_CATEGORIES.FFMPEG_AV_BLOCKED,
-    stages: [ERROR_STAGES.POSTPROCESS],
-    patterns: [/killed/i, /sigkill/i, /code 137/i]
+    patterns: [
+      // 137 is 128 + SIGKILL - nothing else exits ffmpeg that way
+      /ffmpeg exited with code 137/i,
+      /ffmpeg[^\n]{0,80}\b(?:killed|sigkill)\b/i,
+      /\b(?:killed|sigkill)\b[^\n]{0,80}ffmpeg/i,
+      /postprocessing:[^\n]{0,120}\b(?:killed|sigkill)\b/i
+    ]
   },
   {
     category: ERROR_CATEGORIES.FFMPEG_MISSING,

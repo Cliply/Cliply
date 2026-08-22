@@ -1842,6 +1842,10 @@ module.exports = {
   nominalExecutableIn,
   legacyBinaryName,
   ERROR_CODES,
+  // exported so a test can hold the two wording tables to their invariant:
+  // they must not share a key, or wordingFor would silently shadow one
+  ERROR_METADATA,
+  TERMINAL_ERRORS,
   PROGRESS_TEMPLATE,
   FILE_TEMPLATE,
   STREAM_TEMPLATE,
