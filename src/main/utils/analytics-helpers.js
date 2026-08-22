@@ -71,26 +71,25 @@ function extractQuality(formatId) {
 
   const id = formatId.toString().toLowerCase()
 
-  // handle our new dynamic format selectors first
-  const newFormatMappings = {
-    // video format selectors
-    auto: "auto",
-    best_quality: "best",
-    hd_720p: "720p",
-    eco_360p: "360p",
+  // a video download is reported by the height the user picked, so any height
+  // the menu offered comes through as itself rather than as "unknown"
+  if (/^\d{2,4}p$/.test(id)) {
+    return id
+  }
 
-    // audio format selectors
-    auto_audio: "auto_audio",
-    high_audio: "high_quality",
-    medium_audio: "medium_quality",
+  const knownIds = {
+    // the three audio modes
+    mp3: "mp3",
+    m4a: "m4a",
+    original: "original_audio",
 
     // platforms that always use best available (no user format selection)
     pinterest: "best_available",
     tiktok: "best_available"
   }
 
-  if (newFormatMappings[id]) {
-    return newFormatMappings[id]
+  if (knownIds[id]) {
+    return knownIds[id]
   }
 
   // youtube format mappings (legacy support)

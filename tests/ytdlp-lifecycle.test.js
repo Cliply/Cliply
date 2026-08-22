@@ -72,8 +72,8 @@ function createEngine(spawnFn, options = {}) {
 
 const DOWNLOAD = {
   url: "https://www.youtube.com/watch?v=abc",
-  videoFormatId: "hd_720p",
-  audioFormatId: "auto_audio",
+  height: 720,
+  container: "mp4",
   outputDir: "/tmp/downloads",
   outputTemplate: "out.%(ext)s"
 }

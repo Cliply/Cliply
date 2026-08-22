@@ -1,8 +1,8 @@
 import type {
+  AudioMode,
   TimeRange,
-  VideoFormat,
+  QualityTier,
   VideoInfoResponse,
-  VideoQualityOption,
   DownloadPathInfo
 } from "@/lib/api"
 
@@ -18,22 +18,24 @@ interface YouTubeState {
   isLoadingVideoInfo: boolean
   setIsLoadingVideoInfo: (loading: boolean) => void
 
-  selectedVideoFormat: VideoFormat | null
-  selectedAudioFormat: VideoFormat | null
-  setSelectedVideoFormat: (format: VideoFormat | null) => void
-  setSelectedAudioFormat: (format: VideoFormat | null) => void
+  // the dub the user picked, shared by both tabs - "which language do you want
+  // to hear" is one question, not one per download type
+  selectedAudioLanguage: string | null
+  setSelectedAudioLanguage: (code: string | null) => void
 
   audioTimeRange: TimeRange
   setAudioTimeRange: (range: TimeRange) => void
-  selectedAudioFormatForDownload: VideoFormat | null
-  setSelectedAudioFormatForDownload: (format: VideoFormat | null) => void
+  selectedAudioMode: AudioMode
+  setSelectedAudioMode: (mode: AudioMode) => void
   isDownloadingAudio: boolean
   setIsDownloadingAudio: (downloading: boolean) => void
 
   videoTimeRange: TimeRange
   setVideoTimeRange: (range: TimeRange) => void
-  selectedVideoQuality: VideoQualityOption | null
-  setSelectedVideoQuality: (quality: VideoQualityOption | null) => void
+  // the menu row the user is on - one of `videoInfo.quality_tiers`, never a row
+  // left over from a previous video
+  selectedTier: QualityTier | null
+  setSelectedTier: (tier: QualityTier | null) => void
   isDownloadingVideo: boolean
   setIsDownloadingVideo: (downloading: boolean) => void
   videoPreciseCut: boolean
@@ -56,13 +58,15 @@ export const useYouTubeStore = create<YouTubeState>((set) => ({
   url: "",
   videoInfo: null,
   isLoadingVideoInfo: false,
-  selectedVideoFormat: null,
-  selectedAudioFormat: null,
+  selectedAudioLanguage: null,
   audioTimeRange: { start: 0, end: 0 },
-  selectedAudioFormatForDownload: null,
+  // mp3 is the one every device and every editor opens, and it is the same
+  // choice on every video - so it is the initial value rather than a default an
+  // effect has to install
+  selectedAudioMode: "mp3",
   isDownloadingAudio: false,
   videoTimeRange: { start: 0, end: 0 },
-  selectedVideoQuality: null,
+  selectedTier: null,
   isDownloadingVideo: false,
   videoPreciseCut: true,
   audioPreciseCut: true,
@@ -71,17 +75,21 @@ export const useYouTubeStore = create<YouTubeState>((set) => ({
 
   // Actions
   setUrl: (url) => set({ url }),
-  setVideoInfo: (info) => set({ videoInfo: info }),
+  setSelectedAudioLanguage: (code) => set({ selectedAudioLanguage: code }),
+
+  // a new video is a new menu: both per-video selections are dropped here so
+  // the pickers re-open on *this* video's defaults. keeping them would mean a
+  // tier object still carrying the last video's size, and a dub silently
+  // replacing the original on any video that happens to share the code
+  setVideoInfo: (info) =>
+    set({ videoInfo: info, selectedTier: null, selectedAudioLanguage: null }),
   setIsLoadingVideoInfo: (loading) => set({ isLoadingVideoInfo: loading }),
-  setSelectedVideoFormat: (format) => set({ selectedVideoFormat: format }),
-  setSelectedAudioFormat: (format) => set({ selectedAudioFormat: format }),
   setAudioTimeRange: (range) => set({ audioTimeRange: range }),
-  setSelectedAudioFormatForDownload: (format) =>
-    set({ selectedAudioFormatForDownload: format }),
+  setSelectedAudioMode: (mode) => set({ selectedAudioMode: mode }),
   setIsDownloadingAudio: (downloading) =>
     set({ isDownloadingAudio: downloading }),
   setVideoTimeRange: (range) => set({ videoTimeRange: range }),
-  setSelectedVideoQuality: (quality) => set({ selectedVideoQuality: quality }),
+  setSelectedTier: (tier) => set({ selectedTier: tier }),
   setIsDownloadingVideo: (downloading) =>
     set({ isDownloadingVideo: downloading }),
   setVideoPreciseCut: (enabled) => set({ videoPreciseCut: enabled }),
@@ -95,13 +103,12 @@ export const useYouTubeStore = create<YouTubeState>((set) => ({
       url: "",
       videoInfo: null,
       isLoadingVideoInfo: false,
-      selectedVideoFormat: null,
-      selectedAudioFormat: null,
+      selectedAudioLanguage: null,
       audioTimeRange: { start: 0, end: 0 },
-      selectedAudioFormatForDownload: null,
+      selectedAudioMode: "mp3",
       isDownloadingAudio: false,
       videoTimeRange: { start: 0, end: 0 },
-      selectedVideoQuality: null,
+      selectedTier: null,
       isDownloadingVideo: false,
       videoPreciseCut: true,
       audioPreciseCut: true,

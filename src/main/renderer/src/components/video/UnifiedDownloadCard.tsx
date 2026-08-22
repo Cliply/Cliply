@@ -6,9 +6,10 @@ import {
   tiktokApi,
   systemApi,
   validateTimeRange,
+  type AudioTrack,
   type PinterestVideoInfoResponse,
-  type TikTokVideoInfoResponse,
-  type VideoFormat
+  type QualityTier,
+  type TikTokVideoInfoResponse
 } from "@/lib/api"
 import { reportActions } from "@/lib/reportStore"
 import { usePinterestStore } from "@/lib/pinterestStore"
@@ -24,6 +25,7 @@ import { useState } from "react"
 import { toast } from "sonner"
 import { AudioDownloadButton } from "./AudioDownloadButton"
 import { AudioFormatDropdown } from "./AudioFormatDropdown"
+import { AudioTrackDropdown } from "./AudioTrackDropdown"
 import { TimeRangeSelector } from "./TimeRangeSelector"
 import { VideoDownloadButton } from "./VideoDownloadButton"
 import { VideoQualityDropdown } from "./VideoQualityDropdown"
@@ -33,8 +35,8 @@ type YouTubeDownloadCardProps = {
   platform?: "youtube"
   videoInfo: {
     duration: number
-    video_formats: VideoFormat[]
-    audio_formats: VideoFormat[]
+    quality_tiers: QualityTier[]
+    audio_tracks?: AudioTrack[]
   }
   className?: string
 }
@@ -78,17 +80,13 @@ function YouTubeDownloadCard({
 }: {
   videoInfo: {
     duration: number
-    video_formats: VideoFormat[]
-    audio_formats: VideoFormat[]
+    quality_tiers: QualityTier[]
+    audio_tracks?: AudioTrack[]
   }
   className?: string
 }) {
-  const {
-    audioTimeRange,
-    selectedAudioFormatForDownload,
-    videoTimeRange,
-    selectedVideoQuality
-  } = useYouTubeStore()
+  const { audioTimeRange, selectedAudioMode, videoTimeRange, selectedTier } =
+    useYouTubeStore()
 
   const [isVideoQualityDropdownOpen, setIsVideoQualityDropdownOpen] =
     useState(false)
@@ -101,8 +99,7 @@ function YouTubeDownloadCard({
   ).isValid
 
   const showAudioFormatDropdown = isValidAudioTimeRange
-  const showAudioDownloadButton =
-    showAudioFormatDropdown && !!selectedAudioFormatForDownload
+  const showAudioDownloadButton = showAudioFormatDropdown && !!selectedAudioMode
 
   const isValidVideoTimeRange = validateTimeRange(
     videoTimeRange.start,
@@ -111,7 +108,9 @@ function YouTubeDownloadCard({
   ).isValid
 
   const showVideoQualityDropdown = isValidVideoTimeRange
-  const showVideoDownloadButton = showVideoQualityDropdown && !!selectedVideoQuality
+  const showVideoDownloadButton = showVideoQualityDropdown && !!selectedTier
+
+  const audioTracks = videoInfo.audio_tracks ?? []
 
   return (
     <motion.div
@@ -158,15 +157,20 @@ function YouTubeDownloadCard({
               <VideoTimeRangeSelector maxDuration={videoInfo.duration} />
 
               <VideoQualityDropdown
-                videoFormats={videoInfo.video_formats}
-                audioFormats={videoInfo.audio_formats}
+                tiers={videoInfo.quality_tiers}
                 isVisible={showVideoQualityDropdown}
                 onOpenChange={setIsVideoQualityDropdownOpen}
               />
 
+              {/* no video to download means no language to pick for it - the
+                  audio tab still offers the choice */}
+              <AudioTrackDropdown
+                tracks={audioTracks}
+                isVisible={showVideoQualityDropdown && !!selectedTier}
+              />
+
               <VideoDownloadButton
                 maxDuration={videoInfo.duration}
-                audioFormats={videoInfo.audio_formats}
                 isVisible={showVideoDownloadButton}
               />
             </div>
@@ -184,8 +188,10 @@ function YouTubeDownloadCard({
             <div className="space-y-6">
               <TimeRangeSelector maxDuration={videoInfo.duration} />
 
-              <AudioFormatDropdown
-                audioFormats={videoInfo.audio_formats}
+              <AudioFormatDropdown isVisible={showAudioFormatDropdown} />
+
+              <AudioTrackDropdown
+                tracks={audioTracks}
                 isVisible={showAudioFormatDropdown}
               />
 

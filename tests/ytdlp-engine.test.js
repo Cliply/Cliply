@@ -8,6 +8,7 @@ const {
   buildArgs,
   buildCommonArgs,
   buildTrimArgs,
+  normalizeAudioLanguage,
   expectedStreamCount,
   parseProgressLine,
   parseDestinationLine,
@@ -38,6 +39,13 @@ function valueAfter(args, flag) {
   return index === -1 ? undefined : args[index + 1]
 }
 
+// flags that must appear in one exact order, back to back
+function containsSequence(args, sequence) {
+  return args.some((_, index) =>
+    sequence.every((value, offset) => args[index + offset] === value)
+  )
+}
+
 describe("common args", () => {
   test("wires up deno, ffmpeg and the quiet/newline flags", () => {
     const args = buildCommonArgs(PATHS)
@@ -49,12 +57,13 @@ describe("common args", () => {
     expect(args).toContain("--newline")
   })
 
-  test("ports the python retry counts", () => {
+  // the python service's 1/1/2 turned a transient blip into a failed download
+  test("leaves the retry counts at yt-dlp's own defaults", () => {
     const args = buildCommonArgs(PATHS)
 
-    expect(valueAfter(args, "--retries")).toBe("1")
-    expect(valueAfter(args, "--extractor-retries")).toBe("1")
-    expect(valueAfter(args, "--fragment-retries")).toBe("2")
+    expect(args).not.toContain("--retries")
+    expect(args).not.toContain("--extractor-retries")
+    expect(args).not.toContain("--fragment-retries")
   })
 
   test("omits deno and ffmpeg flags when the binaries are unknown", () => {
@@ -100,50 +109,26 @@ describe("info args", () => {
 })
 
 describe("combined download args", () => {
-  test("maps preset ids through the ported format selectors", () => {
+  test("writes the file where the caller asked for it", () => {
     const args = buildArgs("combined", {
       ...PATHS,
       url: "https://youtu.be/abc",
-      videoFormatId: "hd_720p",
-      audioFormatId: "auto_audio",
+      height: 720,
+      container: "mp4",
       outputDir: "/downloads",
       outputTemplate: "video.%(ext)s"
     })
 
-    expect(valueAfter(args, "-f")).toBe("bestvideo[height<=720]+bestaudio")
-    expect(valueAfter(args, "--merge-output-format")).toBe("mp4")
     expect(valueAfter(args, "-P")).toBe("/downloads")
     expect(valueAfter(args, "-o")).toBe("video.%(ext)s")
-  })
-
-  test("auto omits -f entirely, like the python path did", () => {
-    const args = buildArgs("combined", {
-      ...PATHS,
-      url: "https://youtu.be/abc",
-      videoFormatId: "auto",
-      audioFormatId: "auto_audio"
-    })
-
-    expect(args).not.toContain("-f")
-  })
-
-  test("raw format ids from --dump-json are merged", () => {
-    const args = buildArgs("combined", {
-      ...PATHS,
-      url: "https://youtu.be/abc",
-      videoFormatId: "133",
-      audioFormatId: "139"
-    })
-
-    expect(valueAfter(args, "-f")).toBe("133+139")
   })
 
   test("carries the progress and final-filename plumbing", () => {
     const args = buildArgs("combined", {
       ...PATHS,
       url: "https://youtu.be/abc",
-      videoFormatId: "best_quality",
-      audioFormatId: "auto_audio"
+      height: 1080,
+      container: "mp4"
     })
 
     // --print implies --quiet, so --progress must be present for progress lines
@@ -152,6 +137,107 @@ describe("combined download args", () => {
     expect(args.filter((arg) => arg === "--print")).toHaveLength(2)
     expect(args).toContain(STREAM_TEMPLATE)
     expect(args).toContain(FILE_TEMPLATE)
+  })
+})
+
+describe("quality tier download args", () => {
+  const TIER = {
+    ...PATHS,
+    url: "https://youtu.be/abc",
+    outputDir: "/downloads",
+    outputTemplate: "%(title).120B_%(height)sp_%(epoch)s.%(ext)s"
+  }
+
+  test("an mp4 tier asks for the preset and the resolution sort", () => {
+    const args = buildArgs("combined", { ...TIER, height: 720, container: "mp4" })
+
+    expect(containsSequence(args, ["-t", "mp4", "-S", "res:720"])).toBe(true)
+  })
+
+  test("an mkv tier asks for the mkv preset", () => {
+    const args = buildArgs("combined", { ...TIER, height: 2160, container: "mkv" })
+
+    expect(containsSequence(args, ["-t", "mkv", "-S", "res:2160"])).toBe(true)
+  })
+
+  /**
+   * the whole point of the revamp, verified against 2026.08.19:
+   *   -t mp4 -S res:720 -> 298+140, h264 720p
+   *   -S res:720 -t mp4 -> 299+140, h264 1080p
+   * `-t mp4` expands to an -S of its own and the last -S on the line wins, so
+   * a swapped order silently hands the user a different resolution
+   */
+  test("the preset is pushed BEFORE the -S sort, never after", () => {
+    const args = buildArgs("combined", { ...TIER, height: 720, container: "mp4" })
+
+    const preset = args.indexOf("-t")
+    const sort = args.indexOf("-S")
+
+    expect(preset).toBeGreaterThan(-1)
+    expect(sort).toBeGreaterThan(-1)
+    expect(preset).toBeLessThan(sort)
+    expect(args[sort + 1]).toBe("res:720")
+  })
+
+  test("drops the forced --merge-output-format that broke mp4 audio", () => {
+    const args = buildArgs("combined", { ...TIER, height: 1080, container: "mp4" })
+
+    expect(args).not.toContain("--merge-output-format")
+    expect(args).not.toContain("-f")
+  })
+
+  test("trim args are still appended after the tier flags", () => {
+    const args = buildArgs("combined", {
+      ...TIER,
+      height: 720,
+      container: "mp4",
+      timeRange: { start: 30, end: 45 },
+      preciseCut: true
+    })
+
+    expect(containsSequence(args, ["-t", "mp4", "-S", "res:720"])).toBe(true)
+    expect(valueAfter(args, "--download-sections")).toBe("*30-45")
+    expect(args).toContain("--force-keyframes-at-cuts")
+  })
+
+  test("a container we never offered falls back to mp4", () => {
+    const args = buildArgs("combined", {
+      ...TIER,
+      height: 720,
+      container: "--exec=rm -rf /"
+    })
+
+    expect(valueAfter(args, "-t")).toBe("mp4")
+  })
+
+  // no menu row can produce this, but a malformed payload must still leave a
+  // complete instruction behind: "best, in a container that plays everywhere"
+  test("a request with no height still asks for a real container", () => {
+    const args = buildArgs("combined", { ...TIER })
+
+    expect(valueAfter(args, "-t")).toBe("mp4")
+    expect(args).not.toContain("-S")
+    expect(args).not.toContain("-f")
+  })
+
+  test("a tier download expects a video stream and an audio stream", () => {
+    expect(expectedStreamCount("combined", { height: 720, container: "mp4" })).toBe(2)
+  })
+})
+
+describe("output filename args", () => {
+  test("the sanitising flags ride along with the template", () => {
+    const args = buildArgs("combined", {
+      ...PATHS,
+      url: "https://youtu.be/abc",
+      height: 720,
+      container: "mp4",
+      outputDir: "/downloads",
+      outputTemplate: "%(title).120B_%(height)sp_%(epoch)s.%(ext)s"
+    })
+
+    expect(args).toContain("--windows-filenames")
+    expect(valueAfter(args, "--trim-filenames")).toBe("240")
   })
 })
 
@@ -183,8 +269,8 @@ describe("trim args", () => {
     const args = buildArgs("combined", {
       ...PATHS,
       url: "https://youtu.be/abc",
-      videoFormatId: "auto",
-      audioFormatId: "auto_audio",
+      height: 1080,
+      container: "mp4",
       timeRange: { start: 30, end: 45 },
       preciseCut: true
     })
@@ -194,28 +280,253 @@ describe("trim args", () => {
   })
 })
 
-describe("audio args", () => {
-  test("keeps the source container when no target format is asked for", () => {
-    const args = buildArgs("audio", {
-      ...PATHS,
-      url: "https://youtu.be/abc",
-      audioFormatId: "medium_audio"
-    })
+describe("audio mode args", () => {
+  const AUDIO = {
+    ...PATHS,
+    url: "https://youtu.be/abc",
+    outputDir: "/downloads",
+    outputTemplate: "%(title).120B_audio_%(epoch)s.%(ext)s"
+  }
 
-    expect(valueAfter(args, "-f")).toBe("bestaudio[abr<=128]")
+  // -t mp3 is 'ba[acodec^=mp3]/ba/b -x --audio-format mp3' - selector,
+  // extraction and container in one, so we add none of them ourselves
+  test("mp3 uses the native preset", () => {
+    const args = buildArgs("audio", { ...AUDIO, audioMode: "mp3" })
+
+    expect(valueAfter(args, "-t")).toBe("mp3")
+    expect(args).not.toContain("-f")
+    expect(args).not.toContain("--extract-audio")
+    expect(args).not.toContain("--audio-format")
+  })
+
+  test("m4a maps onto the aac preset", () => {
+    const args = buildArgs("audio", { ...AUDIO, audioMode: "m4a" })
+
+    expect(valueAfter(args, "-t")).toBe("aac")
+    expect(args).not.toContain("-f")
+  })
+
+  // "original" is the absence of a preset: whatever youtube served, untouched
+  test("original takes the best audio stream without extracting it", () => {
+    const args = buildArgs("audio", { ...AUDIO, audioMode: "original" })
+
+    expect(valueAfter(args, "-f")).toBe("ba/b")
+    expect(args).not.toContain("-t")
     expect(args).not.toContain("--extract-audio")
   })
 
-  test("extracts to the requested audio format", () => {
+  test("trim args are still appended to a mode download", () => {
     const args = buildArgs("audio", {
-      ...PATHS,
-      url: "https://youtu.be/abc",
-      audioFormatId: "auto_audio",
-      audioFormat: "mp3"
+      ...AUDIO,
+      audioMode: "mp3",
+      timeRange: { start: 5, end: 12 },
+      preciseCut: true
     })
 
-    expect(args).toContain("--extract-audio")
-    expect(valueAfter(args, "--audio-format")).toBe("mp3")
+    expect(valueAfter(args, "-t")).toBe("mp3")
+    expect(valueAfter(args, "--download-sections")).toBe("*5-12")
+    expect(args).toContain("--force-keyframes-at-cuts")
+  })
+
+  // the menu offers three modes and nothing else, so anything unrecognised is
+  // a malformed payload - it gets the universal container rather than a guess
+  test("a mode we never offered falls back to mp3", () => {
+    expect(valueAfter(buildArgs("audio", { ...AUDIO, audioMode: "flac" }), "-t")).toBe("mp3")
+    expect(valueAfter(buildArgs("audio", { ...AUDIO }), "-t")).toBe("mp3")
+  })
+})
+
+/**
+ * language is a FILTER field, not a sort field
+ *
+ * `-S lang:hi` is silently ignored - verified against 2026.08.19, it returns
+ * the original track and prints no error - so this is the one place the
+ * "sorting only, never filters" rule is broken on purpose, and the `/b`
+ * fallback tail is what keeps it from hard-failing.
+ *
+ * nothing here asserts on a format id: the -N suffixes (140-2, 251-12) are
+ * assigned per response and shift between calls.
+ */
+describe("audio language args", () => {
+  const TIER = {
+    ...PATHS,
+    url: "https://youtu.be/abc",
+    outputDir: "/downloads",
+    outputTemplate: "%(title).120B_%(height)sp_%(epoch)s.%(ext)s"
+  }
+  const AUDIO = {
+    ...PATHS,
+    url: "https://youtu.be/abc",
+    outputDir: "/downloads",
+    outputTemplate: "%(title).120B_audio_%(epoch)s.%(ext)s"
+  }
+
+  test("a video download pins the language with a fallback tail", () => {
+    const args = buildArgs("combined", {
+      ...TIER,
+      height: 720,
+      container: "mp4",
+      audioLanguage: "hi"
+    })
+
+    expect(valueAfter(args, "-f")).toBe("bv*+ba[language=hi]/bv*+ba/b")
+  })
+
+  // -t expands to an -S of its own and the last -S wins, so the tier flags
+  // keep the exact order ticket 1 verified - the -f only follows them
+  test("the tier flags keep their verified order ahead of the selector", () => {
+    const args = buildArgs("combined", {
+      ...TIER,
+      height: 1080,
+      container: "mkv",
+      audioLanguage: "ja"
+    })
+
+    expect(containsSequence(args, ["-t", "mkv", "-S", "res:1080"])).toBe(true)
+    expect(args.indexOf("-S")).toBeLessThan(args.indexOf("-f"))
+  })
+
+  test("both containers carry the language the same way", () => {
+    for (const container of ["mp4", "mkv"]) {
+      const args = buildArgs("combined", {
+        ...TIER,
+        height: 720,
+        container,
+        audioLanguage: "de"
+      })
+
+      expect(valueAfter(args, "-t")).toBe(container)
+      expect(valueAfter(args, "-f")).toBe("bv*+ba[language=de]/bv*+ba/b")
+    }
+  })
+
+  // -t mp3 / -t aac carry their own selector; a later -f replaces just that,
+  // leaving the extraction and container flags the preset brought with it
+  test("a converted audio mode keeps its preset and takes the selector", () => {
+    for (const [mode, preset] of [
+      ["mp3", "mp3"],
+      ["m4a", "aac"]
+    ]) {
+      const args = buildArgs("audio", { ...AUDIO, audioMode: mode, audioLanguage: "hi" })
+
+      expect(valueAfter(args, "-t")).toBe(preset)
+      expect(valueAfter(args, "-f")).toBe("ba[language=hi]/ba/b")
+      expect(args.indexOf("-t")).toBeLessThan(args.indexOf("-f"))
+    }
+  })
+
+  test("original audio swaps its selector for the language one", () => {
+    const args = buildArgs("audio", {
+      ...AUDIO,
+      audioMode: "original",
+      audioLanguage: "ko"
+    })
+
+    expect(args.filter((arg) => arg === "-f")).toHaveLength(1)
+    expect(valueAfter(args, "-f")).toBe("ba[language=ko]/ba/b")
+    expect(args).not.toContain("-t")
+  })
+
+  // zh-Hans and zh-Hant are separate tracks a prefix match would collide, so
+  // the code goes in whole and the comparison is `=`
+  test("a regional tag goes in whole, matched exactly", () => {
+    const args = buildArgs("audio", {
+      ...AUDIO,
+      audioMode: "original",
+      audioLanguage: "zh-Hant"
+    })
+
+    expect(valueAfter(args, "-f")).toBe("ba[language=zh-Hant]/ba/b")
+    expect(args.join(" ")).not.toContain("^=")
+  })
+
+  /**
+   * THE test for this feature. nearly every video has one audio language, and
+   * on those the renderer sends no code at all - so the args have to come out
+   * byte for byte identical to what they were before the picker existed.
+   */
+  test("without a language, every download is byte-identical to today's", () => {
+    const cases = [
+      ["combined", { ...TIER, height: 720, container: "mp4" }],
+      ["combined", { ...TIER, height: 2160, container: "mkv" }],
+      [
+        "combined",
+        { ...TIER, height: 720, container: "mp4", timeRange: { start: 30, end: 45 }, preciseCut: true }
+      ],
+      ["audio", { ...AUDIO, audioMode: "mp3" }],
+      ["audio", { ...AUDIO, audioMode: "m4a" }],
+      ["audio", { ...AUDIO, audioMode: "original" }]
+    ]
+
+    for (const [operation, params] of cases) {
+      const baseline = buildArgs(operation, params)
+
+      // the three shapes a request with no choice of dubs can arrive in
+      for (const absent of [{}, { audioLanguage: null }, { audioLanguage: undefined }]) {
+        expect(buildArgs(operation, { ...params, ...absent })).toEqual(baseline)
+      }
+    }
+
+    // and the one that must not have grown an -f: a plain tier download
+    expect(buildArgs("combined", { ...TIER, height: 720, container: "mp4" })).not.toContain("-f")
+  })
+
+  /**
+   * the code is interpolated straight into a format expression, so anything
+   * that is not a language tag is dropped and the download falls back to no
+   * filter at all - the same reasoning as the TIER_CONTAINERS whitelist
+   */
+  test("a malformed code never reaches the format expression", () => {
+    const hostile = [
+      "hi]/bv*+ba[language=ko",
+      "en'; rm -rf /",
+      "en_US",
+      "e",
+      "",
+      "  ",
+      "abcdefghijklmnopq",
+      null,
+      42,
+      { code: "hi" }
+    ]
+
+    for (const audioLanguage of hostile) {
+      const combined = buildArgs("combined", {
+        ...TIER,
+        height: 720,
+        container: "mp4",
+        audioLanguage
+      })
+      const audio = buildArgs("audio", { ...AUDIO, audioMode: "mp3", audioLanguage })
+
+      expect(combined).not.toContain("-f")
+      expect(audio).not.toContain("-f")
+      expect(combined).toEqual(
+        buildArgs("combined", { ...TIER, height: 720, container: "mp4" })
+      )
+    }
+  })
+
+  test("the codes yt-dlp really reports all pass", () => {
+    for (const code of ["hi", "en", "pt-BR", "zh-Hans", "zh-Hant", "fil"]) {
+      expect(normalizeAudioLanguage({ audioLanguage: code })).toBe(code)
+    }
+
+    // surrounding whitespace is a payload artefact, not part of the tag
+    expect(normalizeAudioLanguage({ audioLanguage: " hi " })).toBe("hi")
+    expect(normalizeAudioLanguage({})).toBeNull()
+  })
+
+  test("a simple-platform download never grows a language filter", () => {
+    const args = buildArgs("simple", {
+      ...PATHS,
+      url: "https://tiktok.com/@a/video/1",
+      outputDir: "/downloads",
+      audioLanguage: "hi"
+    })
+
+    expect(valueAfter(args, "-f")).toBe("best")
+    expect(args.filter((arg) => arg === "-f")).toHaveLength(1)
   })
 })
 
@@ -368,26 +679,22 @@ describe("operation gate", () => {
 })
 
 describe("expected stream count", () => {
-  test("counts two streams for merged selectors and auto", () => {
-    expect(
-      expectedStreamCount("combined", { videoFormatId: "hd_720p", audioFormatId: "auto_audio" })
-    ).toBe(2)
-    expect(
-      expectedStreamCount("combined", { videoFormatId: "auto", audioFormatId: "auto_audio" })
-    ).toBe(2)
+  // the opening guess only has to be close: the CLIPLY_STREAM marker corrects
+  // it from the format yt-dlp really chose before the bar moves
+  test("a video download expects a video stream and an audio stream", () => {
+    expect(expectedStreamCount("combined", { height: 720, container: "mp4" })).toBe(2)
   })
 
-  test("counts one stream for pre-muxed and audio-only operations", () => {
-    expect(expectedStreamCount("combined", { formatSelector: "best" })).toBe(1)
-    expect(expectedStreamCount("audio", {})).toBe(1)
+  test("counts one stream for audio-only and simple-platform operations", () => {
+    expect(expectedStreamCount("audio", { audioMode: "mp3" })).toBe(1)
     expect(expectedStreamCount("simple", {})).toBe(1)
   })
 
   test("a trimmed download is one ffmpeg pass no matter how many formats", () => {
     expect(
       expectedStreamCount("combined", {
-        videoFormatId: "hd_720p",
-        audioFormatId: "auto_audio",
+        height: 720,
+        container: "mp4",
         timeRange: { start: 5, end: 12 }
       })
     ).toBe(1)

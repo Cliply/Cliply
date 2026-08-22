@@ -17,10 +17,7 @@ const {
   buildAudioOutputTemplate,
   buildSimpleOutputTemplate
 } = require("./utils/ytdlp-mappers")
-const {
-  getAudioFormatSelector,
-  getSimplePlatformOptions
-} = require("./utils/ytdlp-formats")
+const { getSimplePlatformOptions } = require("./utils/ytdlp-formats")
 const { resolveDownloadId } = require("./utils/download-id")
 
 const { DownloadRunner } = require("./services/download-runner")
@@ -334,7 +331,7 @@ class IPCHandlers {
 
       const videoInfo =
         targetPlatform === "youtube"
-          ? mapVideoInfo(info, url)
+          ? mapVideoInfo(info)
           : mapSimpleInfo(info, `${targetPlatform}_video`)
 
       return this.createSuccess(videoInfo)
@@ -380,7 +377,9 @@ class IPCHandlers {
 
     try {
       if (targetPlatform === "youtube") {
-        this.validateRequest(data, ["url", "video_format_id", "audio_format_id"])
+        // the menu row the user clicked: a real height, and the container that
+        // row was labelled with
+        this.validateRequest(data, ["url", "height"])
       } else {
         // pinterest and tiktok only need the url
         this.validateRequest(data, ["url"])
@@ -388,8 +387,9 @@ class IPCHandlers {
 
       const {
         url,
-        video_format_id: videoFormatId,
-        audio_format_id: audioFormatId,
+        height,
+        container,
+        audio_language: audioLanguage,
         time_range: rawTimeRange,
         precise_cut: preciseCut,
         title = "video",
@@ -400,17 +400,17 @@ class IPCHandlers {
       const timeRange = normalizeTimeRange(rawTimeRange)
 
       if (targetPlatform === "youtube") {
-        const outputTemplate = buildVideoOutputTemplate({
-          title,
-          videoFormatId,
-          timeRange
-        })
+        // the template is native now: yt-dlp fills in the title and the height
+        const outputTemplate = buildVideoOutputTemplate({ timeRange })
 
         const createHandle = () =>
           this.engine.downloadCombined({
             url,
-            videoFormatId,
-            audioFormatId,
+            height,
+            container,
+            // only sent for a video that offers a choice of dubs; the engine
+            // validates it before it reaches a format expression
+            audioLanguage,
             outputDir,
             outputTemplate,
             timeRange,
@@ -435,7 +435,8 @@ class IPCHandlers {
           type: "combined",
           platform: targetPlatform,
           title,
-          formatId: videoFormatId,
+          // analytics reads the quality off this - the height is the quality now
+          formatId: `${height}p`,
           trimmed: Boolean(timeRange),
           createHandle
         })
@@ -523,29 +524,25 @@ class IPCHandlers {
     }
 
     try {
-      this.validateRequest(data, ["url", "format_id"])
+      this.validateRequest(data, ["url", "audio_mode"])
 
       const {
         url,
-        format_id: formatId,
+        audio_mode: audioMode,
+        audio_language: audioLanguage,
         time_range: rawTimeRange,
-        title = "audio",
-        audio_format: audioFormat
+        title = "audio"
       } = data
 
       const outputDir = await this.getDownloadDirectory()
       const timeRange = normalizeTimeRange(rawTimeRange)
-      const outputTemplate = buildAudioOutputTemplate({
-        title,
-        formatId,
-        timeRange
-      })
+      const outputTemplate = buildAudioOutputTemplate({ timeRange })
 
       const createHandle = () =>
         this.engine.downloadAudio({
           url,
-          formatSelector: getAudioFormatSelector(formatId),
-          audioFormat,
+          audioMode,
+          audioLanguage,
           outputDir,
           outputTemplate,
           timeRange,
@@ -569,7 +566,7 @@ class IPCHandlers {
         type: "audio",
         platform: "youtube",
         title,
-        formatId,
+        formatId: audioMode,
         trimmed: Boolean(timeRange),
         createHandle
       })

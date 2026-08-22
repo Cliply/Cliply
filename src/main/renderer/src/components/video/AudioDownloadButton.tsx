@@ -4,7 +4,7 @@ import {
   TooltipContent,
   TooltipTrigger
 } from "@/components/ui/tooltip"
-import { formatDuration, validateTimeRange } from "@/lib/api"
+import { formatDuration, languageName, validateTimeRange } from "@/lib/api"
 import { useAudioDownload } from "@/lib/hooks/useAudioDownload"
 import { useYouTubeStore } from "@/lib/youtubeStore"
 import { isTerminalReason } from "@/lib/downloadOutcome"
@@ -29,7 +29,8 @@ export function AudioDownloadButton({
     videoInfo,
     audioTimeRange,
     setIsDownloadingAudio,
-    selectedAudioFormatForDownload,
+    selectedAudioMode,
+    selectedAudioLanguage,
     audioPreciseCut,
     setAudioPreciseCut
   } = useYouTubeStore()
@@ -51,7 +52,7 @@ export function AudioDownloadButton({
     audioTimeRange.start !== 0 || audioTimeRange.end !== maxDuration
 
   const handleDownload = async () => {
-    if (!selectedAudioFormatForDownload || !isValidRange) return
+    if (!selectedAudioMode || !isValidRange) return
 
     // Prevent multiple downloads
     if (audioDownloadMutation.isPending) return
@@ -64,7 +65,11 @@ export function AudioDownloadButton({
 
       await audioDownloadMutation.mutateAsync({
         url,
-        format_id: selectedAudioFormatForDownload.format_id,
+        audio_mode: selectedAudioMode,
+        // absent unless this video really offered a choice of dubs
+        ...(selectedAudioLanguage
+          ? { audio_language: selectedAudioLanguage }
+          : {}),
         time_range: isSegmentDownload ? audioTimeRange : undefined,
         precise_cut: audioPreciseCut,
         title: videoInfo?.title || "audio"
@@ -117,10 +122,20 @@ export function AudioDownloadButton({
           <div className="flex justify-between">
             <span className="text-slate-600 dark:text-slate-400">Format:</span>
             <span className="font-medium text-slate-900 dark:text-white">
-              {selectedAudioFormatForDownload?.quality}{" "}
-              {selectedAudioFormatForDownload?.ext.toUpperCase()}
+              {selectedAudioMode?.toUpperCase()}
             </span>
           </div>
+          {/* only a video carrying dubs has a language worth naming */}
+          {selectedAudioLanguage && (
+            <div className="flex justify-between">
+              <span className="text-slate-600 dark:text-slate-400">
+                Language:
+              </span>
+              <span className="font-medium text-slate-900 dark:text-white">
+                {languageName(selectedAudioLanguage)}
+              </span>
+            </div>
+          )}
           <div className="flex justify-between">
             <span className="text-slate-600 dark:text-slate-400">
               Time Range:

@@ -2,28 +2,35 @@
 
 import type { ReportEnvironment } from "@/lib/report"
 
-export interface VideoFormat {
-  format_id: string
-  quality: string
-  ext: string
-  filesize?: number | null
-  type: string // "combined" | "video" | "audio" | "auto"
-  height?: number
-  width?: number
-  fps?: number
-  vcodec?: string
-  acodec?: string
-  abr?: number
-  vbr?: number
-  tbr?: number
-  protocol?: string
-  format_note?: string
+/**
+ * one row of the quality menu, derived from the video's own format list
+ *
+ * `height` and `fps` are yt-dlp's. `container` is the one a download at that
+ * height really produces, and `filesize` is the video stream plus the audio it
+ * will be merged with in that container - both worked out from the format list,
+ * and `filesize` is `null` whenever either half is unknown, which renders a row
+ * with no size rather than one claiming a number it cannot stand behind.
+ */
+export interface QualityTier {
+  height: number
+  container: "mp4" | "mkv"
+  filesize: number | null
+  fps: number | null
 }
 
-export interface RecommendedFormats {
-  best_video?: VideoFormat
-  best_audio?: VideoFormat
-  best_combined?: VideoFormat
+// what the audio menu offers: converted mp3, converted m4a, or the stream
+// youtube served with no re-encode at all
+export type AudioMode = "mp3" | "m4a" | "original"
+
+/**
+ * one dubbed audio language the video carries
+ *
+ * `code` is yt-dlp's own BCP-47 tag ("hi", "zh-Hans") and is what the download
+ * request sends back; `is_original` marks the track youtube recorded in.
+ */
+export interface AudioTrack {
+  code: string
+  is_original: boolean
 }
 
 export interface DownloadProgress {
@@ -79,14 +86,8 @@ export interface VideoInfoResponse {
   duration_string: string
   thumbnail?: string | null
   uploader: string
-  view_count?: number
-  upload_date?: string
-  video_formats: VideoFormat[]
-  audio_formats: VideoFormat[]
-  recommendations?: RecommendedFormats
-  description?: string
-  tags?: string[]
-  categories?: string[]
+  quality_tiers: QualityTier[]
+  audio_tracks: AudioTrack[]
 }
 
 export interface PinterestVideoInfoResponse {
@@ -154,7 +155,10 @@ export interface TimeRange {
 
 export interface AudioDownloadRequest {
   url: string
-  format_id: string
+  audio_mode: AudioMode
+  // the dub the user picked, sent only by a video that offered a choice - its
+  // absence is what leaves the download on the original track
+  audio_language?: string
   // renderer-generated correlation id, so progress events can be filtered from
   // the moment the listener subscribes
   download_id?: string
@@ -169,8 +173,12 @@ export interface AudioDownloadRequest {
 
 export interface VideoDownloadRequest {
   url: string
-  video_format_id: string
-  audio_format_id: string
+  height: number
+  // the container of the row that was *displayed*, echoed back so the label the
+  // user read can never disagree with the file they get
+  container: "mp4" | "mkv"
+  // see AudioDownloadRequest.audio_language
+  audio_language?: string
   // see AudioDownloadRequest.download_id
   download_id?: string
   // see AudioDownloadRequest.time_range
@@ -199,12 +207,6 @@ export class DownloadError extends Error {
     this.details = error?.details
     this.category = error?.category
   }
-}
-
-export interface VideoQualityOption {
-  label: string // "1080p", "720p", etc.
-  format: VideoFormat
-  type: "video-only" | "combined"
 }
 
 // Auto-updater types
@@ -657,6 +659,24 @@ export const formatFileSize = (bytes?: number | null): string => {
   return Math.round((bytes / Math.pow(1024, i)) * 100) / 100 + " " + sizes[i]
 }
 
+/**
+ * a language code as a name a person reads: "hi" -> "Hindi", "zh-Hans" ->
+ * "Simplified Chinese"
+ *
+ * `Intl.DisplayNames` is the browser's own CLDR data, which is the whole point:
+ * a hand-written table of 22 languages would be exactly the invented vocabulary
+ * this revamp deleted, and it would go stale the moment youtube adds a dub.
+ * A tag it cannot name (or one malformed enough to throw) falls back to the
+ * code itself, which is still something the user can act on.
+ */
+export const languageName = (code: string): string => {
+  try {
+    return new Intl.DisplayNames(["en"], { type: "language" }).of(code) || code
+  } catch {
+    return code
+  }
+}
+
 export const formatDuration = (seconds: number): string => {
   const hours = Math.floor(seconds / 3600)
   const minutes = Math.floor((seconds % 3600) / 60)
@@ -707,215 +727,6 @@ export const validateTimeRange = (
   }
 
   return { isValid: true }
-}
-
-export const selectBestAudioFormat = (
-  formats: VideoFormat[]
-): VideoFormat | null => {
-  // Handle our new audio format names
-  const autoQuality = formats.find(
-    (format) => format.type === "audio" && format.quality === "Auto"
-  )
-  if (autoQuality) return autoQuality
-
-  // first try to find high quality audio
-  const highQuality = formats.find(
-    (format) => format.type === "audio" && format.quality === "High Quality"
-  )
-  if (highQuality) return highQuality
-
-  // fallback to medium quality
-  const mediumQuality = formats.find(
-    (format) => format.type === "audio" && format.quality === "Medium Quality"
-  )
-  if (mediumQuality) return mediumQuality
-
-  // last resort - any audio format
-  return (
-    formats.find((format) => {
-      if (format.type === "audio") {
-        return true
-      }
-
-      if (
-        format.ext &&
-        ["m4a", "webm", "mp3", "aac", "opus"].includes(format.ext.toLowerCase())
-      ) {
-        if (!format.height && !format.width && !format.fps) {
-          return true
-        }
-      }
-
-      if (
-        format.format_note &&
-        format.format_note.toLowerCase().includes("audio only")
-      ) {
-        return true
-      }
-
-      if (format.acodec && format.acodec !== "none" && format.acodec !== null) {
-        if (
-          !format.vcodec ||
-          format.vcodec === "none" ||
-          format.vcodec === null
-        ) {
-          return true
-        }
-      }
-
-      return false
-    }) || null
-  )
-}
-
-export const selectBestVideoFormat = (
-  formats: VideoFormat[],
-  maxHeight?: number
-): VideoFormat | null => {
-  // Robust video format detection
-  let filtered = formats.filter((format) => {
-    // Check format type first
-    if (
-      format.type === "video" ||
-      format.type === "combined" ||
-      format.type === "auto"
-    ) {
-      return true
-    }
-
-    // Check for video indicators
-    if (format.height && format.height > 0) {
-      return true
-    }
-
-    // Check video codec (fallback)
-    if (format.vcodec && format.vcodec !== "none" && format.vcodec !== null) {
-      return true
-    }
-
-    return false
-  })
-
-  if (maxHeight) {
-    filtered = filtered.filter((f) => !f.height || f.height <= maxHeight)
-  }
-
-  return filtered.sort((a, b) => (b.height || 0) - (a.height || 0))[0] || null
-}
-
-export const filterFormatsByQuality = (
-  formats: VideoFormat[],
-  targetHeight: number
-): VideoFormat[] => {
-  return formats.filter((f) => f.height === targetHeight)
-}
-
-export const getVideoQualityOptions = (
-  videoFormats: VideoFormat[]
-): VideoQualityOption[] => {
-  const qualityMap = new Map<string, VideoQualityOption>()
-
-  videoFormats.forEach((format) => {
-    // Extract quality from the quality field
-    const quality = extractQualityLabel(format.quality)
-
-    // Include video, combined, and auto formats
-    if (
-      quality &&
-      (format.type === "video" ||
-        format.type === "combined" ||
-        format.type === "auto")
-    ) {
-      const existing = qualityMap.get(quality)
-
-      // Prefer better formats (higher file size, better type)
-      if (!existing || isFormatBetter(format, existing.format)) {
-        qualityMap.set(quality, {
-          label: quality,
-          format,
-          type:
-            format.type === "combined"
-              ? "combined"
-              : format.type === "auto"
-                ? "combined"
-                : "video-only"
-        })
-      }
-    }
-  })
-
-  // Sort by quality with custom order for our new formats
-  return Array.from(qualityMap.values()).sort((a, b) => {
-    const qualityOrder: { [key: string]: number } = {
-      "Shorts Auto": 1,
-      Auto: 2,
-      Best: 3,
-      "720p": 4,
-      "360p": 5
-    }
-
-    const orderA = qualityOrder[a.label] || 999
-    const orderB = qualityOrder[b.label] || 999
-
-    if (orderA !== orderB) {
-      return orderA - orderB
-    }
-
-    // Fallback to numeric sorting for legacy formats
-    const aNum = parseInt(a.label.replace(/\D/g, ""))
-    const bNum = parseInt(b.label.replace(/\D/g, ""))
-    return bNum - aNum
-  })
-}
-
-const extractQualityLabel = (quality: string): string | null => {
-  const qualityMappings: { [key: string]: string } = {
-    "Auto (Recommended)": "Auto",
-    "Shorts Auto": "Shorts Auto",
-    Auto: "Auto",
-    "Best Quality": "Best",
-    "720p HD": "720p",
-    "360p (Fast)": "Fastest"
-  }
-
-  // Check if it's one of our new quality formats
-  if (qualityMappings[quality]) {
-    return qualityMappings[quality]
-  }
-
-  // Fallback to original pattern matching for legacy formats
-  const patterns = [
-    /(\d{3,4}p)/, // 1080p, 720p, 480p, etc.
-    /(\d{3,4})/ // Just numbers
-  ]
-
-  for (const pattern of patterns) {
-    const match = quality.match(pattern)
-    if (match) {
-      return match[1].includes("p") ? match[1] : `${match[1]}p`
-    }
-  }
-
-  return null
-}
-
-const isFormatBetter = (
-  formatA: VideoFormat,
-  formatB: VideoFormat
-): boolean => {
-  // Prefer auto formats first, then combined, then video-only
-  if (formatA.type !== formatB.type) {
-    const typeOrder = { auto: 1, combined: 2, video: 3 }
-    const orderA = typeOrder[formatA.type as keyof typeof typeOrder] || 4
-    const orderB = typeOrder[formatB.type as keyof typeof typeOrder] || 4
-    return orderA < orderB
-  }
-
-  // Prefer larger file size (usually better quality)
-  const sizeA = formatA.filesize || 0
-  const sizeB = formatB.filesize || 0
-
-  return sizeA > sizeB
 }
 
 // Auto-updater API

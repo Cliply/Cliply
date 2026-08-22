@@ -82,7 +82,7 @@ function wrapper({ children }: { children: ReactNode }) {
 
 const REQUEST = {
   url: "https://www.youtube.com/watch?v=abc",
-  format_id: "medium_audio"
+  audio_mode: "mp3" as const
 }
 
 type Settled = { ok: boolean; value: unknown }

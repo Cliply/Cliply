@@ -44,7 +44,7 @@ const BASE = {
   type: "combined",
   platform: "youtube",
   title: "A Video",
-  formatId: "hd_720p"
+  formatId: "720p"
 }
 
 const settle = () => new Promise((resolve) => setImmediate(resolve))
@@ -358,7 +358,7 @@ describe("analytics", () => {
 
     expect(tracked[0].name).toBe("download_completed")
     expect(tracked[0].platform).toBe("youtube")
-    expect(tracked[0].formatId).toBe("hd_720p")
+    expect(tracked[0].formatId).toBe("720p")
   })
 
   test("reports a failure with its error code", async () => {

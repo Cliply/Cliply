@@ -14,9 +14,15 @@ const path = require("path")
 
 const { YtdlpEngine } = require("../src/main/services/ytdlp-engine")
 const { YtdlpUpdater, releaseAssetFor } = require("../src/main/services/ytdlp-updater")
+const { extractAudioTracks } = require("../src/main/utils/ytdlp-mappers")
 
 const REPO = path.join(__dirname, "..")
 const URL = process.env.CLIPLY_SMOKE_URL || "https://www.youtube.com/watch?v=aqz-KE-bpKQ"
+
+// a dubbed upload, for the audio track checks - the default URL above has one
+// audio language, which is the case that must show no picker at all
+const DUBBED_URL =
+  process.env.CLIPLY_SMOKE_DUBBED_URL || "https://www.youtube.com/watch?v=Af6i6ChAVTw"
 
 const PLATFORM_DIRS = { darwin: "macos", win32: "windows", linux: "linux" }
 const PLATFORM_DIR = PLATFORM_DIRS[process.platform] || process.platform
@@ -127,8 +133,8 @@ async function main() {
   console.log("\n=== trimmed download (0:05-0:12, precise cut) ===")
   const trimmed = engine.downloadCombined({
     url: URL,
-    videoFormatId: "eco_360p",
-    audioFormatId: "auto_audio",
+    height: 360,
+    container: "mp4",
     outputDir: downloadDir,
     outputTemplate: "smoke_trim.%(ext)s",
     timeRange: { start: 5, end: 12 },
@@ -141,7 +147,8 @@ async function main() {
   console.log("\n=== untrimmed video+audio download ===")
   const merged = engine.downloadCombined({
     url: URL,
-    formatSelector: "160+139",
+    height: 144,
+    container: "mp4",
     outputDir: downloadDir,
     outputTemplate: "smoke_merged.%(ext)s"
   })
@@ -159,8 +166,7 @@ async function main() {
   console.log("\n=== audio download ===")
   const audio = engine.downloadAudio({
     url: URL,
-    audioFormatId: "medium_audio",
-    audioFormat: "mp3",
+    audioMode: "mp3",
     outputDir: downloadDir,
     outputTemplate: "smoke_audio.%(ext)s",
     timeRange: { start: 5, end: 10 },
@@ -168,6 +174,43 @@ async function main() {
   })
   const audioResult = await audio.promise
   check("mp3 produced", fs.existsSync(audioResult.filePath), audioResult.filePath)
+
+  console.log("\n=== dubbed audio tracks ===")
+  // the single-language case first, because it is nearly every video and the
+  // one this feature is not allowed to change
+  check(
+    "a single-language video offers no track choice",
+    extractAudioTracks(info).length === 0,
+    `${info.formats.filter((format) => format.vcodec === "none").length} audio formats, no languages`
+  )
+
+  const dubbedInfo = await engine.getInfo(DUBBED_URL)
+  const tracks = extractAudioTracks(dubbedInfo)
+  check("a dubbed video reports its languages", tracks.length > 1, `${tracks.length} tracks`)
+  check(
+    "the original is identified",
+    tracks.filter((track) => track.is_original).length === 1,
+    tracks.find((track) => track.is_original)?.code
+  )
+
+  const dub = tracks.find((track) => !track.is_original)
+  if (dub) {
+    const dubbed = engine.downloadAudio({
+      url: DUBBED_URL,
+      audioMode: "mp3",
+      audioLanguage: dub.code,
+      outputDir: downloadDir,
+      outputTemplate: `smoke_dub_${dub.code}.%(ext)s`,
+      timeRange: { start: 10, end: 16 },
+      preciseCut: true
+    })
+    const dubbedResult = await dubbed.promise
+    check(
+      `a ${dub.code} audio download produced a file`,
+      fs.existsSync(dubbedResult.filePath),
+      path.basename(dubbedResult.filePath)
+    )
+  }
 
   console.log("\n=== error mapping ===")
   try {
@@ -195,8 +238,8 @@ async function main() {
   const before = countFfmpeg()
   const cancelling = engine.downloadCombined({
     url: URL,
-    videoFormatId: "hd_720p",
-    audioFormatId: "auto_audio",
+    height: 720,
+    container: "mp4",
     outputDir: downloadDir,
     outputTemplate: "smoke_cancel.%(ext)s",
     timeRange: { start: 0, end: 120 },
@@ -236,8 +279,8 @@ async function main() {
   console.log("\n=== update gate ===")
   const busy = engine.downloadCombined({
     url: URL,
-    videoFormatId: "eco_360p",
-    audioFormatId: "auto_audio",
+    height: 360,
+    container: "mp4",
     outputDir: downloadDir,
     outputTemplate: "smoke_busy.%(ext)s"
   })

@@ -10,10 +10,6 @@ const fs = require("fs")
 const os = require("os")
 const path = require("path")
 
-const {
-  getFormatSelector,
-  getAudioFormatSelector
-} = require("../utils/ytdlp-formats")
 // shared with the cookie manager on purpose: when the two disagreed about
 // "#HttpOnly_" lines, downloads dropped a jar the ui called loaded
 const { cookieFileHasEntries } = require("../utils/cookie-jar")
@@ -476,8 +472,9 @@ function buildCommonArgs({ ffmpegPath, denoPath, cookieFile } = {}) {
 
   args.push("--no-warnings", "--no-colors", "--newline")
 
-  // retry counts ported from the python service - fail fast rather than hang
-  args.push("--retries", "1", "--extractor-retries", "1", "--fragment-retries", "2")
+  // no retry overrides: yt-dlp's defaults (10 / 3 / 10) ride out the transient
+  // blips the python service's 1/1/2 turned into failures, and the no-output
+  // watchdog still kills anything genuinely wedged
 
   if (cookieFile) {
     args.push("--cookies", cookieFile)
@@ -505,6 +502,13 @@ function buildDownloadArgs({ outputDir, outputTemplate } = {}) {
 
   if (outputTemplate) {
     args.push("-o", outputTemplate)
+    // --windows-filenames is a no-op on mac and windows: verified against
+    // 2026.08.19, yt-dlp already substitutes `: / | ? * < >` with fullwidth
+    // lookalikes by default there. it earns its place only on the linux build,
+    // which would otherwise write names that break when copied to windows.
+    // --trim-filenames keeps a name inside the 255-byte path component limit -
+    // it takes a LENGTH, not a bare flag
+    args.push("--windows-filenames", "--trim-filenames", "240")
   }
 
   return args
@@ -524,6 +528,97 @@ function buildTrimArgs({ timeRange, preciseCut } = {}) {
   }
 
   return args
+}
+
+// the only containers a tier may ask for: -t expands into whole option sets, so
+// an unvetted value from the renderer must never reach it
+const TIER_CONTAINERS = ["mp4", "mkv"]
+
+// the whole audio vocabulary: our wording -> yt-dlp's preset name. `original`
+// maps to null because it *is* the absence of a preset - the stream youtube
+// served, unconverted. the keys are also the valid-mode list
+const AUDIO_MODE_PRESETS = { mp3: "mp3", m4a: "aac", original: null }
+
+// a language code is interpolated straight into an -f expression, so it is
+// whitelisted for the same reason TIER_CONTAINERS is: nothing arriving over
+// ipc gets to write format-selector syntax. real codes are bcp-47 tags -
+// "hi", "pt-BR", "zh-Hans" - and nothing else has to pass
+const AUDIO_LANGUAGE_PATTERN = /^[a-zA-Z0-9-]{2,16}$/
+
+/**
+ * read the requested audio language off the download params
+ *
+ * anything unrecognised comes back as null, which means the args are built
+ * exactly as they were before this option existed - the same download every
+ * single-language video has always produced
+ *
+ * @param {Object} params - operation parameters
+ * @returns {string|null} the language code, or null for "no language filter"
+ */
+function normalizeAudioLanguage(params = {}) {
+  // a tag is a string, and only a string: coercing a number or an object into
+  // one would launder a malformed payload into something the pattern accepts
+  if (typeof params.audioLanguage !== "string") {
+    return null
+  }
+
+  const code = params.audioLanguage.trim()
+
+  return AUDIO_LANGUAGE_PATTERN.test(code) ? code : null
+}
+
+/**
+ * the format selector that pins an audio language
+ *
+ * **language is a filter field, not a sort field.** `-S lang:hi` is silently
+ * ignored - verified against 2026.08.19, it returns the original track and
+ * prints no error - so this is the one place the "sorting only, never filters"
+ * rule is broken on purpose. the `/b` fallback tail is what keeps it safe: a
+ * language that has gone away since the listing degrades to the normal pick
+ * instead of failing the download.
+ *
+ * the match is exact (`=`) and never a prefix (`^=`), because `zh-Hans` and
+ * `zh-Hant` are separate tracks that a prefix match would collide into one.
+ *
+ * @param {string} language - a code that has already been validated
+ * @param {boolean} audioOnly - true for the audio tab, false for video+audio
+ * @returns {string} the -f expression
+ */
+function audioLanguageSelector(language, audioOnly) {
+  return audioOnly
+    ? `ba[language=${language}]/ba/b`
+    : `bv*+ba[language=${language}]/bv*+ba/b`
+}
+
+/**
+ * read a {height, container} quality tier off the download params
+ *
+ * a missing height is not an error: `-t mp4` on its own is still a complete
+ * instruction ("best, in this container"), which is what yt-dlp would do anyway
+ *
+ * @param {Object} params - operation parameters
+ * @returns {Object} {height, container} - height is null when none was asked for
+ */
+function normalizeQualityTier(params = {}) {
+  const height = Math.round(Number(params.height))
+
+  return {
+    height: Number.isFinite(height) && height > 0 ? height : null,
+    container: TIER_CONTAINERS.includes(params.container) ? params.container : "mp4"
+  }
+}
+
+/**
+ * read the audio mode off the download params
+ * @param {Object} params - operation parameters
+ * @returns {string} mp3 | m4a | original
+ */
+function normalizeAudioMode(params = {}) {
+  const mode = String(params.audioMode || "").toLowerCase()
+
+  // mp3 is the fallback for anything unrecognised - the same universal mode the
+  // menu opens on, so a malformed payload can never produce an unplayable file
+  return Object.hasOwn(AUDIO_MODE_PRESETS, mode) ? mode : "mp3"
 }
 
 /**
@@ -553,17 +648,25 @@ function buildArgs(operation, params = {}) {
     }
 
     case "combined": {
-      const selector =
-        params.formatSelector !== undefined
-          ? params.formatSelector
-          : getFormatSelector(params.videoFormatId, params.audioFormatId)
+      const tier = normalizeQualityTier(params)
 
-      // a null selector means "auto" - let yt-dlp pick, exactly like the python path
-      if (selector) {
-        args.push("-f", selector)
+      // ORDER IS LOAD-BEARING. `-t mp4` expands to an -S of its own and the
+      // last -S on the line wins, so the preset has to come first:
+      //   -t mp4 -S res:720 -> 298+140, h264 720p
+      //   -S res:720 -t mp4 -> 299+140, h264 1080p
+      // no --merge-output-format either: -t already remuxes to a container
+      // whose codecs the whole world can actually play
+      args.push("-t", tier.container)
+
+      if (tier.height) {
+        args.push("-S", `res:${tier.height}`)
       }
 
-      args.push("--merge-output-format", params.mergeOutputFormat || "mp4")
+      const language = normalizeAudioLanguage(params)
+      if (language) {
+        args.push("-f", audioLanguageSelector(language, false))
+      }
+
       args.push("--no-playlist")
       args.push(...buildDownloadArgs(params))
       args.push(...buildTrimArgs(params))
@@ -571,17 +674,24 @@ function buildArgs(operation, params = {}) {
     }
 
     case "audio": {
-      const selector =
-        params.formatSelector !== undefined
-          ? params.formatSelector
-          : getAudioFormatSelector(params.audioFormatId || params.formatId)
+      const preset = AUDIO_MODE_PRESETS[normalizeAudioMode(params)]
+      const language = normalizeAudioLanguage(params)
 
-      args.push("-f", selector || "bestaudio")
+      if (!preset) {
+        // no -x on purpose: "original" means the stream in the container
+        // youtube served it in, and the /b tail keeps sites that only offer
+        // muxed formats from failing outright
+        args.push("-f", language ? audioLanguageSelector(language, true) : "ba/b")
+      } else {
+        // -t mp3 / -t aac carry their own selector, extraction and container
+        args.push("-t", preset)
 
-      // without an explicit target format we keep the source container, which
-      // is what the python service did
-      if (params.audioFormat) {
-        args.push("--extract-audio", "--audio-format", params.audioFormat)
+        // a later -f replaces the preset's own selector while its extraction
+        // and container flags stay - verified: `-t mp3 -f "ba[language=hi]/ba/b"`
+        // produces an mp3 whose %(language)s reads hi
+        if (language) {
+          args.push("-f", audioLanguageSelector(language, true))
+        }
       }
 
       args.push("--no-playlist")
@@ -649,7 +759,8 @@ function invalidUrlError(message) {
 
 // yt-dlp reports progress per stream, so a video+audio download sweeps 0-100
 // twice. this is the opening guess; the before_dl marker corrects it once the
-// real format is known.
+// real format is known - including the case where the pick turns out to be a
+// single pre-muxed file.
 function expectedStreamCount(operation, params = {}) {
   if (operation !== "combined") {
     return 1
@@ -661,17 +772,8 @@ function expectedStreamCount(operation, params = {}) {
     return 1
   }
 
-  const selector =
-    params.formatSelector !== undefined
-      ? params.formatSelector
-      : getFormatSelector(params.videoFormatId, params.audioFormatId)
-
-  // "auto" (null) and merged selectors both end up fetching video + audio
-  if (!selector) {
-    return 2
-  }
-
-  return selector.includes("+") ? 2 : 1
+  // a video download merges a video stream with an audio one
+  return 2
 }
 
 /**
@@ -1751,6 +1853,9 @@ module.exports = {
   buildCommonArgs,
   buildDownloadArgs,
   buildTrimArgs,
+  normalizeQualityTier,
+  normalizeAudioMode,
+  normalizeAudioLanguage,
   expectedStreamCount,
   parseProgressLine,
   parseDestinationLine,
