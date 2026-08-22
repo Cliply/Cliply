@@ -18,7 +18,9 @@
 const fsp = require("fs").promises
 const { createWriteStream } = require("fs")
 const crypto = require("crypto")
+const dns = require("dns").promises
 const https = require("https")
+const net = require("net")
 const path = require("path")
 const { pipeline } = require("stream/promises")
 
@@ -50,6 +52,12 @@ const STAGED_PROBE_TIMEOUT_MS = 5 * 60 * 1000
 const BUNDLED_MARKER = ".bundled-engine.json"
 
 const REQUEST_TIMEOUT_MS = 60 * 1000
+
+// how long a single address gets to answer before the next one is tried. the
+// os gives up on an unreachable host after ~75s, far too long to sit through
+// when a sibling address would have answered in milliseconds
+const CONNECT_TIMEOUT_MS = 10 * 1000
+
 const MAX_REDIRECTS = 5
 // SHA2-256SUMS is ~2 kb; anything near this is a redirect to something else
 const MAX_TEXT_BYTES = 1024 * 1024
@@ -795,29 +803,154 @@ function createHttpClient() {
   }
 }
 
-function httpGet(url, options = {}) {
+/**
+ * GET a url, trying every address its hostname resolves to
+ *
+ * github serves releases from an anycast host with four A records, and one
+ * blackholed address is enough to stall an update indefinitely: https.get
+ * resolves through dns.lookup, which returns a single address and never falls
+ * back to its siblings, and the node electron 28 ships leaves happy eyeballs
+ * off by default. so the addresses are resolved up front and tried in turn.
+ *
+ * @param {string} url - url to GET
+ * @param {Object} options - {signal, timeoutMs, connectTimeoutMs, lookup}
+ * @returns {Promise<import("http").IncomingMessage>} the unread response
+ */
+async function httpGet(url, options = {}) {
+  const addresses = await resolveAddresses(new URL(url).hostname, options)
+
+  return withAddressFallback(addresses, (address) =>
+    httpGetVia(url, address, options)
+  )
+}
+
+/**
+ * every address a hostname resolves to, in the order the resolver gave them
+ *
+ * dns.lookup rather than dns.resolve so the os stays in charge - hosts files,
+ * vpn split dns and corporate resolvers all still apply
+ * @param {string} hostname - host to resolve
+ * @param {Object} options - {lookup} for tests
+ * @returns {Promise<string[]>} at least one address
+ */
+async function resolveAddresses(hostname, options = {}) {
+  const lookup = options.lookup || dns.lookup
+  const found = await lookup(hostname, { all: true, verbatim: true })
+  const addresses = found.map((entry) => entry.address)
+
+  if (addresses.length === 0) {
+    throw new Error(`could not resolve ${hostname}`)
+  }
+
+  return addresses
+}
+
+/**
+ * run an attempt per address, stopping at the first that gets through
+ *
+ * only a failure that happened before a connection was established moves on to
+ * the next address. a tls, http or abort failure would repeat identically
+ * there, so it is surfaced immediately rather than multiplied by four.
+ * @param {string[]} addresses - addresses to try, in order
+ * @param {(address: string) => Promise<any>} attempt - what to try per address
+ * @returns {Promise<any>} the first successful attempt
+ */
+async function withAddressFallback(addresses, attempt) {
+  let lastError = null
+
+  for (const address of addresses) {
+    try {
+      return await attempt(address)
+    } catch (error) {
+      if (!error || error.connectFailed !== true) {
+        throw error
+      }
+
+      lastError = error
+    }
+  }
+
+  throw lastError
+}
+
+/**
+ * one GET, pinned to one address
+ * @param {string} url - url to GET
+ * @param {string} address - the address to reach it at
+ * @param {Object} options - {signal, timeoutMs, connectTimeoutMs}
+ * @returns {Promise<import("http").IncomingMessage>} the unread response
+ */
+function httpGetVia(url, address, options = {}) {
   return new Promise((resolve, reject) => {
     let request
+    let connected = false
+
+    const fail = (error) => {
+      // an abort is the caller's decision, not something a sibling address fixes
+      error.connectFailed = !connected && !isAbortError(error)
+      reject(error)
+    }
+
+    const onConnect = () => {
+      connected = true
+      // the short fuse only covers reaching the host - from here the longer
+      // stalled-transfer guard owns the rest of the response
+      request.setTimeout(options.timeoutMs || REQUEST_TIMEOUT_MS)
+    }
 
     try {
       request = https.get(
         url,
         {
           signal: options.signal || undefined,
-          headers: { "user-agent": USER_AGENT, accept: "*/*" }
+          headers: { "user-agent": USER_AGENT, accept: "*/*" },
+          // the url still carries the hostname, so sni, the host header and
+          // certificate validation are all untouched by pinning the address
+          lookup: (_hostname, lookupOptions, callback) => {
+            const family = net.isIPv6(address) ? 6 : 4
+
+            if (lookupOptions && lookupOptions.all) {
+              callback(null, [{ address, family }])
+              return
+            }
+
+            callback(null, address, family)
+          },
+          // set here rather than through request.setTimeout so the timer is
+          // armed when the socket is created, and so covers the connect itself
+          timeout: options.connectTimeoutMs || CONNECT_TIMEOUT_MS
         },
         resolve
       )
     } catch (error) {
-      reject(error)
+      fail(error)
       return
     }
 
-    request.on("error", reject)
-    request.setTimeout(options.timeoutMs || REQUEST_TIMEOUT_MS, () => {
-      request.destroy(new Error(`request timed out: ${url}`))
+    request.on("socket", (socket) => {
+      if (socket.connecting) {
+        socket.once("connect", onConnect)
+        return
+      }
+
+      onConnect()
+    })
+
+    request.on("error", fail)
+    request.on("timeout", () => {
+      request.destroy(
+        new Error(
+          connected
+            ? `request timed out: ${url}`
+            : `could not connect to ${address} for ${url}`
+        )
+      )
     })
   })
+}
+
+function isAbortError(error) {
+  return Boolean(error) && (error.name === "AbortError" || error.code === "ABORT_ERR")
 }
 
 async function followRedirects(url, options = {}, hops = 0) {
@@ -965,6 +1098,10 @@ module.exports = {
   compareVersions,
   releaseAssetFor,
   createHttpClient,
+  // exported for tests - the address fallback has no seam through the client
+  httpGet,
+  resolveAddresses,
+  withAddressFallback,
   UPDATE_TIMEOUT_MS,
   STAGED_PROBE_TIMEOUT_MS
 }

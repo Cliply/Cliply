@@ -6,13 +6,17 @@
 
 const crypto = require("crypto")
 const fs = require("fs")
+const net = require("net")
 const os = require("os")
 const path = require("path")
 
 const {
   YtdlpUpdater,
   compareVersions,
-  releaseAssetFor
+  releaseAssetFor,
+  httpGet,
+  resolveAddresses,
+  withAddressFallback
 } = require("../src/main/services/ytdlp-updater")
 const {
   OperationGate,
@@ -186,6 +190,128 @@ describe("release assets", () => {
     expect(releaseAssetFor("linux", "x64")).toBe("yt-dlp_linux.zip")
     expect(releaseAssetFor("linux", "arm64")).toBe("yt-dlp_linux_aarch64.zip")
     expect(releaseAssetFor("aix", "ppc")).toBeNull()
+  })
+})
+
+// github's release host answers on four anycast addresses. when one of them is
+// blackholed - which is a thing that happens on real networks - node's own
+// resolution picks a single address and stays there, so the update never lands
+describe("reaching a host that has more than one address", () => {
+  // TEST-NET-3: reserved for documentation, so it is never routable anywhere
+  const UNROUTABLE = ["203.0.113.1", "203.0.113.2"]
+  const lookupOf = (...addresses) => async () =>
+    addresses.map((address) => ({ address, family: 4 }))
+
+  const connectFailure = () => {
+    const error = new Error("connect ETIMEDOUT")
+    error.connectFailed = true
+    return error
+  }
+
+  describe("choosing when to move to the next address", () => {
+    test("stops at the first address that answers", async () => {
+      const tried = []
+      const attempt = async (address) => {
+        tried.push(address)
+        return `response from ${address}`
+      }
+
+      expect(await withAddressFallback(["a", "b", "c"], attempt)).toBe(
+        "response from a"
+      )
+      expect(tried).toEqual(["a"])
+    })
+
+    test("moves past an address it could not connect to", async () => {
+      const tried = []
+      const attempt = async (address) => {
+        tried.push(address)
+        if (address !== "c") throw connectFailure()
+        return "response from c"
+      }
+
+      expect(await withAddressFallback(["a", "b", "c"], attempt)).toBe(
+        "response from c"
+      )
+      expect(tried).toEqual(["a", "b", "c"])
+    })
+
+    test("gives up on a failure the next address would repeat", async () => {
+      const tried = []
+      const attempt = async (address) => {
+        tried.push(address)
+        throw new Error("certificate has expired")
+      }
+
+      await expect(withAddressFallback(["a", "b", "c"], attempt)).rejects.toThrow(
+        "certificate has expired"
+      )
+      // a bad certificate or a 404 is the host's answer, not the address's
+      expect(tried).toEqual(["a"])
+    })
+
+    test("surfaces the last failure when no address works", async () => {
+      const attempt = async (address) => {
+        const error = connectFailure()
+        error.message = `no route to ${address}`
+        throw error
+      }
+
+      await expect(withAddressFallback(["a", "b"], attempt)).rejects.toThrow(
+        "no route to b"
+      )
+    })
+  })
+
+  describe("resolving", () => {
+    test("returns every address the resolver offers", async () => {
+      const addresses = await resolveAddresses("cliply.test", {
+        lookup: lookupOf("185.199.108.133", "185.199.109.133")
+      })
+
+      expect(addresses).toEqual(["185.199.108.133", "185.199.109.133"])
+    })
+
+    test("goes through the os resolver, so hosts-file names still work", async () => {
+      const addresses = await resolveAddresses("localhost")
+
+      expect(addresses.length).toBeGreaterThan(0)
+      expect(addresses.every((address) => net.isIP(address) !== 0)).toBe(true)
+    })
+
+    test("refuses a hostname that resolves to nothing", async () => {
+      await expect(
+        resolveAddresses("cliply.test", { lookup: lookupOf() })
+      ).rejects.toThrow("could not resolve cliply.test")
+    })
+  })
+
+  // real sockets, no server: these prove how a genuine connect failure is
+  // classified, which is what decides whether the next address gets a turn
+  describe("classifying a real failure", () => {
+    test("an unreachable address is treated as worth retrying elsewhere", async () => {
+      await expect(
+        httpGet("https://cliply.test/latest", {
+          lookup: lookupOf(UNROUTABLE[0]),
+          connectTimeoutMs: 50
+        })
+      ).rejects.toMatchObject({ connectFailed: true })
+    })
+
+    test("a cancelled request is not blamed on the address", async () => {
+      const controller = new AbortController()
+      controller.abort()
+
+      const error = await httpGet("https://cliply.test/latest", {
+        lookup: lookupOf(...UNROUTABLE),
+        connectTimeoutMs: 50,
+        signal: controller.signal
+      }).catch((caught) => caught)
+
+      // retrying the other address would only abort again
+      expect(error.connectFailed).toBe(false)
+      expect(error.name).toBe("AbortError")
+    })
   })
 })
 
