@@ -281,7 +281,15 @@ const PROPERTY_VOCABULARIES = {
     "swap-failed",
     "swap-stranded",
     "unsupported-platform",
-    "version-mismatch"
+    "version-mismatch",
+
+    // the one value the updater does not produce. checkForUpdate() can reject
+    // rather than return - runUpdateLocked leaves probeVersion and the
+    // recovery renames unguarded - and index.js names that itself. kept apart
+    // from "check-failed", which is the tag lookup failing and returning
+    // normally: merging them would hide a bug in our own code inside the
+    // commonest network blip there is
+    "check-rejected"
   ]),
 
   // deliberately empty - these values do not exist yet. task 7 invents the
@@ -322,6 +330,147 @@ const KNOWN_PLATFORMS = new Set([
 
 const MAX_TEXT_LENGTH = 500
 const MAX_NUMBER = 1e9
+
+/**
+ * error_message is the one property whose values cannot be enumerated.
+ *
+ * every other string kind is answered by a vocabulary or a numeric anchor,
+ * because - as six rounds of counterexamples established - a pattern cannot
+ * establish what a string *is*, only what it still looks like. this property
+ * has neither defence available to it: it is free text by design, and the
+ * useful half of it is precisely the wording nobody wrote for us. an error
+ * that did not come from the engine carries whatever node, yt-dlp or a throw
+ * site put in it, and the updater's own http failures name their urls.
+ *
+ * redactLogLine is not the answer either. it serves the local log file, where
+ * an absolute path is legitimately useful to whoever is debugging their own
+ * machine; it scrubs the home directory and a query string and nothing else.
+ * merging the two thresholds would degrade the logs to protect telemetry.
+ *
+ * so this works the other way round from a grammar. scrub the shapes we can
+ * name, then ask whether anything location-shaped or identity-shaped is still
+ * standing, and if so send a fixed placeholder rather than the text. an
+ * incomplete pattern list then costs a message instead of a leak, which is the
+ * direction this property has to fail in.
+ */
+const TEXT_PLACEHOLDER = "[redacted]"
+
+/**
+ * how far a path runs once it has started.
+ *
+ * paths hold spaces - "My Holiday Video.mp4" is one token to a person and
+ * three to a regex - and stopping at the first space is what leaves the words
+ * of a title standing after the filename at the end of them has gone. so a
+ * space is consumed only while something further along the line still carries
+ * a separator or a dot, which keeps the path whole without swallowing the
+ * sentence that follows it.
+ */
+const PATH_TAIL = String.raw`(?:[^\s'"<>|,;)]|[ \t](?=[^\n\r]*[\\/.]))*`
+
+const PATH_HEADS = [
+  // a windows unc share
+  String.raw`\\\\`,
+  // a drive letter. the word boundary keeps "Note:" and a clock time out
+  String.raw`\b[A-Za-z]:[\\/]`,
+  // what redactLogLine leaves behind where a home directory was
+  String.raw`~[\\/]`,
+  // two separators, so "MiB/s" and "and/or" stay prose rather than becoming
+  // locations. a *relative* path is deliberately unreachable here - it is
+  // indistinguishable from prose, and the refusal below is what answers it
+  String.raw`/[^\s'"<>|,;)]*/`
+]
+
+const TEXT_SCRUBS = [
+  // a scheme url first, so its own path is consumed here rather than by the
+  // path patterns below. brackets end it so a parenthesised url reads
+  // cleanly; angle brackets do not, because redactLogLine leaves a
+  // "?<redacted>" tail behind that belongs to the url it came from
+  [/\b[a-z][a-z0-9+.-]*:\/\/[^\s'"()[\]]+/gi, "[url]"],
+  [/\bwww\.[^\s'"()[\]]+/gi, "[url]"],
+  [/[^\s'"<>@]+@[^\s'"<>@]+\.[^\s'"<>@]+/g, "[email]"],
+
+  // an address. the updater says "could not connect to <address> for <url>",
+  // and while the address it means is github's, the check below cannot tell
+  // one of those from the machine's own: an ipv4 carries no letters, so the
+  // filename rule reads it as harmless and lets it through. four groups of
+  // digits is more than a version string has, so "2026.08.19" is untouched
+  [/\b\d{1,3}(?:\.\d{1,3}){3}\b/g, "[address]"],
+  [/\b[0-9a-f]{0,4}(?::[0-9a-f]{1,4}){2,7}\b/gi, "[address]"],
+
+  ...PATH_HEADS.map((head) => [new RegExp(head + PATH_TAIL, "g"), "[path]"]),
+
+  // whatever is left carrying an extension. \p{L} rather than [A-Za-z]: a
+  // title in another script is still a title
+  [/\S*\p{L}\S*\.[\p{L}\p{N}]{1,6}(?=$|[\s.,;:!?)\]'"])/gu, "[file]"]
+]
+
+// a span that holds nothing but markers has already been cleaned, and keeping
+// it is what leaves node's "open '[path]'" readable instead of "open [text]"
+const MARKERS_ONLY = /^(?:\s|\[(?:url|path|file|email|address|text)\])*$/
+
+/**
+ * what may not survive the scrub above.
+ *
+ * deliberately broader than it: this half decides whether the text may be sent
+ * at all, so it asks whether the string still looks like a location or an
+ * identity rather than whether we know how to clean it.
+ */
+const TEXT_UNSAFE = [
+  // any separator still standing is one the scrubs could not account for -
+  // a relative path, a windows path in a shape we did not parse
+  /[/\\]/,
+  /@/,
+  // a dotted token carrying a letter: a filename whose extension the scrub
+  // did not recognise. a version string is digits either side and survives
+  /\S*\p{L}\S*\.[\p{L}\p{N}]/u,
+  // something hanging off a home marker. a bare "~" is a whole home directory
+  // and says nothing; "~something" is a path we did not parse
+  /~\S/
+]
+
+/**
+ * replace the quoted spans a message uses to name the thing it is about
+ *
+ * a title, an argument, a filename: whatever is still inside a span after the
+ * scrubs above ran is text nobody vouched for, so the span goes as a whole.
+ *
+ * @param {string} text - already scrubbed of the shapes we can name
+ * @returns {string} the same text with unvouched-for spans replaced
+ */
+function scrubQuotedSpans(text) {
+  return (
+    text
+      .replace(/"([^"]*)"/g, (span, inner) =>
+        MARKERS_ONLY.test(inner) ? span : "[text]"
+      )
+      // a single quote is an apostrophe far more often than a quote mark, so
+      // this one only counts as a span when it is delimited on both sides -
+      // otherwise "you're not a bot" and "don't" would pair up across a
+      // perfectly safe sentence
+      .replace(/(^|[\s(])'([^']*)'(?=$|[\s).,;:!?])/g, (span, lead, inner) =>
+        MARKERS_ONLY.test(inner) ? span : `${lead}[text]`
+      )
+  )
+}
+
+/**
+ * make a free-text message safe to send, or refuse to send it
+ * @param {string} value - the caller's text, already through redactLogLine
+ * @returns {{text: string, refused: boolean}}
+ */
+function scrubText(value) {
+  let text = value
+
+  for (const [pattern, replacement] of TEXT_SCRUBS) {
+    text = text.replace(pattern, replacement)
+  }
+
+  text = scrubQuotedSpans(text)
+
+  return TEXT_UNSAFE.some((pattern) => pattern.test(text))
+    ? { text: TEXT_PLACEHOLDER, refused: true }
+    : { text, refused: false }
+}
 
 /**
  * check a value against its kind, returning the value to send.
@@ -389,10 +538,22 @@ function checkKind(kind, value, key) {
         : { ok: false }
 
 
-    case "text":
-      return typeof value === "string"
-        ? { ok: true, value: redactLogLine(value).slice(0, MAX_TEXT_LENGTH) }
-        : { ok: false }
+    // scrubbed, then re-checked, and only then truncated: cutting first would
+    // leave the front half of a path behind, which no pattern then matches
+    case "text": {
+      if (typeof value !== "string") return { ok: false }
+
+      const scrubbed = scrubText(redactLogLine(value))
+
+      return {
+        ok: true,
+        value: scrubbed.text.slice(0, MAX_TEXT_LENGTH),
+        // a refusal is reported the way a normalization is, naming only the
+        // placeholder - which is a reserved constant - and never the text we
+        // could not vouch for
+        normalized: scrubbed.refused
+      }
+    }
 
     default:
       return { ok: false }

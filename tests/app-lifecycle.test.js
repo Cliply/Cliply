@@ -560,12 +560,36 @@ describe("the deferred engine update check", () => {
     expect(properties.update_reason).toBe("busy")
   })
 
-  it("survives the check rejecting outright", async () => {
+  it("reports a check that rejected instead of reporting", async () => {
+    // runUpdateLocked can throw - a probe that rejects, a rename that does -
+    // and nothing else in the pipeline says this install cannot even ask
+    // whether its engine is stale
     const warn = jest.spyOn(console, "warn").mockImplementation(() => {})
-    mockUpdater.checkForUpdate.mockRejectedValue(new Error("offline"))
+    mockUpdater.checkForUpdate.mockRejectedValue(new Error("spawn EACCES"))
 
     await expect(app.checkForEngineUpdate()).resolves.toBeUndefined()
-    expect(mockAnalytics.capture).not.toHaveBeenCalled()
+
+    expect(captured()).toHaveLength(1)
+    const [event, properties] = captured()[0]
+    expect(event).toBe("engine_update_failed")
+    // not "check-failed": that one is the tag lookup failing and returning
+    // normally. a rejection is our own code breaking, and merging the two
+    // would hide a bug inside a common network blip
+    expect(properties.update_reason).toBe("check-rejected")
+    expect(properties.error_message).toBe("spawn EACCES")
+
+    warn.mockRestore()
+  })
+
+  it("still resolves when the rejection carries no message", async () => {
+    const warn = jest.spyOn(console, "warn").mockImplementation(() => {})
+    mockUpdater.checkForUpdate.mockRejectedValue(null)
+
+    await expect(app.checkForEngineUpdate()).resolves.toBeUndefined()
+
+    const [, properties] = captured()[0]
+    expect(properties.update_reason).toBe("check-rejected")
+    expect(Object.keys(properties)).not.toContain("error_message")
 
     warn.mockRestore()
   })
@@ -659,6 +683,26 @@ describe("the engine payloads survive the real validator", () => {
     expect(warn).not.toHaveBeenCalled()
   })
 
+  it("scrubs the url out of what the updater said went wrong", async () => {
+    // the updater's own http messages carry github urls verbatim - "HTTP 404
+    // for <url>", "request timed out: <url>" - so this is the live path that
+    // sends a url into a free-text property, not a hypothetical one
+    mockUpdater.checkForUpdate.mockResolvedValue({
+      started: true,
+      updated: false,
+      reason: "check-failed",
+      error:
+        "could not read the latest yt-dlp release tag (https://github.com/yt-dlp/yt-dlp/releases/latest)"
+    })
+    await app.checkForEngineUpdate()
+
+    const [message] = await replay()
+
+    expect(message.properties.error_message).not.toContain("github.com")
+    expect(message.properties.error_message).toContain("[url]")
+    expect(warn).not.toHaveBeenCalled()
+  })
+
   it("sends an update whole", async () => {
     mockUpdater.checkForUpdate.mockResolvedValue({
       started: true,
@@ -707,6 +751,11 @@ describe("the engine payloads survive the real validator", () => {
       })
       await app.checkForEngineUpdate()
     }
+
+    // and the one index.js supplies itself
+    mockUpdater.checkForUpdate.mockRejectedValue(new Error("spawn EACCES"))
+    await app.checkForEngineUpdate()
+    reasons.push("check-rejected")
 
     const sent = await replay()
 

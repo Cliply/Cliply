@@ -204,9 +204,16 @@ class CliplyApp {
         console.log("yt-dlp update check:", result)
         this.reportEngineUpdate(result)
       })
-      .catch((error) =>
-        console.warn("yt-dlp update check failed:", error.message)
-      )
+      .catch((error) => {
+        // the check threw rather than reporting - probeVersion rejecting, a
+        // rename that could not be recovered. an install that cannot even ask
+        // whether its engine is stale is the silent degradation this event
+        // exists to surface, and nothing else in the pipeline says so
+        const message = (error && error.message) || null
+
+        console.warn("yt-dlp update check failed:", message)
+        this.reportEngineUpdate({ reason: "check-rejected", error: message })
+      })
   }
 
   /**

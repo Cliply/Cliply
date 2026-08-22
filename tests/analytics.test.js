@@ -713,7 +713,10 @@ describe("Analytics", () => {
           "asset-layout-unexpected", "busy", "cancelled", "check-failed",
           "checksum-mismatch", "checksum-missing", "download-failed",
           "no-binary-available", "probe-failed", "repaired", "swap-failed",
-          "swap-stranded", "unsupported-platform", "version-mismatch"
+          "swap-stranded", "unsupported-platform", "version-mismatch",
+          // the one value the updater does not produce: index.js's word for a
+          // check that rejected instead of reporting
+          "check-rejected"
         ]) {
           const properties = await captureOne("engine_update_failed", {
             update_reason: value
@@ -1153,6 +1156,215 @@ describe("Analytics", () => {
           })
           expect(properties).not.toHaveProperty("file_size_mb")
         }
+      })
+    })
+
+    /**
+     * error_message is the one property whose values cannot be enumerated, so
+     * every other kind's defence - a vocabulary, a numeric anchor - is
+     * unavailable to it. these fixtures are deliberately hostile: the module's
+     * own wording is safe, and a privacy test built only from strings we write
+     * ourselves proves nothing about the strings we do not.
+     *
+     * the assertion is always that the sensitive substring is absent from what
+     * the client received. whether a warning fired is a different question.
+     */
+    describe("error_message against text nobody vouched for", () => {
+      const home = require("os").homedir()
+
+      async function sent(text) {
+        const properties = await captureOne("download_failed", {
+          error_message: text
+        })
+        return properties.error_message
+      }
+
+      it("takes the video id out of a watch url", async () => {
+        const message = await sent(
+          "Failed on https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+        )
+
+        expect(message).not.toContain("dQw4w9WgXcQ")
+        expect(message).not.toContain("youtube.com")
+        expect(message).toContain("[url]")
+      })
+
+      it("takes the video id out of a url that carries it in the path", async () => {
+        // the existing redaction only strips a query string, so this one
+        // walked straight through it
+        const message = await sent("https://youtu.be/dQw4w9WgXcQ")
+
+        expect(message).not.toContain("dQw4w9WgXcQ")
+        expect(message).toBe("[url]")
+      })
+
+      it("takes the username and the title out of a windows path", async () => {
+        const message = await sent(
+          "Can't write to C:\\Users\\devansh\\Videos\\My Holiday Video.mp4"
+        )
+
+        expect(message).not.toContain("devansh")
+        expect(message).not.toContain("Holiday")
+        expect(message).not.toContain(".mp4")
+        expect(message).toContain("[path]")
+      })
+
+      it("takes the title out of a home path", async () => {
+        const message = await sent(
+          `ERROR: unable to open ${home}/Movies/My Holiday Video.mp4`
+        )
+
+        expect(message).not.toContain(home)
+        expect(message).not.toContain("Holiday")
+      })
+
+      it("takes the title out of a path that is not under home", async () => {
+        // /Volumes and /mnt are nobody's home directory, so the existing
+        // redaction had nothing to say about them
+        const message = await sent(
+          "/Volumes/Media/My Holiday Video.mp4 could not be read"
+        )
+
+        expect(message).not.toContain("Holiday")
+        expect(message).toContain("[path]")
+      })
+
+      it("takes out a bare filename", async () => {
+        const message = await sent("could not write video.mp4")
+
+        expect(message).not.toContain("video.mp4")
+        expect(message).toBe("could not write [file]")
+      })
+
+      it("takes out a quoted title", async () => {
+        // a quoted span is where a message puts the thing it is talking about
+        const message = await sent('Failed to process "My Holiday Video"')
+
+        expect(message).not.toContain("Holiday")
+        expect(message).toBe("Failed to process [text]")
+      })
+
+      it("keeps a quoted span that holds nothing but a marker", async () => {
+        // node writes its file errors this way, and "open '[path]'" is worth
+        // more than "open [text]" - the quote rule must not eat what the
+        // scrub above it has already cleaned
+        const message = await sent(
+          `ENOENT: no such file or directory, open '${home}/Movies/x.mp4'`
+        )
+
+        expect(message).not.toContain(home)
+        expect(message).toBe(
+          "ENOENT: no such file or directory, open '[path]'"
+        )
+      })
+
+      it("takes out an email address", async () => {
+        const message = await sent("mail someone@example.com about it")
+
+        expect(message).not.toContain("someone@example.com")
+        expect(message).toContain("[email]")
+      })
+
+      it("takes out an ip address", async () => {
+        // an ipv4 carries no letters, so the filename rule reads it as
+        // harmless prose - this is the shape that walks past every other
+        // check here, and the updater names one on every connect failure
+        expect(
+          await sent("could not connect to 140.82.121.4 for the release")
+        ).toBe("could not connect to [address] for the release")
+
+        expect(await sent("could not connect to 2606:2800:220:1:248::25c8")).not.toContain(
+          "2606:2800"
+        )
+      })
+
+      it("leaves a version string alone next to an address rule", async () => {
+        // four groups of digits is more than a version has, and an exit code
+        // after a colon is not an ipv6 host
+        expect(await sent("engine reports 2026.08.19")).toBe(
+          "engine reports 2026.08.19"
+        )
+        expect(await sent("yt-dlp exited with code 137: Killed")).toBe(
+          "yt-dlp exited with code 137: Killed"
+        )
+      })
+
+      it("takes out a filename that is not written in latin script", async () => {
+        // a title in another script is still a title, so the patterns match
+        // unicode letters rather than [A-Za-z]
+        const message = await sent("read of видео.mp4 failed")
+
+        expect(message).not.toContain("видео")
+        expect(message).toBe("read of [file] failed")
+      })
+
+      it("sends a placeholder when it cannot clean the text", async () => {
+        // a relative path is indistinguishable from prose, so no pattern
+        // could have cleaned these. failing closed costs the message; failing
+        // open would cost the title
+        for (const text of [
+          "Movies/My Holiday Video.mp4 failed",
+          "Videos\\My Holiday Video.mp4 failed"
+        ]) {
+          const message = await sent(text)
+
+          expect(message).toBe("[redacted]")
+          expect(message).not.toContain("Holiday")
+        }
+      })
+
+      it("keeps the words that follow a path instead of eating them", async () => {
+        // a path holds spaces, so it cannot end at the first one - but a tail
+        // that runs to the end of the line takes the diagnosis with it
+        const message = await sent(
+          `unable to open ${home}/Movies/My Holiday Video.mp4 (permission denied)`
+        )
+
+        expect(message).not.toContain("Holiday")
+        expect(message).toBe("unable to open [path] (permission denied)")
+      })
+
+      it("never writes the text it refused into the warning", async () => {
+        console.warn.mockClear()
+        await sent("Movies/My Holiday Video.mp4 failed")
+
+        const logged = console.warn.mock.calls.flat().join(" ")
+        expect(logged).toContain("error_message")
+        expect(logged).not.toContain("Holiday")
+        expect(logged).not.toContain("Movies")
+      })
+
+      it("leaves the engine's own wording exactly as it is", async () => {
+        // ERROR_METADATA and TERMINAL_ERRORS in ytdlp-engine.js. a sample
+        // rather than the whole table, chosen for the shapes that could trip
+        // a pattern: an apostrophe, sentence periods, a bare hyphenated word
+        for (const wording of [
+          "YouTube asked us to confirm you're not a bot.",
+          "This video isn't available for download.",
+          "Your antivirus stopped the video processor.",
+          "Not enough disk space to save this download.",
+          "The download stopped responding."
+        ]) {
+          expect(await sent(wording)).toBe(wording)
+        }
+      })
+
+      it("leaves a version string alone", async () => {
+        // the updater reports these, and a dotted token of digits is not a
+        // filename however much it looks like one
+        const wording = "staged engine reports 2026.08.19, expected 2026.08.20"
+        expect(await sent(wording)).toBe(wording)
+      })
+
+      it("scrubs before it truncates, not after", async () => {
+        // truncating first would cut a path in half and leave the front of it
+        // behind, which no pattern then matches
+        const prose = "y".repeat(440)
+        const message = await sent(`${prose} ${home}/Movies/x.mp4`)
+
+        expect(message).not.toContain(home)
+        expect(message).toBe(`${prose} [path]`)
+        expect(message.length).toBeLessThanOrEqual(500)
       })
     })
 

@@ -754,6 +754,34 @@ describe("the download payloads survive the real validator", () => {
     expect(warn).not.toHaveBeenCalled()
   })
 
+  it("sends nothing identifying when the failure was not the engine's", async () => {
+    // the engine's own wording is fixed and safe, which is exactly why a
+    // replay built only from it proves nothing. this is the other half: a
+    // throw from outside the engine, whose message nobody wrote for telemetry
+    const home = require("os").homedir()
+    const { handlers, captured } = createHandlers()
+
+    await handlers.runner.run({
+      downloadId: "download_9",
+      ...VIDEO,
+      createHandle: () => {
+        throw new Error(
+          `ENOENT: no such file or directory, open '${home}/Movies/My Holiday Video.mp4'`
+        )
+      }
+    })
+
+    const [message] = await replay(captured)
+    const text = message.properties.error_message
+
+    expect(text).not.toContain(home)
+    expect(text).not.toContain("Holiday")
+    expect(text).not.toContain(".mp4")
+    // still a usable failure, which is the whole reason free text is sent
+    expect(text).toContain("no such file or directory")
+    expect(message.properties.error_category).toBe(ERROR_CATEGORIES.PATH_ERROR)
+  })
+
   it("sends a cancel whole", async () => {
     const { handlers, captured } = createHandlers()
 
