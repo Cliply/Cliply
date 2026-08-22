@@ -213,7 +213,19 @@ function toText(input) {
   return String(input)
 }
 
-// an entry applies unless it names the stages it is limited to
+/**
+ * whether a pattern entry is allowed to match at this stage
+ *
+ * an entry applies unless it names the stages it is limited to. no entry in
+ * CATEGORY_PATTERNS is gated today - FFMPEG_AV_BLOCKED was, until it turned out
+ * mapError reads a stderr tail without knowing which stage produced it. the
+ * mechanism is kept for a caller that does know: the updater is always at
+ * UPDATE, so it can gate an entry that would be a false positive anywhere else.
+ *
+ * @param {{stages?: string[]}} entry - a CATEGORY_PATTERNS entry
+ * @param {string} stage - one of ERROR_STAGES
+ * @returns {boolean}
+ */
 function appliesToStage(entry, stage) {
   return !entry.stages || entry.stages.includes(stage)
 }
@@ -259,5 +271,9 @@ module.exports = {
   ERROR_CATEGORIES,
   ERROR_STAGES,
   CATEGORY_PATTERNS,
+  // exported so the stage gate can be tested on its own: no production entry
+  // uses it right now, and a fixture entry parked in the frozen table just to
+  // give the test something to bite on would be worse than testing it directly
+  appliesToStage,
   classify
 }

@@ -2,8 +2,49 @@ const {
   ERROR_CATEGORIES,
   ERROR_STAGES,
   CATEGORY_PATTERNS,
+  appliesToStage,
   classify
 } = require("../src/main/utils/error-taxonomy")
+
+// the stage gate is tested here on fixtures rather than through the production
+// table, which has no gated entry since FFMPEG_AV_BLOCKED stopped needing one.
+// the mechanism is kept for a caller that knows its own stage - the updater is
+// always at UPDATE - so it is worth holding to its contract now, not later.
+describe("appliesToStage", () => {
+  const gated = { stages: [ERROR_STAGES.UPDATE, ERROR_STAGES.RESOLVE_BINARY] }
+  const ungated = { patterns: [/whatever/i] }
+
+  it("lets a gated entry through at a stage it names", () => {
+    expect(appliesToStage(gated, ERROR_STAGES.UPDATE)).toBe(true)
+    expect(appliesToStage(gated, ERROR_STAGES.RESOLVE_BINARY)).toBe(true)
+  })
+
+  it("holds a gated entry back at every stage it does not name", () => {
+    const others = Object.values(ERROR_STAGES).filter(
+      (stage) => !gated.stages.includes(stage)
+    )
+
+    expect(others.length).toBeGreaterThan(0)
+    for (const stage of others) {
+      expect(appliesToStage(gated, stage)).toBe(false)
+    }
+  })
+
+  it("lets an ungated entry through at every stage", () => {
+    for (const stage of Object.values(ERROR_STAGES)) {
+      expect(appliesToStage(ungated, stage)).toBe(true)
+    }
+  })
+
+  it("reads an empty stages list as naming no stage, not as ungated", () => {
+    // an empty array is truthy, so this takes the gated branch and matches
+    // nothing. that is the safe reading: a typo that empties the list disables
+    // the entry rather than quietly letting it match everywhere
+    for (const stage of Object.values(ERROR_STAGES)) {
+      expect(appliesToStage({ stages: [] }, stage)).toBe(false)
+    }
+  })
+})
 
 describe("classify", () => {
   it("puts an antivirus kill in its own bucket, not generic ffmpeg", () => {
