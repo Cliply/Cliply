@@ -52,17 +52,18 @@ const CATEGORY_PATTERNS = [
   {
     // an av kill has to be recognised from the text alone: the only caller that
     // classifies real stderr is mapError, which cannot know it was postprocessing
-    // when it reads the tail. so instead of gating this entry to a stage, every
-    // pattern requires a kill token to sit next to ffmpeg (or next to yt-dlp's
-    // own postprocessing framing) on the same line - a cancel worded "process
-    // killed" still cannot match, which was the point of the gate.
+    // when it reads the tail. so this entry is not gated to a stage - instead
+    // every alternative names ffmpeg and requires a kill token within 80
+    // characters of it on the same line.
+    //
+    // naming ffmpeg is what keeps the category meaning what it says. yt-dlp runs
+    // other postprocessors (AtomicParsley for thumbnails, for one), so a kill
+    // under the "Postprocessing:" heading is no evidence ffmpeg was the victim,
+    // and a cancel worded "process killed" cannot match at all.
     //
     // our own cancels never reach here anyway: they carry an explicit CANCELLED
     // code, and mapError short-circuits on the cancelled flag before classifying.
     category: ERROR_CATEGORIES.FFMPEG_AV_BLOCKED,
-    // every alternative names ffmpeg: yt-dlp runs other postprocessors too
-    // (AtomicParsley for thumbnails, for one), and a kill under the
-    // "Postprocessing:" heading is not evidence that ffmpeg was the victim
     patterns: [
       // 137 is 128 + SIGKILL - nothing else exits ffmpeg that way
       /ffmpeg exited with code 137/i,
