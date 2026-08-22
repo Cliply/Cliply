@@ -6,6 +6,10 @@ const os = require("os")
 const { APP_CONFIG } = require("../utils/constants")
 const { redactLogLine } = require("./ytdlp-engine")
 const { getAppVersion } = require("../utils/analytics-helpers")
+const {
+  ERROR_CATEGORIES,
+  ERROR_STAGES
+} = require("../utils/error-taxonomy")
 
 /**
  * every event we send, and every property it may carry. anything absent is
@@ -98,24 +102,31 @@ const PROPERTY_KINDS = {
   progress_at_failure: "number",
   progress_at_cancel: "number",
 
-  // short labels from a vocabulary this app controls
-  platform: "token",
-  url_kind: "token",
-  media_type: "token",
-  quality: "token",
-  audio_format: "token",
-  duration_bucket: "token",
-  elapsed_bucket: "token",
-  speed_bucket: "token",
-  load_ms_bucket: "token",
-  error_category: "token",
-  error_stage: "token",
-  reason: "token",
-  update_reason: "token",
-  previous_version: "token",
-  engine_version: "token",
-  from_version: "token",
-  to_version: "token",
+  // lowercase identifiers from a vocabulary this app controls
+  platform: "slug",
+  url_kind: "slug",
+  media_type: "slug",
+  quality: "slug",
+  audio_format: "slug",
+  reason: "slug",
+  update_reason: "slug",
+
+  // version strings, which must lead with a digit - that is what a filename
+  // cannot do
+  previous_version: "version",
+  engine_version: "version",
+  from_version: "version",
+  to_version: "version",
+
+  // pre-bucketed measurements, never a raw one
+  duration_bucket: "bucket",
+  elapsed_bucket: "bucket",
+  speed_bucket: "bucket",
+  load_ms_bucket: "bucket",
+
+  // checked against the taxonomy itself, not a copy of it
+  error_category: "error_category",
+  error_stage: "error_stage",
 
   // free text, scrubbed and clipped
   error_message: "text"
@@ -124,12 +135,32 @@ const PROPERTY_KINDS = {
 const KIND_BY_PROPERTY = new Map(Object.entries(PROPERTY_KINDS))
 
 /**
- * what a token may contain. spaces and `<>=~` are admitted so bucket labels
- * ("1-5 min", "<1m", ">10m") survive; the work is done by what is missing -
- * `/`, `\`, `:`, `@`, quotes and everything non-ascii. that is what a url, a
- * path and an email address all need in order to be one.
+ * one charset for all short strings could not work, and did not: a single
+ * grammar wide enough for "1-5 min" also admitted "My Holiday Video", and one
+ * that allowed "2026.08.19" also allowed "vacation.mp4". a character allowlist
+ * cannot tell a controlled label from prose or a basename - only a grammar
+ * shaped like the specific thing can.
  */
-const TOKEN_PATTERN = /^[A-Za-z0-9 ._+<>=~-]{1,64}$/
+
+// a lowercase identifier. no spaces and no dots, which is what stops a title
+// and a filename respectively
+const SLUG_PATTERN = /^[a-z0-9][a-z0-9_-]{0,31}$/
+
+// must lead with a digit - "vacation.mp4" cannot, "2026.08.19" must
+const VERSION_PATTERN = /^[0-9][A-Za-z0-9._-]{0,31}$/
+
+// a pre-bucketed measurement: leads with a digit or a comparison, ends in a
+// short unit. "1-5 min", "<1m", "10-50 MB"
+const BUCKET_PATTERN = /^[<>]?[0-9]+(-[0-9]+)?\s?[a-zA-Z]{0,4}$/
+
+/**
+ * the error vocabularies are referenced, never copied. task 2 made the
+ * taxonomy the single source of truth, so a category added there validates
+ * here for free - and a typo'd one becomes a loud drop instead of a bad
+ * segment sitting in posthog forever.
+ */
+const ERROR_CATEGORY_VALUES = new Set(Object.values(ERROR_CATEGORIES))
+const ERROR_STAGE_VALUES = new Set(Object.values(ERROR_STAGES))
 
 const MAX_TEXT_LENGTH = 500
 const MAX_NUMBER = 1e9
@@ -152,8 +183,28 @@ function checkKind(kind, value) {
         ? { ok: true, value }
         : { ok: false }
 
-    case "token":
-      return typeof value === "string" && TOKEN_PATTERN.test(value)
+    case "slug":
+      return typeof value === "string" && SLUG_PATTERN.test(value)
+        ? { ok: true, value }
+        : { ok: false }
+
+    case "version":
+      return typeof value === "string" && VERSION_PATTERN.test(value)
+        ? { ok: true, value }
+        : { ok: false }
+
+    case "bucket":
+      return typeof value === "string" && BUCKET_PATTERN.test(value)
+        ? { ok: true, value }
+        : { ok: false }
+
+    case "error_category":
+      return typeof value === "string" && ERROR_CATEGORY_VALUES.has(value)
+        ? { ok: true, value }
+        : { ok: false }
+
+    case "error_stage":
+      return typeof value === "string" && ERROR_STAGE_VALUES.has(value)
         ? { ok: true, value }
         : { ok: false }
 

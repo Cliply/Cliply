@@ -529,28 +529,80 @@ describe("Analytics", () => {
 
       for (const [event, keys] of Object.entries(ALLOWED_PROPERTIES)) {
         for (const key of keys) {
-          if (!PROPERTY_KINDS[key]) unkinded.push(`${event}.${key}`)
+          if (!Object.hasOwn(PROPERTY_KINDS, key)) {
+            unkinded.push(`${event}.${key}`)
+          }
         }
       }
 
       expect(unkinded).toEqual([])
     })
 
-    describe("token", () => {
-      it("keeps the bucket labels tasks 5-6 will produce", async () => {
-        for (const value of [
-          "1-5 min",
-          "<1m",
-          ">10m",
-          "~5m",
-          "10-50 MB",
-          "1080p",
-          "youtube",
-          "NETWORK_ERROR",
-          "fetch_info",
-          "2026.08.19",
-          "0.3.3"
-        ]) {
+    it("does not count an inherited name as a declared kind", () => {
+      // a bracket lookup would find Object.prototype.toString and read it as
+      // a declared kind, so the walk above has to ask hasOwn
+      expect(PROPERTY_KINDS.toString).toBeDefined()
+      expect(Object.hasOwn(PROPERTY_KINDS, "toString")).toBe(false)
+    })
+
+    describe("the values that defeated the token charset", () => {
+      it("drops a video title in platform", async () => {
+        // "My Holiday Video" matched the old token grammar and shipped
+        const properties = await captureOne("download_completed", {
+          platform: "My Holiday Video",
+          media_type: "video"
+        })
+
+        expect(properties).not.toHaveProperty("platform")
+        expect(properties.media_type).toBe("video")
+      })
+
+      it("drops a bare filename in quality", async () => {
+        // "vacation.mp4" matched too - dots were admitted for version strings
+        const properties = await captureOne("download_completed", {
+          quality: "vacation.mp4",
+          media_type: "video"
+        })
+
+        expect(properties).not.toHaveProperty("quality")
+        expect(properties.media_type).toBe("video")
+      })
+
+      it("drops them from every kind that takes a string", async () => {
+        for (const value of ["My Holiday Video", "vacation.mp4"]) {
+          const slug = await captureOne("download_completed", {
+            platform: value
+          })
+          expect(slug).not.toHaveProperty("platform")
+
+          const version = await captureOne("engine_updated", {
+            to_version: value
+          })
+          expect(version).not.toHaveProperty("to_version")
+
+          const bucket = await captureOne("download_completed", {
+            elapsed_bucket: value
+          })
+          expect(bucket).not.toHaveProperty("elapsed_bucket")
+        }
+      })
+    })
+
+    describe("slug", () => {
+      it("keeps every quality extractQuality can produce", async () => {
+        const { extractQuality } = require("../src/main/utils/analytics-helpers")
+        const produced = [
+          ...new Set(
+            [
+              "1080p", "720p", "480p", "360p", "240p", "144p", "mp3", "m4a",
+              "original", "pinterest", "tiktok", "137", "22", "140", "251",
+              "bestaudio", "bestaudio[abr<=70]", "worstaudio", "[quality<=low]",
+              "garbage", ""
+            ].map(extractQuality)
+          )
+        ]
+
+        for (const value of produced) {
           const properties = await captureOne("download_completed", {
             quality: value
           })
@@ -558,6 +610,150 @@ describe("Analytics", () => {
         }
       })
 
+      it("keeps the platform and reason vocabularies", async () => {
+        for (const value of ["youtube", "pinterest", "tiktok", "unknown"]) {
+          const properties = await captureOne("url_submitted", {
+            platform: value
+          })
+          expect(properties.platform).toBe(value)
+        }
+
+        for (const value of [
+          "up-to-date",
+          "version-mismatch",
+          "swap-failed",
+          "asset-layout-unexpected",
+          "corrupt-and-no-bundle"
+        ]) {
+          const properties = await captureOne("engine_seeded", { reason: value })
+          expect(properties.reason).toBe(value)
+        }
+      })
+
+      it("rejects uppercase, spaces, dots and a leading dash", async () => {
+        for (const value of [
+          "YouTube",
+          "my video",
+          "clip.mp4",
+          "-leading",
+          "_leading",
+          "a".repeat(33)
+        ]) {
+          const properties = await captureOne("url_submitted", {
+            platform: value
+          })
+          expect(properties).not.toHaveProperty("platform")
+        }
+      })
+    })
+
+    describe("version", () => {
+      it("keeps real app and engine versions", async () => {
+        for (const value of [
+          "0.3.2",
+          "0.3.3",
+          "2026.08.19",
+          "1.2.3-beta.1",
+          "10.0.0-rc.1"
+        ]) {
+          const properties = await captureOne("engine_updated", {
+            to_version: value
+          })
+          expect(properties.to_version).toBe(value)
+        }
+      })
+
+      it("rejects anything that does not start with a digit", async () => {
+        for (const value of ["vacation.mp4", "v1.2.3", "unknown", "beta"]) {
+          const properties = await captureOne("engine_updated", {
+            to_version: value
+          })
+          expect(properties).not.toHaveProperty("to_version")
+        }
+      })
+    })
+
+    describe("bucket", () => {
+      it("keeps the labels the taxonomy anticipates", async () => {
+        for (const value of [
+          "1-5 min",
+          "<1m",
+          ">10m",
+          "10-50 MB",
+          "30s",
+          "<1 min",
+          ">1 hour",
+          "0-1s"
+        ]) {
+          const properties = await captureOne("download_completed", {
+            elapsed_bucket: value
+          })
+          expect(properties.elapsed_bucket).toBe(value)
+        }
+      })
+
+      it("rejects prose and filenames", async () => {
+        for (const value of [
+          "My Holiday Video",
+          "vacation.mp4",
+          "unknown",
+          "a while"
+        ]) {
+          const properties = await captureOne("download_completed", {
+            elapsed_bucket: value
+          })
+          expect(properties).not.toHaveProperty("elapsed_bucket")
+        }
+      })
+    })
+
+    describe("the imported error vocabularies", () => {
+      const {
+        ERROR_CATEGORIES,
+        ERROR_STAGES
+      } = require("../src/main/utils/error-taxonomy")
+
+      it("accepts every category the taxonomy defines", async () => {
+        for (const value of Object.values(ERROR_CATEGORIES)) {
+          const properties = await captureOne("download_failed", {
+            error_category: value
+          })
+          expect(properties.error_category).toBe(value)
+        }
+      })
+
+      it("accepts every stage the taxonomy defines", async () => {
+        for (const value of Object.values(ERROR_STAGES)) {
+          const properties = await captureOne("download_failed", {
+            error_stage: value
+          })
+          expect(properties.error_stage).toBe(value)
+        }
+      })
+
+      it("turns a typo into a loud drop rather than a bad segment", async () => {
+        for (const value of [
+          "NETWORK_ERORR",
+          "network_error",
+          "MADE_UP_CATEGORY"
+        ]) {
+          const properties = await captureOne("download_failed", {
+            error_category: value
+          })
+          expect(properties).not.toHaveProperty("error_category")
+        }
+
+        const stage = await captureOne("download_failed", {
+          error_stage: "downloading"
+        })
+        expect(stage).not.toHaveProperty("error_stage")
+      })
+    })
+
+    describe("locations and identities, whatever the kind", () => {
+      // the per-kind blocks above cover each grammar's own vocabulary. this
+      // one keeps the original privacy assertion in one place: none of the
+      // shapes a url, a path or an address needs can survive anywhere.
       it("rejects anything that looks like a location or an identity", async () => {
         for (const value of [
           "https://private.example/video",
@@ -751,7 +947,7 @@ describe("Analytics", () => {
       await captureOne("download_completed", { platform: 42 })
       logged = console.warn.mock.calls.flat().join(" ")
       expect(logged).toContain("platform")
-      expect(logged).toContain("token")
+      expect(logged).toContain("slug")
     })
   })
 })
