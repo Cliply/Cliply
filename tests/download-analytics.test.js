@@ -19,7 +19,10 @@ jest.mock("electron", () => ({
 
 const { EventEmitter } = require("events")
 
+const fs = require("fs")
+
 const IPCHandlers = require("../src/main/ipc-handlers")
+const { elapsedBucket, speedBucket } = require("../src/main/utils/analytics-helpers")
 const { ERROR_CODES } = require("../src/main/services/ytdlp-engine")
 const {
   classify,
@@ -174,7 +177,7 @@ describe("what the taxonomy does with a download failure", () => {
 })
 
 describe("download_completed", () => {
-  it("reports what was taken and how big it was", async () => {
+  it("reports what was taken", async () => {
     const { handlers, captured } = createHandlers()
 
     await runDownload(handlers, VIDEO, (handle) =>
@@ -188,7 +191,6 @@ describe("download_completed", () => {
     expect(properties.media_type).toBe("video")
     expect(properties.quality).toBe("1080p")
     expect(properties.is_trimmed).toBe(false)
-    expect(properties.file_size_mb).toBe(0)
   })
 
   it("carries a trimmed download's is_trimmed", async () => {
@@ -214,6 +216,131 @@ describe("download_completed", () => {
     expect(serialised).not.toContain("My Holiday Video")
     expect(serialised).not.toContain("/Users/someone")
     expect(captured[0].properties).not.toHaveProperty("video_title")
+  })
+})
+
+describe("how long it took, and how fast", () => {
+  const MIB = 1024 * 1024
+
+  /**
+   * complete one download against a clock and a file size we control
+   * @param {Object} options - {elapsedMs, fileSize}
+   * @returns {Promise<Object>} the properties the pipeline built
+   */
+  async function completeWith({ elapsedMs, fileSize }) {
+    const { handlers, captured } = createHandlers()
+    let now = 1_600_000_000_000
+
+    // the reservation stamps the start and the completion reads it back, so
+    // the clock is the only seam either of these measurements has
+    jest.spyOn(Date, "now").mockImplementation(() => now)
+    jest.spyOn(fs, "statSync").mockReturnValue({ size: fileSize })
+
+    const handle = new FakeHandle()
+    const running = handlers.runner.run({
+      downloadId: "download_1",
+      ...VIDEO,
+      createHandle: () => handle
+    })
+    await settle()
+
+    now += elapsedMs
+    handle.resolve({ filePath: "/downloads/a.mp4" })
+    await running
+
+    return captured[0].properties
+  }
+
+  describe("elapsedBucket", () => {
+    it("splits where a healthy download stops looking healthy", () => {
+      // deliberately not even: under a minute is the line between a download
+      // that behaved and one that did not, so the resolution is spent there
+      const cases = [
+        [0, "<5s"],
+        [4999, "<5s"],
+        [5000, "5-15s"],
+        [14999, "5-15s"],
+        [15000, "15-60s"],
+        [59999, "15-60s"],
+        [60000, "1-5 min"],
+        [299999, "1-5 min"],
+        [300000, "5-15 min"],
+        [899999, "5-15 min"],
+        [900000, ">15 min"],
+        [86400000, ">15 min"]
+      ]
+
+      for (const [elapsedMs, label] of cases) {
+        expect(elapsedBucket(elapsedMs)).toBe(label)
+      }
+    })
+
+    it("says nothing about a duration it cannot have measured", () => {
+      // a clock that stepped backwards under us, or a reservation that was
+      // already gone. "0s" would read as an instant download
+      for (const value of [-1, NaN, Infinity, undefined, null, "20000"]) {
+        expect(elapsedBucket(value)).toBeNull()
+      }
+    })
+  })
+
+  describe("speedBucket", () => {
+    it("splits around what a working connection looks like", () => {
+      const cases = [
+        [MIB, 2000, "<1 MBps"],
+        [10 * MIB, 10000, "1-3 MBps"],
+        [30 * MIB, 10000, "3-10 MBps"],
+        [200 * MIB, 10000, "10-30 MBps"],
+        [500 * MIB, 10000, ">30 MBps"]
+      ]
+
+      for (const [bytes, elapsedMs, label] of cases) {
+        expect(speedBucket(bytes, elapsedMs)).toBe(label)
+      }
+    })
+
+    it("says nothing when either half of the sum is missing", () => {
+      // a size of zero is a stat that failed, not an empty file - and a
+      // duration of zero divides into it to give an infinite speed
+      expect(speedBucket(0, 10000)).toBeNull()
+      expect(speedBucket(10 * MIB, 0)).toBeNull()
+      expect(speedBucket(10 * MIB, -5)).toBeNull()
+      expect(speedBucket(NaN, 10000)).toBeNull()
+      expect(speedBucket(10 * MIB, NaN)).toBeNull()
+    })
+  })
+
+  it("reports both against a real download", async () => {
+    const properties = await completeWith({
+      elapsedMs: 20000,
+      fileSize: 100 * MIB
+    })
+
+    expect(properties.elapsed_bucket).toBe("15-60s")
+    expect(properties.speed_bucket).toBe("3-10 MBps")
+    expect(properties.file_size_mb).toBe(100)
+  })
+
+  it("still times a download whose size could not be read", async () => {
+    // fileSizeOf() returns 0 for a stat that threw. zero megabytes at zero
+    // megabytes a second is a measurement of nothing, so neither is claimed -
+    // but the clock still ran, and how long it took is still true
+    const properties = await completeWith({ elapsedMs: 20000, fileSize: 0 })
+
+    expect(properties.elapsed_bucket).toBe("15-60s")
+    expect(properties).not.toHaveProperty("speed_bucket")
+    expect(properties).not.toHaveProperty("file_size_mb")
+  })
+
+  it("counts from the moment the user asked, not from the spawn", async () => {
+    // the reservation is where the wait starts: the ack, the setImmediate and
+    // a repair-on-failure engine update are all time the user spent waiting
+    const properties = await completeWith({
+      elapsedMs: 400000,
+      fileSize: 100 * MIB
+    })
+
+    expect(properties.elapsed_bucket).toBe("5-15 min")
   })
 })
 
@@ -539,9 +666,66 @@ describe("the download payloads survive the real validator", () => {
       platform: "youtube",
       media_type: "video",
       quality: "1080p",
-      is_trimmed: true,
-      file_size_mb: 0
+      is_trimmed: true
     })
+    expect(warn).not.toHaveBeenCalled()
+  })
+
+  it("sends every bucket label the two measurements can produce", async () => {
+    // the bucket grammar takes a leading digit or comparison, an optional
+    // range and a unit of at most four letters. every label written by hand is
+    // a chance to break one of those, and a broken one is a silent drop
+    const MIB = 1024 * 1024
+    const { handlers, captured } = createHandlers()
+
+    let now = 1_600_000_000_000
+    jest.spyOn(Date, "now").mockImplementation(() => now)
+
+    // a duration from each elapsed bucket, paired with a size that walks the
+    // speed buckets across them
+    const runs = [
+      { elapsedMs: 1000, fileSize: 20 * MIB },
+      { elapsedMs: 10000, fileSize: 5 * MIB },
+      { elapsedMs: 30000, fileSize: 60 * MIB },
+      { elapsedMs: 120000, fileSize: 5000 * MIB },
+      { elapsedMs: 600000, fileSize: 10 * MIB },
+      { elapsedMs: 1200000, fileSize: 1 * MIB }
+    ]
+
+    for (const [index, run] of runs.entries()) {
+      jest.spyOn(fs, "statSync").mockReturnValue({ size: run.fileSize })
+
+      const handle = new FakeHandle()
+      const running = handlers.runner.run({
+        downloadId: `download_${index}`,
+        ...VIDEO,
+        createHandle: () => handle
+      })
+      await settle()
+
+      now += run.elapsedMs
+      handle.resolve({ filePath: "/downloads/a.mp4" })
+      await running
+    }
+
+    const sent = await replay(captured)
+
+    expect(sent.map((message) => message.properties.elapsed_bucket)).toEqual([
+      "<5s",
+      "5-15s",
+      "15-60s",
+      "1-5 min",
+      "5-15 min",
+      ">15 min"
+    ])
+    expect(sent.map((message) => message.properties.speed_bucket)).toEqual([
+      "10-30 MBps",
+      "<1 MBps",
+      "1-3 MBps",
+      ">30 MBps",
+      "<1 MBps",
+      "<1 MBps"
+    ])
     expect(warn).not.toHaveBeenCalled()
   })
 

@@ -132,6 +132,70 @@ function extractQuality(formatId) {
   return "unknown"
 }
 
+/**
+ * how long a download took, as a label rather than a measurement
+ *
+ * the boundaries are deliberately uneven. an even split would spend most of
+ * its resolution separating fast from slightly less fast, where the question
+ * these answer is whether downloads work for this person at all - so the
+ * detail sits under a minute, which is where a download that behaved stops
+ * being distinguishable from one that struggled, and everything past a quarter
+ * of an hour collapses into a single "something is wrong".
+ *
+ * @param {number} elapsedMs - wall clock from the request to the finished file
+ * @returns {string|null} a bucket label, or null when it was not measurable
+ */
+function elapsedBucket(elapsedMs) {
+  // null rather than a "0s" that would read as an instant download. a clock
+  // that stepped backwards mid-download is the realistic way this happens
+  if (!Number.isFinite(elapsedMs) || elapsedMs < 0) {
+    return null
+  }
+
+  const seconds = elapsedMs / 1000
+
+  if (seconds < 5) return "<5s"
+  if (seconds < 15) return "5-15s"
+  if (seconds < 60) return "15-60s"
+  if (seconds < 300) return "1-5 min"
+  if (seconds < 900) return "5-15 min"
+  return ">15 min"
+}
+
+/**
+ * how fast a download ran, in mebibytes a second - the unit yt-dlp shows the
+ * user while it works
+ *
+ * the label says MBps rather than MB/s because the bucket grammar's unit is
+ * letters only: a slash cannot be written, and MBps is the same thing without
+ * one. the boundary that matters is 1, which is roughly where a connection
+ * stops keeping up with a video download.
+ *
+ * @param {number} bytes - the finished file's size
+ * @param {number} elapsedMs - how long it took to arrive
+ * @returns {string|null} a bucket label, or null when it was not measurable
+ */
+function speedBucket(bytes, elapsedMs) {
+  // a size of zero is a stat that failed rather than an empty file - a
+  // download that resolved always wrote something - and a duration of zero
+  // divides into it to give an infinite speed. neither is a slow download
+  if (!Number.isFinite(bytes) || bytes <= 0) {
+    return null
+  }
+
+  if (!Number.isFinite(elapsedMs) || elapsedMs <= 0) {
+    return null
+  }
+
+  const perSecond = bytes / (1024 * 1024) / (elapsedMs / 1000)
+
+  if (perSecond < 1) return "<1 MBps"
+  if (perSecond < 3) return "1-3 MBps"
+  if (perSecond < 10) return "3-10 MBps"
+  if (perSecond < 30) return "10-30 MBps"
+  return ">30 MBps"
+}
+
 // check first launch
 function isFirstLaunch() {
   const userDataPath = path.join(os.homedir(), ".cliply")
@@ -221,6 +285,8 @@ function getAppVersion() {
 module.exports = {
   extractQuality,
   extractTitleFromFilename,
+  elapsedBucket,
+  speedBucket,
   isFirstLaunch,
   sanitizeTitle,
   getAppVersion

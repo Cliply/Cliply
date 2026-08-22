@@ -3,7 +3,11 @@
 const { ipcMain, dialog, app } = require("electron")
 const os = require("os")
 const { IPC_CHANNELS } = require("./utils/constants")
-const { extractQuality } = require("./utils/analytics-helpers")
+const {
+  extractQuality,
+  elapsedBucket,
+  speedBucket
+} = require("./utils/analytics-helpers")
 const { ERROR_STAGES, classify } = require("./utils/error-taxonomy")
 const {
   mapVideoInfo,
@@ -164,9 +168,20 @@ class IPCHandlers {
     }
 
     if (name === "download_completed") {
+      // a size of zero is a stat that failed, not an empty file: a download
+      // that resolved always wrote something. sending the zero would report
+      // an empty file and drag every average through it, so all three of the
+      // measurements are omitted rather than guessed at when they are missing
+      const elapsed = elapsedBucket(payload.elapsedMs)
+      const speed = speedBucket(payload.fileSize, payload.elapsedMs)
+
       this.analytics.capture("download_completed", {
         ...base,
-        file_size_mb: Math.round((payload.fileSize || 0) / (1024 * 1024))
+        ...(payload.fileSize
+          ? { file_size_mb: Math.round(payload.fileSize / (1024 * 1024)) }
+          : {}),
+        ...(elapsed ? { elapsed_bucket: elapsed } : {}),
+        ...(speed ? { speed_bucket: speed } : {})
       })
       return
     }

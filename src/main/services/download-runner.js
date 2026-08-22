@@ -192,6 +192,11 @@ class DownloadRunner {
   }
 
   settleCompleted({ downloadId, type, platform, formatId, trimmed, result }) {
+    // the reservation is where the wait began - before the ipc acknowledgement
+    // and before the spawn, which is what the user actually sat through
+    const entry = this.active.get(downloadId)
+    const elapsedMs = entry ? Date.now() - entry.started : null
+
     this.active.delete(downloadId)
 
     const filePath = result.filePath || null
@@ -213,7 +218,8 @@ class DownloadRunner {
       platform,
       formatId,
       trimmed,
-      fileSize
+      fileSize,
+      elapsedMs
     })
 
     return {
