@@ -162,8 +162,14 @@ class SettingsStore {
    * the new contents go to a scratch file first and are renamed over the
    * target, so a reader finds either the old file or the new one and never a
    * half-written one. writing in place would truncate settings.json before
-   * refilling it, and a crash in that window loses the download folder - or an
-   * opt-out, which then quietly reads as analytics-enabled at the next launch.
+   * refilling it, and a process crash in that window loses the download folder
+   * - or an opt-out, which then quietly reads as analytics-enabled at the next
+   * launch.
+   *
+   * that guarantee covers a process dying, not the power going out: neither
+   * the scratch file nor the directory entry is fsynced, so the on-disk state
+   * after a power loss is unspecified. a sync on every preference write is not
+   * worth buying that back.
    * @param {Object} patch
    */
   async writeSettings(patch) {

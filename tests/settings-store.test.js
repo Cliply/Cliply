@@ -205,8 +205,10 @@ describe("analytics preferences", () => {
         JSON.stringify({ download_path: chosen })
       )
 
-      // revoke the right to create the temp file, so the write dies at the
-      // point where a crash would have truncated settings.json
+      // revoking the right to create entries stops the scratch file, so the
+      // write fails before it can replace the target. this is what separates
+      // the two implementations: writing in place needs no such permission,
+      // so it would have truncated settings.json here quite happily
       fs.chmodSync(root, 0o555)
 
       try {
