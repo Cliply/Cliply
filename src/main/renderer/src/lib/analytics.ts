@@ -168,6 +168,16 @@ export function audioQuality(mode: AudioMode): string {
 }
 
 /**
+ * the quality of a download from a platform that offers no choice at all
+ *
+ * pinterest and tiktok send no format id, so main's own falls back to the
+ * platform name and extractQuality maps both of those to "best_available"
+ * (analytics-helpers.js:23-32). the same download's later events say that, so
+ * this one says it too.
+ */
+export const SIMPLE_QUALITY = "best_available"
+
+/**
  * whether this download is really a segment
  *
  * mirrors normalizeTimeRange (ipc-handlers.js:55), which throws away a range

@@ -8,7 +8,11 @@ const {
   elapsedBucket,
   speedBucket
 } = require("./utils/analytics-helpers")
-const { ERROR_STAGES, classify } = require("./utils/error-taxonomy")
+const {
+  ERROR_CATEGORIES,
+  ERROR_STAGES,
+  classify
+} = require("./utils/error-taxonomy")
 const {
   mapVideoInfo,
   mapSimpleInfo,
@@ -455,7 +459,16 @@ class IPCHandlers {
       const targetPlatform = platform ? String(platform).toLowerCase() : "youtube"
 
       if (!SUPPORTED_DOWNLOAD_PLATFORMS.includes(targetPlatform)) {
-        return this.createError("Unsupported platform", "Please use YouTube, Pinterest, or TikTok")
+        // classified here because nothing else will: this refusal is raised
+        // before the engine runs, so the catch below never sees it and
+        // media_info_failed would report it as UNKNOWN_ERROR. a url for a site
+        // we do not serve is the invalid one
+        return this.createError(
+          "Unsupported platform",
+          "Please use YouTube, Pinterest, or TikTok",
+          "GENERAL_ERROR",
+          { category: ERROR_CATEGORIES.INVALID_URL }
+        )
       }
 
       // one spawn, no server to wait for
@@ -463,10 +476,16 @@ class IPCHandlers {
 
       // the python pinterest service refused image pins by inspecting formats
       if (targetPlatform === "pinterest" && !hasPlayableVideo(info)) {
+        // the same reason: raised here rather than thrown, so it arrives
+        // unclassified unless this says so. there is no video at this url to
+        // download, which is what VIDEO_UNAVAILABLE says - the code beside it
+        // keeps "there was never a video here" separable for anyone who needs
+        // the distinction
         return this.createError(
           "This Pinterest pin contains an image, not a video.",
           "The Pinterest downloader only works with video pins.",
-          "NOT_A_VIDEO"
+          "NOT_A_VIDEO",
+          { category: ERROR_CATEGORIES.VIDEO_UNAVAILABLE }
         )
       }
 

@@ -132,6 +132,24 @@
         "audio_format": "original",
         "is_trimmed": false
       }
+    },
+    {
+      "event": "download_started",
+      "properties": {
+        "platform": "pinterest",
+        "media_type": "video",
+        "quality": "best_available",
+        "is_trimmed": false
+      }
+    },
+    {
+      "event": "download_started",
+      "properties": {
+        "platform": "tiktok",
+        "media_type": "video",
+        "quality": "best_available",
+        "is_trimmed": false
+      }
     }
   ],
   "unvouchedText": [

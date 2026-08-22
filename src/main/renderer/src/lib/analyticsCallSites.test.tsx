@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 //
-// every telemetry bag the renderer can build, driven out of the real hooks
-// against mocked apis and recorded as it crosses the preload bridge.
+// every telemetry bag the renderer can build, driven out of the real hooks and
+// components against mocked apis and recorded as it crosses the preload bridge.
 //
 // the recorded list is compared to analytics-payloads.fixture.json, which the
 // main suite (tests/renderer-analytics.test.js) replays through the real
@@ -12,11 +12,11 @@
 // there.
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { act, renderHook } from "@testing-library/react"
+import { act, render, renderHook, screen } from "@testing-library/react"
 import type { ReactNode } from "react"
 import { beforeEach, describe, expect, test, vi } from "vitest"
 
-import payloads from "../analytics-payloads.fixture.json"
+import payloads from "./analytics-payloads.fixture.json"
 import type { AudioDownloadRequest, VideoDownloadRequest } from "@/lib/api"
 import type { Platform } from "@/lib/store"
 
@@ -29,6 +29,8 @@ const mocks = vi.hoisted(() => ({
   getTikTokInfo: vi.fn(),
   downloadVideo: vi.fn(),
   downloadAudio: vi.fn(),
+  downloadPin: vi.fn(),
+  downloadTikTok: vi.fn(),
   listeners: [] as ProgressListener[]
 }))
 
@@ -55,8 +57,16 @@ vi.mock("@/lib/api", () => {
       downloadVideo: (request: unknown) => mocks.downloadVideo(request),
       downloadAudio: (request: unknown) => mocks.downloadAudio(request)
     },
-    pinterestApi: { getInfo: (url: string) => mocks.getPinInfo(url) },
-    tiktokApi: { getInfo: (url: string) => mocks.getTikTokInfo(url) },
+    pinterestApi: {
+      getInfo: (url: string) => mocks.getPinInfo(url),
+      download: (request: unknown) => mocks.downloadPin(request)
+    },
+    tiktokApi: {
+      getInfo: (url: string) => mocks.getTikTokInfo(url),
+      download: (request: unknown) => mocks.downloadTikTok(request)
+    },
+    // the youtube card reads it; the two cards driven here never render it
+    validateTimeRange: () => ({ isValid: true }),
     downloadApi: {
       onProgress: (listener: ProgressListener) => {
         mocks.listeners.push(listener)
@@ -80,10 +90,13 @@ vi.mock("sonner", () => ({
   toast: { success: vi.fn(), info: vi.fn(), error: vi.fn() }
 }))
 
+import { UnifiedDownloadCard } from "@/components/video/UnifiedDownloadCard"
 import { DownloadError } from "@/lib/api"
-import { useAudioDownload } from "./useAudioDownload"
-import { useMediaSearch } from "./useMediaSearch"
-import { useVideoDownload } from "./useVideoDownload"
+import { useAudioDownload } from "@/lib/hooks/useAudioDownload"
+import { useMediaSearch } from "@/lib/hooks/useMediaSearch"
+import { useVideoDownload } from "@/lib/hooks/useVideoDownload"
+import { usePinterestStore } from "@/lib/pinterestStore"
+import { useTikTokStore } from "@/lib/tiktokStore"
 
 let recorded: Bag[]
 
@@ -193,6 +206,47 @@ const startVideo = (request: Partial<VideoDownloadRequest>) =>
     mocks.downloadVideo
   )
 
+/**
+ * click the one button pinterest and tiktok have
+ *
+ * neither platform offers a choice of anything, so the whole download is a
+ * store url and a click - there is no hook to drive and no request to build.
+ */
+async function startSimpleDownload(platform: "pinterest" | "tiktok") {
+  const store =
+    platform === "pinterest"
+      ? usePinterestStore.getState()
+      : useTikTokStore.getState()
+
+  store.setUrl(
+    platform === "pinterest"
+      ? "https://pin.it/abc123"
+      : "https://vm.tiktok.com/ZM123/"
+  )
+
+  const info = {
+    title: "My Holiday Video",
+    duration: 45,
+    duration_string: "0:45",
+    thumbnail: null,
+    uploader: "Someone"
+  }
+
+  const view = render(
+    platform === "pinterest" ? (
+      <UnifiedDownloadCard platform="pinterest" pinInfo={info} />
+    ) : (
+      <UnifiedDownloadCard platform="tiktok" tikTokInfo={info} />
+    )
+  )
+
+  await act(async () => {
+    screen.getByRole("button", { name: /download video/i }).click()
+  })
+
+  view.unmount()
+}
+
 const startAudio = (request: Partial<AudioDownloadRequest>) =>
   download(
     useAudioDownload,
@@ -279,6 +333,14 @@ describe("the bags the call sites build", () => {
       time_range: { start: 10, end: 30 }
     })
     await startAudio({ audio_mode: "original" })
+
+    // the two platforms that offer no choice at all. main falls back to the
+    // platform name for their format id, which extractQuality reads as
+    // "best_available", and it never marks them trimmed
+    mocks.downloadPin.mockResolvedValue({ downloadId: "ignored" })
+    mocks.downloadTikTok.mockResolvedValue({ downloadId: "ignored" })
+    await startSimpleDownload("pinterest")
+    await startSimpleDownload("tiktok")
 
     expect(recorded).toEqual(payloads.callSites)
   })

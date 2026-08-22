@@ -269,6 +269,78 @@ describe("what the renderer may not do", () => {
   })
 })
 
+describe("the info failures the renderer has to name", () => {
+  /**
+   * media_info_failed reports whatever main put in `category`, and falls back
+   * to UNKNOWN_ERROR when there is none. these two refusals carried none: they
+   * are main's own, raised before the engine ran, so nothing classified them
+   * and two named failure modes arrived as "we could not tell".
+   */
+  const { ERROR_CATEGORIES } = require("../src/main/utils/error-taxonomy")
+
+  it("classifies a platform it does not serve", async () => {
+    const { handlers } = await createHandlers()
+    jest.spyOn(console, "error").mockImplementation(() => {})
+
+    const result = await handlers.handleGetVideoInfo(null, {
+      url: "https://www.instagram.com/p/abc/",
+      platform: "instagram"
+    })
+
+    expect(result.success).toBe(false)
+    expect(result.error.category).toBe(ERROR_CATEGORIES.INVALID_URL)
+  })
+
+  it("classifies a pin that turned out to be an image", async () => {
+    const { handlers } = await createHandlers()
+    jest.spyOn(console, "error").mockImplementation(() => {})
+
+    // metadata with no formats in it - what an image pin looks like to the
+    // engine, and what hasPlayableVideo() reads
+    handlers.engine.getInfo = jest
+      .fn()
+      .mockResolvedValue({ title: "A Pin", duration: 0, formats: [] })
+
+    const result = await handlers.handleGetVideoInfo(null, {
+      url: "https://pin.it/abc123",
+      platform: "pinterest"
+    })
+
+    expect(result.success).toBe(false)
+    expect(result.error.code).toBe("NOT_A_VIDEO")
+    expect(result.error.category).toBe(ERROR_CATEGORIES.VIDEO_UNAVAILABLE)
+  })
+
+  it("gives the renderer a category the vocabulary holds", async () => {
+    // the round trip: what main says here is what media_info_failed carries,
+    // and a value outside ERROR_CATEGORIES would be dropped on the way out
+    const { handlers, sent } = await createHandlers()
+    jest.spyOn(console, "error").mockImplementation(() => {})
+
+    const refusal = await handlers.handleGetVideoInfo(null, {
+      url: "https://www.instagram.com/p/abc/",
+      platform: "instagram"
+    })
+
+    await send(handlers, [
+      {
+        event: "media_info_failed",
+        properties: {
+          platform: "unsupported",
+          error_category: refusal.error.category,
+          error_stage: "fetch_info",
+          error_message: refusal.error.message
+        }
+      }
+    ])
+
+    expect(sent[0].properties.error_category).toBe(
+      ERROR_CATEGORIES.INVALID_URL
+    )
+    expect(warn).not.toHaveBeenCalled()
+  })
+})
+
 describe("a boundary that must not take the app down", () => {
   it("returns rather than throwing when there is no analytics service", async () => {
     const handlers = new IPCHandlers({

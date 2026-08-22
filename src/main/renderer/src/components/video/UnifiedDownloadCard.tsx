@@ -1,5 +1,6 @@
 import { Button } from "@/components/ui/button"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { SIMPLE_QUALITY, track } from "@/lib/analytics"
 import {
   DownloadError,
   pinterestApi,
@@ -281,6 +282,17 @@ function PinterestDownloadCard({
     if (!url || isDownloading) return
     try {
       setIsDownloading(true)
+
+      // main reports this download's end, so it has to hear about its start:
+      // completions with no starts is a funnel that shows the impossible
+      track("download_started", {
+        platform: "pinterest",
+        media_type: "video",
+        quality: SIMPLE_QUALITY,
+        // there is no trimming here to report - no range is ever sent
+        is_trimmed: false
+      })
+
       await pinterestApi.download({ url, title: pinInfo?.title })
       toast.success("Download complete!", { action: { label: "Open Folder", onClick: () => systemApi.openDownloadFolder() } })
     } catch (error) {
@@ -326,6 +338,15 @@ function TikTokDownloadCard({
     if (!url || isDownloading) return
     try {
       setIsDownloading(true)
+
+      // as pinterest above: one button, one quality, never a range
+      track("download_started", {
+        platform: "tiktok",
+        media_type: "video",
+        quality: SIMPLE_QUALITY,
+        is_trimmed: false
+      })
+
       await tiktokApi.download({ url, title: tikTokInfo?.title })
       toast.success("Download complete!", { action: { label: "Open Folder", onClick: () => systemApi.openDownloadFolder() } })
     } catch (error) {
