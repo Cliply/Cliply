@@ -171,7 +171,7 @@ describe("failure paths", () => {
     spawnFn.children[0].emit("error", error)
 
     await expect(handle.promise).rejects.toMatchObject({
-      code: ERROR_CODES.BINARY_MISSING
+      code: ERROR_CODES.ENGINE_MISSING
     })
   })
 

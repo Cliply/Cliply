@@ -33,6 +33,12 @@ const ERROR_CATEGORIES = Object.freeze({
   DUPLICATE_DOWNLOAD: "DUPLICATE_DOWNLOAD",
   INVALID_DOWNLOAD_ID: "INVALID_DOWNLOAD_ID",
   CANCELLED: "CANCELLED",
+  // no pattern produces this one: it is the engine's fallback for a run that
+  // failed without saying anything we recognise, and the string the renderer's
+  // report builder and the download runner already emit. UNKNOWN_ERROR is what
+  // classify() returns instead - the two are deliberately distinct so "we ran
+  // and it broke" stays separable from "we could not tell what broke"
+  DOWNLOAD_FAILED: "DOWNLOAD_FAILED",
   UNKNOWN_ERROR: "UNKNOWN_ERROR"
 })
 
@@ -140,7 +146,11 @@ const CATEGORY_PATTERNS = [
       /nsig extraction failed/i,
       /signature extraction failed/i,
       /failed to extract any player response/i,
-      /player response/i
+      /player response/i,
+      // yt-dlp downgrades to a client that cannot see every format - the
+      // download either fails outright or silently loses the quality the user
+      // picked, and an engine update is what fixes it
+      /some web client https formats have been skipped/i
     ]
   },
   {

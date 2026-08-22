@@ -60,124 +60,82 @@ const EXECUTABLE_NAMES = {
   ]
 }
 
-// error codes - the first five match the codes the renderer already handles
-const ERROR_CODES = {
-  BOT_DETECTION: "BOT_DETECTION",
-  VIDEO_UNAVAILABLE: "VIDEO_UNAVAILABLE",
-  NETWORK_ERROR: "NETWORK_ERROR",
-  PERMISSION_ERROR: "PERMISSION_ERROR",
-  DOWNLOAD_FAILED: "DOWNLOAD_FAILED",
-  INVALID_URL: "INVALID_URL",
-  EXTRACTION_FAILED: "EXTRACTION_FAILED",
-  DISK_FULL: "DISK_FULL",
-  FFMPEG_ERROR: "FFMPEG_ERROR",
-  STALLED: "STALLED",
-  CANCELLED: "CANCELLED",
-  BINARY_MISSING: "BINARY_MISSING"
-}
+const {
+  ERROR_CATEGORIES,
+  ERROR_STAGES,
+  classify
+} = require("../utils/error-taxonomy")
 
-// stderr pattern table - order matters, the first match wins
-const ERROR_PATTERNS = [
-  {
-    code: ERROR_CODES.BOT_DETECTION,
-    patterns: [
-      /sign in to confirm you.{0,3}re not a bot/i,
-      /confirm you.{0,3}re not a bot/i,
-      /use --cookies/i,
-      /cookies are no longer valid/i
-    ],
+// the engine's historical name for the taxonomy - kept so existing call sites
+// and tests read naturally. the engine used to own a second, narrower list and
+// its own stderr pattern table; both drifted from the taxonomy, so the taxonomy
+// is now the only classifier and this file only owns the wording.
+const ERROR_CODES = ERROR_CATEGORIES
+
+// wording and behaviour flags for the codes classify() can hand back. no
+// patterns here on purpose: a second pattern table is exactly the drift this
+// module just stopped paying for.
+const ERROR_METADATA = {
+  [ERROR_CODES.BOT_DETECTION]: {
     message: "YouTube asked us to confirm you're not a bot.",
     suggestion: "Import your YouTube cookies from Settings and try again.",
     needsCookies: true
   },
-  {
-    code: ERROR_CODES.VIDEO_UNAVAILABLE,
-    patterns: [
-      // youtube words this several different ways
-      /video unavailable/i,
-      /video is unavailable/i,
-      /this video is not available/i,
-      /not made this video available/i,
-      /content is(?:n.?t| not) available/i,
-      /private video/i,
-      /this video is private/i,
-      /sign in to confirm your age/i,
-      /age.restricted/i,
-      /members.only/i,
-      /removed by the uploader/i,
-      /has been terminated/i,
-      /video has been removed/i,
-      /join this channel/i
-    ],
+  [ERROR_CODES.VIDEO_UNAVAILABLE]: {
     message: "This video isn't available for download.",
     suggestion: "It may be private, age-restricted, or removed."
   },
-  {
-    code: ERROR_CODES.DISK_FULL,
-    patterns: [/no space left/i, /enospc/i, /disk full/i],
-    message: "Not enough disk space to save this download.",
-    suggestion: "Free up some space and try again."
+  [ERROR_CODES.GEO_BLOCKED]: {
+    message: "This video isn't available in your country.",
+    suggestion: "The uploader restricted where it can be watched."
   },
-  {
-    code: ERROR_CODES.PERMISSION_ERROR,
-    patterns: [
-      /permission denied/i,
-      /errno 13/i,
-      /operation not permitted/i,
-      /unable to open for writing/i
-    ],
-    message: "Can't write to the download folder.",
-    suggestion: "Check permissions or pick a different download location."
-  },
-  {
-    code: ERROR_CODES.EXTRACTION_FAILED,
-    patterns: [
-      /unable to extract/i,
-      /nsig extraction failed/i,
-      /signature extraction failed/i,
-      /failed to extract any player response/i,
-      /player response/i,
-      /some web client https formats have been skipped/i
-    ],
+  [ERROR_CODES.EXTRACTION_FAILED]: {
     message: "YouTube changed something the downloader needs to catch up with.",
     suggestion: "Updating the downloader usually fixes this.",
     // the download flow retries these once after running yt-dlp -U
     updateMayFix: true
   },
-  {
-    code: ERROR_CODES.NETWORK_ERROR,
-    patterns: [
-      /unable to download webpage/i,
-      /timed out/i,
-      /timeout/i,
-      /connection reset/i,
-      /connection refused/i,
-      /connection aborted/i,
-      /network is unreachable/i,
-      /temporary failure in name resolution/i,
-      /getaddrinfo/i,
-      /http error 5\d\d/i,
-      /remote end closed connection/i
-    ],
+  [ERROR_CODES.NETWORK_ERROR]: {
     message: "Network interrupted the download.",
     suggestion: "Check your connection and try again.",
     retryable: true
   },
-  {
-    code: ERROR_CODES.FFMPEG_ERROR,
-    patterns: [
-      /ffmpeg exited with code/i,
-      /ffmpeg not found/i,
-      /ffmpeg is not installed/i,
-      /postprocessing:/i,
-      /moov atom not found/i,
-      /invalid data found when processing input/i
-    ],
+  [ERROR_CODES.DISK_FULL]: {
+    message: "Not enough disk space to save this download.",
+    suggestion: "Free up some space and try again."
+  },
+  [ERROR_CODES.PERMISSION_ERROR]: {
+    message: "Can't write to the download folder.",
+    suggestion: "Check permissions or pick a different download location."
+  },
+  [ERROR_CODES.PATH_ERROR]: {
+    message: "Couldn't write to that location.",
+    suggestion: "Try a different download folder, or one with a shorter path."
+  },
+  [ERROR_CODES.JS_RUNTIME_MISSING]: {
+    message: "A component the downloader needs is missing.",
+    suggestion: "Please reinstall Cliply."
+  },
+  [ERROR_CODES.FFMPEG_MISSING]: {
+    message: "The video processor is missing.",
+    suggestion: "Please reinstall Cliply."
+  },
+  [ERROR_CODES.FFMPEG_AV_BLOCKED]: {
+    message: "Your antivirus stopped the video processor.",
+    suggestion: "Allow Cliply in your antivirus, then try again."
+  },
+  [ERROR_CODES.FFMPEG_CORRUPT_STREAM]: {
+    message: "The video stream was damaged.",
+    suggestion: "Try a different quality."
+  },
+  [ERROR_CODES.FFMPEG_ERROR]: {
     message: "Something went wrong while processing the video.",
     suggestion: "Please try again."
   }
-]
+}
 
+// codes nothing classifies its way into - they are set directly by the caller
+// that already knows what happened
 const TERMINAL_ERRORS = {
   [ERROR_CODES.CANCELLED]: {
     message: "Download cancelled.",
@@ -187,7 +145,7 @@ const TERMINAL_ERRORS = {
     message: "The download stopped responding.",
     suggestion: "Check your connection and try again."
   },
-  [ERROR_CODES.BINARY_MISSING]: {
+  [ERROR_CODES.ENGINE_MISSING]: {
     message: "The downloader engine is missing.",
     suggestion: "Please restart Cliply, or reinstall it if this keeps happening."
   },
@@ -195,6 +153,16 @@ const TERMINAL_ERRORS = {
     message: "Download failed.",
     suggestion: "Please try again."
   }
+}
+
+// wording for any code, whoever produced it, so the ui never shows a blank
+// message. terminal codes first, then the classified ones, then the catch-all.
+function wordingFor(code) {
+  return (
+    TERMINAL_ERRORS[code] ||
+    ERROR_METADATA[code] ||
+    TERMINAL_ERRORS[ERROR_CODES.DOWNLOAD_FAILED]
+  )
 }
 
 // =============================================================================
@@ -419,17 +387,21 @@ function mapError({
   const errorLine = [...lines].reverse().find((line) => /^\s*ERROR[: ]/i.test(line))
   const details = errorLine ? errorLine.trim() : lines[lines.length - 1] || null
 
-  for (const entry of ERROR_PATTERNS) {
-    if (entry.patterns.some((pattern) => pattern.test(haystack))) {
-      return {
-        code: entry.code,
-        message: entry.message,
-        suggestion: entry.suggestion,
-        retryable: Boolean(entry.retryable),
-        updateMayFix: Boolean(entry.updateMayFix),
-        needsCookies: Boolean(entry.needsCookies),
-        details
-      }
+  // the taxonomy owns the pattern table now. UNKNOWN_ERROR means nothing
+  // matched, which is the same "we ran and it broke" the fallback below has
+  // always reported - so it falls through rather than becoming a new code.
+  const { category } = classify(haystack, ERROR_STAGES.DOWNLOAD)
+  const metadata = category === ERROR_CODES.UNKNOWN_ERROR ? null : ERROR_METADATA[category]
+
+  if (metadata) {
+    return {
+      code: category,
+      message: metadata.message,
+      suggestion: metadata.suggestion,
+      retryable: Boolean(metadata.retryable),
+      updateMayFix: Boolean(metadata.updateMayFix),
+      needsCookies: Boolean(metadata.needsCookies),
+      details
     }
   }
 
@@ -1034,7 +1006,7 @@ class YtdlpOperation extends EventEmitter {
         env: { ...process.env }
       })
     } catch (error) {
-      this.fail({ code: ERROR_CODES.BINARY_MISSING, cause: error })
+      this.fail({ code: ERROR_CODES.ENGINE_MISSING, cause: error })
       return
     }
 
@@ -1060,7 +1032,7 @@ class YtdlpOperation extends EventEmitter {
       // ENOENT here means the binary vanished between the path check and spawn
       const code =
         error && error.code === "ENOENT"
-          ? ERROR_CODES.BINARY_MISSING
+          ? ERROR_CODES.ENGINE_MISSING
           : ERROR_CODES.DOWNLOAD_FAILED
       this.fail({ code, cause: error })
     })
@@ -1270,7 +1242,7 @@ class YtdlpOperation extends EventEmitter {
     const mapped = code
       ? {
           code,
-          ...(TERMINAL_ERRORS[code] || TERMINAL_ERRORS[ERROR_CODES.DOWNLOAD_FAILED]),
+          ...wordingFor(code),
           details: cause ? redactLogLine(cause.message) : null
         }
       : mapError({

@@ -854,17 +854,32 @@ describe("error mapping", () => {
     expect(map("ERROR: [youtube] aaaaaaaaaaa: This video is unavailable").code).toBe(
       ERROR_CODES.VIDEO_UNAVAILABLE
     )
-    expect(
-      map(
-        "ERROR: [youtube] abc: The uploader has not made this video available in your country"
-      ).code
-    ).toBe(ERROR_CODES.VIDEO_UNAVAILABLE)
     expect(map("ERROR: [youtube] abc: Private video. Sign in").code).toBe(
       ERROR_CODES.VIDEO_UNAVAILABLE
     )
     expect(
       map("ERROR: [youtube] abc: Sign in to confirm your age").code
     ).toBe(ERROR_CODES.VIDEO_UNAVAILABLE)
+  })
+
+  test("a geo block is its own code, not a generic unavailable video", () => {
+    // the taxonomy split these apart: "not available in your country" is worth
+    // telling the user about specifically, and it used to read as "removed"
+    const result = map(
+      "ERROR: [youtube] abc: The uploader has not made this video available in your country"
+    )
+
+    expect(result.code).toBe(ERROR_CODES.GEO_BLOCKED)
+    expect(result.message).toContain("your country")
+  })
+
+  test("ffmpeg causes we can act on get their own codes", () => {
+    expect(map("ERROR: Postprocessing: ffmpeg not found").code).toBe(
+      ERROR_CODES.FFMPEG_MISSING
+    )
+    expect(map("ERROR: Postprocessing: moov atom not found").code).toBe(
+      ERROR_CODES.FFMPEG_CORRUPT_STREAM
+    )
   })
 
   test("network failures are retryable", () => {

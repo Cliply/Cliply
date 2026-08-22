@@ -4,11 +4,11 @@ const { ipcMain, dialog, app } = require("electron")
 const os = require("os")
 const { IPC_CHANNELS, APP_CONFIG } = require("./utils/constants")
 const {
-  categorizeError,
   extractQuality,
   extractTitleFromFilename,
   sanitizeTitle
 } = require("./utils/analytics-helpers")
+const { ERROR_STAGES, classify } = require("./utils/error-taxonomy")
 const {
   mapVideoInfo,
   mapSimpleInfo,
@@ -150,7 +150,9 @@ class IPCHandlers {
     if (name === "download_completed") {
       eventData.file_size_mb = Math.round((payload.fileSize || 0) / (1024 * 1024))
     } else {
-      eventData.error_type = payload.errorCode || categorizeError(payload.errorMessage)
+      eventData.error_type =
+        payload.errorCode ||
+        classify(payload.errorMessage, ERROR_STAGES.DOWNLOAD).category
       eventData.error_message = payload.errorMessage
     }
 
@@ -343,7 +345,7 @@ class IPCHandlers {
         error.code || "GENERAL_ERROR",
         {
           details: error.details || undefined,
-          category: categorizeError(error.message)
+          category: classify(error, ERROR_STAGES.FETCH_INFO).category
         }
       )
     }
@@ -491,7 +493,10 @@ class IPCHandlers {
           result.message || "Download failed",
           "Please try again or check your connection",
           "DOWNLOAD_FAILED",
-          { details: result.details, category: categorizeError(result.message) }
+          {
+            details: result.details,
+            category: classify(result.message, ERROR_STAGES.DOWNLOAD).category
+          }
         )
       }
 
@@ -505,7 +510,7 @@ class IPCHandlers {
         error.code || "DOWNLOAD_FAILED",
         {
           details: error.details || error.message,
-          category: categorizeError(error.message)
+          category: classify(error, ERROR_STAGES.DOWNLOAD).category
         }
       )
     }
@@ -585,7 +590,7 @@ class IPCHandlers {
         error.code || "DOWNLOAD_FAILED",
         {
           details: error.details || error.message,
-          category: categorizeError(error.message)
+          category: classify(error, ERROR_STAGES.DOWNLOAD).category
         }
       )
     }

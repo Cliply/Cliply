@@ -4,66 +4,9 @@ const fs = require("fs")
 const path = require("path")
 const os = require("os")
 
-// categorize errors
-function categorizeError(errorMessage) {
-  const message = (errorMessage || "").toLowerCase()
-
-  if (
-    message.includes("antivirus") ||
-    message.includes("killed") ||
-    message.includes("sigkill")
-  ) {
-    return "FFMPEG_AV_BLOCKED"
-  }
-
-  if (message.includes("ffmpeg binary is missing")) {
-    return "FFMPEG_MISSING"
-  }
-
-  if (message.includes("no space") || message.includes("disk full")) {
-    return "FFMPEG_DISK_FULL"
-  }
-
-  if (message.includes("moov atom") || message.includes("corrupted")) {
-    return "FFMPEG_CORRUPT_STREAM"
-  }
-
-  if (message.includes("ffmpeg exited with code") || message.includes("ffmpeg output:")) {
-    return "FFMPEG_ERROR"
-  }
-
-  if (
-    message.includes("network") ||
-    message.includes("connection") ||
-    message.includes("timeout")
-  ) {
-    return "NETWORK_ERROR"
-  }
-
-  if (
-    message.includes("bot") ||
-    message.includes("rate") ||
-    message.includes("block")
-  ) {
-    return "BOT_DETECTION"
-  }
-
-  if (
-    message.includes("unavailable") ||
-    message.includes("private") ||
-    message.includes("deleted") ||
-    message.includes("not available on this app") ||
-    message.includes("restricted")
-  ) {
-    return "VIDEO_UNAVAILABLE"
-  }
-
-  if (message.includes("permission") || message.includes("access")) {
-    return "PERMISSION_ERROR"
-  }
-
-  return "UNKNOWN_ERROR"
-}
+// error classification lives in utils/error-taxonomy.js - the substring
+// matcher that used to sit here invented codes the rest of the app never had
+// (FFMPEG_DISK_FULL) and read "block" in any word as bot detection
 
 // extract quality from format id
 function extractQuality(formatId) {
@@ -276,7 +219,6 @@ function getAppVersion() {
 }
 
 module.exports = {
-  categorizeError,
   extractQuality,
   extractTitleFromFilename,
   isFirstLaunch,

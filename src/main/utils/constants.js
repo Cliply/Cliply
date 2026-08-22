@@ -112,21 +112,12 @@ const FORMATS = {
   SUBTITLE: ["srt", "vtt", "ass"]
 }
 
-// error types
-const ERROR_TYPES = {
-  // network and connectivity
-  NETWORK_ERROR: "NETWORK_ERROR",
-  BOT_DETECTION: "BOT_DETECTION",
-  VIDEO_UNAVAILABLE: "VIDEO_UNAVAILABLE",
-  INVALID_URL: "INVALID_URL",
-  DOWNLOAD_FAILED: "DOWNLOAD_FAILED",
-  PERMISSION_ERROR: "PERMISSION_ERROR"
-}
+// error codes live in utils/error-taxonomy.js - this file used to carry a
+// six-entry copy of them that nothing kept in step
 
 module.exports = {
   APP_CONFIG,
   IPC_CHANNELS,
   SUPPORTED_PLATFORMS,
-  FORMATS,
-  ERROR_TYPES
+  FORMATS
 }
