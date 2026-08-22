@@ -193,6 +193,52 @@ const {
   mapError
 } = require("../src/main/services/ytdlp-engine")
 
+describe("NOT_A_VIDEO", () => {
+  // "there was never a video here" is a different failure from "there was a
+  // video and it is gone": one is content that went away, the other is somebody
+  // expecting a downloader to take an image. folding the second into the first
+  // buries a ux signal inside a bucket that reads as someone else's problem
+  it("is its own category, not a shade of VIDEO_UNAVAILABLE", () => {
+    expect(ERROR_CATEGORIES.NOT_A_VIDEO).toBe("NOT_A_VIDEO")
+    expect(ERROR_CATEGORIES.NOT_A_VIDEO).not.toBe(
+      ERROR_CATEGORIES.VIDEO_UNAVAILABLE
+    )
+  })
+
+  it("is honoured as an explicit code", () => {
+    // nothing else can produce it, so a caller that names it has to be believed
+    expect(
+      classify({ code: "NOT_A_VIDEO" }, ERROR_STAGES.FETCH_INFO).category
+    ).toBe(ERROR_CATEGORIES.NOT_A_VIDEO)
+  })
+
+  it("is produced by no pattern, including its own wording", () => {
+    // we raise it by inspecting a format list, never by reading stderr. a
+    // pattern for it would be guessing at text nobody writes
+    for (const text of [
+      "This Pinterest pin contains an image, not a video.",
+      "not a video",
+      "image"
+    ]) {
+      expect(classify(text, ERROR_STAGES.FETCH_INFO).category).not.toBe(
+        ERROR_CATEGORIES.NOT_A_VIDEO
+      )
+    }
+  })
+
+  it("has wording of its own to fall back on", () => {
+    // ERROR_METADATA is "wording for the codes classify() can hand back", and
+    // it can hand this one back now. without an entry, an explicitError for it
+    // would say "Download failed" and explain nothing
+    expect(ERROR_METADATA[ERROR_CATEGORIES.NOT_A_VIDEO].message).toEqual(
+      expect.any(String)
+    )
+    expect(explicitError(ERROR_CATEGORIES.NOT_A_VIDEO).message).not.toBe(
+      TERMINAL_ERRORS[ERROR_CODES.DOWNLOAD_FAILED].message
+    )
+  })
+})
+
 describe("taxonomy adoption", () => {
   it("engine ERROR_CODES is the taxonomy, not a second list", () => {
     expect(ERROR_CODES).toBe(ERROR_CATEGORIES)

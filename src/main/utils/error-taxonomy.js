@@ -15,6 +15,15 @@ const ERROR_STAGES = Object.freeze({
 const ERROR_CATEGORIES = Object.freeze({
   BOT_DETECTION: "BOT_DETECTION",
   VIDEO_UNAVAILABLE: "VIDEO_UNAVAILABLE",
+  // deliberately not a shade of VIDEO_UNAVAILABLE, which means there was a
+  // video and it is gone or blocked. this one means there was never a video
+  // here at all - a pinterest image pin, today - so it is somebody expecting a
+  // downloader to take something that is not one, and that is a question about
+  // where people get stuck rather than about content that went away.
+  //
+  // no pattern produces it and none should: it is raised by inspecting a format
+  // list (ipc-handlers' pinterest branch), never by reading stderr
+  NOT_A_VIDEO: "NOT_A_VIDEO",
   GEO_BLOCKED: "GEO_BLOCKED",
   EXTRACTION_FAILED: "EXTRACTION_FAILED",
   INVALID_URL: "INVALID_URL",

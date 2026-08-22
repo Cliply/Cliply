@@ -85,6 +85,16 @@ const ERROR_METADATA = {
     message: "This video isn't available for download.",
     suggestion: "It may be private, age-restricted, or removed."
   },
+  // no pattern reaches this one - it is raised by whoever looked at the format
+  // list and found no video in it. the wording is here anyway, because a code
+  // classify() can hand back needs something to say: a caller that names it
+  // would otherwise get "Download failed", which explains nothing. the
+  // pinterest refusal in ipc-handlers says the same thing in its own words,
+  // because it knows which platform the user was on and this does not
+  [ERROR_CODES.NOT_A_VIDEO]: {
+    message: "There's no video at this link.",
+    suggestion: "Cliply downloads video, so try a link that has one."
+  },
   [ERROR_CODES.GEO_BLOCKED]: {
     message: "This video isn't available in your country.",
     suggestion: "The uploader restricted where it can be watched."

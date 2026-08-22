@@ -307,8 +307,11 @@ describe("the info failures the renderer has to name", () => {
     })
 
     expect(result.success).toBe(false)
-    expect(result.error.code).toBe("NOT_A_VIDEO")
-    expect(result.error.category).toBe(ERROR_CATEGORIES.VIDEO_UNAVAILABLE)
+    // its own category, not VIDEO_UNAVAILABLE: a pin that never held a video
+    // is a user pointing a downloader at an image, which is a different thing
+    // from a video that has gone away
+    expect(result.error.code).toBe(ERROR_CATEGORIES.NOT_A_VIDEO)
+    expect(result.error.category).toBe(ERROR_CATEGORIES.NOT_A_VIDEO)
   })
 
   it("gives the renderer a category the vocabulary holds", async () => {

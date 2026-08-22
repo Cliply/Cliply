@@ -477,15 +477,15 @@ class IPCHandlers {
       // the python pinterest service refused image pins by inspecting formats
       if (targetPlatform === "pinterest" && !hasPlayableVideo(info)) {
         // the same reason: raised here rather than thrown, so it arrives
-        // unclassified unless this says so. there is no video at this url to
-        // download, which is what VIDEO_UNAVAILABLE says - the code beside it
-        // keeps "there was never a video here" separable for anyone who needs
-        // the distinction
+        // unclassified unless this says so. its own category rather than
+        // VIDEO_UNAVAILABLE, which means a video that has gone away - this is
+        // somebody pointing a downloader at an image, and the two answer
+        // different questions
         return this.createError(
           "This Pinterest pin contains an image, not a video.",
           "The Pinterest downloader only works with video pins.",
-          "NOT_A_VIDEO",
-          { category: ERROR_CATEGORIES.VIDEO_UNAVAILABLE }
+          ERROR_CATEGORIES.NOT_A_VIDEO,
+          { category: ERROR_CATEGORIES.NOT_A_VIDEO }
         )
       }
 
