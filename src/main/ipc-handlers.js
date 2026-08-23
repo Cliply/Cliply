@@ -218,11 +218,18 @@ class IPCHandlers {
       return
     }
 
+    // the audio mode, read back off the format id - for an audio download that
+    // id IS the mode the renderer sent as download_started's audio_format, so
+    // both terminal events join to the start on it. it sits in `base` rather
+    // than in either branch so the two ends cannot drift apart later.
+    const format = audioFormat(payload.formatId)
+
     const base = {
       platform: payload.platform,
       media_type: MEDIA_TYPES[payload.type],
       quality: extractQuality(payload.formatId),
-      is_trimmed: Boolean(payload.trimmed)
+      is_trimmed: Boolean(payload.trimmed),
+      ...(format ? { audio_format: format } : {})
     }
 
     if (name === "download_completed") {
@@ -233,14 +240,8 @@ class IPCHandlers {
       const elapsed = elapsedBucket(payload.elapsedMs)
       const speed = speedBucket(payload.fileSize, payload.elapsedMs)
 
-      // the completion carries the start event's dimensions plus these
-      // measurements, so the audio mode comes along too - read back off the
-      // format id, which for an audio download IS the mode the start reported
-      const format = audioFormat(payload.formatId)
-
       this.capture("download_completed", {
         ...base,
-        ...(format ? { audio_format: format } : {}),
         ...(payload.fileSize
           ? { file_size_mb: Math.round(payload.fileSize / (1024 * 1024)) }
           : {}),

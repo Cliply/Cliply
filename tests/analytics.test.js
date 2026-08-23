@@ -459,44 +459,11 @@ describe("Analytics", () => {
       expect(client.captured).toHaveLength(0)
     })
 
-    it("goes inert before the drain rather than after it", async () => {
-      // the drain is worth running - the events already queued are the user's
-      // last ones - but it must not be what the opt-out waits on to take
-      // effect. flush() has no cap of its own, so awaiting it first leaves the
-      // service sending for as long as the network takes to give up.
-      const client = fakeClient()
-      let releaseFlush
-      client.flush = jest.fn(
-        () =>
-          new Promise((resolve) => {
-            releaseFlush = resolve
-          })
-      )
-
-      const analytics = new Analytics({
-        settingsStore: fakeStore(),
-        createClient: () => client,
-        forceEnabled: true
-      })
-      await analytics.init()
-
-      const opting = analytics.setEnabled(false)
-      await new Promise((resolve) => setImmediate(resolve))
-
-      // the drain is under way and the instance is already inert
-      expect(client.flush).toHaveBeenCalledTimes(1)
-      expect(analytics.isEnabled()).toBe(false)
-
-      analytics.capture("download_completed", { platform: "youtube" })
-      expect(client.captured).toHaveLength(0)
-
-      releaseFlush()
-      await opting
-    })
-
-    it("does not let a stalled drain hold the opt-out open", async () => {
-      // a flush that never settles is the case the ordering above exists for:
-      // inert immediately, and the click still comes back
+    it("returns without waiting on the drain at all", async () => {
+      // a menu click must never wait on telemetry, least of all the telemetry
+      // it just asked to stop. the drain still runs - those events were
+      // captured under consent - but in the background, where a network that
+      // has stopped answering costs the user nothing.
       const client = fakeClient()
       client.flush = jest.fn(() => new Promise(() => {}))
 
@@ -507,20 +474,74 @@ describe("Analytics", () => {
       })
       await analytics.init()
 
-      jest.useFakeTimers()
+      // a macrotask sentinel: setEnabled's own awaits are microtasks, so a
+      // version that waited on the drain - or on a cap around it - is still
+      // pending when this resolves, and "pending" wins the race
+      const sentinel = new Promise((resolve) => setImmediate(resolve))
+      const opting = analytics.setEnabled(false)
+
+      await expect(
+        Promise.race([
+          opting.then(() => "returned"),
+          sentinel.then(() => "pending")
+        ])
+      ).resolves.toBe("returned")
+
+      // and it is inert, with the drain it started still hanging
+      expect(client.flush).toHaveBeenCalledTimes(1)
+      expect(analytics.isEnabled()).toBe(false)
+
+      analytics.capture("download_completed", { platform: "youtube" })
+      expect(client.captured).toHaveLength(0)
+    })
+
+    it("retires the detached client rather than only flushing it", async () => {
+      // flush() leaves the sdk's flushInterval timer armed, so a
+      // flushed-and-forgotten client keeps waking for the life of the process.
+      // shutdown() clears it, drains the queue, and bounds itself with the
+      // timeout it is handed - which is the whole cap, now that nobody waits.
+      const client = fakeClient()
+      client.shutdown = jest.fn().mockResolvedValue(undefined)
+
+      const analytics = new Analytics({
+        settingsStore: fakeStore(),
+        createClient: () => client,
+        forceEnabled: true
+      })
+      await analytics.init()
+
+      await analytics.setEnabled(false)
+      await new Promise((resolve) => setImmediate(resolve))
+
+      expect(client.shutdown).toHaveBeenCalledWith(2000)
+      expect(client.flush).not.toHaveBeenCalled()
+    })
+
+    it("keeps its never-throws promise when the drain rejects", async () => {
+      // nothing observes the drain now, so a rejection there would surface as
+      // an unhandled rejection rather than as a return value
+      const client = fakeClient()
+      client.shutdown = jest.fn().mockRejectedValue(new Error("no route"))
+
+      const analytics = new Analytics({
+        settingsStore: fakeStore(),
+        createClient: () => client,
+        forceEnabled: true
+      })
+      await analytics.init()
+
+      const unhandled = jest.fn()
+      process.on("unhandledRejection", unhandled)
 
       try {
-        const opting = analytics.setEnabled(false)
+        await expect(analytics.setEnabled(false)).resolves.toBeUndefined()
+        await new Promise((resolve) => setImmediate(resolve))
+        await new Promise((resolve) => setImmediate(resolve))
 
-        await jest.advanceTimersByTimeAsync(0)
+        expect(unhandled).not.toHaveBeenCalled()
         expect(analytics.isEnabled()).toBe(false)
-        analytics.capture("download_completed", { platform: "youtube" })
-        expect(client.captured).toHaveLength(0)
-
-        await jest.advanceTimersByTimeAsync(2000)
-        await expect(opting).resolves.toBeUndefined()
       } finally {
-        jest.useRealTimers()
+        process.off("unhandledRejection", unhandled)
       }
     })
   })

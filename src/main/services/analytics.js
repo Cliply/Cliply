@@ -58,11 +58,15 @@ const ALLOWED_PROPERTIES = {
     "elapsed_bucket",
     "speed_bucket"
   ],
+  // likewise download_started's properties plus its own. a schema consistent
+  // on success and silent on failure would be worse than either answer applied
+  // to both ends
   download_failed: [
     "platform",
     "media_type",
     "quality",
     "is_trimmed",
+    "audio_format",
     "error_category",
     "error_stage",
     "error_message",
@@ -413,10 +417,11 @@ const KNOWN_PLATFORMS = new Set([
 const MAX_TEXT_LENGTH = 500
 const MAX_NUMBER = 1e9
 
-// how long the opt-out is willing to wait for the drain it starts on its way
-// out. the same two seconds the quit path allows (QUIT_FLUSH_TIMEOUT_MS in
-// index.js), for the same reason: a flush that cannot finish must never be
-// what a user-visible action is waiting on
+// how long the background drain an opt-out starts is given before it gives up.
+// nobody waits on it, so this is not about responsiveness - it is what stops a
+// detached client sitting on a dead socket indefinitely. the same two seconds
+// the quit path allows (QUIT_FLUSH_TIMEOUT_MS in index.js), because the amount
+// of unsent telemetry worth holding a resource for is the same either way.
 const OPT_OUT_FLUSH_TIMEOUT_MS = 2000
 
 /**
@@ -892,6 +897,39 @@ async function drainClient(client) {
   }
 }
 
+/**
+ * retire a client the instance has already let go of
+ *
+ * shutdown() rather than flush(), and the difference is not cosmetic. flush()
+ * never touches the sdk's own flushInterval timer (posthog-core-stateless.js:
+ * only clearFlushTimer does, and flush() does not call it), so a
+ * flushed-and-forgotten client goes on waking every ten seconds for the life
+ * of the process. shutdown() clears that timer, drains the queue, and bounds
+ * itself with the timeout it is handed - which is the only cap left that means
+ * anything, now that nobody is waiting on the result. the sdk's own warning
+ * against reusing a shut-down instance is exactly this contract: the client is
+ * detached, and an opt-in builds a fresh one through init().
+ *
+ * the flush() fallback is for a client injected by a test that has no
+ * shutdown, so the drain still happens rather than being reported as broken.
+ *
+ * @param {Object|null} client - the client the instance no longer holds
+ */
+async function retireClient(client) {
+  if (!client) return
+
+  if (typeof client.shutdown !== "function") {
+    await drainClient(client)
+    return
+  }
+
+  try {
+    await client.shutdown(OPT_OUT_FLUSH_TIMEOUT_MS)
+  } catch (error) {
+    console.warn("analytics drain failed:", describeError(error))
+  }
+}
+
 function defaultCreateClient(key, host) {
   const { PostHog } = require("posthog-node")
   return new PostHog(key, {
@@ -1133,32 +1171,27 @@ class Analytics {
     // goes inert here. the caller surfaces the failure so the user is not
     // told an opt-out stuck when it did not.
     if (!enabled) {
-      // inert FIRST, drain second. the other order reads as if it delivers
-      // more, and what it really does is keep the pipe open for as long as the
-      // flush takes: flush() has no cap of its own, so a stalled one leaves
-      // the service enabled - still queueing, still sending - indefinitely
-      // after the user clicked stop. detaching the client is what makes the
-      // click take effect, so it happens before anything can wait.
+      // inert first, and it is detaching the client that makes the click take
+      // effect. draining first reads as if it delivers more, and what it
+      // really does is keep the pipe open for as long as the flush takes -
+      // flush() has no cap of its own, so a stalled one left the service
+      // enabled, still queueing and still sending, indefinitely after the user
+      // said stop.
       const detached = this.client
       this.enabled = false
       this.client = null
 
-      // the events already captured are still the user's last ones and worth
-      // delivering, so the detached client is drained anyway - capped the way
-      // the quit path caps its own drain, because nothing about a flush that
-      // cannot finish may hold the menu click open either
-      let timer = null
-
-      await Promise.race([
-        drainClient(detached),
-        new Promise((resolve) => {
-          timer = setTimeout(resolve, OPT_OUT_FLUSH_TIMEOUT_MS)
-        })
-      ])
-
-      // the cap loses this race far more often than it wins it, and a timer
-      // left armed behind a won race holds the loop open for two more seconds
-      clearTimeout(timer)
+      // fired, never awaited. those events were captured under consent and are
+      // still worth delivering, so the detached client is retired properly -
+      // bounded, and with its timer cleared - but a menu click must not wait on
+      // telemetry, least of all on the telemetry it just asked to stop. the
+      // cost is that opting out and quitting at once may lose the last batch,
+      // which is the right direction to lose it.
+      //
+      // the catch is load-bearing rather than decorative: this promise is
+      // unobserved, so it is the place a rejection would surface as an
+      // unhandled one instead of as a return value.
+      retireClient(detached).catch(() => {})
 
       return persisted
     }

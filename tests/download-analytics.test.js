@@ -319,6 +319,29 @@ describe("download_completed", () => {
     expect(captured[0].properties).not.toHaveProperty("audio_format")
   })
 
+  it("names the same audio mode whichever way the download ended", async () => {
+    // the design writes both terminal events as download_started's properties
+    // plus their own, so a schema that is consistent on success and silent on
+    // failure would be worse than either answer applied to both
+    const { handlers, captured } = createHandlers()
+
+    await runDownload(handlers, { ...AUDIO, formatId: "m4a" }, (handle) =>
+      handle.resolve({ filePath: "/downloads/a.m4a" })
+    )
+    await runDownload(handlers, { ...AUDIO, formatId: "m4a" }, (handle) =>
+      handle.reject(engineError(ERROR_CODES.DISK_FULL, "No space left."))
+    )
+
+    const [completed, failed] = captured
+
+    expect(completed.event).toBe("download_completed")
+    expect(failed.event).toBe("download_failed")
+    expect(failed.properties.audio_format).toBe("m4a")
+    expect(failed.properties.audio_format).toBe(
+      completed.properties.audio_format
+    )
+  })
+
   it("says nothing about the title or the file it wrote", async () => {
     const { handlers, captured } = createHandlers()
 
@@ -888,24 +911,32 @@ describe("the download payloads survive the real validator", () => {
     expect(warn).not.toHaveBeenCalled()
   })
 
-  it("sends every audio mode the completion can carry", async () => {
+  it("sends every audio mode either terminal event can carry", async () => {
     // audio_format is a vocabulary, so a mode the schema does not list is
     // dropped behind a warning nobody sees in production. these are the three
-    // the audio flow can produce
+    // the audio flow can produce, on both ways a download can end
     const { handlers, captured } = createHandlers()
 
     for (const mode of ["mp3", "m4a", "original"]) {
       await runDownload(handlers, { ...AUDIO, formatId: mode }, (handle) =>
         handle.resolve({ filePath: "/downloads/a.m4a" })
       )
+      await runDownload(handlers, { ...AUDIO, formatId: mode }, (handle) =>
+        handle.reject(engineError(ERROR_CODES.NETWORK_ERROR, "Network lost."))
+      )
     }
 
     const sent = await replay(captured)
 
-    expect(sent.map((message) => message.properties.audio_format)).toEqual([
-      "mp3",
-      "m4a",
-      "original"
+    expect(
+      sent.map((message) => [message.event, message.properties.audio_format])
+    ).toEqual([
+      ["download_completed", "mp3"],
+      ["download_failed", "mp3"],
+      ["download_completed", "m4a"],
+      ["download_failed", "m4a"],
+      ["download_completed", "original"],
+      ["download_failed", "original"]
     ])
     expect(warn).not.toHaveBeenCalled()
   })
