@@ -46,11 +46,14 @@ const ALLOWED_PROPERTIES = {
     "is_trimmed",
     "audio_format"
   ],
+  // download_started's properties plus the completion measures, which is what
+  // makes the two ends of the funnel join on the same dimensions
   download_completed: [
     "platform",
     "media_type",
     "quality",
     "is_trimmed",
+    "audio_format",
     "file_size_mb",
     "elapsed_bucket",
     "speed_bucket"
@@ -376,8 +379,11 @@ const PROPERTY_VOCABULARIES = {
 
 const VOCABULARY_BY_PROPERTY = new Map(Object.entries(PROPERTY_VOCABULARIES))
 
-// what an unrecognised platform becomes. it is not a drop: which unsupported
-// sites people paste is one of the questions analytics exists to answer
+// what an unrecognised platform becomes. it is not a drop - the event still
+// arrives, tagged - so the bucket counts how often people try a site we do not
+// support. it does not say which sites those are: every unrecognised value
+// collapses to this one literal, and no hostname is kept anywhere, which is
+// what the no-url rule requires. an aggregate, not a list.
 const PLATFORM_UNSUPPORTED = "unsupported"
 
 /**
@@ -406,6 +412,12 @@ const KNOWN_PLATFORMS = new Set([
 
 const MAX_TEXT_LENGTH = 500
 const MAX_NUMBER = 1e9
+
+// how long the opt-out is willing to wait for the drain it starts on its way
+// out. the same two seconds the quit path allows (QUIT_FLUSH_TIMEOUT_MS in
+// index.js), for the same reason: a flush that cannot finish must never be
+// what a user-visible action is waiting on
+const OPT_OUT_FLUSH_TIMEOUT_MS = 2000
 
 /**
  * error_message is the one property whose values cannot be enumerated.
@@ -860,6 +872,26 @@ function checkSuperProperties(candidates) {
   return safe
 }
 
+/**
+ * best-effort drain of one client
+ *
+ * takes the client rather than reading `this.client`, because the opt-out path
+ * detaches it before draining: the flush has to run against a client the
+ * instance no longer holds, and a version reading the field would find null
+ * there and quietly do nothing.
+ *
+ * @param {Object|null} client - a posthog client, or nothing
+ */
+async function drainClient(client) {
+  if (!client) return
+
+  try {
+    await client.flush()
+  } catch (error) {
+    console.warn("analytics flush failed:", describeError(error))
+  }
+}
+
 function defaultCreateClient(key, host) {
   const { PostHog } = require("posthog-node")
   return new PostHog(key, {
@@ -1076,13 +1108,7 @@ class Analytics {
    * unless this runs first
    */
   async flush() {
-    if (!this.client) return
-
-    try {
-      await this.client.flush()
-    } catch (error) {
-      console.warn("analytics flush failed:", describeError(error))
-    }
+    await drainClient(this.client)
   }
 
   /**
@@ -1107,9 +1133,33 @@ class Analytics {
     // goes inert here. the caller surfaces the failure so the user is not
     // told an opt-out stuck when it did not.
     if (!enabled) {
-      await this.flush()
+      // inert FIRST, drain second. the other order reads as if it delivers
+      // more, and what it really does is keep the pipe open for as long as the
+      // flush takes: flush() has no cap of its own, so a stalled one leaves
+      // the service enabled - still queueing, still sending - indefinitely
+      // after the user clicked stop. detaching the client is what makes the
+      // click take effect, so it happens before anything can wait.
+      const detached = this.client
       this.enabled = false
       this.client = null
+
+      // the events already captured are still the user's last ones and worth
+      // delivering, so the detached client is drained anyway - capped the way
+      // the quit path caps its own drain, because nothing about a flush that
+      // cannot finish may hold the menu click open either
+      let timer = null
+
+      await Promise.race([
+        drainClient(detached),
+        new Promise((resolve) => {
+          timer = setTimeout(resolve, OPT_OUT_FLUSH_TIMEOUT_MS)
+        })
+      ])
+
+      // the cap loses this race far more often than it wins it, and a timer
+      // left armed behind a won race holds the loop open for two more seconds
+      clearTimeout(timer)
+
       return persisted
     }
 

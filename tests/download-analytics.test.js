@@ -176,6 +176,90 @@ describe("what the taxonomy does with a download failure", () => {
   })
 })
 
+describe("what a pinterest/tiktok failure hands the renderer", () => {
+  /**
+   * run one simple-platform download to failure through the real ipc handler
+   * @param {Object} handlers - the IPCHandlers under test
+   * @param {Error} error - what the engine handle rejects with
+   * @returns {Promise<Object>} the ipc response
+   */
+  async function failSimpleDownload(handlers, error) {
+    const handle = new FakeHandle()
+    handlers.engine.downloadSimple = jest.fn(() => handle)
+
+    const responding = handlers.handleDownloadCombined(null, {
+      url: "https://www.pinterest.com/pin/1/",
+      platform: "pinterest",
+      download_id: "download_1"
+    })
+
+    await settle()
+    handle.reject(error)
+
+    return responding
+  }
+
+  it("keeps the engine's category instead of reclassifying the wording", async () => {
+    // these two flows await the runner and translate its result themselves,
+    // rather than letting the renderer follow progress events. the taxonomy
+    // sits on the error object the runner passes back - `code` - while
+    // `message` beside it is the wording the user reads, which matches none of
+    // the patterns the categories were written from
+    const { handlers } = createHandlers()
+
+    const response = await failSimpleDownload(
+      handlers,
+      engineError(
+        ERROR_CODES.FFMPEG_AV_BLOCKED,
+        "Your antivirus stopped the video processor."
+      )
+    )
+
+    expect(response.success).toBe(false)
+    expect(response.error.category).toBe(ERROR_CATEGORIES.FFMPEG_AV_BLOCKED)
+    expect(response.error.code).toBe(ERROR_CODES.FFMPEG_AV_BLOCKED)
+    // the wording is still the wording - only the taxonomy fields changed
+    expect(response.error.message).toBe(
+      "Your antivirus stopped the video processor."
+    )
+  })
+
+  it("agrees with the event the runner already sent", async () => {
+    // the runner classified this failure for analytics before the handler ran.
+    // one download must not be one category in posthog and another in the
+    // issue report the user pastes into github
+    const { handlers, captured } = createHandlers()
+
+    const response = await failSimpleDownload(
+      handlers,
+      engineError(
+        ERROR_CODES.DISK_FULL,
+        "Not enough disk space to save this download."
+      )
+    )
+
+    expect(captured).toHaveLength(1)
+    expect(captured[0].event).toBe("download_failed")
+    expect(response.error.category).toBe(captured[0].properties.error_category)
+    expect(response.error.category).toBe(ERROR_CATEGORIES.DISK_FULL)
+  })
+
+  it("still classifies a failure that arrived without a code", async () => {
+    // a throw from outside the engine has no taxonomy value on it, so the
+    // patterns are still what answers - reading the error object rather than
+    // the wording does not give that up
+    const { handlers } = createHandlers()
+
+    const response = await failSimpleDownload(
+      handlers,
+      new Error("ERROR: unable to download webpage: The read operation timed out")
+    )
+
+    expect(response.error.category).toBe(ERROR_CATEGORIES.NETWORK_ERROR)
+    expect(response.error.code).toBe("DOWNLOAD_FAILED")
+  })
+})
+
 describe("download_completed", () => {
   it("reports what was taken", async () => {
     const { handlers, captured } = createHandlers()
@@ -203,6 +287,36 @@ describe("download_completed", () => {
     )
 
     expect(captured[0].properties.is_trimmed).toBe(true)
+  })
+
+  it("carries the audio mode the start event named", async () => {
+    // the renderer sends download_started's audio_format straight off
+    // request.audio_mode (lib/hooks/useAudioDownload.ts:169), and main receives
+    // that same string as the download's format id (ipc-handlers.js:782). so
+    // this is the value, not one that merely looks like it
+    const { handlers, captured } = createHandlers()
+
+    for (const mode of ["mp3", "m4a", "original"]) {
+      await runDownload(handlers, { ...AUDIO, formatId: mode }, (handle) =>
+        handle.resolve({ filePath: "/downloads/a.m4a" })
+      )
+    }
+
+    expect(captured.map((message) => message.properties.audio_format)).toEqual([
+      "mp3",
+      "m4a",
+      "original"
+    ])
+  })
+
+  it("says nothing about an audio mode a video download never had", async () => {
+    const { handlers, captured } = createHandlers()
+
+    await runDownload(handlers, VIDEO, (handle) =>
+      handle.resolve({ filePath: "/downloads/a.mp4" })
+    )
+
+    expect(captured[0].properties).not.toHaveProperty("audio_format")
   })
 
   it("says nothing about the title or the file it wrote", async () => {
@@ -771,6 +885,28 @@ describe("the download payloads survive the real validator", () => {
       quality: "1080p",
       is_trimmed: true
     })
+    expect(warn).not.toHaveBeenCalled()
+  })
+
+  it("sends every audio mode the completion can carry", async () => {
+    // audio_format is a vocabulary, so a mode the schema does not list is
+    // dropped behind a warning nobody sees in production. these are the three
+    // the audio flow can produce
+    const { handlers, captured } = createHandlers()
+
+    for (const mode of ["mp3", "m4a", "original"]) {
+      await runDownload(handlers, { ...AUDIO, formatId: mode }, (handle) =>
+        handle.resolve({ filePath: "/downloads/a.m4a" })
+      )
+    }
+
+    const sent = await replay(captured)
+
+    expect(sent.map((message) => message.properties.audio_format)).toEqual([
+      "mp3",
+      "m4a",
+      "original"
+    ])
     expect(warn).not.toHaveBeenCalled()
   })
 

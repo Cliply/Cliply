@@ -154,6 +154,37 @@ function extractQuality(formatId) {
 }
 
 /**
+ * the three audio modes the audio flow can ask for.
+ *
+ * they are the format id for an audio download: handleDownloadAudio passes
+ * `data.audio_mode` straight through as `formatId` (ipc-handlers.js:782), and
+ * the renderer sends that same string as download_started's `audio_format`
+ * (renderer/src/lib/hooks/useAudioDownload.ts:169). so a terminal event reading
+ * the format id back reports the value the start event already sent, rather
+ * than one derived to look like it.
+ */
+const AUDIO_MODES = new Set(["mp3", "m4a", "original"])
+
+/**
+ * the audio mode behind a format id, if it is one
+ *
+ * deliberately not a mapping the way extractQuality is - that one renames
+ * `original` to `original_audio`, which is the right answer for a quality label
+ * and the wrong one here, where the point is to match what the start event
+ * sent verbatim.
+ *
+ * @param {string} formatId - the format id the download ran with
+ * @returns {string|undefined} the mode, or nothing when it names no audio mode
+ */
+function audioFormat(formatId) {
+  if (!formatId) return undefined
+
+  const id = formatId.toString().toLowerCase()
+
+  return AUDIO_MODES.has(id) ? id : undefined
+}
+
+/**
  * how long a download took, as a label rather than a measurement
  *
  * the boundaries are deliberately uneven. an even split would spend most of
@@ -259,6 +290,7 @@ function getAppVersion() {
 module.exports = {
   describeError,
   extractQuality,
+  audioFormat,
   elapsedBucket,
   speedBucket,
   isFirstLaunch,

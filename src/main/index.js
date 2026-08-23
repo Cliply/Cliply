@@ -673,11 +673,6 @@ class CliplyApp {
   async onBeforeQuit(event) {
     this.isQuitting = true
 
-    // skip cleanup if updating
-    if (global.isUpdating) {
-      return
-    }
-
     // the quit we re-issued below, arriving back here
     if (this.hasShutDown) {
       return
@@ -685,25 +680,43 @@ class CliplyApp {
 
     this.hasShutDown = true
 
+    /**
+     * installing an update is still a quit, and it is the quit whose last
+     * events matter most: it is the boundary between two versions, which is
+     * the whole reason previous_version exists. so it drains like any other.
+     *
+     * what it skips is the teardown that would fight the installer - killing
+     * the running downloads and tearing down ipc. cancelling this quit is safe
+     * for the installer itself: electron-updater has already spawned it by the
+     * time it calls app.quit() (BaseUpdater.quitAndInstall installs first, then
+     * quits from a setImmediate), the spawned installer waits on this process
+     * to exit, and its own quitAndInstallCalled guard means the second quit
+     * below cannot start a second install.
+     */
+    const installing = Boolean(global.isUpdating)
+
     if (event && typeof event.preventDefault === "function") {
       event.preventDefault()
     }
 
     try {
-      // update cleanup
-      this.updateState.isCheckingForUpdates = false
+      if (!installing) {
+        // update cleanup
+        this.updateState.isCheckingForUpdates = false
 
-      // kill any running yt-dlp process - partial .part files stay resumable
-      if (this.services.ytdlpEngine) {
-        const cancelled = this.services.ytdlpEngine.cancelAll()
-        if (cancelled > 0) {
-          console.log(`cancelled ${cancelled} running download(s) on quit`)
+        // kill any running yt-dlp process - partial .part files stay resumable
+        if (this.services.ytdlpEngine) {
+          const cancelled = this.services.ytdlpEngine.cancelAll()
+          if (cancelled > 0) {
+            console.log(`cancelled ${cancelled} running download(s) on quit`)
+          }
         }
       }
 
       // batched events are lost if we exit without draining them. capped,
       // because a flush that cannot finish must not leave the app refusing to
-      // close - telemetry is never worth that
+      // close - telemetry is never worth that, and least of all when an
+      // installer is waiting on this process to go
       if (this.services.analytics) {
         let flushTimer = null
 
@@ -720,7 +733,7 @@ class CliplyApp {
       }
 
       // cleanup ipc handlers
-      if (this.ipcHandlers) {
+      if (!installing && this.ipcHandlers) {
         this.ipcHandlers.cleanup()
       }
     } catch (error) {

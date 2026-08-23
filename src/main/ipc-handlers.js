@@ -6,6 +6,7 @@ const { IPC_CHANNELS } = require("./utils/constants")
 const {
   describeError,
   extractQuality,
+  audioFormat,
   elapsedBucket,
   speedBucket
 } = require("./utils/analytics-helpers")
@@ -232,8 +233,14 @@ class IPCHandlers {
       const elapsed = elapsedBucket(payload.elapsedMs)
       const speed = speedBucket(payload.fileSize, payload.elapsedMs)
 
+      // the completion carries the start event's dimensions plus these
+      // measurements, so the audio mode comes along too - read back off the
+      // format id, which for an audio download IS the mode the start reported
+      const format = audioFormat(payload.formatId)
+
       this.capture("download_completed", {
         ...base,
+        ...(format ? { audio_format: format } : {}),
         ...(payload.fileSize
           ? { file_size_mb: Math.round(payload.fileSize / (1024 * 1024)) }
           : {}),
@@ -674,13 +681,29 @@ class IPCHandlers {
       })
 
       if (!result.success) {
+        /**
+         * the taxonomy is on the error object, not on the wording beside it.
+         *
+         * the runner hands back three fields with three different jobs:
+         * `error.code` is the category mapError already chose, `message` is
+         * the sentence the user reads, and `details` is the raw text. reading
+         * the message here re-runs the patterns against wording written for a
+         * human, which matches almost none of them - so nearly every category
+         * would arrive at the renderer as UNKNOWN_ERROR, in the same failure
+         * the runner had just reported correctly to analytics.
+         *
+         * the error object rather than a rebuilt bag: classify() takes the
+         * explicit code when it owns one and falls back to the patterns when
+         * it does not, which is what a throw from outside the engine looks
+         * like. the adjacent catch below reads it exactly this way.
+         */
         return this.createError(
           result.message || "Download failed",
           "Please try again or check your connection",
-          "DOWNLOAD_FAILED",
+          result.error?.code || "DOWNLOAD_FAILED",
           {
             details: result.details,
-            category: classify(result.message, ERROR_STAGES.DOWNLOAD).category
+            category: classify(result.error, ERROR_STAGES.DOWNLOAD).category
           }
         )
       }

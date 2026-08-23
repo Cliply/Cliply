@@ -458,6 +458,71 @@ describe("Analytics", () => {
       expect(analytics.isEnabled()).toBe(false)
       expect(client.captured).toHaveLength(0)
     })
+
+    it("goes inert before the drain rather than after it", async () => {
+      // the drain is worth running - the events already queued are the user's
+      // last ones - but it must not be what the opt-out waits on to take
+      // effect. flush() has no cap of its own, so awaiting it first leaves the
+      // service sending for as long as the network takes to give up.
+      const client = fakeClient()
+      let releaseFlush
+      client.flush = jest.fn(
+        () =>
+          new Promise((resolve) => {
+            releaseFlush = resolve
+          })
+      )
+
+      const analytics = new Analytics({
+        settingsStore: fakeStore(),
+        createClient: () => client,
+        forceEnabled: true
+      })
+      await analytics.init()
+
+      const opting = analytics.setEnabled(false)
+      await new Promise((resolve) => setImmediate(resolve))
+
+      // the drain is under way and the instance is already inert
+      expect(client.flush).toHaveBeenCalledTimes(1)
+      expect(analytics.isEnabled()).toBe(false)
+
+      analytics.capture("download_completed", { platform: "youtube" })
+      expect(client.captured).toHaveLength(0)
+
+      releaseFlush()
+      await opting
+    })
+
+    it("does not let a stalled drain hold the opt-out open", async () => {
+      // a flush that never settles is the case the ordering above exists for:
+      // inert immediately, and the click still comes back
+      const client = fakeClient()
+      client.flush = jest.fn(() => new Promise(() => {}))
+
+      const analytics = new Analytics({
+        settingsStore: fakeStore(),
+        createClient: () => client,
+        forceEnabled: true
+      })
+      await analytics.init()
+
+      jest.useFakeTimers()
+
+      try {
+        const opting = analytics.setEnabled(false)
+
+        await jest.advanceTimersByTimeAsync(0)
+        expect(analytics.isEnabled()).toBe(false)
+        analytics.capture("download_completed", { platform: "youtube" })
+        expect(client.captured).toHaveLength(0)
+
+        await jest.advanceTimersByTimeAsync(2000)
+        await expect(opting).resolves.toBeUndefined()
+      } finally {
+        jest.useRealTimers()
+      }
+    })
   })
 
   describe("the client the app actually ships", () => {

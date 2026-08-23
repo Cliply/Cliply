@@ -93,8 +93,12 @@ if a chart on either of these is flat, that is why. removing them from
   `download_started` with no terminal event — the app flushes at quit, but only for
   events that were already captured.
 - `platform` is normalized rather than dropped: an unrecognised site arrives as
-  `unsupported`, so that bucket is a real signal about which sites people try, not an
-  error bucket.
+  `unsupported`, so the event still counts rather than vanishing. read that bucket as
+  *how often* people try a site we do not support — it cannot tell you *which* sites
+  those are. every unrecognised value becomes the same literal and no hostname is kept
+  anywhere, so there is nothing behind the count to break down. answering "which sites"
+  would take a deliberate change: adding the site to `KNOWN_PLATFORMS` in
+  [`analytics.js`](../src/main/services/analytics.js), by name, one at a time.
 
 ## which builds send anything
 

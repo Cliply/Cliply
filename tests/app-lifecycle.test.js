@@ -884,16 +884,66 @@ describe("quitting", () => {
     expect(mockAnalytics.flush).toHaveBeenCalledTimes(1)
   })
 
-  it("skips the drain when an update is installing", async () => {
+  it("drains when an update is installing, and only skips the teardown", async () => {
+    // installing an update is still a quit, and it is the quit whose last
+    // events matter most: it is the boundary between two versions, which is
+    // the whole point of previous_version. what an install cannot tolerate is
+    // the teardown - cancelling the downloads and tearing down ipc - so that
+    // is what stays skipped, not the drain
+    const cancelAll = jest.fn(() => 1)
+    app.services.ytdlpEngine = { cancelAll }
     global.isUpdating = true
 
     try {
       const event = quitEvent()
       await app.onBeforeQuit(event)
 
-      expect(mockAnalytics.flush).not.toHaveBeenCalled()
-      expect(event.preventDefault).not.toHaveBeenCalled()
+      expect(mockAnalytics.flush).toHaveBeenCalledTimes(1)
+      expect(event.preventDefault).toHaveBeenCalledTimes(1)
+      expect(mockAnalytics.flush.mock.invocationCallOrder[0]).toBeLessThan(
+        mockElectron.app.quit.mock.invocationCallOrder[0]
+      )
+
+      expect(mockIpcHandlers.cleanup).not.toHaveBeenCalled()
+      expect(cancelAll).not.toHaveBeenCalled()
     } finally {
+      global.isUpdating = false
+    }
+  })
+
+  it("re-issues the quit the installer asked for", async () => {
+    // the installer is already spawned and waiting on this process to exit, so
+    // cancelling its quit only works if the second one actually goes out - and
+    // the pass that follows it must fall straight through
+    global.isUpdating = true
+
+    try {
+      await app.onBeforeQuit(quitEvent())
+      expect(mockElectron.app.quit).toHaveBeenCalledTimes(1)
+
+      const second = quitEvent()
+      await app.onBeforeQuit(second)
+
+      expect(second.preventDefault).not.toHaveBeenCalled()
+      expect(mockAnalytics.flush).toHaveBeenCalledTimes(1)
+    } finally {
+      global.isUpdating = false
+    }
+  })
+
+  it("does not let a stalled drain strand an update install", async () => {
+    global.isUpdating = true
+    jest.useFakeTimers()
+    mockAnalytics.flush.mockImplementation(() => new Promise(() => {}))
+
+    try {
+      const quitting = app.onBeforeQuit(quitEvent())
+      jest.advanceTimersByTime(10000)
+      await quitting
+
+      expect(mockElectron.app.quit).toHaveBeenCalledTimes(1)
+    } finally {
+      jest.useRealTimers()
       global.isUpdating = false
     }
   })
