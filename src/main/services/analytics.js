@@ -900,15 +900,17 @@ async function drainClient(client) {
 /**
  * retire a client the instance has already let go of
  *
- * shutdown() rather than flush(), and the difference is not cosmetic. flush()
- * never touches the sdk's own flushInterval timer (posthog-core-stateless.js:
- * only clearFlushTimer does, and flush() does not call it), so a
- * flushed-and-forgotten client goes on waking every ten seconds for the life
- * of the process. shutdown() clears that timer, drains the queue, and bounds
- * itself with the timeout it is handed - which is the only cap left that means
- * anything, now that nobody is waiting on the result. the sdk's own warning
- * against reusing a shut-down instance is exactly this contract: the client is
- * detached, and an opt-in builds a fresh one through init().
+ * shutdown() rather than flush(), for three reasons - none of which is that
+ * flush() leaks a timer. it does not: flush() reaches _flush(), which calls
+ * clearFlushTimer() first thing (@posthog/core, posthog-core-stateless.js).
+ * what shutdown() adds over it is (1) it drains in a LOOP until the queues are
+ * empty rather than making one pass, (2) it waits on the in-flight sends
+ * before it starts, and (3) it bounds the whole thing with the timeout it is
+ * handed - which is the only cap left that means anything, now that nobody
+ * waits on the result, and it is a cap we get without arming a timer of our
+ * own. its documented caveat, do not reuse an instance after shutting it down,
+ * is exactly this contract: the client is detached, and an opt-in builds a
+ * fresh one through init().
  *
  * the flush() fallback is for a client injected by a test that has no
  * shutdown, so the drain still happens rather than being reported as broken.
@@ -1150,43 +1152,61 @@ class Analytics {
   }
 
   /**
+   * write the preference, keeping this module's never-throws contract
+   *
+   * the store catches its own write failures today, but this module must not
+   * rest its own guarantee on a collaborator's internals.
+   *
+   * @param {boolean} enabled - the preference to store
+   * @returns {Promise<Object|undefined>} the store's {success, error?}
+   */
+  async persistPreference(enabled) {
+    try {
+      return await this.settingsStore.setAnalyticsEnabled(enabled)
+    } catch (error) {
+      return { success: false, error: describeError(error) }
+    }
+  }
+
+  /**
    * user toggled the preference. turning it off stops the client immediately.
+   *
+   * the two directions are deliberately NOT symmetric, because the risk is
+   * not symmetric. stopping must never be delayed by anything that can hang;
+   * starting must never run ahead of the write that would survive a restart.
+   *
    * @param {boolean} enabled
    * @returns {Promise<Object>} the store's {success, error?} - the caller
    *   decides what to tell the user about a write that did not stick
    */
   async setEnabled(enabled) {
-    let persisted
-
-    // the store catches its own write failures today, but this module's
-    // never-throws contract cannot rest on a collaborator's internals
-    try {
-      persisted = await this.settingsStore.setAnalyticsEnabled(enabled)
-    } catch (error) {
-      persisted = { success: false, error: describeError(error) }
-    }
-
-    // stop sending regardless - honouring the user's intent this session is
-    // more important than the write succeeding, so a failed opt-out still
-    // goes inert here. the caller surfaces the failure so the user is not
-    // told an opt-out stuck when it did not.
     if (!enabled) {
-      // inert first, and it is detaching the client that makes the click take
-      // effect. draining first reads as if it delivers more, and what it
-      // really does is keep the pipe open for as long as the flush takes -
-      // flush() has no cap of its own, so a stalled one left the service
-      // enabled, still queueing and still sending, indefinitely after the user
-      // said stop.
+      /**
+       * inert SYNCHRONOUSLY - before this method awaits anything at all.
+       *
+       * the user said stop, and neither the network nor a settings write gets
+       * to delay that. an await in front of this line is the whole bug however
+       * it is spelled: draining first kept the pipe open for as long as the
+       * flush took, and persisting first kept it open for as long as the disk
+       * took. detaching the client is what makes the click take effect, so it
+       * happens first and nothing is allowed in front of it.
+       *
+       * the preference may then fail to stick, and that is the caller's to
+       * report - honouring the intent for this session matters more than the
+       * write landing, and the menu says so rather than claiming it stuck.
+       */
       const detached = this.client
       this.enabled = false
       this.client = null
 
+      const persisted = await this.persistPreference(false)
+
       // fired, never awaited. those events were captured under consent and are
       // still worth delivering, so the detached client is retired properly -
-      // bounded, and with its timer cleared - but a menu click must not wait on
-      // telemetry, least of all on the telemetry it just asked to stop. the
-      // cost is that opting out and quitting at once may lose the last batch,
-      // which is the right direction to lose it.
+      // bounded, and released rather than left running - but a menu click must
+      // not wait on telemetry, least of all on the telemetry it just asked to
+      // stop. the cost is that opting out and quitting at once may lose the
+      // last batch, which is the right direction to lose it.
       //
       // the catch is load-bearing rather than decorative: this promise is
       // unobserved, so it is the place a rejection would surface as an
@@ -1195,6 +1215,21 @@ class Analytics {
 
       return persisted
     }
+
+    const persisted = await this.persistPreference(true)
+
+    /**
+     * turning it ON waits for the write, and gives up if it did not land.
+     *
+     * the menu reverts the tick to off on exactly this predicate, so a service
+     * that enabled itself anyway would be sending behind a switch the user can
+     * see is off. init()'s re-read of the preference usually covers for that
+     * by accident - it reads back the value the failed write did not change -
+     * but not when the settings file is unwritable AND unreadable, where the
+     * read fails open to enabled and agrees with the caller. the state is not
+     * safe to leave resting on that coincidence.
+     */
+    if (persisted && persisted.success === false) return persisted
 
     this.enabled = true
     if (!this.client) await this.init()

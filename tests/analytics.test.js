@@ -459,6 +459,109 @@ describe("Analytics", () => {
       expect(client.captured).toHaveLength(0)
     })
 
+    it("stops sending before the preference write, not after it", async () => {
+      // the drain was only half of it: a settings write that hangs is just as
+      // able to keep the service alive past the click. an opt-out takes effect
+      // synchronously, before this method awaits anything at all.
+      const client = fakeClient()
+      const analytics = new Analytics({
+        settingsStore: fakeStore({
+          setAnalyticsEnabled: () => new Promise(() => {})
+        }),
+        createClient: () => client,
+        forceEnabled: true
+      })
+      await analytics.init()
+
+      // deliberately not awaited - the write never settles, which is the point
+      analytics.setEnabled(false)
+
+      expect(analytics.isEnabled()).toBe(false)
+      analytics.capture("download_completed", { platform: "youtube" })
+      expect(client.captured).toHaveLength(0)
+    })
+
+    /**
+     * a store that cannot be written but reads as enabled
+     *
+     * the shape of an unwritable or unreadable settings file: the read fails
+     * open, because a file we cannot parse is not an opt-out, while nothing can
+     * be persisted. it matters because it is the one case where init()'s own
+     * re-read of the preference does NOT quietly cover for setEnabled getting
+     * the decision wrong - the read agrees with the caller, and only the write
+     * knows better.
+     *
+     * @param {Function} setAnalyticsEnabled - the failing write
+     * @returns {Object} a settings store stub
+     */
+    function unwritableStore(setAnalyticsEnabled) {
+      return fakeStore({ isAnalyticsEnabled: async () => true, setAnalyticsEnabled })
+    }
+
+    it("does not enable itself when the write threw", async () => {
+      // the menu reverts the tick to off when the write fails. a service that
+      // enabled itself anyway would be sending behind a switch the user can
+      // see is off, which is the worst split there is between ui and behaviour.
+      //
+      // no init() first: that is the state a previous opt-out leaves behind -
+      // init() returned early, so there is no client to reuse.
+      const client = fakeClient()
+      const analytics = new Analytics({
+        settingsStore: unwritableStore(async () => {
+          throw new Error("disk full")
+        }),
+        createClient: () => client,
+        forceEnabled: true
+      })
+
+      const result = await analytics.setEnabled(true)
+
+      expect(result).toEqual({ success: false, error: "disk full" })
+      expect(analytics.isEnabled()).toBe(false)
+      analytics.capture("download_completed", { platform: "youtube" })
+      expect(client.captured).toHaveLength(0)
+    })
+
+    it("does not enable itself when the store says the write did not stick", async () => {
+      // the live path: the store catches its own failures and reports them,
+      // so this is the shape a real disk error arrives in - not the throw
+      const client = fakeClient()
+      const analytics = new Analytics({
+        settingsStore: unwritableStore(async () => ({
+          success: false,
+          error: "EACCES"
+        })),
+        createClient: () => client,
+        forceEnabled: true
+      })
+
+      await analytics.setEnabled(true)
+
+      expect(analytics.isEnabled()).toBe(false)
+      analytics.capture("download_completed", { platform: "youtube" })
+      expect(client.captured).toHaveLength(0)
+    })
+
+    it("enables itself once the write has stuck", async () => {
+      // gated on the same predicate the menu uses to decide whether to revert,
+      // so the service's state and the tick cannot disagree
+      const client = fakeClient()
+      const analytics = new Analytics({
+        settingsStore: fakeStore({
+          isAnalyticsEnabled: async () => true,
+          setAnalyticsEnabled: async () => ({ success: true })
+        }),
+        createClient: () => client,
+        forceEnabled: true
+      })
+
+      await analytics.setEnabled(true)
+      analytics.capture("download_completed", { platform: "youtube" })
+
+      expect(analytics.isEnabled()).toBe(true)
+      expect(client.captured).toHaveLength(1)
+    })
+
     it("returns without waiting on the drain at all", async () => {
       // a menu click must never wait on telemetry, least of all the telemetry
       // it just asked to stop. the drain still runs - those events were
