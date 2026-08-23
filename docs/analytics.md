@@ -102,13 +102,31 @@ if a chart on either of these is flat, that is why. removing them from
 
 ## which builds send anything
 
-`Analytics` only initializes when `NODE_ENV === "production"` or
-`CLIPLY_ANALYTICS_DEV === "1"`. a plain `npm run dev` sends nothing, which is why the
-dev-mode check needs the env var:
+`Analytics` only initializes when `app.isPackaged` is true — an installed build —
+or `CLIPLY_ANALYTICS_DEV === "1"`. a plain `npm run dev` sends nothing, which is why
+the dev-mode check needs the env var:
 
 ```bash
 CLIPLY_ANALYTICS_DEV=1 npm run dev
 ```
+
+every event carries `environment`, which is `production` in a packaged build and
+`development` in a dev opt-in session. **filter on it.** dev sessions are otherwise
+indistinguishable from real ones, and — more to the point — a dashboard receiving
+nothing from `production` is the shape a broken gate has.
+
+that is not hypothetical. this gate previously read `NODE_ENV === "production"`, and
+nothing sets `NODE_ENV` in a packaged app: not the dev scripts (they set
+`development`), not electron-builder, and there is no `.env`. every installed build
+evaluated it to false and sent zero events. `app.isPackaged` is electron's own answer
+and is true in exactly the builds this is about; `NODE_ENV` is deliberately not kept
+as a second signal, because tooling sets it for reasons of its own and a developer
+machine carrying `NODE_ENV=production` would report into the production project.
+
+the lookup fails closed: if `require("electron")` cannot be read, the build is
+treated as unpackaged and sends nothing. that costs a real packaged build nothing —
+there, electron is part of the runtime — and the only place it can fail is outside
+electron, where sending would be wrong.
 
 on top of that, `APP_CONFIG.ANALYTICS_CONFIG.ENABLED` in
 [`src/main/utils/constants.js`](../src/main/utils/constants.js) is a build-time kill

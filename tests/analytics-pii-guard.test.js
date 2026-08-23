@@ -520,6 +520,12 @@ describe("the shape of the boundary is pinned, so widening it is a decision", ()
     expect(Object.keys(sent[0].properties).sort()).toEqual([
       "app_version",
       "arch",
+      // which kind of build sent this. a closed two-value vocabulary, and the
+      // module's own value rather than a caller's - it is read off
+      // app.isPackaged, which is also what decides whether anything sends at
+      // all. it carries nothing about the machine, and it is here because a
+      // gate that lets nothing through is otherwise invisible
+      "environment",
       "locale",
       "os",
       "os_version"
@@ -604,6 +610,7 @@ describe("the shape of the boundary is pinned, so widening it is a decision", ()
       "app_version",
       "arch",
       "engine_version",
+      "environment",
       "locale",
       "os",
       "os_version"

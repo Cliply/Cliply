@@ -28,6 +28,7 @@ that's what makes the list below a complete list rather than a summary of one. a
 - your operating system, its version, and your cpu type (`darwin`, `25.5.0`, `arm64`)
 - your system language (`en-GB`)
 - the version of yt-dlp the app is running
+- whether the event came from a released build or from a developer's own machine — the literal word `production` or `development`, and nothing else. it's there so our own test runs don't get counted as yours
 - **country, region and city, worked out from your ip address.** the app never sends the address itself — posthog reads it off the connection, resolves the location, and the project is configured to discard the address rather than store it.
 
 ## what we send, event by event

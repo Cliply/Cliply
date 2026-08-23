@@ -1949,3 +1949,197 @@ describe("Analytics", () => {
     })
   })
 })
+
+/**
+ * which builds send anything.
+ *
+ * every other test in this file passes `forceEnabled`, which is the flag that
+ * exists to skip this gate - so until now nothing exercised it at all. what
+ * was there read `NODE_ENV === "production"`, and nothing in the repo sets
+ * that: not the dev scripts (they set "development"), not electron-builder,
+ * which does not put NODE_ENV into a packaged app's environment at all. every
+ * installed build therefore evaluated the gate to false and sent nothing,
+ * forever, and the half of the contract that would have caught it - a
+ * *packaged* build DOES send - was the half nobody wrote.
+ *
+ * so both directions are asserted here, and the gate is driven through the
+ * real constructor rather than described.
+ */
+describe("which builds send anything", () => {
+  /**
+   * construct the module the way a build would: a fresh require, whatever
+   * electron the case claims is there, an environment holding only what the
+   * case names, and no forceEnabled.
+   *
+   * the module is re-required per case because the electron lookup happens
+   * inside it, and jest's registry is what decides whether `require("electron")`
+   * finds an app object. this is the same shape the locale cases in
+   * analytics-pii-guard.test.js use.
+   */
+  async function inBuild({ electron, env = {} } = {}) {
+    const saved = {
+      NODE_ENV: process.env.NODE_ENV,
+      CLIPLY_ANALYTICS_DEV: process.env.CLIPLY_ANALYTICS_DEV
+    }
+
+    // jest sets NODE_ENV=test on its own, so a case claiming "nothing is set"
+    // has to say so rather than inherit it
+    delete process.env.NODE_ENV
+    delete process.env.CLIPLY_ANALYTICS_DEV
+    Object.assign(process.env, env)
+
+    jest.resetModules()
+    if (electron) jest.doMock("electron", electron)
+
+    try {
+      const { Analytics: Fresh } = require("../src/main/services/analytics")
+
+      const client = fakeClient()
+      let created = false
+
+      const analytics = new Fresh({
+        settingsStore: fakeStore(),
+        createClient: () => {
+          created = true
+          return client
+        }
+      })
+
+      await analytics.init()
+      analytics.capture("app_launched", { is_first_launch: true })
+
+      return { created, sent: client.captured, analytics }
+    } finally {
+      jest.dontMock("electron")
+      jest.resetModules()
+
+      for (const [key, value] of Object.entries(saved)) {
+        if (value === undefined) delete process.env[key]
+        else process.env[key] = value
+      }
+    }
+  }
+
+  /** a packaged app, as electron reports itself once installed */
+  const packaged = () => ({ app: { isPackaged: true, getLocale: () => "en-US" } })
+
+  /** the same app run from source, which is what `npm run dev` produces */
+  const unpackaged = () => ({
+    app: { isPackaged: false, getLocale: () => "en-US" }
+  })
+
+  it("sends from a packaged build with nothing else set", async () => {
+    // the test whose absence is the whole bug. no NODE_ENV, no opt-in env var,
+    // nothing but the build being an installed one - and an event has to reach
+    // the client, not merely a flag be true
+    const { created, sent } = await inBuild({ electron: packaged })
+
+    expect(created).toBe(true)
+    expect(sent).toHaveLength(1)
+    expect(sent[0].event).toBe("app_launched")
+    expect(sent[0].properties.is_first_launch).toBe(true)
+    expect(sent[0].distinctId).toBe("11111111-2222-3333-4444-555555555555")
+  })
+
+  it("sends nothing from an unpackaged build", async () => {
+    const { created, sent } = await inBuild({ electron: unpackaged })
+
+    expect(created).toBe(false)
+    expect(sent).toHaveLength(0)
+  })
+
+  it("sends from an unpackaged build when the dev opt-in is set", async () => {
+    const { created, sent } = await inBuild({
+      electron: unpackaged,
+      env: { CLIPLY_ANALYTICS_DEV: "1" }
+    })
+
+    expect(created).toBe(true)
+    expect(sent).toHaveLength(1)
+  })
+
+  it("does not take NODE_ENV=production for a shipped build", async () => {
+    // the signal that replaced this one is not merely redundant: NODE_ENV is
+    // set by tooling for reasons of its own, and a developer machine that
+    // happened to carry it would start reporting into the production project.
+    // app.isPackaged answers the actual question and nothing else does
+    const { created, sent } = await inBuild({
+      electron: unpackaged,
+      env: { NODE_ENV: "production" }
+    })
+
+    expect(created).toBe(false)
+    expect(sent).toHaveLength(0)
+  })
+
+  it("still sends from a packaged build carrying NODE_ENV=development", async () => {
+    // and the inverse: whatever the environment claims, an installed build is
+    // an installed build
+    const { created } = await inBuild({
+      electron: packaged,
+      env: { NODE_ENV: "development" }
+    })
+
+    expect(created).toBe(true)
+  })
+
+  it("stays off when electron cannot be asked", async () => {
+    // the degrade direction, pinned. a build where require("electron") throws
+    // is not a packaged app - in one the module is part of the runtime - so
+    // this state only arises outside electron, where sending would be wrong
+    const { created, sent } = await inBuild({
+      electron: () => {
+        throw new Error("electron is not here")
+      }
+    })
+
+    expect(created).toBe(false)
+    expect(sent).toHaveLength(0)
+  })
+
+  it("stays off when electron is there but has no app object", async () => {
+    // what a plain node require of the electron package actually yields: the
+    // path to the binary, so `app` is undefined rather than absent-with-a-throw
+    const { created } = await inBuild({ electron: () => "/path/to/electron" })
+
+    expect(created).toBe(false)
+  })
+
+  describe("the environment every event is filed under", () => {
+    it("says production from a packaged build", async () => {
+      const { sent } = await inBuild({ electron: packaged })
+
+      expect(sent[0].properties.environment).toBe("production")
+    })
+
+    it("says development from a dev opt-in session", async () => {
+      // the point of the property: these sessions used to be indistinguishable
+      // from real ones in the dashboard, and a gate that let none of the real
+      // ones through would have looked like ordinary traffic
+      const { sent } = await inBuild({
+        electron: unpackaged,
+        env: { CLIPLY_ANALYTICS_DEV: "1" }
+      })
+
+      expect(sent[0].properties.environment).toBe("development")
+    })
+
+    it("is the module's own value, not one a caller can set", async () => {
+      const client = fakeClient()
+      const analytics = new Analytics({
+        settingsStore: fakeStore(),
+        createClient: () => client,
+        forceEnabled: true
+      })
+      await analytics.init()
+
+      analytics.capture("app_launched", { environment: "production" })
+
+      // dropped as an unlisted property on the way in, and then supplied by
+      // the super properties, which capture() spreads last
+      expect(client.captured[0].properties.environment).toBe("development")
+      const logged = console.warn.mock.calls.flat().join(" ")
+      expect(logged).toContain("environment")
+    })
+  })
+})

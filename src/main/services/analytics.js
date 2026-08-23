@@ -151,7 +151,13 @@ const PROPERTY_KINDS = {
   os: "vocabulary",
   os_version: "version",
   arch: "vocabulary",
-  locale: "locale"
+  locale: "locale",
+
+  // two values, both ours, listed in PROPERTY_VOCABULARIES - a closed kind,
+  // which is what a build indicator should be: it exists so a dev session is
+  // filterable rather than indistinguishable, and nothing about that needs a
+  // kind that admits anything else
+  environment: "vocabulary"
 }
 
 const KIND_BY_PROPERTY = new Map(Object.entries(PROPERTY_KINDS))
@@ -243,6 +249,11 @@ const LOCALE_PATTERN =
 
 // what readLocale() reports when electron is not there to ask
 const LOCALE_UNKNOWN = "unknown"
+
+// the two builds that exist: one somebody installed, and one run from source
+// with the dev opt-in set. see the environment vocabulary below
+const ENVIRONMENT_PRODUCTION = "production"
+const ENVIRONMENT_DEVELOPMENT = "development"
 
 /**
  * the finite vocabularies, one per property.
@@ -378,7 +389,22 @@ const PROPERTY_VOCABULARIES = {
   // nothing else here answers. "short-link" is the redirect hosts (youtu.be,
   // pin.it, vm/vt.tiktok.com, tiktok.com/t), which cost a resolution step
   // before anything else can happen
-  url_kind: new Set(["video", "shorts", "playlist", "short-link", "embed"])
+  url_kind: new Set(["video", "shorts", "playlist", "short-link", "embed"]),
+
+  /**
+   * which kind of build sent the event.
+   *
+   * "development" is a session somebody opted into with CLIPLY_ANALYTICS_DEV=1
+   * - a packaged build is always "production", whatever its environment says,
+   * because app.isPackaged is what both this and the gate above read.
+   *
+   * it is here because the gate failing shut is invisible without it: a
+   * dashboard receiving nothing from real installs looks exactly like a
+   * dashboard receiving nothing at all, and that is how a build that had sent
+   * zero events since the feature landed went unnoticed through nine rounds of
+   * review. one dimension makes the two distinguishable.
+   */
+  environment: new Set([ENVIRONMENT_PRODUCTION, ENVIRONMENT_DEVELOPMENT])
 }
 
 const VOCABULARY_BY_PROPERTY = new Map(Object.entries(PROPERTY_VOCABULARIES))
@@ -817,6 +843,44 @@ function readLocale() {
 }
 
 /**
+ * whether this is a build somebody installed, rather than one run from source.
+ *
+ * this is the production indicator, and it used to be NODE_ENV === "production"
+ * - which nothing in this repo ever sets. the dev scripts set "development",
+ * electron-builder puts no NODE_ENV into a packaged app's environment at all,
+ * and there is no .env, so every build a user actually installed evaluated that
+ * gate to false and sent nothing. app.isPackaged is electron's own answer to
+ * the same question and is true in exactly the builds this is about.
+ *
+ * NODE_ENV is deliberately not kept alongside it. it is not merely redundant:
+ * it is set by tooling for reasons of its own, so keeping it as an alternative
+ * signal means a machine that happens to carry NODE_ENV=production - a build
+ * step, a CI shell, an exported variable - starts reporting into the production
+ * project from source. that is the same class of mistake inverted, and one
+ * signal that answers the question beats two where the spare one can only be
+ * wrong.
+ *
+ * required lazily, the way readLocale() does and for the same reason: electron
+ * is not present under jest, and a require at module top would take every test
+ * in this file down with it.
+ *
+ * it fails CLOSED - unreadable means not packaged, which means no telemetry.
+ * that cannot cost a real packaged build anything, because in one the electron
+ * module is part of the runtime and this lookup cannot fail; the only place it
+ * can fail is outside electron, where sending would be wrong anyway. failing
+ * open would invert exactly that: a script, a test or a tool that constructed
+ * this class would be treated as a shipped install.
+ */
+function isPackagedBuild() {
+  try {
+    const { app } = require("electron")
+    return app?.isPackaged === true
+  } catch {
+    return false
+  }
+}
+
+/**
  * the kernel release, cut back to the part of it that is a version.
  *
  * os.release() is already one on darwin ("25.5.0") and on windows
@@ -996,11 +1060,19 @@ class Analytics {
     // thing the user chose.
     this.pendingWrite = Promise.resolve()
 
+    /**
+     * read once, and used for two separate things: whether this build may send
+     * at all, and what `environment` says on the events it sends. they have to
+     * agree, and the second is what makes the first visible in the dashboard -
+     * a gate that lets nothing through is otherwise indistinguishable from an
+     * app nobody launched.
+     */
+    this.isProductionBuild = isPackagedBuild()
+
     this.allowedInThisBuild =
       typeof forceEnabled === "boolean"
         ? forceEnabled
-        : process.env.NODE_ENV === "production" ||
-          process.env.CLIPLY_ANALYTICS_DEV === "1"
+        : this.isProductionBuild || process.env.CLIPLY_ANALYTICS_DEV === "1"
   }
 
   async init() {
@@ -1020,7 +1092,10 @@ class Analytics {
         os: process.platform,
         os_version: kernelVersion(),
         arch: process.arch,
-        locale: readLocale()
+        locale: readLocale(),
+        environment: this.isProductionBuild
+          ? ENVIRONMENT_PRODUCTION
+          : ENVIRONMENT_DEVELOPMENT
       })
 
       // the engine is probed once per run, so whatever it reported has to be
