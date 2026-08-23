@@ -62,6 +62,61 @@ describe("download path", () => {
     expect(await store.ensureDownloadPath()).toBe(path.join(root, "default-downloads"))
     warn.mockRestore()
   })
+
+  // chmod does not restrict the superuser, and is a no-op on windows
+  const canRevokeWrite =
+    typeof process.getuid === "function" && process.getuid() !== 0
+
+  ;(canRevokeWrite ? test : test.skip)(
+    "falls back when the configured folder exists but can no longer be written to",
+    async () => {
+      // the regression this guards: mkdir(recursive:true) succeeds for a
+      // directory that is already there, permissions and all - it was never
+      // going to notice that this one lost write access after it was chosen
+      const chosen = path.join(root, "revoked")
+      fs.mkdirSync(chosen)
+      fs.chmodSync(chosen, 0o555)
+      fs.writeFileSync(
+        store.settingsFile,
+        JSON.stringify({ download_path: chosen })
+      )
+
+      const warn = jest.spyOn(console, "warn").mockImplementation(() => {})
+      try {
+        expect(await store.ensureDownloadPath()).toBe(
+          path.join(root, "default-downloads")
+        )
+        expect(fs.existsSync(path.join(root, "default-downloads"))).toBe(true)
+      } finally {
+        fs.chmodSync(chosen, 0o755)
+        warn.mockRestore()
+      }
+    }
+  )
+
+  ;(canRevokeWrite ? test : test.skip)(
+    "throws when neither the configured folder nor the default can be written to",
+    async () => {
+      const chosen = path.join(root, "revoked")
+      fs.mkdirSync(chosen)
+      fs.chmodSync(chosen, 0o555)
+      fs.writeFileSync(
+        store.settingsFile,
+        JSON.stringify({ download_path: chosen })
+      )
+      fs.mkdirSync(path.join(root, "default-downloads"))
+      fs.chmodSync(path.join(root, "default-downloads"), 0o555)
+
+      const warn = jest.spyOn(console, "warn").mockImplementation(() => {})
+      try {
+        await expect(store.ensureDownloadPath()).rejects.toThrow()
+      } finally {
+        fs.chmodSync(chosen, 0o755)
+        fs.chmodSync(path.join(root, "default-downloads"), 0o755)
+        warn.mockRestore()
+      }
+    }
+  )
 })
 
 describe("persisting a new path", () => {

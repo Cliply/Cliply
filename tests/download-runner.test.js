@@ -281,7 +281,12 @@ describe("bookkeeping", () => {
 
     expect(runner.size).toBe(1)
     expect(runner.has("combined_1")).toBe(true)
-    expect(runner.list()[0]).toMatchObject({ id: "combined_1", type: "combined" })
+    expect(runner.list()[0]).toMatchObject({
+      downloadId: "combined_1",
+      type: "combined",
+      status: "downloading",
+      progress: 0
+    })
 
     handle.resolve({ filePath: "/downloads/a.mp4" })
     await running
@@ -605,7 +610,7 @@ describe("concurrent downloads", () => {
     // the original entry is untouched
     expect(runner.size).toBe(1)
     expect(runner.list()[0]).toMatchObject({
-      id: "id-a",
+      downloadId: "id-a",
       type: "combined",
       title: "A Video"
     })

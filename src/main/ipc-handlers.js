@@ -650,7 +650,11 @@ class IPCHandlers {
         platform: targetPlatform
       })
 
-      // each platform keeps the options its python service used
+      // each platform keeps the options its python service used - format_id
+      // is accepted for its analytics label below, never as a selector
+      // override. tiktok's preset exists specifically to avoid the
+      // watermarked stream; letting an incoming value replace it would
+      // silently undo that
       const preset = getSimplePlatformOptions(targetPlatform)
 
       const createHandle = () =>
@@ -658,7 +662,7 @@ class IPCHandlers {
           url,
           outputDir,
           outputTemplate,
-          formatSelector: simpleFormatId || preset.formatSelector,
+          formatSelector: preset.formatSelector,
           extraArgs: preset.extraArgs
         })
 
@@ -860,7 +864,7 @@ class IPCHandlers {
 
       const download = this.runner
         .list()
-        .find((entry) => entry.id === downloadId)
+        .find((entry) => entry.downloadId === downloadId)
       if (download) {
         return this.createSuccess(download)
       } else {
@@ -875,9 +879,10 @@ class IPCHandlers {
   // get all active downloads
   async handleGetAllDownloads(_event) {
     try {
-      const downloads = this.runner.list()
-
-      return this.createSuccess({ downloads })
+      // getAllDownloads() on the renderer side reads response.data straight
+      // as the array the DownloadStatus[] contract promises - wrapping it in
+      // an object here was handing back something that is not that array
+      return this.createSuccess(this.runner.list())
     } catch (error) {
       console.error("Get all downloads failed:", error.message)
       return this.createError("Failed to get downloads")

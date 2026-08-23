@@ -724,16 +724,29 @@ class CliplyApp {
     }
 
     try {
+      // update cleanup and the engine shutdown wait both only apply to an
+      // ordinary quit - an install-triggered one skips the teardown that
+      // would fight the installer, per the comment above
+      let shutdownPromise = Promise.resolve()
+
       if (!installing) {
-        // update cleanup
         this.updateState.isCheckingForUpdates = false
 
-        // kill any running yt-dlp process - partial .part files stay resumable
+        // kill any running yt-dlp process and actually wait for the tree to
+        // exit - partial .part files stay resumable either way, but a wait
+        // shorter than the engine's own sigterm->sigkill escalation would let
+        // this process quit before that escalation ever fires, orphaning
+        // whatever the signal alone did not clean up. runs alongside the
+        // analytics flush below rather than after it, so a quit with nothing
+        // in flight is not slowed down by a wait that resolves instantly
         if (this.services.ytdlpEngine) {
-          const cancelled = this.services.ytdlpEngine.cancelAll()
-          if (cancelled > 0) {
-            console.log(`cancelled ${cancelled} running download(s) on quit`)
-          }
+          shutdownPromise = this.services.ytdlpEngine
+            .awaitShutdown()
+            .then((cancelled) => {
+              if (cancelled > 0) {
+                console.log(`cancelled ${cancelled} running download(s) on quit`)
+              }
+            })
         }
       }
 
@@ -741,20 +754,25 @@ class CliplyApp {
       // because a flush that cannot finish must not leave the app refusing to
       // close - telemetry is never worth that, and least of all when an
       // installer is waiting on this process to go
+      let analyticsPromise = Promise.resolve()
+
       if (this.services.analytics) {
         let flushTimer = null
 
-        await Promise.race([
+        analyticsPromise = Promise.race([
           this.services.analytics.flush(),
           new Promise((resolve) => {
             flushTimer = setTimeout(resolve, QUIT_FLUSH_TIMEOUT_MS)
           })
-        ])
-
-        // the cap loses the race far more often than it wins it, and a timer
-        // left armed behind a won race holds the loop open for two more seconds
-        clearTimeout(flushTimer)
+        ]).then(() => {
+          // the cap loses the race far more often than it wins it, and a timer
+          // left armed behind a won race holds the loop open for two more
+          // seconds
+          clearTimeout(flushTimer)
+        })
       }
+
+      await Promise.all([shutdownPromise, analyticsPromise])
 
       // cleanup ipc handlers
       if (!installing && this.ipcHandlers) {

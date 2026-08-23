@@ -269,26 +269,40 @@ class YtdlpUpdater {
       await removeQuietly(stagingDir)
       await copyDirectory(sourceDir, stagingDir)
       await makeExecutable(stagingDir)
-      await this.swapIn(stagingDir, installedDir)
     } catch (error) {
       await removeQuietly(stagingDir)
       console.warn("failed to seed the yt-dlp engine:", error.message)
       return { seeded: false, reason: "copy-failed", error: error.message }
     }
 
-    // the engine changed underneath any cached answer
-    if (typeof this.engine.invalidateVersion === "function") {
-      this.engine.invalidateVersion()
+    // prove the copy actually runs before it ever displaces what is at the
+    // installed path - a corrupt copy (a truncated write, an antivirus
+    // quarantine that lets the bytes land but not the process start) must
+    // never win over a working engine, bundled fallback included. this also
+    // deliberately pays the freshly-unpacked onedir's one-time os scan here,
+    // so the user's first action does not.
+    const staged = resolveExecutableIn(stagingDir)
+    const version = staged
+      ? await this.engine.probeVersion(staged, { timeoutMs: this.probeTimeoutMs })
+      : null
+
+    if (!version) {
+      await removeQuietly(stagingDir)
+      return { seeded: false, reason: "seed-unusable" }
+    }
+
+    try {
+      await this.swapIn(stagingDir, installedDir)
+    } catch (error) {
+      console.warn("failed to install the seeded yt-dlp engine:", error.message)
+      return { seeded: false, reason: "swap-failed", error: error.message }
     }
 
     await this.removeLegacyOnefile()
 
-    // deliberate: the first run of a freshly installed onedir pays a one-time
-    // os scan, and paying it here means the user's first action doesn't
-    const version = await this.engine.probeVersion(
-      resolveExecutableIn(installedDir) || this.engine.getInstalledBinaryPath(),
-      { timeoutMs: this.probeTimeoutMs }
-    )
+    // the probe above already paid for this answer - handing it on means
+    // nothing downstream pays for it a second time
+    this.engine.rememberVersion(version)
 
     return { seeded: true, reason, version }
   }

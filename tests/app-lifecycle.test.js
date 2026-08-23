@@ -174,6 +174,10 @@ beforeEach(() => {
   mockEngine = {
     getBinaryPath: jest.fn(() => "/tmp/yt-dlp"),
     cancelAll: jest.fn(() => 0),
+    // the real awaitShutdown calls cancelAll and resolves to what it
+    // returned; this stand-in keeps that same relationship so a test that
+    // only overrides cancelAll (below) still drives the quit path correctly
+    awaitShutdown: jest.fn(() => Promise.resolve(mockEngine.cancelAll())),
     rememberVersion: jest.fn((version) => {
       if (version) knownVersion = version
     }),
@@ -1189,5 +1193,50 @@ describe("quitting", () => {
     } finally {
       jest.useRealTimers()
     }
+  })
+
+  it("actually waits for the engine to finish shutting down before quitting", async () => {
+    // the regression this guards: cancelAll() alone only sends the signals
+    // and returns immediately, so the app could re-quit and exit before a
+    // cancelled process (or its sigkill escalation) had actually died.
+    // awaitShutdown() is the one that waits for that - prove onBeforeQuit
+    // actually holds on its promise rather than firing and forgetting it
+    let resolveShutdown
+    mockEngine.awaitShutdown.mockImplementation(
+      () => new Promise((resolve) => { resolveShutdown = resolve })
+    )
+
+    const quitting = app.onBeforeQuit(quitEvent())
+    await Promise.resolve().then().then() // let pending microtasks settle
+
+    expect(mockElectron.app.quit).not.toHaveBeenCalled()
+
+    resolveShutdown(1)
+    await quitting
+
+    expect(mockElectron.app.quit).toHaveBeenCalledTimes(1)
+  })
+
+  it("runs the engine shutdown wait and the analytics flush concurrently", async () => {
+    // sequential waits would make a quit during an active download pay both
+    // costs back to back; concurrent means a quit with nothing running is not
+    // slowed down by a wait that resolves instantly
+    const order = []
+    mockEngine.awaitShutdown.mockImplementation(async () => {
+      order.push("shutdown-start")
+      await new Promise((resolve) => setTimeout(resolve, 5))
+      order.push("shutdown-end")
+      return 1
+    })
+    mockAnalytics.flush.mockImplementation(async () => {
+      order.push("flush-start")
+      await new Promise((resolve) => setTimeout(resolve, 5))
+      order.push("flush-end")
+    })
+
+    await app.onBeforeQuit(quitEvent())
+
+    expect(order[0]).toBe("shutdown-start")
+    expect(order[1]).toBe("flush-start")
   })
 })

@@ -258,6 +258,59 @@ describe("what a pinterest/tiktok failure hands the renderer", () => {
     expect(response.error.category).toBe(ERROR_CATEGORIES.NETWORK_ERROR)
     expect(response.error.code).toBe("DOWNLOAD_FAILED")
   })
+
+  it("hands the renderer's DownloadStatus[]/DownloadStatus contracts back as declared", async () => {
+    // getAllDownloads() reads response.data straight as the array; getStatus()
+    // reads it straight as one entry. both used to disagree with what the ipc
+    // layer actually sent back
+    const { handlers } = createHandlers()
+    const handle = new FakeHandle()
+    handlers.engine.downloadSimple = jest.fn(() => handle)
+
+    handlers.handleDownloadCombined(null, {
+      url: "https://www.pinterest.com/pin/1/",
+      platform: "pinterest",
+      download_id: "download_1"
+    })
+    await settle()
+
+    const all = await handlers.handleGetAllDownloads()
+    expect(Array.isArray(all.data)).toBe(true)
+    expect(all.data).toEqual([
+      expect.objectContaining({ downloadId: "download_1", status: "downloading" })
+    ])
+
+    const one = await handlers.handleGetDownloadStatus(null, {
+      downloadId: "download_1"
+    })
+    expect(one.data).toEqual(
+      expect.objectContaining({ downloadId: "download_1", status: "downloading" })
+    )
+
+    handle.resolve({})
+  })
+
+  it("never lets an incoming format_id replace tiktok's anti-watermark preset", async () => {
+    // 'b' is chosen specifically because yt-dlp scores the non-watermarked
+    // stream above the watermarked one for it - a format_id from the ipc
+    // payload used to be able to silently override that
+    const { handlers } = createHandlers()
+    const handle = new FakeHandle()
+    handlers.engine.downloadSimple = jest.fn(() => handle)
+
+    handlers.handleDownloadCombined(null, {
+      url: "https://www.tiktok.com/@user/video/1",
+      platform: "tiktok",
+      download_id: "download_1",
+      format_id: "worst"
+    })
+    await settle()
+    handle.resolve({})
+
+    expect(handlers.engine.downloadSimple).toHaveBeenCalledWith(
+      expect.objectContaining({ formatSelector: "b" })
+    )
+  })
 })
 
 describe("download_completed", () => {

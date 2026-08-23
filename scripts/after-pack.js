@@ -110,7 +110,9 @@ async function prepareMacOS(appOutDir, packager, arch, tools = realTools) {
   const resourcesPath = path.join(appPath, "Contents", "Resources")
   const binariesPath = path.join(resourcesPath, "binaries")
 
-  for (const binary of await collectBinaries(binariesPath, "darwin")) {
+  const helpers = await collectBinaries(binariesPath, "darwin")
+
+  for (const binary of helpers) {
     // an unsigned helper cannot be exec'd by a hardened-runtime parent, so a
     // failure on a binary that is present must stop the build
     await chmodExec(binary)
@@ -131,6 +133,14 @@ async function prepareMacOS(appOutDir, packager, arch, tools = realTools) {
   const target = await thinYtdlpEngine(engineDir, arch, tools)
   await signYtdlpEngine(engineDir, tools)
   await auditYtdlpEngine(engineDir, target, tools)
+
+  // ffmpeg and deno are signed above like the engine is, but were never put
+  // through the same strict re-check - a signature adhocSign() only warned
+  // about, or a helper that is the wrong architecture for this build, could
+  // otherwise ship. ffmpeg and deno are not universal like the engine
+  // (cliply's mac build has only ever shipped them arm64-only), so this is a
+  // proof they already meet the same bar the engine does, not a second thin
+  await auditFiles(helpers, target, tools)
 }
 
 async function prepareWindows(appOutDir) {
@@ -438,6 +448,38 @@ async function signYtdlpEngine(engineDir, tools = realTools) {
 }
 
 /**
+ * one file's share of the audit: exact arch match (when a target is given)
+ * plus a signature that actually verifies. failures are pushed as labelled
+ * strings rather than thrown, so a caller can report every problem in the
+ * package at once instead of stopping at the first
+ *
+ * @param {string} file - the mach-o to check
+ * @param {string} label - how to name it in a problem line
+ * @param {string|null} target - expected arch, or null to skip that check
+ * @param {Object} tools - command runner (injected by tests)
+ * @param {string[]} problems - collected failure lines, appended in place
+ */
+async function checkMachOFile(file, label, target, tools, problems) {
+  if (target) {
+    try {
+      const slices = await lipoArchs(file, tools)
+
+      if (slices.length !== 1 || slices[0] !== target) {
+        problems.push(`${label}: is ${slices.join(", ")}, expected exactly ${target}`)
+      }
+    } catch (error) {
+      problems.push(`${label}: ${error.message}`)
+    }
+  }
+
+  try {
+    await verifySignature(file, tools)
+  } catch (error) {
+    problems.push(`${label}: ${error.message}`)
+  }
+}
+
+/**
  * final gate: prove the engine on disk is what we meant to ship
  *
  * the per-file steps above each check their own work, but this pass exists to
@@ -456,26 +498,8 @@ async function auditYtdlpEngine(engineDir, target, tools = realTools) {
   for (const file of await listFiles(engineDir)) {
     if (!(await isMachO(file))) continue
 
-    const label = path.relative(engineDir, file)
     audited++
-
-    if (target) {
-      try {
-        const slices = await lipoArchs(file, tools)
-
-        if (slices.length !== 1 || slices[0] !== target) {
-          problems.push(`${label}: is ${slices.join(", ")}, expected exactly ${target}`)
-        }
-      } catch (error) {
-        problems.push(`${label}: ${error.message}`)
-      }
-    }
-
-    try {
-      await verifySignature(file, tools)
-    } catch (error) {
-      problems.push(`${label}: ${error.message}`)
-    }
+    await checkMachOFile(file, path.relative(engineDir, file), target, tools, problems)
   }
 
   if (problems.length) {
@@ -486,6 +510,35 @@ async function auditYtdlpEngine(engineDir, target, tools = realTools) {
   }
 
   console.log(`audited ${audited} mach-o file(s) in the yt-dlp engine - all signed and ${target || "universal"}`)
+}
+
+/**
+ * the same strict check as auditYtdlpEngine, for an explicit list of files
+ * rather than a directory - the helper binaries (ffmpeg, deno) live beside
+ * the engine, not inside it, and adhocSign() alone only warns rather than
+ * proving the result actually verifies
+ *
+ * @param {string[]} files - the mach-o files to check
+ * @param {string|null} target - expected arch, or null to skip that check
+ * @param {Object} tools - command runner (injected by tests)
+ */
+async function auditFiles(files, target, tools = realTools) {
+  const problems = []
+
+  for (const file of files) {
+    await checkMachOFile(file, path.basename(file), target, tools, problems)
+  }
+
+  if (problems.length) {
+    throw new Error(
+      `helper binary audit failed for ${problems.length} of ${files.length} file(s):\n  ` +
+        problems.join("\n  ")
+    )
+  }
+
+  if (files.length) {
+    console.log(`audited ${files.length} helper binary(ies) - all signed and ${target || "universal"}`)
+  }
 }
 
 // a signature codesign will actually accept, checked the same two ways we sign
@@ -669,6 +722,7 @@ Object.assign(module.exports, {
   thinYtdlpEngine,
   signYtdlpEngine,
   auditYtdlpEngine,
+  auditFiles,
   lipoArchs,
   adhocSign,
   signOutOfPlace,

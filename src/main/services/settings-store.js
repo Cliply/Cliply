@@ -39,6 +39,29 @@ function isInstallId(value) {
   return typeof value === "string" && INSTALL_ID_PATTERN.test(value)
 }
 
+/**
+ * prove a directory can actually be written to, not just that it exists
+ *
+ * a directory existing and a directory being writable are different claims -
+ * an existing folder can lose write access (a revoked acl, a cloud-synced
+ * folder mid-sync) without ceasing to exist, which is exactly the gap
+ * `mkdir(recursive:true)` leaves open. the probe name is unique per call so
+ * two callers racing this against the same directory can never collide on
+ * the same file.
+ *
+ * @param {string} directory - path to probe
+ * @throws if the directory cannot be written to
+ */
+async function probeWritable(directory) {
+  const probe = path.join(
+    directory,
+    `.cliply-write-test-${process.pid}-${crypto.randomBytes(4).toString("hex")}`
+  )
+
+  await fsp.writeFile(probe, "test")
+  await fsp.rm(probe, { force: true })
+}
+
 class SettingsStore {
   constructor(options = {}) {
     this.settingsFile = options.settingsFile || SETTINGS_FILE
@@ -83,21 +106,34 @@ class SettingsStore {
 
   /**
    * make sure the download folder exists, falling back when it cannot be used
-   * @returns {Promise<string>} the directory downloads will land in
+   *
+   * mkdir(recursive:true) alone is not enough: it succeeds for a directory
+   * that already exists even when its permissions have changed since it was
+   * configured (revoked acl, a cloud-synced folder mid-sync, a removable
+   * drive remounted read-only), so a plain mkdir check never actually
+   * triggers the documented fallback in that case
+   *
+   * @returns {Promise<string>} an existing, proven-writable directory
    */
   async ensureDownloadPath() {
     const target = this.getDownloadPath()
 
     try {
       await fsp.mkdir(target, { recursive: true })
+      await probeWritable(target)
       return target
     } catch (error) {
       console.warn(
         `download folder ${target} is unusable (${error.message}), falling back`
       )
-      await fsp.mkdir(this.defaultPath, { recursive: true })
-      return this.defaultPath
     }
+
+    // the default is not assumed writable either - whatever made the
+    // configured folder unusable (a locked-down profile, revoked disk access)
+    // could just as easily apply here
+    await fsp.mkdir(this.defaultPath, { recursive: true })
+    await probeWritable(this.defaultPath)
+    return this.defaultPath
   }
 
   /**
@@ -114,9 +150,7 @@ class SettingsStore {
       await fsp.mkdir(newPath, { recursive: true })
 
       // prove we can actually write there before saving it
-      const probe = path.join(newPath, ".cliply-write-test")
-      await fsp.writeFile(probe, "test")
-      await fsp.rm(probe, { force: true })
+      await probeWritable(newPath)
     } catch (error) {
       return {
         success: false,

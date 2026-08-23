@@ -66,6 +66,12 @@ function createFakeEngine(root, versions = {}) {
     invalidateVersion() {
       this.invalidated += 1
     },
+    // mirrors the real engine: a probe somebody else already paid for, kept
+    // against whatever getBinaryPath() resolves to right now
+    rememberVersion(version) {
+      if (!version) return
+      this.remembered = { path: this.getBinaryPath(), version }
+    },
     hasActiveOperations() {
       return this.gate.readers > 0
     },
@@ -488,6 +494,49 @@ describe("seeding", () => {
     expect(result.reason).toBe("missing")
     expect(fs.readFileSync(engine.installedExecutable, "utf8")).toBe("bundled engine")
   })
+
+  test("a bundled copy that cannot run is never installed - first install", async () => {
+    const engine = createFakeEngine(root)
+    writeEngineDir(engine.bundledDir, "bundled engine")
+
+    // the staged copy is what gets probed before anything moves - scripting it
+    // by content match would race the copy, so this scripts every unresolved
+    // path the same way a corrupt copy (a truncated write, an antivirus
+    // quarantine that lets the bytes land but not the process start) would
+    const realProbe = engine.probeVersion.bind(engine)
+    engine.probeVersion = async (binaryPath, options) =>
+      binaryPath.includes(".seeding-") ? null : realProbe(binaryPath, options)
+
+    const result = await new YtdlpUpdater({ engine }).seed()
+
+    expect(result).toEqual({ seeded: false, reason: "seed-unusable" })
+    // nothing was ever installed - there is nothing to fall back to and the
+    // app has to say so honestly, not report seeded:true over an empty path
+    expect(fs.existsSync(engine.installedExecutable)).toBe(false)
+  })
+
+  test("a bundled copy that cannot run never displaces a working installed engine", async () => {
+    const engine = createFakeEngine(root)
+    writeEngineDir(engine.bundledDir, "bundled engine")
+    writeEngineDir(engine.installedDir, "installed engine")
+    engine.versions[engine.bundledExecutable] = "2026.09.01"
+    engine.versions[engine.installedExecutable] = "2026.08.19"
+
+    const realProbe = engine.probeVersion.bind(engine)
+    engine.probeVersion = async (binaryPath, options) =>
+      binaryPath.includes(".seeding-") ? null : realProbe(binaryPath, options)
+
+    const result = await new YtdlpUpdater({ engine }).seed()
+
+    expect(result).toEqual({ seeded: false, reason: "seed-unusable" })
+    // this is the bug this guards: a probe-after-swap design would have
+    // already overwritten the working engine before finding out the copy
+    // could not run, leaving neither the new one nor the old one usable
+    expect(fs.readFileSync(engine.installedExecutable, "utf8")).toBe(
+      "installed engine"
+    )
+  })
+
 })
 
 describe("update guards", () => {

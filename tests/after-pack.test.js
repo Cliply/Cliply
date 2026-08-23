@@ -433,7 +433,11 @@ describe("prepareMacOS", () => {
       engine: { "yt-dlp_macos": true, "_internal/libssl.dylib": true },
       binaries: FULL_BINARIES.darwin
     })
-    const tools = makeTools({ archs: () => ["x86_64", "arm64"] })
+    // only the engine ships universal, thin-on-build mach-o files - ffmpeg and
+    // deno have only ever been bundled arm64-only, same as a real build
+    const tools = makeTools({
+      archs: (file) => (file.includes("ytdlp") ? ["x86_64", "arm64"] : ["arm64"])
+    })
 
     await expect(
       prepareMacOS(appOutDir, packager, ARCH_ARM64, tools)
@@ -443,6 +447,46 @@ describe("prepareMacOS", () => {
     expect(
       tools.calls.filter((c) => c[0] === "codesign" && c[1] === "--force")
     ).toHaveLength(4)
+
+    // and the helpers were strictly re-verified, not just adhoc-signed
+    expect(
+      tools.calls.filter((c) => c[0] === "codesign" && c[1] === "--verify")
+    ).toHaveLength(4)
+  })
+
+  it("rejects a helper binary that is the wrong architecture", async () => {
+    const { appOutDir, packager } = makePackage("darwin", {
+      engine: { "yt-dlp_macos": true },
+      binaries: FULL_BINARIES.darwin
+    })
+    // ffmpeg somehow ended up x86_64-only in an arm64 build - adhocSign()
+    // would still sign it happily, since signing does not check architecture
+    const tools = makeTools({
+      archs: (file) => (file.includes("ffmpeg") ? ["x86_64"] : ["arm64"])
+    })
+
+    await expect(
+      prepareMacOS(appOutDir, packager, ARCH_ARM64, tools)
+    ).rejects.toThrow(/ffmpeg: is x86_64, expected exactly arm64/)
+  })
+
+  it("rejects a helper binary whose signature does not verify", async () => {
+    const { appOutDir, packager } = makePackage("darwin", {
+      engine: { "yt-dlp_macos": true },
+      binaries: FULL_BINARIES.darwin
+    })
+    const tools = makeTools({
+      archs: () => ["arm64"],
+      verify: (file) => {
+        if (file.includes("deno")) {
+          throw new Error("code object is not signed at all")
+        }
+      }
+    })
+
+    await expect(
+      prepareMacOS(appOutDir, packager, ARCH_ARM64, tools)
+    ).rejects.toThrow(/deno: signature does not verify/)
   })
 })
 

@@ -35,6 +35,11 @@ const DEFAULT_WATCHDOG_MS = 2 * 60 * 1000
 // how long a cancelled process gets to exit before it is killed outright
 const KILL_GRACE_MS = 5000
 
+// app quit: the ceiling on waiting for cancelled operations to actually exit.
+// longer than KILL_GRACE_MS so the sigkill escalation always gets to fire
+// before this gives up, plus slack for taskkill itself to run on windows
+const SHUTDOWN_WAIT_MS = KILL_GRACE_MS + 2000
+
 // a warm onedir answers --version in well under a second, but the very first
 // run after an install is scanned by the os and can take the best part of a
 // minute - so this ceiling only ever catches a genuinely wedged process
@@ -969,13 +974,15 @@ class YtdlpOperation extends EventEmitter {
     trackStreamMarker = true,
     gate = null,
     killGraceMs = KILL_GRACE_MS,
-    spawnFn = spawn
+    spawnFn = spawn,
+    killFn = process.kill
   }) {
     super()
 
     this.gate = gate
     this.killGraceMs = killGraceMs
     this.spawnFn = spawnFn
+    this.killFn = killFn
 
     this.id = id
     this.operation = operation
@@ -1019,14 +1026,17 @@ class YtdlpOperation extends EventEmitter {
     }
 
     this.gate.acquireRead().then((release) => {
-      this.releaseGate = release
-
-      // cancelled while we were queued behind an update - never spawn at all
+      // cancelled while we were queued behind an update - never spawn at all.
+      // cancel()'s own path already called fail() before this ever resolved,
+      // so settled is already true and fail() here would just no-op - without
+      // releasing a lock we only just received. release it directly, or every
+      // update after this one sees the gate as busy forever.
       if (this.cancelled || this.settled) {
-        this.fail({})
+        release()
         return
       }
 
+      this.releaseGate = release
       this.start()
     })
   }
@@ -1037,6 +1047,12 @@ class YtdlpOperation extends EventEmitter {
         cwd: this.cwd,
         stdio: ["ignore", "pipe", "pipe"],
         windowsHide: true,
+        // yt-dlp spawns ffmpeg and deno as its own children. detaching it into
+        // its own process group on posix means a signal to -pid reaches every
+        // descendant, not just yt-dlp - the same guarantee windows gets from
+        // taskkill /T. windows has no equivalent grouping semantics for this
+        // and uses taskkill for its tree-kill instead, so this stays off there.
+        detached: process.platform !== "win32",
         env: { ...process.env }
       })
     } catch (error) {
@@ -1223,21 +1239,37 @@ class YtdlpOperation extends EventEmitter {
       return
     }
 
-    try {
-      this.child.kill("SIGTERM")
-    } catch {
-      // process already gone
-    }
+    this.signalGroup("SIGTERM")
 
     // yt-dlp cleans up its .part files and its children on sigterm; kill hard
     // if it hangs
     this.killTimer = setTimeout(() => {
-      try {
-        if (this.child) this.child.kill("SIGKILL")
-      } catch {
-        // process already gone
-      }
+      this.signalGroup("SIGKILL")
     }, this.killGraceMs)
+  }
+
+  /**
+   * posix only: signal the process group start() detached this child into, so
+   * ffmpeg and deno die with it instead of surviving as orphans. a group that
+   * is already gone (esrch) falls back to the direct child, so a stuck
+   * download is never left uncancellable because the group lookup failed
+   * @param {string} signal - "SIGTERM" or "SIGKILL"
+   */
+  signalGroup(signal) {
+    if (!this.child || !this.child.pid) return
+
+    try {
+      this.killFn(-this.child.pid, signal)
+      return
+    } catch {
+      // no such process group - fall through to the direct child
+    }
+
+    try {
+      this.child.kill(signal)
+    } catch {
+      // process already gone
+    }
   }
 
   killTree() {
@@ -1386,6 +1418,7 @@ class YtdlpEngine {
     this.watchdogMs = options.watchdogMs || DEFAULT_WATCHDOG_MS
     this.killGraceMs = options.killGraceMs || KILL_GRACE_MS
     this.spawnFn = options.spawnFn || spawn
+    this.killFn = options.killFn || process.kill
 
     this.operations = new Map()
 
@@ -1581,7 +1614,8 @@ class YtdlpEngine {
       trackStreamMarker: !resolved.timeRange,
       gate: this.gate,
       killGraceMs: options.killGraceMs || this.killGraceMs,
-      spawnFn: this.spawnFn
+      spawnFn: this.spawnFn,
+      killFn: this.killFn
     })
 
     if (typeof options.onProgress === "function") {
@@ -1859,6 +1893,38 @@ class YtdlpEngine {
 
     return cancelled
   }
+
+  /**
+   * cancel everything and wait for the process tree to actually be gone,
+   * not just for the signal to have been sent
+   *
+   * cancelAll() alone returns the moment signals go out - the sigterm grace
+   * period and any taskkill spawn are still in flight. a caller that quits
+   * right after it can exit before that escalation ever runs, orphaning
+   * whatever yt-dlp had not managed to clean up yet. this waits for each
+   * operation's own promise (which only settles once its child's close event
+   * fires) instead, bounded so a wedged process can never hold the app open.
+   *
+   * @param {number} maxWaitMs - ceiling on how long to wait
+   * @returns {Promise<number>} how many operations were cancelled
+   */
+  async awaitShutdown(maxWaitMs = SHUTDOWN_WAIT_MS) {
+    // captured before cancelAll(), since a settling operation removes itself
+    // from this.operations - the promises are what outlive that
+    const settling = [...this.operations.values()].map((handle) =>
+      handle.promise.catch(() => {})
+    )
+    const cancelled = this.cancelAll()
+
+    if (settling.length > 0) {
+      await Promise.race([
+        Promise.all(settling),
+        new Promise((resolve) => setTimeout(resolve, maxWaitMs))
+      ])
+    }
+
+    return cancelled
+  }
 }
 
 // =============================================================================
@@ -1932,5 +1998,7 @@ module.exports = {
   ENGINE_DIR_NAME,
   STDERR_BUFFER_LINES,
   DEFAULT_WATCHDOG_MS,
-  PROBE_TIMEOUT_MS
+  PROBE_TIMEOUT_MS,
+  KILL_GRACE_MS,
+  SHUTDOWN_WAIT_MS
 }

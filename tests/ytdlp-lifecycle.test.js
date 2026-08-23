@@ -59,6 +59,14 @@ function createSpawner() {
 // let queued microtasks and stream data events run
 const settle = () => new Promise((resolve) => setImmediate(resolve))
 
+// the real posix kill path signals a process group by pid, which these fake
+// children do not have - throwing here is what a real esrch looks like, and
+// it is exactly what makes killChild() fall back to the fake child's own
+// tracked kill(), which is what every existing signal assertion reads
+function fakeGroupKill() {
+  throw new Error("ESRCH")
+}
+
 function createEngine(spawnFn, options = {}) {
   return new YtdlpEngine({
     userDataPath: path.join(os.tmpdir(), "cliply-lifecycle"),
@@ -66,6 +74,7 @@ function createEngine(spawnFn, options = {}) {
     ffmpegPath: "/fake/ffmpeg",
     denoPath: "/fake/deno",
     spawnFn,
+    killFn: fakeGroupKill,
     ...options
   })
 }
@@ -263,6 +272,42 @@ describe("cancellation", () => {
     await handle.promise.catch(() => {})
   })
 
+  test("on posix, signals the process group before touching the child directly", async () => {
+    const spawnFn = createSpawner()
+    const killCalls = []
+    const engine = createEngine(spawnFn, {
+      killFn: (pid, signal) => killCalls.push([pid, signal])
+    })
+
+    const handle = engine.downloadCombined(DOWNLOAD)
+    await settle()
+
+    const child = spawnFn.children[0]
+    handle.cancel()
+
+    // the group, not the direct pid - ffmpeg and deno are in it too
+    expect(killCalls).toEqual([[-child.pid, "SIGTERM"]])
+    expect(child.signals).toEqual([])
+
+    child.exit(null)
+    await handle.promise.catch(() => {})
+  })
+
+  test("on posix, falls back to the direct child when the group is gone", async () => {
+    // fakeGroupKill (the createEngine default) always throws esrch
+    const spawnFn = createSpawner()
+    const engine = createEngine(spawnFn)
+
+    const handle = engine.downloadCombined(DOWNLOAD)
+    await settle()
+
+    handle.cancel()
+    expect(spawnFn.children[0].signals).toContain("SIGTERM")
+
+    spawnFn.children[0].exit(null)
+    await handle.promise.catch(() => {})
+  })
+
   test("cancelling twice only signals once", async () => {
     const spawnFn = createSpawner()
     const engine = createEngine(spawnFn)
@@ -298,6 +343,49 @@ describe("cancellation", () => {
 
     expect(spawnFn.calls).toHaveLength(0)
     expect(engine.getActiveCount()).toBe(0)
+
+    // the regression this guards: begin()'s queued continuation used to call
+    // fail({}) again here, which no-ops because cancel() already settled the
+    // operation - so the read lock it had just been granted was never handed
+    // back, and every update after this one would find the gate stuck busy
+    expect(engine.gate.tryAcquireWrite()).not.toBeNull()
+  })
+
+  test("awaitShutdown waits for cancelled operations to actually exit", async () => {
+    const spawnFn = createSpawner()
+    const engine = createEngine(spawnFn)
+
+    const first = engine.downloadCombined(DOWNLOAD)
+    const second = engine.downloadCombined(DOWNLOAD)
+    await settle()
+
+    const shutdown = engine.awaitShutdown(5000)
+
+    // still running: the children have not exited yet
+    await settle()
+    expect(engine.getActiveCount()).toBe(2)
+
+    spawnFn.children.forEach((child) => child.exit(null))
+
+    expect(await shutdown).toBe(2)
+    expect(engine.getActiveCount()).toBe(0)
+
+    await Promise.all([first.promise, second.promise]).catch(() => {})
+  })
+
+  test("awaitShutdown gives up at its ceiling rather than hanging forever", async () => {
+    const spawnFn = createSpawner()
+    const engine = createEngine(spawnFn)
+
+    const handle = engine.downloadCombined(DOWNLOAD)
+    await settle()
+
+    // the child never exits - a genuinely wedged process
+    const shutdown = await engine.awaitShutdown(20)
+    expect(shutdown).toBe(1)
+
+    spawnFn.children[0].exit(null)
+    await handle.promise.catch(() => {})
   })
 
   test("cancelAll stops every running operation", async () => {

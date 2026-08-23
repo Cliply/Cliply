@@ -339,14 +339,23 @@ class DownloadRunner {
     return this.active.size
   }
 
+  /**
+   * a snapshot of every download still in flight
+   *
+   * shaped to match the renderer's DownloadStatus contract (downloadId,
+   * status, progress) plus the extra bookkeeping fields a caller building a
+   * downloads list would also want
+   * @returns {Object[]}
+   */
   list() {
-    return [...this.active.entries()].map(([id, entry]) => ({
-      id,
+    return [...this.active.entries()].map(([downloadId, entry]) => ({
+      downloadId,
+      status: entry.status,
+      progress: entry.progress,
       type: entry.type,
       title: entry.title,
       platform: entry.platform,
-      started: entry.started,
-      status: entry.status
+      startTime: entry.started
     }))
   }
 }
