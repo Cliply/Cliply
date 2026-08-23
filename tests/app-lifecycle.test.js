@@ -16,7 +16,14 @@ const mockWindow = {
   isDestroyed: jest.fn(() => false),
   loadURL: jest.fn(),
   loadFile: jest.fn(() => Promise.resolve()),
-  webContents: { send: jest.fn(), openDevTools: jest.fn() }
+  webContents: {
+    send: jest.fn(),
+    openDevTools: jest.fn(),
+    // the window's session is where the youtube embed referer is installed
+    session: {
+      webRequest: { onBeforeSendHeaders: jest.fn() }
+    }
+  }
 }
 
 const mockElectron = {
@@ -274,6 +281,36 @@ describe("initialize", () => {
     expect(order).toEqual(["services", "events", "menu"])
 
     jest.restoreAllMocks()
+  })
+})
+
+describe("the youtube embed referer", () => {
+  // the regression this guards: the packaged app is served with loadFile(),
+  // so the renderer runs under file:// and chromium sends no Referer at all.
+  // youtube's embed player reads that header server-side to decide
+  // playability, and without it the response is an errorScreen rather than a
+  // video - error 153 in the build, never in dev
+  it("adds one to embed requests, and only to those", () => {
+    app.createWindow()
+
+    const [filter, handler] =
+      mockWindow.webContents.session.webRequest.onBeforeSendHeaders.mock
+        .calls[0]
+
+    // a broader filter would hand a referer to every request the app makes
+    expect(filter.urls).toEqual(["https://www.youtube.com/embed/*"])
+
+    const callback = jest.fn()
+    handler({ requestHeaders: { "User-Agent": "Cliply" } }, callback)
+
+    // the existing headers survive; the referer names a real site that is not
+    // youtube itself, which youtube refuses as a self-referential embed
+    expect(callback).toHaveBeenCalledWith({
+      requestHeaders: {
+        "User-Agent": "Cliply",
+        Referer: "https://cliply.space/"
+      }
+    })
   })
 })
 

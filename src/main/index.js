@@ -25,6 +25,11 @@ const {
 // let the user get their first download going before we check for updates
 const UPDATE_CHECK_DELAY_MS = 90 * 1000
 
+// the site the embed player is told it is embedded on. it has to name a real
+// site that is not youtube itself - a youtube.com referer is refused as a
+// self-referential embed (error 152). see giveYouTubeEmbedsAReferer()
+const EMBED_REFERER = "https://cliply.space/"
+
 // what getAppVersion() reports when it cannot read package.json. persisting it
 // would poison the launch after this one: it comes back as previous_version,
 // where the version grammar rejects it and the property is dropped
@@ -567,6 +572,33 @@ class CliplyApp {
       })
   }
 
+  /**
+   * give youtube's embed player a referer to read
+   *
+   * the packaged app is served with loadFile(), so the renderer runs under
+   * file:// - and chromium sends no Referer at all from a file:// page. the
+   * embed player decides playability from that header server-side: without it
+   * the response carries an errorScreen instead of a video, which is what the
+   * user sees as error 153. dev never hits it because vite serves the same
+   * page over http://localhost.
+   *
+   * scoped to the embed url so no other request the app makes gains a referer
+   * it did not have before.
+   */
+  giveYouTubeEmbedsAReferer() {
+    this.mainWindow.webContents.session.webRequest.onBeforeSendHeaders(
+      { urls: ["https://www.youtube.com/embed/*"] },
+      (details, callback) => {
+        callback({
+          requestHeaders: {
+            ...details.requestHeaders,
+            Referer: EMBED_REFERER
+          }
+        })
+      }
+    )
+  }
+
   // create main window
   createWindow() {
     // create browser window
@@ -591,6 +623,8 @@ class CliplyApp {
       icon: this.getAppIcon(),
       titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "default"
     })
+
+    this.giveYouTubeEmbedsAReferer()
 
     // window event handlers
     this.mainWindow.on("closed", this.onWindowClosed)
