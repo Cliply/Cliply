@@ -870,4 +870,23 @@ describe("the version the engine knows", () => {
 
     expect(await version).toBe("2026.09.01")
   })
+
+  test("waits out an in-flight swap instead of probing a path mid-rename", async () => {
+    const spawnFn = createSpawner()
+    const engine = createEngine(spawnFn)
+
+    // the updater holds the write lock while it renames the installed
+    // directory - a probe that started here must not resolve the path or
+    // spawn until the rename is done, or it can read a half-swapped engine
+    const releaseSwap = engine.gate.tryAcquireWrite()
+
+    const version = engine.getVersion()
+    await settle()
+    expect(spawnFn.calls).toHaveLength(0)
+
+    releaseSwap()
+    await answerProbe(spawnFn, "2026.09.01")
+
+    expect(await version).toBe("2026.09.01")
+  })
 })

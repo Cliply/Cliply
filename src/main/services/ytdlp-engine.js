@@ -1710,16 +1710,21 @@ class YtdlpEngine {
    * @returns {Promise<string|null>} version string, or null when unusable
    */
   async getVersion() {
-    const binaryPath = this.getBinaryPath()
+    const release = await this.gate.acquireRead()
+    try {
+      const binaryPath = this.getBinaryPath()
 
-    if (this.cachedVersion && this.cachedVersion.path === binaryPath) {
-      return this.cachedVersion.version
+      if (this.cachedVersion && this.cachedVersion.path === binaryPath) {
+        return this.cachedVersion.version
+      }
+
+      const version = await this.probeVersion(binaryPath)
+      this.cachedVersion = { path: binaryPath, version }
+
+      return version
+    } finally {
+      release()
     }
-
-    const version = await this.probeVersion(binaryPath)
-    this.cachedVersion = { path: binaryPath, version }
-
-    return version
   }
 
   // call after seeding or a self-update swapped the binary
