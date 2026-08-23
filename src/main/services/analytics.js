@@ -872,6 +872,15 @@ function defaultCreateClient(key, host) {
     // meaningless. in electron the machine IS the client, so without this
     // line country/region/city silently never arrive.
     disableGeoip: false,
+    // the same trap one option over, and the same reason. the node sdk assumes
+    // a server, so `isServer ?? true` (posthog-node, client.js) attaches
+    // `$is_server: true` to every event unless this says otherwise. in electron
+    // the machine IS the client, so the default is not merely undisclosed - it
+    // is wrong, and it would label every event in the project as server-side.
+    //
+    // note this omits the property rather than sending `false`:
+    // getCommonEventProperties() only sets it when the option is truthy
+    isServer: false,
     flushAt: 20,
     flushInterval: 10000
   })

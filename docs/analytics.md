@@ -110,6 +110,27 @@ on top of that, `APP_CONFIG.ANALYTICS_CONFIG.ENABLED` in
 [`src/main/utils/constants.js`](../src/main/utils/constants.js) is a build-time kill
 switch, and the user's own preference is read once at `init()`.
 
+## the two SDK options that are set against their defaults
+
+Both exist because `posthog-node` is written for a server and this is a desktop
+client, and both are the kind of line a later reader deletes as redundant.
+
+| option | default | why ours differs |
+| --- | --- | --- |
+| `disableGeoip: false` | `true` (the JSDoc says `false`; the compiled source reads `?? true`) | without it, posthog never resolves country/region/city — silently |
+| `isServer: false` | `true` | without it, `$is_server: true` rides every event and labels the whole project server-side |
+
+Each is pinned twice in `tests/analytics.test.js`: once on the options the real
+factory passes, and once on the *SDK's own* behaviour without the option, so
+deleting either line fails loudly instead of quietly changing what ships.
+
+`isServer: false` **omits** the property rather than sending `false` —
+`getCommonEventProperties()` only sets it when the option is truthy. That is what
+`PRIVACY.md`'s list of what PostHog adds depends on, and a third test pins the whole
+of that common-property set (`$lib`, `$lib_version`, nothing else) so a version bump
+that starts attaching a fourth property makes the document's claim fail rather than
+quietly become false.
+
 ## two things this repo cannot tell you
 
 both are settings on the posthog project rather than anything in the code. no test can

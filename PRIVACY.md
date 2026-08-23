@@ -69,7 +69,7 @@ that's what makes the list below a complete list rather than a summary of one. a
 
 - whether the import worked, and whether the file turned out to have youtube cookies in it
 
-that's the whole list of what *we* send. posthog adds a little of its own on top: which sdk and version delivered the event (`$lib`, `$lib_version`), and the location worked out from your ip described above.
+that's the whole list of what *we* send. the posthog library adds a little of its own on top: which sdk and version delivered the event (`$lib`, `$lib_version`), a one-off random id for the event itself, the time it happened, and the location worked out from your ip described above.
 
 ## the one free-text field
 

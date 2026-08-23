@@ -476,7 +476,7 @@ describe("Analytics", () => {
       expect(created).toBe(0)
     })
 
-    it("sets disableGeoip false on the client it builds for itself", async () => {
+    it("sets disableGeoip and isServer false on the client it builds for itself", async () => {
       const { PostHog } = require("posthog-node")
       PostHog.mockClear()
 
@@ -493,6 +493,7 @@ describe("Analytics", () => {
       expect(key).toBe(APP_CONFIG.ANALYTICS_CONFIG.POSTHOG_KEY)
       expect(options.host).toBe(APP_CONFIG.ANALYTICS_CONFIG.POSTHOG_HOST)
       expect(options.disableGeoip).toBe(false)
+      expect(options.isServer).toBe(false)
     })
 
     it("would lose geoip if that option were dropped", () => {
@@ -506,6 +507,57 @@ describe("Analytics", () => {
       })
 
       expect(bare.disableGeoip).toBe(true)
+    })
+
+    /**
+     * the same companion for isServer, and it is asserted on behaviour rather
+     * than on the stored option because that is where the surprise lives:
+     * `isServer ?? true` means the *absence* of the option adds a property.
+     *
+     * this is the disableGeoip trap one option over. the difference is which
+     * direction it fails in - dropping disableGeoip silently loses data we
+     * want, while dropping this one silently adds a property we never declared
+     * and labels every event in the project as server-side.
+     */
+    it("would attach $is_server to every event if that option were dropped", () => {
+      const { PostHog: RealPostHog } = jest.requireActual("posthog-node")
+      const options = { host: "https://us.i.posthog.com" }
+
+      const bare = new RealPostHog("phc_test", options)
+      const ours = new RealPostHog("phc_test", { ...options, isServer: false })
+
+      expect(bare.getCommonEventProperties().$is_server).toBe(true)
+
+      // omitted, not sent as false - so with the option set there is no
+      // $is_server on the wire at all, which is what PRIVACY.md's list of
+      // what posthog adds depends on
+      expect(ours.getCommonEventProperties()).not.toHaveProperty("$is_server")
+    })
+
+    /**
+     * and the whole of what the sdk attaches, so PRIVACY.md's "that's the whole
+     * list of what we send, and here is what posthog adds" is derived from the
+     * client rather than from whatever we happened to notice.
+     *
+     * a version bump that starts attaching a fourth property fails here, which
+     * is the only way that document stays true without somebody re-reading
+     * node_modules every release.
+     */
+    it("attaches exactly the properties PRIVACY.md says posthog adds", () => {
+      const { PostHog: RealPostHog } = jest.requireActual("posthog-node")
+      const client = new RealPostHog("phc_test", {
+        host: "https://us.i.posthog.com",
+        disableGeoip: false,
+        isServer: false
+      })
+
+      // $geoip_disable is the fourth candidate and is deliberately absent:
+      // prepareMessage only adds it when disableGeoip is truthy, and ours is
+      // false precisely so posthog does resolve the location
+      expect(Object.keys(client.getCommonEventProperties()).sort()).toEqual([
+        "$lib",
+        "$lib_version"
+      ])
     })
   })
 
