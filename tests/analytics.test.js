@@ -600,11 +600,20 @@ describe("Analytics", () => {
         // the first click's write finally lands, long after it stopped
         // speaking for what the user wants
         releaseEnableWrite()
-        await Promise.all([enabling, disabling])
+        const [enableResult, disableResult] = await Promise.all([
+          enabling,
+          disabling
+        ])
 
         expect(analytics.isEnabled()).toBe(false)
         analytics.capture("download_completed", { platform: "youtube" })
         expect(client.captured).toHaveLength(0)
+
+        // the caller is a menu handler holding the live MenuItem, so the stale
+        // answer has to say so - otherwise its failure gets reported against a
+        // checkbox showing somebody else's click
+        expect(enableResult).toMatchObject({ superseded: true })
+        expect(disableResult).not.toHaveProperty("superseded")
 
         // and it never went live in the first place. checking only the end
         // state would let a superseded enable build a client, turn itself on,
@@ -648,10 +657,19 @@ describe("Analytics", () => {
         expect(writes).toEqual([false])
 
         releaseDisableWrite()
-        await Promise.all([disabling, enabling])
+        const [disableResult, enableResult] = await Promise.all([
+          disabling,
+          enabling
+        ])
 
         expect(writes).toEqual([false, true])
         expect(analytics.isEnabled()).toBe(true)
+
+        // the opt-out's EFFECT was applied unconditionally and rightly so, but
+        // by the time it returns a newer click has replaced it - and its
+        // result must not be reported against the tick that newer click left
+        expect(disableResult).toMatchObject({ superseded: true })
+        expect(enableResult).not.toHaveProperty("superseded")
       })
 
       it("stays off when the opt-out lands while the client is being built", async () => {

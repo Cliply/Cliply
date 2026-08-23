@@ -862,23 +862,88 @@ describe("the analytics opt-out menu item", () => {
     expect(menuItem.checked).toBe(false)
   })
 
-  it("reverts the tick and says so when the preference did not save", async () => {
+  it("puts the tick where the service is when the preference did not save", async () => {
+    // derived from isEnabled(), never inverted from the click. a tick computed
+    // from the service cannot disagree with it; a tick that flips agrees only
+    // as long as every path gets the arithmetic right, and it has now been
+    // wrong twice.
+    //
+    // so a failed opt-out leaves the tick OFF: the service went inert for the
+    // session whether or not the write stuck, and that is what off means. the
+    // dialog, not the checkbox, is what says it will not survive a restart.
     mockAnalytics.setEnabled.mockResolvedValue({
       success: false,
       error: "disk full"
     })
+    mockAnalytics.isEnabled.mockReturnValue(false)
     app.createMenu()
 
     const menuItem = { checked: false }
     await analyticsMenuItem().click(menuItem)
 
-    // a privacy control that silently fails to persist comes back on at the
-    // next launch - the tick must not claim otherwise
-    expect(menuItem.checked).toBe(true)
+    expect(menuItem.checked).toBe(false)
     expect(mockElectron.dialog.showMessageBox).toHaveBeenCalledTimes(1)
     const [, options] = mockElectron.dialog.showMessageBox.mock.calls[0]
     expect(options.type).toBe("error")
     expect(options.detail).toBe("disk full")
+  })
+
+  it("puts the tick back when an opt-in did not save", async () => {
+    mockAnalytics.setEnabled.mockResolvedValue({
+      success: false,
+      error: "disk full"
+    })
+    mockAnalytics.isEnabled.mockReturnValue(false)
+    app.createMenu()
+
+    const menuItem = { checked: true }
+    await analyticsMenuItem().click(menuItem)
+
+    expect(menuItem.checked).toBe(false)
+    expect(mockElectron.dialog.showMessageBox).toHaveBeenCalledTimes(1)
+  })
+
+  describe("a click the user has already replaced", () => {
+    // the handler closes over the live MenuItem, so an older click's failure
+    // resuming late acts on the checkbox the NEWEST click left behind. both
+    // orderings are reachable from one impatient double-click.
+
+    it("says nothing about a tick that has moved on without it", async () => {
+      mockAnalytics.setEnabled.mockResolvedValue({
+        success: false,
+        error: "disk full",
+        superseded: true
+      })
+      // where the newer click left things: off, and the service agrees
+      mockAnalytics.isEnabled.mockReturnValue(false)
+      app.createMenu()
+
+      const menuItem = { checked: false }
+      await analyticsMenuItem().click(menuItem)
+
+      expect(menuItem.checked).toBe(false)
+      // and no dialog: an error about a click nobody is making any more is
+      // noise, and it arrives with no way to tell which click it was about
+      expect(mockElectron.dialog.showMessageBox).not.toHaveBeenCalled()
+    })
+
+    it("does not turn a live tick off for a superseded opt-out", async () => {
+      // the reverse ordering: the older click was the opt-out, and the service
+      // is now on because the newer one turned it on
+      mockAnalytics.setEnabled.mockResolvedValue({
+        success: false,
+        error: "disk full",
+        superseded: true
+      })
+      mockAnalytics.isEnabled.mockReturnValue(true)
+      app.createMenu()
+
+      const menuItem = { checked: true }
+      await analyticsMenuItem().click(menuItem)
+
+      expect(menuItem.checked).toBe(true)
+      expect(mockElectron.dialog.showMessageBox).not.toHaveBeenCalled()
+    })
   })
 })
 

@@ -899,10 +899,28 @@ class CliplyApp {
                 menuItem.checked
               )
 
+              // this handler closed over the live MenuItem, and electron neither
+              // serialises clicks nor disables the item while one is running -
+              // so an older click resuming late acts on the checkbox the NEWEST
+              // click left behind, not on its own. a result the service has
+              // marked superseded has nothing to say about it, and a dialog
+              // naming a click already replaced is noise with no way to tell
+              // which click it was about.
+              if (result && result.superseded) {
+                return
+              }
+
               // a privacy control that silently fails to persist would come
               // back on at the next launch - say so rather than pretend
               if (result && result.success === false) {
-                menuItem.checked = !menuItem.checked
+                // read from the service, never inverted from the click. a tick
+                // derived from isEnabled() cannot disagree with what is
+                // actually being sent; one that flips agrees only as long as
+                // every path gets the arithmetic right, and it has been wrong
+                // twice. note a failed opt-out therefore leaves the tick OFF -
+                // the service is inert for this session either way, and it is
+                // the dialog that says it will not survive a restart.
+                menuItem.checked = this.services.analytics.isEnabled()
                 dialog.showMessageBox(this.mainWindow, {
                   type: "error",
                   title: "Couldn't save that preference",

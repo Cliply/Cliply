@@ -1177,10 +1177,16 @@ class Analytics {
    * chained rather than fired: overlapping toggles must reach the file in the
    * order the clicks arrived, or the stored value ends up decided by whichever
    * write the disk happened to finish first - and a file disagreeing with the
-   * tick outlives the session, which is the part the user notices. the cost is
-   * that a write which never settles stalls the ones behind it; the disk is
-   * already the broken thing there, and runtime intent is honoured regardless
-   * because the opt-out never waits on this at all.
+   * tick outlives the session, which is the part the user notices.
+   *
+   * the cost is written down as a choice rather than left to be found later. a
+   * write that never settles blocks every write queued behind it, and because
+   * turning analytics ON waits for its own write, a later opt-in then never
+   * takes effect at all: the tick reads on and the service stays off until the
+   * app restarts. that is not merely a delayed dialog - it is a real refusal to
+   * start sending - and it is the direction we want, because storage this
+   * broken is not a state to begin collecting in. an opt-OUT is unaffected
+   * whatever the disk does, because it never waits on this.
    *
    * @param {boolean} enabled - the preference to store
    * @returns {Promise<Object|undefined>} the store's {success, error?}
@@ -1255,8 +1261,11 @@ class Analytics {
        * oversight. a superseded enable LOSES, because sending is the state
        * that needs a live mandate; a disable always WINS immediately, because
        * refusing to stop is never the safe way to resolve a race. so this side
-       * takes no ticket check at all, while the other side re-checks after
-       * every await.
+       * applies its EFFECT with no ticket check at all, while the other side
+       * re-checks after every await.
+       *
+       * its RESULT is still tagged, because by the time the write comes back a
+       * newer click may own the checkbox - see tagIfSuperseded.
        *
        * the preference may then fail to stick, and that is the caller's to
        * report - honouring the intent for this session matters more than the
@@ -1264,7 +1273,7 @@ class Analytics {
        */
       this.goInert()
 
-      return this.persistPreference(false)
+      return this.tagIfSuperseded(await this.persistPreference(false), generation)
     }
 
     const persisted = await this.persistPreference(true)
@@ -1275,12 +1284,14 @@ class Analytics {
      * back to its own caller - the write did happen - but nothing here may
      * touch runtime state again.
      */
-    if (generation !== this.toggleGeneration) return persisted
+    if (generation !== this.toggleGeneration) {
+      return this.tagIfSuperseded(persisted, generation)
+    }
 
     /**
      * turning it ON waits for the write, and gives up if it did not land.
      *
-     * the menu reverts the tick to off on exactly this predicate, so a service
+     * the menu shows the tick the service's own state warrants, so a service
      * that enabled itself anyway would be sending behind a switch the user can
      * see is off. init()'s re-read of the preference usually covers for that
      * by accident - it reads back the value the failed write did not change -
@@ -1297,9 +1308,35 @@ class Analytics {
     // while it ran has just been undone by init()'s own success. put it back,
     // and let go of the client it built rather than leaving one running behind
     // an off switch.
-    if (generation !== this.toggleGeneration) this.goInert()
+    if (generation !== this.toggleGeneration) {
+      this.goInert()
+      return this.tagIfSuperseded(persisted, generation)
+    }
 
     return persisted
+  }
+
+  /**
+   * mark a result whose click has already been replaced
+   *
+   * the caller is a menu handler that closed over the live MenuItem, so an
+   * older call resuming late does not act on its own historical checkbox - it
+   * acts on the one the NEWEST click left behind. a stale failure reported
+   * there flips somebody else's tick and raises a dialog about a click nobody
+   * is making any more.
+   *
+   * the write did happen, so the result still goes back to its own caller.
+   * tagged, so that caller can tell it is answering a question that has been
+   * withdrawn.
+   *
+   * @param {Object|undefined} persisted - the store's {success, error?}
+   * @param {number} generation - the ticket this call took on the way in
+   * @returns {Object|undefined} the result, marked if it is no longer current
+   */
+  tagIfSuperseded(persisted, generation) {
+    if (generation === this.toggleGeneration) return persisted
+
+    return { ...persisted, superseded: true }
   }
 }
 
