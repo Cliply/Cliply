@@ -979,6 +979,23 @@ class Analytics {
     // kept apart from superProperties because init() rebuilds those wholesale
     this.engineVersion = null
 
+    /**
+     * which toggle currently speaks for the user.
+     *
+     * setEnabled takes a ticket on the way in and re-checks it after every
+     * await. electron neither serialises menu clicks nor disables the item
+     * while a handler runs, so a double-click puts two calls in flight - and
+     * an older one resuming after a slow disk would otherwise apply a decision
+     * the user has already replaced.
+     */
+    this.toggleGeneration = 0
+
+    // preference writes are chained onto this so they land in the order the
+    // clicks arrived. two racing writes otherwise leave the stored value
+    // decided by whichever the disk finished first, which need not be the last
+    // thing the user chose.
+    this.pendingWrite = Promise.resolve()
+
     this.allowedInThisBuild =
       typeof forceEnabled === "boolean"
         ? forceEnabled
@@ -1157,15 +1174,56 @@ class Analytics {
    * the store catches its own write failures today, but this module must not
    * rest its own guarantee on a collaborator's internals.
    *
+   * chained rather than fired: overlapping toggles must reach the file in the
+   * order the clicks arrived, or the stored value ends up decided by whichever
+   * write the disk happened to finish first - and a file disagreeing with the
+   * tick outlives the session, which is the part the user notices. the cost is
+   * that a write which never settles stalls the ones behind it; the disk is
+   * already the broken thing there, and runtime intent is honoured regardless
+   * because the opt-out never waits on this at all.
+   *
    * @param {boolean} enabled - the preference to store
    * @returns {Promise<Object|undefined>} the store's {success, error?}
    */
   async persistPreference(enabled) {
+    const write = this.pendingWrite.then(() =>
+      this.settingsStore.setAnalyticsEnabled(enabled)
+    )
+
+    // the chain has to survive a rejected write, or every later toggle
+    // inherits the rejection and none of them ever runs
+    this.pendingWrite = write.catch(() => {})
+
     try {
-      return await this.settingsStore.setAnalyticsEnabled(enabled)
+      return await write
     } catch (error) {
       return { success: false, error: describeError(error) }
     }
+  }
+
+  /**
+   * stop sending, now
+   *
+   * synchronous by construction: everything that could take time happens after
+   * the client is already gone, so there is no state in which this has been
+   * asked for and not yet taken effect.
+   */
+  goInert() {
+    const detached = this.client
+    this.enabled = false
+    this.client = null
+
+    // fired, never awaited. those events were captured under consent and are
+    // still worth delivering, so the detached client is retired properly -
+    // bounded, and released rather than left running - but a menu click must
+    // not wait on telemetry, least of all on the telemetry it just asked to
+    // stop. the cost is that opting out and quitting at once may lose the last
+    // batch, which is the right direction to lose it.
+    //
+    // the catch is load-bearing rather than decorative: this promise is
+    // unobserved, so it is the place a rejection would surface as an unhandled
+    // one instead of as a return value.
+    retireClient(detached).catch(() => {})
   }
 
   /**
@@ -1180,43 +1238,44 @@ class Analytics {
    *   decides what to tell the user about a write that did not stick
    */
   async setEnabled(enabled) {
+    const generation = ++this.toggleGeneration
+
     if (!enabled) {
       /**
-       * inert SYNCHRONOUSLY - before this method awaits anything at all.
+       * inert SYNCHRONOUSLY - before this method awaits anything at all, and
+       * NOT gated on the generation.
        *
-       * the user said stop, and neither the network nor a settings write gets
-       * to delay that. an await in front of this line is the whole bug however
-       * it is spelled: draining first kept the pipe open for as long as the
-       * flush took, and persisting first kept it open for as long as the disk
-       * took. detaching the client is what makes the click take effect, so it
-       * happens first and nothing is allowed in front of it.
+       * the user said stop, and neither the network nor a settings write nor
+       * another click gets to delay that. an await in front of this line is
+       * the whole bug however it is spelled: draining first kept the pipe open
+       * for as long as the flush took, and persisting first kept it open for
+       * as long as the disk took.
+       *
+       * the asymmetry with the enable path below is deliberate rather than an
+       * oversight. a superseded enable LOSES, because sending is the state
+       * that needs a live mandate; a disable always WINS immediately, because
+       * refusing to stop is never the safe way to resolve a race. so this side
+       * takes no ticket check at all, while the other side re-checks after
+       * every await.
        *
        * the preference may then fail to stick, and that is the caller's to
        * report - honouring the intent for this session matters more than the
        * write landing, and the menu says so rather than claiming it stuck.
        */
-      const detached = this.client
-      this.enabled = false
-      this.client = null
+      this.goInert()
 
-      const persisted = await this.persistPreference(false)
-
-      // fired, never awaited. those events were captured under consent and are
-      // still worth delivering, so the detached client is retired properly -
-      // bounded, and released rather than left running - but a menu click must
-      // not wait on telemetry, least of all on the telemetry it just asked to
-      // stop. the cost is that opting out and quitting at once may lose the
-      // last batch, which is the right direction to lose it.
-      //
-      // the catch is load-bearing rather than decorative: this promise is
-      // unobserved, so it is the place a rejection would surface as an
-      // unhandled one instead of as a return value.
-      retireClient(detached).catch(() => {})
-
-      return persisted
+      return this.persistPreference(false)
     }
 
     const persisted = await this.persistPreference(true)
+
+    /**
+     * superseded: a later click decided while this one was on the disk, and
+     * that click is the one speaking for the user now. the result still goes
+     * back to its own caller - the write did happen - but nothing here may
+     * touch runtime state again.
+     */
+    if (generation !== this.toggleGeneration) return persisted
 
     /**
      * turning it ON waits for the write, and gives up if it did not land.
@@ -1233,6 +1292,13 @@ class Analytics {
 
     this.enabled = true
     if (!this.client) await this.init()
+
+    // init() sets enabled and client from the store, so a disable that landed
+    // while it ran has just been undone by init()'s own success. put it back,
+    // and let go of the client it built rather than leaving one running behind
+    // an off switch.
+    if (generation !== this.toggleGeneration) this.goInert()
+
     return persisted
   }
 }

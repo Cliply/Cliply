@@ -38,6 +38,9 @@ function fakeStore(overrides = {}) {
   }
 }
 
+// one macrotask drains the promise chains these methods hang off
+const settle = () => new Promise((resolve) => setImmediate(resolve))
+
 describe("Analytics", () => {
   it("attaches super properties to every event", async () => {
     const client = fakeClient()
@@ -562,6 +565,133 @@ describe("Analytics", () => {
       expect(client.captured).toHaveLength(1)
     })
 
+    describe("two clicks in the air at once", () => {
+      // electron neither serialises menu clicks nor disables the item while a
+      // handler is still running, so an impatient double-click puts two of
+      // these in flight together. that is ordinary input, not a contrived race.
+
+      it("does not let a superseded opt-in enable behind an off switch", async () => {
+        const client = fakeClient()
+        const createClient = jest.fn(() => client)
+        let releaseEnableWrite
+
+        const analytics = new Analytics({
+          settingsStore: fakeStore({
+            isAnalyticsEnabled: async () => true,
+            setAnalyticsEnabled: (value) =>
+              value
+                ? new Promise((resolve) => {
+                    releaseEnableWrite = () => resolve({ success: true })
+                  })
+                : Promise.resolve({ success: true })
+          }),
+          createClient,
+          forceEnabled: true
+        })
+
+        // no init(): opted out, so there is no client to reuse
+        const enabling = analytics.setEnabled(true)
+        await settle()
+
+        // the user does not wait for the disk, and clicks again
+        const disabling = analytics.setEnabled(false)
+        expect(analytics.isEnabled()).toBe(false)
+
+        // the first click's write finally lands, long after it stopped
+        // speaking for what the user wants
+        releaseEnableWrite()
+        await Promise.all([enabling, disabling])
+
+        expect(analytics.isEnabled()).toBe(false)
+        analytics.capture("download_completed", { platform: "youtube" })
+        expect(client.captured).toHaveLength(0)
+
+        // and it never went live in the first place. checking only the end
+        // state would let a superseded enable build a client, turn itself on,
+        // and be turned back off a moment later - a window with a live client
+        // in it, which anything captured in that window would leave through
+        expect(createClient).not.toHaveBeenCalled()
+      })
+
+      it("writes the two clicks in the order they arrived", async () => {
+        // runtime state is only half of it: if the older write lands last, the
+        // file disagrees with the tick the user is looking at, and the
+        // disagreement survives the restart
+        const client = fakeClient()
+        const writes = []
+        let releaseDisableWrite
+
+        const analytics = new Analytics({
+          settingsStore: fakeStore({
+            isAnalyticsEnabled: async () => true,
+            setAnalyticsEnabled: (value) => {
+              writes.push(value)
+              return value === false
+                ? new Promise((resolve) => {
+                    releaseDisableWrite = () => resolve({ success: true })
+                  })
+                : Promise.resolve({ success: true })
+            }
+          }),
+          createClient: () => client,
+          forceEnabled: true
+        })
+        await analytics.init()
+
+        const disabling = analytics.setEnabled(false)
+        await settle()
+        const enabling = analytics.setEnabled(true)
+        await settle()
+
+        // the second write has not been issued at all - it is queued behind
+        // the first, which is what stops it landing first
+        expect(writes).toEqual([false])
+
+        releaseDisableWrite()
+        await Promise.all([disabling, enabling])
+
+        expect(writes).toEqual([false, true])
+        expect(analytics.isEnabled()).toBe(true)
+      })
+
+      it("stays off when the opt-out lands while the client is being built", async () => {
+        // init() sets enabled and client from the store, so a disable arriving
+        // mid-init is about to be undone by init()'s own success
+        const client = fakeClient()
+        let releaseInstallId
+
+        const analytics = new Analytics({
+          settingsStore: fakeStore({
+            isAnalyticsEnabled: async () => true,
+            getInstallId: () =>
+              new Promise((resolve) => {
+                releaseInstallId = () =>
+                  resolve("11111111-2222-3333-4444-555555555555")
+              })
+          }),
+          createClient: () => client,
+          forceEnabled: true
+        })
+
+        const enabling = analytics.setEnabled(true)
+        await settle()
+
+        const disabling = analytics.setEnabled(false)
+        expect(analytics.isEnabled()).toBe(false)
+
+        releaseInstallId()
+        await Promise.all([enabling, disabling])
+
+        expect(analytics.isEnabled()).toBe(false)
+        // and the client init() went on to build was let go of rather than
+        // left running behind an off switch
+        expect(client.flush).toHaveBeenCalledTimes(1)
+
+        analytics.capture("download_completed", { platform: "youtube" })
+        expect(client.captured).toHaveLength(0)
+      })
+    })
+
     it("returns without waiting on the drain at all", async () => {
       // a menu click must never wait on telemetry, least of all the telemetry
       // it just asked to stop. the drain still runs - those events were
@@ -599,10 +729,11 @@ describe("Analytics", () => {
     })
 
     it("retires the detached client rather than only flushing it", async () => {
-      // flush() leaves the sdk's flushInterval timer armed, so a
-      // flushed-and-forgotten client keeps waking for the life of the process.
-      // shutdown() clears it, drains the queue, and bounds itself with the
-      // timeout it is handed - which is the whole cap, now that nobody waits.
+      // not because flush() leaves a timer armed - it does not, _flush() calls
+      // clearFlushTimer first thing - but because shutdown() drains in a LOOP
+      // until the queues are empty rather than making one pass, waits on the
+      // in-flight sends first, and bounds itself with the timeout it is handed,
+      // which is the whole cap now that nobody waits on the result.
       const client = fakeClient()
       client.shutdown = jest.fn().mockResolvedValue(undefined)
 
