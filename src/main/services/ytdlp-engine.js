@@ -1719,6 +1719,12 @@ class YtdlpEngine {
    * costs seconds. handing the answer back here means nothing downstream buys
    * it a second time.
    *
+   * precondition: the caller probed the binary getBinaryPath() resolves to
+   * *now*. this keys the answer to that path and asks nothing else - so a
+   * caller that probes a staged engine before the swap, and reports it here,
+   * files the new engine's version against the old one and every reader is
+   * told the wrong thing until something invalidates it.
+   *
    * @param {string} version - what that probe reported
    */
   rememberVersion(version) {
