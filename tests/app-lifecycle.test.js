@@ -47,6 +47,7 @@ let mockAnalytics = null
 let mockSettingsStore = null
 let mockIpcHandlers = null
 let mockUpdater = null
+let mockEngine = null
 
 // what IPCHandlers was handed at the moment it was constructed - a snapshot,
 // because the services object keeps being filled in afterwards
@@ -67,10 +68,7 @@ jest.mock("../src/main/services/ytdlp-engine", () => ({
   // validated - which reads as a passing replay that sent nothing at all
   redactLogLine: jest.requireActual("../src/main/services/ytdlp-engine")
     .redactLogLine,
-  YtdlpEngine: jest.fn(() => ({
-    getBinaryPath: jest.fn(() => "/tmp/yt-dlp"),
-    cancelAll: jest.fn(() => 0)
-  }))
+  YtdlpEngine: jest.fn(() => mockEngine)
 }))
 
 jest.mock("../src/main/services/ytdlp-updater", () => ({
@@ -128,6 +126,17 @@ function analyticsMenuItem() {
   )
 }
 
+// found by the one thing that is not its label - a test that located this item
+// by the text it is asserting on would only be proving itself
+function engineVersionMenuItem() {
+  return toolsSubmenu().find((entry) => entry.enabled === false)
+}
+
+// what the Tools menu actually reads, top to bottom
+function toolsMenuShape() {
+  return toolsSubmenu().map((entry) => entry.label || `<${entry.type}>`)
+}
+
 let app
 
 beforeEach(() => {
@@ -157,6 +166,20 @@ beforeEach(() => {
     cleanup: jest.fn()
   }
 
+  // a stand-in that keeps the one part of the real contract this suite leans
+  // on: a falsy version is not an answer, so it never erases one we had.
+  // ytdlp-lifecycle covers the engine's own behaviour
+  let knownVersion = null
+
+  mockEngine = {
+    getBinaryPath: jest.fn(() => "/tmp/yt-dlp"),
+    cancelAll: jest.fn(() => 0),
+    rememberVersion: jest.fn((version) => {
+      if (version) knownVersion = version
+    }),
+    getKnownVersion: jest.fn(() => knownVersion)
+  }
+
   mockUpdater = {
     seed: jest.fn().mockResolvedValue({
       seeded: false,
@@ -177,6 +200,7 @@ beforeEach(() => {
   app.ipcHandlers = mockIpcHandlers
   app.services.analytics = mockAnalytics
   app.services.settingsStore = mockSettingsStore
+  app.services.ytdlpEngine = mockEngine
 })
 
 describe("the aptabase bootstrap is gone", () => {
@@ -427,6 +451,15 @@ describe("seeding the engine", () => {
 
     // the engine is probed once per run, so this is the only chance to say
     expect(mockAnalytics.setEngineVersion).toHaveBeenCalledWith("2026.08.19")
+  })
+
+  it("gives the version to the engine, not only to analytics", async () => {
+    await seedWith({ seeded: false, reason: "up-to-date", version: "2026.08.19" })
+
+    // the menu and the issue report both name the engine, and the user can
+    // switch telemetry off - so the app cannot keep its only copy in there
+    expect(mockEngine.rememberVersion).toHaveBeenCalledWith("2026.08.19")
+    expect(app.services.ytdlpEngine.getKnownVersion()).toBe("2026.08.19")
   })
 
   it("reports a seed that actually installed an engine", async () => {
@@ -846,6 +879,135 @@ describe("the analytics opt-out menu item", () => {
     const [, options] = mockElectron.dialog.showMessageBox.mock.calls[0]
     expect(options.type).toBe("error")
     expect(options.detail).toBe("disk full")
+  })
+})
+
+describe("the engine version in the Tools menu", () => {
+  let log
+
+  beforeEach(() => {
+    log = jest.spyOn(console, "log").mockImplementation(() => {})
+  })
+
+  afterEach(() => {
+    log.mockRestore()
+  })
+
+  it("names the engine this install is actually running", () => {
+    mockEngine.rememberVersion("2026.08.19")
+    app.createMenu()
+
+    expect(engineVersionMenuItem()).toBeDefined()
+    expect(engineVersionMenuItem().label).toBe("Video engine: yt-dlp 2026.08.19")
+  })
+
+  it("says it does not know rather than inventing a version", () => {
+    // a refused or failed seed reports no version, and setEngineVersion drops
+    // falsy by design - so "unknown" is a state this line has to be able to sit
+    // in for a whole run without claiming otherwise
+    app.createMenu()
+
+    expect(engineVersionMenuItem().label).toBe("Video engine: version unknown")
+  })
+
+  it("is a line to read, not a thing to click", () => {
+    app.createMenu()
+
+    expect(engineVersionMenuItem().enabled).toBe(false)
+    expect(engineVersionMenuItem().click).toBeUndefined()
+  })
+
+  it("takes its own place above the analytics toggle", () => {
+    mockEngine.rememberVersion("2026.08.19")
+    app.createMenu()
+
+    expect(toolsMenuShape()).toEqual([
+      "Check for Updates",
+      "<separator>",
+      "Video engine: yt-dlp 2026.08.19",
+      "<separator>",
+      "Send usage data"
+    ])
+  })
+
+  it("does not reach for a menu that has not been built yet", async () => {
+    // the seed resolves inside initializeServices, which runs before
+    // createMenu. rebuilding there would put a menu up early and then throw it
+    // away moments later
+    app.services = {}
+    await app.initializeServices()
+
+    expect(mockElectron.Menu.setApplicationMenu).not.toHaveBeenCalled()
+  })
+
+  it("follows the engine onto a version that lands after startup", async () => {
+    mockEngine.rememberVersion("2026.08.19")
+    app.createMenu()
+    expect(engineVersionMenuItem().label).toBe("Video engine: yt-dlp 2026.08.19")
+
+    app.services.ytdlpUpdater = mockUpdater
+    mockUpdater.checkForUpdate.mockResolvedValue({
+      started: true,
+      updated: true,
+      from: "2026.08.19",
+      to: "2026.09.01",
+      reason: "completed"
+    })
+    await app.checkForEngineUpdate()
+
+    // a label is copied into the native menu when the item is inserted, so
+    // there is nothing to mutate afterwards - the menu has to be rebuilt, and
+    // it has to be handed back to electron for any of it to show
+    expect(engineVersionMenuItem().label).toBe("Video engine: yt-dlp 2026.09.01")
+    expect(mockElectron.Menu.setApplicationMenu).toHaveBeenCalledTimes(2)
+  })
+
+  it("leaves the analytics toggle as it found it when it rebuilds", async () => {
+    mockAnalytics.isEnabled.mockReturnValue(false)
+    mockEngine.rememberVersion("2026.08.19")
+    app.createMenu()
+
+    app.services.ytdlpUpdater = mockUpdater
+    mockUpdater.checkForUpdate.mockResolvedValue({
+      started: true,
+      updated: true,
+      from: "2026.08.19",
+      to: "2026.09.01",
+      reason: "completed"
+    })
+    await app.checkForEngineUpdate()
+
+    const item = analyticsMenuItem()
+    expect(item).toBeDefined()
+    expect(item.type).toBe("checkbox")
+    expect(item.checked).toBe(false)
+  })
+
+  it("rebuilds nothing when the update left the engine where it was", async () => {
+    mockEngine.rememberVersion("2026.08.19")
+    app.createMenu()
+
+    app.services.ytdlpUpdater = mockUpdater
+    await app.checkForEngineUpdate()
+
+    expect(mockElectron.Menu.setApplicationMenu).toHaveBeenCalledTimes(1)
+  })
+
+  it("rebuilds nothing when the version did not actually move", () => {
+    mockEngine.rememberVersion("2026.08.19")
+    app.createMenu()
+
+    // an update reports the version it landed on, not that it differs. landing
+    // back on the one already on the label is nothing to redraw for - and a
+    // rebuild swaps the menu out from under anyone who has it open
+    app.reportEngineUpdate({
+      updated: true,
+      from: "2026.08.19",
+      to: "2026.08.19",
+      reason: "completed"
+    })
+
+    expect(mockElectron.Menu.setApplicationMenu).toHaveBeenCalledTimes(1)
   })
 })
 

@@ -709,3 +709,77 @@ describe("version probe", () => {
     expect(await engine.probeVersion("/missing/yt-dlp")).toBeNull()
   })
 })
+
+// the engine is where the running version lives. the menu and the issue report
+// both name it, and neither can await a probe or read it back out of analytics
+// - telemetry is something the user can switch off, and an app must not lose
+// track of what it is running when they do.
+describe("the version the engine knows", () => {
+  async function answerProbe(spawnFn, version) {
+    await settle()
+    const child = spawnFn.children[spawnFn.children.length - 1]
+    child.say(`${version}\n`)
+    await settle()
+    child.exit(0)
+  }
+
+  test("knows nothing until somebody has looked", () => {
+    expect(createEngine(createSpawner()).getKnownVersion()).toBeNull()
+  })
+
+  test("keeps what a probe found", async () => {
+    const spawnFn = createSpawner()
+    const engine = createEngine(spawnFn)
+
+    const version = engine.getVersion()
+    await answerProbe(spawnFn, "2026.08.19")
+
+    expect(await version).toBe("2026.08.19")
+    expect(engine.getKnownVersion()).toBe("2026.08.19")
+  })
+
+  test("takes an answer somebody else already paid for", async () => {
+    const spawnFn = createSpawner()
+    const engine = createEngine(spawnFn)
+
+    // the seed and the self-update each run --version on the engine they just
+    // installed, and on a cold onedir that first run is the slow one. handing
+    // the result over means nothing downstream buys it twice
+    engine.rememberVersion("2026.08.19")
+
+    expect(engine.getKnownVersion()).toBe("2026.08.19")
+    expect(await engine.getVersion()).toBe("2026.08.19")
+    expect(spawnFn.calls).toHaveLength(0)
+  })
+
+  test("a probe that found nothing is not an answer to keep", async () => {
+    const spawnFn = createSpawner()
+    const engine = createEngine(spawnFn)
+
+    engine.rememberVersion("2026.08.19")
+    engine.rememberVersion(null)
+    engine.rememberVersion(undefined)
+    engine.rememberVersion("")
+
+    // a refused seed reports no version at all. recording that would both
+    // forget a version we did have and pin "unknown" for the rest of the run,
+    // where an empty slot lets the next getVersion() go and ask
+    expect(engine.getKnownVersion()).toBe("2026.08.19")
+    expect(spawnFn.calls).toHaveLength(0)
+  })
+
+  test("forgets it when the engine underneath is replaced", async () => {
+    const spawnFn = createSpawner()
+    const engine = createEngine(spawnFn)
+
+    engine.rememberVersion("2026.08.19")
+    engine.invalidateVersion()
+
+    expect(engine.getKnownVersion()).toBeNull()
+
+    const version = engine.getVersion()
+    await answerProbe(spawnFn, "2026.09.01")
+
+    expect(await version).toBe("2026.09.01")
+  })
+})

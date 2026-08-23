@@ -1694,6 +1694,44 @@ class YtdlpEngine {
   }
 
   /**
+   * the version we already know, without going near the binary
+   *
+   * the application menu is built synchronously and the issue report has to
+   * name the engine the moment it opens, so neither can await a probe. null
+   * means we do not know - which is a state worth saying out loud rather than
+   * papering over, since a refused seed leaves us in it for the whole run.
+   *
+   * @returns {string|null} version string, or null when unknown
+   */
+  getKnownVersion() {
+    const binaryPath = this.getBinaryPath()
+
+    return this.cachedVersion && this.cachedVersion.path === binaryPath
+      ? this.cachedVersion.version
+      : null
+  }
+
+  /**
+   * take a version somebody else already probed
+   *
+   * the seed and the self-update both run `--version` on the engine they just
+   * installed, and on a freshly unpacked onedir that first run is the one that
+   * costs seconds. handing the answer back here means nothing downstream buys
+   * it a second time.
+   *
+   * @param {string} version - what that probe reported
+   */
+  rememberVersion(version) {
+    // a probe that failed reports no version at all, and that is not an answer
+    // worth keeping: recording it would forget a version we did have and pin
+    // the result for the rest of the run, where an empty slot lets the next
+    // getVersion() go and ask again
+    if (!version) return
+
+    this.cachedVersion = { path: this.getBinaryPath(), version }
+  }
+
+  /**
    * read the version of the binary that would be run
    * @param {string} binaryPath - optional override
    * @param {Object} options - {timeoutMs} - a first run needs far longer than

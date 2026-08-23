@@ -165,9 +165,9 @@ class CliplyApp {
 
       // whatever the seed decided, the version it reports is the engine this
       // session runs on - and the probe happens once, so this is the only
-      // chance to put it on every later event. a refusal reports no version
-      // at all, which setEngineVersion ignores rather than storing
-      this.services.analytics.setEngineVersion(seeded.version)
+      // chance to hand it on. a refusal reports no version at all, which both
+      // consumers ignore rather than storing
+      this.noteEngineVersion(seeded.version)
 
       if (seeded.seeded) {
         this.services.analytics.capture("engine_seeded", {
@@ -194,6 +194,30 @@ class CliplyApp {
     } catch (error) {
       console.error("Service initialization failed:", error)
       throw error
+    }
+  }
+
+  /**
+   * pass a freshly probed engine version to everything that shows it
+   *
+   * the engine service is where this lives. analytics is a consumer of it and
+   * not its home: the user can switch telemetry off, and the menu and the
+   * issue report still have to be able to say what is running when they do.
+   *
+   * @param {string} version - what the seed or the update probed, if anything
+   */
+  noteEngineVersion(version) {
+    const shown = this.services.ytdlpEngine.getKnownVersion()
+
+    this.services.ytdlpEngine.rememberVersion(version)
+    this.services.analytics.setEngineVersion(version)
+
+    // the menu was built from whatever we knew at startup, and an update lands
+    // long after that. a menu item's label is copied into the native menu when
+    // the item is inserted - there is no delegate that reads it back - so the
+    // only way to correct the line is to build the menu again.
+    if (this.menu && this.services.ytdlpEngine.getKnownVersion() !== shown) {
+      this.createMenu()
     }
   }
 
@@ -244,7 +268,7 @@ class CliplyApp {
         ...(result.from ? { from_version: result.from } : {}),
         to_version: result.to
       })
-      this.services.analytics.setEngineVersion(result.to)
+      this.noteEngineVersion(result.to)
       return
     }
 
@@ -752,6 +776,10 @@ class CliplyApp {
 
   // create application menu
   createMenu() {
+    // synchronous on purpose: the menu is built during startup and again after
+    // an update lands, and neither moment can wait on a --version probe
+    const engineVersion = this.services.ytdlpEngine.getKnownVersion()
+
     const template = [
       {
         label: "File",
@@ -837,6 +865,22 @@ class CliplyApp {
                 dialog.showErrorBox("Error", "Failed to check for updates.")
               }
             }
+          },
+          { type: "separator" },
+          {
+            // which engine this install actually downloads with - the single
+            // most useful thing to know before filing an issue, and the same
+            // string the report attaches.
+            //
+            // read from the engine rather than from analytics: telemetry is
+            // something the user can switch off, and this line has to stay
+            // right when they do. it is deliberately unknown-tolerant - a
+            // failed probe leaves us with no version for the whole run, and
+            // guessing one would be worse than admitting it
+            label: engineVersion
+              ? `Video engine: yt-dlp ${engineVersion}`
+              : "Video engine: version unknown",
+            enabled: false
           },
           { type: "separator" },
           {
@@ -1003,8 +1047,10 @@ class CliplyApp {
       ]
     }
 
-    const menu = Menu.buildFromTemplate(template)
-    Menu.setApplicationMenu(menu)
+    // kept so noteEngineVersion can tell "the menu is up and now reads wrong"
+    // from "startup has not built one yet"
+    this.menu = Menu.buildFromTemplate(template)
+    Menu.setApplicationMenu(this.menu)
   }
 }
 

@@ -5,6 +5,7 @@ import { systemApi } from "@/lib/api"
 import {
   buildIssueBody,
   buildIssueUrl,
+  environmentFields,
   type ReportEnvironment,
   type ReportInput
 } from "@/lib/report"
@@ -73,11 +74,9 @@ export function ReportIssueDialog() {
     }
   }
 
-  const environmentLine = [
-    `Cliply ${environment?.appVersion ?? "unknown"}`,
-    `${environment?.platform ?? "unknown"} ${environment?.arch ?? ""}`.trim(),
-    `yt-dlp ${environment?.ytDlpVersion ?? "unknown"}`
-  ].join("  ·  ")
+  // the same list the issue body tabulates, so the card can never show less
+  // than the report sends
+  const setupFields = environmentFields(environment)
 
   const logTail = (context.details || "").split("\n").slice(-15).join("\n")
 
@@ -113,10 +112,22 @@ export function ReportIssueDialog() {
           </div>
 
           <div className={cardClass}>
-            <p className={labelClass}>Your setup</p>
-            <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">
-              {environmentLine}
-            </p>
+            <p className={labelClass}>Your setup, attached as-is</p>
+            <dl className="mt-1.5 space-y-1">
+              {setupFields.map((field) => (
+                <div
+                  key={field.label}
+                  className="flex items-baseline justify-between gap-3 text-sm"
+                >
+                  <dt className="text-slate-500 dark:text-slate-400">
+                    {field.label}
+                  </dt>
+                  <dd className="truncate text-slate-700 tabular-nums dark:text-slate-200">
+                    {field.value}
+                  </dd>
+                </div>
+              ))}
+            </dl>
           </div>
 
           {logTail && (
