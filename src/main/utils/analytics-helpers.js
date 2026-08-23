@@ -4,69 +4,29 @@ const fs = require("fs")
 const path = require("path")
 const os = require("os")
 
-// categorize errors
-function categorizeError(errorMessage) {
-  const message = (errorMessage || "").toLowerCase()
+// error classification lives in utils/error-taxonomy.js - the substring
+// matcher that used to sit here invented codes the rest of the app never had
+// (FFMPEG_DISK_FULL) and read "block" in any word as bot detection
 
-  if (
-    message.includes("antivirus") ||
-    message.includes("killed") ||
-    message.includes("sigkill")
-  ) {
-    return "FFMPEG_AV_BLOCKED"
+/**
+ * a message for anything a throw site may have produced, including null
+ *
+ * lives here rather than at any one of its call sites because all three of them
+ * are the same promise - that telemetry never throws into its caller - and a
+ * catch that reads `error.message` breaks it: the read is a property access,
+ * and a getter can throw from inside the catch, where nothing is left to catch
+ * it. `String(error)` is not the answer either, since a hostile toString throws
+ * the same way and a symbol throws on interpolation.
+ *
+ * @param {*} error - whatever was thrown
+ * @returns {string} something safe to print
+ */
+function describeError(error) {
+  try {
+    return error && error.message ? String(error.message) : String(error)
+  } catch {
+    return "unknown error"
   }
-
-  if (message.includes("ffmpeg binary is missing")) {
-    return "FFMPEG_MISSING"
-  }
-
-  if (message.includes("no space") || message.includes("disk full")) {
-    return "FFMPEG_DISK_FULL"
-  }
-
-  if (message.includes("moov atom") || message.includes("corrupted")) {
-    return "FFMPEG_CORRUPT_STREAM"
-  }
-
-  if (message.includes("ffmpeg exited with code") || message.includes("ffmpeg output:")) {
-    return "FFMPEG_ERROR"
-  }
-
-  if (
-    message.includes("network") ||
-    message.includes("connection") ||
-    message.includes("timeout")
-  ) {
-    return "NETWORK_ERROR"
-  }
-
-  if (
-    message.includes("bot") ||
-    message.includes("rate") ||
-    message.includes("block")
-  ) {
-    return "BOT_DETECTION"
-  }
-
-  if (
-    message.includes("unavailable") ||
-    message.includes("private") ||
-    message.includes("deleted") ||
-    message.includes("not available on this app") ||
-    message.includes("restricted")
-  ) {
-    return "VIDEO_UNAVAILABLE"
-  }
-
-  if (message.includes("python") || message.includes("server")) {
-    return "PYTHON_SERVER_ERROR"
-  }
-
-  if (message.includes("permission") || message.includes("access")) {
-    return "PERMISSION_ERROR"
-  }
-
-  return "UNKNOWN_ERROR"
 }
 
 // extract quality from format id
@@ -75,26 +35,25 @@ function extractQuality(formatId) {
 
   const id = formatId.toString().toLowerCase()
 
-  // handle our new dynamic format selectors first
-  const newFormatMappings = {
-    // video format selectors
-    auto: "auto",
-    best_quality: "best",
-    hd_720p: "720p",
-    eco_360p: "360p",
+  // a video download is reported by the height the user picked, so any height
+  // the menu offered comes through as itself rather than as "unknown"
+  if (/^\d{2,4}p$/.test(id)) {
+    return id
+  }
 
-    // audio format selectors
-    auto_audio: "auto_audio",
-    high_audio: "high_quality",
-    medium_audio: "medium_quality",
+  const knownIds = {
+    // the three audio modes
+    mp3: "mp3",
+    m4a: "m4a",
+    original: "original_audio",
 
     // platforms that always use best available (no user format selection)
     pinterest: "best_available",
     tiktok: "best_available"
   }
 
-  if (newFormatMappings[id]) {
-    return newFormatMappings[id]
+  if (knownIds[id]) {
+    return knownIds[id]
   }
 
   // youtube format mappings (legacy support)
@@ -194,6 +153,101 @@ function extractQuality(formatId) {
   return "unknown"
 }
 
+/**
+ * the three audio modes the audio flow can ask for.
+ *
+ * they are the format id for an audio download: handleDownloadAudio passes
+ * `data.audio_mode` straight through as `formatId` (ipc-handlers.js:782), and
+ * the renderer sends that same string as download_started's `audio_format`
+ * (renderer/src/lib/hooks/useAudioDownload.ts:169). so a terminal event reading
+ * the format id back reports the value the start event already sent, rather
+ * than one derived to look like it.
+ */
+const AUDIO_MODES = new Set(["mp3", "m4a", "original"])
+
+/**
+ * the audio mode behind a format id, if it is one
+ *
+ * deliberately not a mapping the way extractQuality is - that one renames
+ * `original` to `original_audio`, which is the right answer for a quality label
+ * and the wrong one here, where the point is to match what the start event
+ * sent verbatim.
+ *
+ * @param {string} formatId - the format id the download ran with
+ * @returns {string|undefined} the mode, or nothing when it names no audio mode
+ */
+function audioFormat(formatId) {
+  if (!formatId) return undefined
+
+  const id = formatId.toString().toLowerCase()
+
+  return AUDIO_MODES.has(id) ? id : undefined
+}
+
+/**
+ * how long a download took, as a label rather than a measurement
+ *
+ * the boundaries are deliberately uneven. an even split would spend most of
+ * its resolution separating fast from slightly less fast, where the question
+ * these answer is whether downloads work for this person at all - so the
+ * detail sits under a minute, which is where a download that behaved stops
+ * being distinguishable from one that struggled, and everything past a quarter
+ * of an hour collapses into a single "something is wrong".
+ *
+ * @param {number} elapsedMs - wall clock from the request to the finished file
+ * @returns {string|null} a bucket label, or null when it was not measurable
+ */
+function elapsedBucket(elapsedMs) {
+  // null rather than a "0s" that would read as an instant download. a clock
+  // that stepped backwards mid-download is the realistic way this happens
+  if (!Number.isFinite(elapsedMs) || elapsedMs < 0) {
+    return null
+  }
+
+  const seconds = elapsedMs / 1000
+
+  if (seconds < 5) return "<5s"
+  if (seconds < 15) return "5-15s"
+  if (seconds < 60) return "15-60s"
+  if (seconds < 300) return "1-5 min"
+  if (seconds < 900) return "5-15 min"
+  return ">15 min"
+}
+
+/**
+ * how fast a download ran, in mebibytes a second - the unit yt-dlp shows the
+ * user while it works
+ *
+ * the label says MBps rather than MB/s because the bucket grammar's unit is
+ * letters only: a slash cannot be written, and MBps is the same thing without
+ * one. the boundary that matters is 1, which is roughly where a connection
+ * stops keeping up with a video download.
+ *
+ * @param {number} bytes - the finished file's size
+ * @param {number} elapsedMs - how long it took to arrive
+ * @returns {string|null} a bucket label, or null when it was not measurable
+ */
+function speedBucket(bytes, elapsedMs) {
+  // a size of zero is a stat that failed rather than an empty file - a
+  // download that resolved always wrote something - and a duration of zero
+  // divides into it to give an infinite speed. neither is a slow download
+  if (!Number.isFinite(bytes) || bytes <= 0) {
+    return null
+  }
+
+  if (!Number.isFinite(elapsedMs) || elapsedMs <= 0) {
+    return null
+  }
+
+  const perSecond = bytes / (1024 * 1024) / (elapsedMs / 1000)
+
+  if (perSecond < 1) return "<1 MBps"
+  if (perSecond < 3) return "1-3 MBps"
+  if (perSecond < 10) return "3-10 MBps"
+  if (perSecond < 30) return "10-30 MBps"
+  return ">30 MBps"
+}
+
 // check first launch
 function isFirstLaunch() {
   const userDataPath = path.join(os.homedir(), ".cliply")
@@ -216,59 +270,12 @@ function isFirstLaunch() {
   }
 }
 
-// sanitize title (remove pii)
-function sanitizeTitle(title) {
-  if (!title || typeof title !== "string") {
-    return "unknown"
-  }
-
-  // limit length and remove pii
-  let sanitized = title
-    .slice(0, 100)
-    .replace(/\b\d{4,}\b/g, "[number]")
-    .replace(/\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b/g, "[email]")
-
-  return sanitized
-}
-
-// extract title from filename
-function extractTitleFromFilename(filename) {
-  if (!filename) return "unknown"
-
-  // remove extension
-  const nameWithoutExt = filename.replace(
-    /\.(mp4|m4a|webm|mkv|avi|mov|mp3|wav|opus|aac|flac)$/i,
-    ""
-  )
-
-  // filename patterns:
-  // audio: {title}_audio_{quality}_{timestamp}
-  // video: {title}_{quality}_{timestamp}
-
-  let titlePart = nameWithoutExt
-
-  // remove timestamp
-  titlePart = titlePart.replace(/_\d{5}$/, "")
-
-  // remove trimmed section
-  titlePart = titlePart.replace(/_trimmed_[\d-]+$/, "")
-
-  // audio files
-  if (titlePart.includes("_audio_")) {
-    const parts = titlePart.split("_audio_")
-    if (parts.length >= 2) {
-      titlePart = parts[0]
-    }
-  } else {
-    // video files
-    titlePart = titlePart.replace(
-      /_(1080p|720p|480p|360p|240p|144p|high|medium|low)$/,
-      ""
-    )
-  }
-
-  return titlePart || "unknown"
-}
+// sanitizeTitle and extractTitleFromFilename lived here to feed a video title
+// into the old aptabase events. no event has a property for a title any more -
+// ALLOWED_PROPERTIES (services/analytics.js) is the whole list - so the pair
+// was two ready-made ways to derive one with nowhere left to send it. deleted
+// rather than left dead: the privacy claim in PRIVACY.md is that a title has no
+// route out, and a helper that produces one is a route waiting for a caller
 
 // get app version
 function getAppVersion() {
@@ -281,10 +288,11 @@ function getAppVersion() {
 }
 
 module.exports = {
-  categorizeError,
+  describeError,
   extractQuality,
-  extractTitleFromFilename,
+  audioFormat,
+  elapsedBucket,
+  speedBucket,
   isFirstLaunch,
-  sanitizeTitle,
   getAppVersion
 }

@@ -1,3 +1,4 @@
+import { isTrimmedRange, track, videoQuality } from "@/lib/analytics"
 import {
   DownloadError,
   downloadApi,
@@ -6,6 +7,7 @@ import {
   type DownloadProgress,
   type VideoDownloadRequest
 } from "@/lib/api"
+import { isTerminalReason, terminalReason } from "@/lib/downloadOutcome"
 import { reportActions } from "@/lib/reportStore"
 import { showDownloadErrorToast } from "@/lib/toast-utils"
 import { useMutation } from "@tanstack/react-query"
@@ -28,6 +30,8 @@ export interface VideoDownloadState {
   outputFile?: string
   fileSize?: number
   error?: string
+  // trimmed downloads report a single sweep, so there is no live percentage
+  indeterminate?: boolean
 }
 
 export const useVideoDownload = () => {
@@ -39,8 +43,14 @@ export const useVideoDownload = () => {
   const progressCleanupRef = useRef<(() => void) | null>(null)
 
   // Cleanup progress listener on unmount
+  // On unmount we stop listening but deliberately do NOT cancel the engine
+  // download - it keeps running, which is what users expect when a view is
+  // swapped out. The pending mutation is settled so nothing awaits forever.
   useEffect(() => {
     return () => {
+      settleRef.current?.reject(terminalReason("abandoned", "Download view closed"))
+      settleRef.current = null
+
       if (progressCleanupRef.current) {
         progressCleanupRef.current()
         progressCleanupRef.current = null
@@ -49,6 +59,10 @@ export const useVideoDownload = () => {
   }, [])
 
   const lastUrlRef = useRef<string | undefined>(undefined)
+  const settleRef = useRef<{
+    resolve: (value: { downloadId: string }) => void
+    reject: (error: Error) => void
+  } | null>(null)
 
   const mutation = useMutation({
     mutationFn: async (request: VideoDownloadRequest) => {
@@ -59,14 +73,28 @@ export const useVideoDownload = () => {
         message: "Starting video download..."
       })
 
-      // Start the download
-      const result = await videoApi.downloadVideo(request)
-      const { downloadId } = result
+      // Correlate on an id we generate here: the listener can then filter from
+      // the moment it subscribes, so a concurrent download's events can never
+      // settle this mutation.
+      const downloadId = crypto.randomUUID()
+      setDownloadState((prev) => ({ ...prev, downloadId }))
 
-      // Set up progress tracking
+      // settles when a terminal event arrives, which is what keeps the caller's
+      // await (and the button's pending state) tied to the real download
+      const finished = new Promise<{ downloadId: string }>((resolve, reject) => {
+        settleRef.current = { resolve, reject }
+      })
+
+      // nothing awaits `finished` until the start ipc below resolves, so an
+      // unmount or reset in that window would reject a promise with no handler
+      // attached - which surfaces as an unhandledrejection. Observing it here
+      // is enough; the `await` further down still sees the same rejection.
+      finished.catch(() => {})
+
       const cleanup = downloadApi.onProgress(
         (progressData: DownloadProgress) => {
-          if (progressData.downloadId === downloadId) {
+          if (progressData.downloadId !== downloadId) return
+          {
             setDownloadState((prev) => ({
               ...prev,
               downloadId,
@@ -74,6 +102,7 @@ export const useVideoDownload = () => {
               progress: progressData.progress || prev.progress,
               speed: progressData.speed,
               eta: progressData.eta,
+              indeterminate: progressData.indeterminate,
               message:
                 progressData.error ||
                 `Downloading video... ${(progressData.progress || 0).toFixed(1)}%`,
@@ -93,17 +122,15 @@ export const useVideoDownload = () => {
                 }
               })
 
-              // Cleanup listener after completion
-              if (progressCleanupRef.current) {
-                progressCleanupRef.current()
-                progressCleanupRef.current = null
-              }
+              settleRef.current?.resolve({ downloadId })
             }
 
             // Handle failure
             if (progressData.status === "failed") {
               reportActions.stage({
                 shortMessage: progressData.error || "Download failed",
+                details: progressData.details,
+                category: progressData.category,
                 platform: "youtube",
                 downloadType: "video",
                 videoUrl: lastUrlRef.current
@@ -113,11 +140,20 @@ export const useVideoDownload = () => {
                 progressData.error || "Something went wrong. You can send us the details."
               )
 
-              // Cleanup listener after failure
-              if (progressCleanupRef.current) {
-                progressCleanupRef.current()
-                progressCleanupRef.current = null
-              }
+              // already surfaced here; onError must not report it twice
+              settleRef.current?.reject(
+                terminalReason(
+                  "failed",
+                  progressData.error || "Download failed"
+                )
+              )
+            }
+
+            // Handle cancellation - not a failure, nobody should report it
+            if (progressData.status === "cancelled") {
+              settleRef.current?.reject(
+                terminalReason("cancelled", "Download cancelled")
+              )
             }
           }
         }
@@ -125,9 +161,42 @@ export const useVideoDownload = () => {
 
       progressCleanupRef.current = cleanup
 
-      return { downloadId, cleanup }
+      // the hook only ever serves youtube - the other platforms have their own
+      // components and never reach this mutation
+      track("download_started", {
+        platform: "youtube",
+        media_type: "video",
+        quality: videoQuality(request.height),
+        is_trimmed: isTrimmedRange(request.time_range)
+      })
+
+      try {
+        // resolves once the process is running; the download itself is followed
+        // through the progress events above
+        await videoApi.downloadVideo({ ...request, download_id: downloadId })
+
+        return await finished
+      } catch (error) {
+        // a start failure means no terminal event is ever coming, so settle the
+        // terminal promise rather than leaving it pending forever (rejecting an
+        // already-settled promise is a no-op, so the terminal paths are safe)
+        settleRef.current?.reject(error as Error)
+        throw error
+      } finally {
+        settleRef.current = null
+        if (progressCleanupRef.current) {
+          progressCleanupRef.current()
+          progressCleanupRef.current = null
+        }
+      }
     },
     onError: (error: Error) => {
+      // terminal outcomes are owned by the progress-event path above, which has
+      // already updated state, toasted and staged the report
+      if (isTerminalReason(error)) {
+        return
+      }
+
       setDownloadState((prev) => ({
         ...prev,
         status: "failed",
@@ -151,18 +220,27 @@ export const useVideoDownload = () => {
   const cancelDownload = async () => {
     if (downloadState.downloadId) {
       try {
-        await downloadApi.cancelDownload(downloadState.downloadId)
+        const cancelled = await downloadApi.cancelDownload(
+          downloadState.downloadId
+        )
+
+        // main reports false when it had nothing to cancel - usually because the
+        // download just finished. Settling anyway would show "cancelled" over a
+        // completed download and discard the terminal event still in flight.
+        if (!cancelled) {
+          return
+        }
+
         setDownloadState((prev) => ({
           ...prev,
           status: "cancelled",
           message: "Download cancelled"
         }))
 
-        // Cleanup progress listener
-        if (progressCleanupRef.current) {
-          progressCleanupRef.current()
-          progressCleanupRef.current = null
-        }
+        // settle the pending mutation so the button never stays stuck
+        settleRef.current?.reject(
+          terminalReason("cancelled", "Download cancelled")
+        )
 
         toast.info("Video download cancelled")
       } catch (error) {
@@ -173,6 +251,9 @@ export const useVideoDownload = () => {
 
   // Reset function to clear state
   const reset = () => {
+    settleRef.current?.reject(terminalReason("abandoned", "Download reset"))
+    settleRef.current = null
+
     if (progressCleanupRef.current) {
       progressCleanupRef.current()
       progressCleanupRef.current = null

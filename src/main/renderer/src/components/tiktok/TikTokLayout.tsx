@@ -1,14 +1,8 @@
 import { ModeToggle } from "@/components/ui/mode-toggle"
 import { FeedbackCard, UnifiedDownloadCard } from "@/components/video"
-import { useServerStatus } from "@/lib/hooks/useServerStatus"
 import { useTikTokStore } from "@/lib/tiktokStore"
 import { useAppStore } from "@/lib/store"
-import {
-  showServerReadyToast,
-  showServerStartingToast
-} from "@/lib/toast-utils"
 import { motion } from "framer-motion"
-import { useEffect, useRef } from "react"
 import { CompactSearch } from "../video/CompactSearch"
 import { TikTokDetailsCard } from "./TikTokDetailsCard"
 import { TikTokThumbnail } from "./TikTokThumbnail"
@@ -16,24 +10,6 @@ import { TikTokThumbnail } from "./TikTokThumbnail"
 export function TikTokLayout() {
   const { videoInfo, url } = useTikTokStore()
   const { setShowMediaDetails } = useAppStore()
-
-  const serverStatus = useServerStatus()
-  const prevStatusRef = useRef(serverStatus.status)
-
-  useEffect(() => {
-    const prevStatus = prevStatusRef.current
-    const currentStatus = serverStatus.status
-
-    if (prevStatus !== currentStatus) {
-      if (currentStatus === "starting") {
-        showServerStartingToast()
-      } else if (currentStatus === "ready" && prevStatus === "starting") {
-        showServerReadyToast()
-      }
-    }
-
-    prevStatusRef.current = currentStatus
-  }, [serverStatus.status])
 
   if (!videoInfo) return null
 

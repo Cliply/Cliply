@@ -14,6 +14,8 @@
     "moduleDetection": "force",
     "noEmit": true,
     "jsx": "react-jsx",
+    /* the telemetry payload fixture is json, and both test runners read it */
+    "resolveJsonModule": true,
 
     /* Path mapping */
     "baseUrl": ".",

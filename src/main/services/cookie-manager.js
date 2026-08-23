@@ -4,8 +4,25 @@
  */
 
 const fs = require("fs").promises
+const { readFileSync } = require("fs")
 const path = require("path")
 const { APP_CONFIG } = require("../utils/constants")
+// the engine reads the same jar with the same parser - see utils/cookie-jar
+const { inspectCookieContent } = require("../utils/cookie-jar")
+
+// written by older builds; it claimed the cookies worked when all it knew was
+// that the file existed, so it is stripped wherever status is read or written
+const LEGACY_STATUS_KEYS = ["working"]
+
+function withoutLegacyKeys(status) {
+  const cleaned = { ...status }
+
+  for (const key of LEGACY_STATUS_KEYS) {
+    delete cleaned[key]
+  }
+
+  return cleaned
+}
 
 class CookieManager {
   constructor() {
@@ -66,26 +83,32 @@ class CookieManager {
   }
 
   /**
-   * check if cookie file has valid cookies
-   * @returns {Promise<boolean>} true if cookies are valid
+   * describe what the cookie jar actually holds
+   *
+   * "has some non-comment lines" was too weak: an expired jar, or one exported
+   * for an unrelated site, would still be treated as a working youtube login.
+   *
+   * @returns {Promise<Object>} {total, youtube, expired, usable}
    */
-  async validateCookieFile() {
+  async inspectCookieFile(now = Date.now()) {
     try {
       const content = await fs.readFile(this.cookieFile, "utf8")
 
-      // check if file has actual cookie data (not just headers)
-      const lines = content
-        .split("\n")
-        .filter(
-          (line) =>
-            line.trim() && !line.startsWith("#") && !line.startsWith("\t#")
-        )
-
-      return lines.length > 0
+      return inspectCookieContent(content, now)
     } catch (error) {
-      console.error("failed to validate cookie file:", error)
-      return false
+      console.error("failed to read cookie file:", error.message)
+      return { total: 0, youtube: 0, expired: 0, usable: false }
     }
+  }
+
+  /**
+   * check if cookie file has usable youtube cookies
+   * @returns {Promise<boolean>} true if a live youtube cookie is present
+   */
+  async validateCookieFile() {
+    const { usable } = await this.inspectCookieFile()
+
+    return usable
   }
 
   /**
@@ -155,11 +178,37 @@ ${content}`
   }
 
   /**
+   * re-read the jar and recompute isValid, synchronously
+   *
+   * isValid used to be computed once at startup and then trusted: a jar
+   * replaced by hand, or one whose cookies expired while the app stayed open,
+   * kept its old verdict until something happened to call refresh(). downloads
+   * then either skipped a perfectly good jar or passed a dead one. nothing is
+   * cached here on purpose - a cookie jar is a few kilobytes, the engine
+   * already re-reads it per operation, and both staleness modes need a fresh
+   * read anyway (expiry is a function of the clock, not of the file).
+   *
+   * @returns {boolean} whether the jar holds a live youtube cookie
+   */
+  revalidate() {
+    try {
+      this.isValid = inspectCookieContent(
+        readFileSync(this.cookieFile, "utf8")
+      ).usable
+    } catch {
+      // missing or unreadable file - the same answer either way
+      this.isValid = false
+    }
+
+    return this.isValid
+  }
+
+  /**
    * get cookie file path for yt-dlp
    * @returns {string|null} path to cookie file or null if invalid
    */
   getCookieFilePath() {
-    return this.isValid ? this.cookieFile : null
+    return this.revalidate() ? this.cookieFile : null
   }
 
   /**
@@ -167,68 +216,43 @@ ${content}`
    * @returns {boolean} true if cookies are valid
    */
   hasValidCookies() {
-    return this.isValid
+    return this.revalidate()
   }
 
-  /**
-   * test cookies by making a request to the python server
-   * @returns {Promise<boolean>} true if cookies work
-   */
-  async testCookies() {
-    if (!this.isValid) {
-      return false
-    }
-
-    try {
-
-      // cookie testing is handled by the python server
-      // this method just updates local status and returns current validity
-      this.lastTest = new Date().toISOString()
-
-      await this.updateStatus({
-        lastTest: this.lastTest,
-        working: this.isValid,
-        note: "Cookie testing handled by Python server"
-      })
-
-      return this.isValid
-    } catch (error) {
-      console.error("cookie test status update failed:", error.message)
-
-      await this.updateStatus({
-        lastTest: new Date().toISOString(),
-        working: false,
-        lastError: error.message
-      })
-
-      return false
-    }
-  }
+  // testCookies() used to live here. It reported working: this.isValid with the
+  // note "handled by Python server" - the file simply existing was presented as
+  // proof the cookies worked. Nothing called it, and the ipc cookie test now
+  // owns this, so the claim is gone rather than left to be found and reused.
 
   /**
    * get cookie status information
    * @returns {Promise<Object>} cookie status
    */
   async getStatus() {
+    // the jar may have been replaced or expired since anyone last looked
+    this.revalidate()
+
     try {
       // try to read existing status
       const statusContent = await fs.readFile(this.statusFile, "utf8")
-      const status = JSON.parse(statusContent)
+      // a status file written by an older build still carries "working"
+      const status = withoutLegacyKeys(JSON.parse(statusContent))
 
       // add current file info
       const stats = await fs.stat(this.cookieFile)
       status.fileSize = stats.size
       status.fileModified = stats.mtime.toISOString()
       status.valid = this.isValid
+      status.cookiesLoaded = this.isValid
 
       return status
     } catch (error) {
       // return default status if file doesn't exist or is invalid
       return {
         valid: this.isValid,
+        cookiesLoaded: this.isValid,
         lastImport: null,
         lastTest: this.lastTest,
-        working: false,
         fileSize: 0,
         fileModified: null
       }
@@ -242,7 +266,8 @@ ${content}`
   async updateStatus(updates) {
     try {
       const currentStatus = await this.getStatus()
-      const newStatus = { ...currentStatus, ...updates }
+      // strip here too, so a caller cannot write the retired key back in
+      const newStatus = withoutLegacyKeys({ ...currentStatus, ...updates })
 
       await fs.writeFile(
         this.statusFile,
@@ -266,7 +291,9 @@ ${content}`
       await this.updateStatus({
         lastClear: new Date().toISOString(),
         valid: false,
-        working: false
+        cookiesLoaded: false,
+        extractionCheck: "skipped",
+        note: "No cookies imported"
       })
 
       return true
@@ -283,21 +310,18 @@ ${content}`
   async getFileInfo() {
     try {
       const stats = await fs.stat(this.cookieFile)
-      const content = await fs.readFile(this.cookieFile, "utf8")
+      const inspection = await this.inspectCookieFile()
 
-      // count actual cookie lines (not comments)
-      const cookieLines = content
-        .split("\n")
-        .filter(
-          (line) =>
-            line.trim() && !line.startsWith("#") && !line.startsWith("\t#")
-        )
+      // the inspection just answered the question - keep the field in step
+      this.isValid = inspection.usable
 
       return {
         exists: true,
         size: stats.size,
         modified: stats.mtime.toISOString(),
-        cookieCount: cookieLines.length,
+        cookieCount: inspection.total,
+        youtubeCookieCount: inspection.youtube,
+        expiredCookieCount: inspection.expired,
         valid: this.isValid,
         path: this.cookieFile
       }

@@ -5,51 +5,42 @@ if (process.env.NODE_ENV !== "production") {
 
 const { app, BrowserWindow, Menu, shell, dialog } = require("electron")
 const { autoUpdater } = require("electron-updater")
-const { EventEmitter } = require("events")
 const path = require("path")
 const isDev = process.env.NODE_ENV === "development"
 
 // import services
-const ServerManager = require("./services/server-manager")
 const CookieManager = require("./services/cookie-manager")
+const { YtdlpEngine } = require("./services/ytdlp-engine")
+const { YtdlpUpdater } = require("./services/ytdlp-updater")
+const { SettingsStore } = require("./services/settings-store")
+const { Analytics } = require("./services/analytics")
 const IPCHandlers = require("./ipc-handlers")
 const { APP_CONFIG } = require("./utils/constants")
-const { getAppVersion } = require("./utils/analytics-helpers")
+const {
+  describeError,
+  getAppVersion,
+  isFirstLaunch
+} = require("./utils/analytics-helpers")
 
-// analytics
-let trackEvent = null
-if (APP_CONFIG.ANALYTICS_CONFIG.ENABLED) {
-  try {
-    const {
-      initialize,
-      trackEvent: aptabaseTrackEvent
-    } = require("@aptabase/electron/main")
-    initialize(APP_CONFIG.ANALYTICS_CONFIG.APP_KEY)
-    trackEvent = aptabaseTrackEvent
-    // make globally available
-    global.trackEvent = trackEvent
-    console.log("Analytics initialized")
-  } catch (error) {
-    console.warn("Failed to initialize analytics:", error.message)
-    trackEvent = () => {}
-    global.trackEvent = trackEvent
-  }
-} else {
-  trackEvent = () => {}
-  global.trackEvent = trackEvent
-}
+// let the user get their first download going before we check for updates
+const UPDATE_CHECK_DELAY_MS = 90 * 1000
 
-// Configure undici defaults globally to prevent HeadersTimeoutError
-const { setGlobalDispatcher, Agent } = require("undici")
+// what getAppVersion() reports when it cannot read package.json. persisting it
+// would poison the launch after this one: it comes back as previous_version,
+// where the version grammar rejects it and the property is dropped
+const UNKNOWN_VERSION = "unknown"
 
-// Create agent with no timeouts for long downloads
-const agent = new Agent({
-  headersTimeout: 0, // No headers timeout
-  bodyTimeout: 0, // No body timeout
-  connectTimeout: 30000 // Keep connection timeout only
-})
+// how long a drain may hold the quit open. two seconds is a batch leaving on a
+// working connection; past that the events are worth less than the wait
+const QUIT_FLUSH_TIMEOUT_MS = 2000
 
-setGlobalDispatcher(agent)
+/**
+ * what an update check reports when nothing went wrong: the engine was already
+ * current, or it just became current without the version changing. every other
+ * reason is one the engine did not update, which is what engine_update_failed
+ * exists to explain - including "busy", where the check never ran at all.
+ */
+const ENGINE_CURRENT_REASONS = new Set(["up-to-date", "completed"])
 
 class CliplyApp {
   constructor() {
@@ -57,9 +48,9 @@ class CliplyApp {
     this.services = {}
     this.ipcHandlers = null
     this.isQuitting = false
-
-    // event emitter for service communication
-    this.eventEmitter = new EventEmitter()
+    // set once the shutdown drain has run, so the quit it re-issues is not
+    // cancelled a second time
+    this.hasShutDown = false
 
     // update handling
     this.updateState = {
@@ -141,21 +132,152 @@ class CliplyApp {
         ? path.join(__dirname, "..", "..")
         : process.resourcesPath
 
-      // init server manager
-      this.services.serverManager = new ServerManager(this.eventEmitter)
-      await this.services.serverManager.initialize(resourcesPath)
+      // one settings store for the whole main process. ipc-handlers falls back
+      // to constructing its own when the bag does not carry one, and two of
+      // them means two install id mints racing over the same file - so it is
+      // built here, before anything that reads it
+      this.services.settingsStore = new SettingsStore()
+
+      // analytics - one exit point for all telemetry. first, so that everything
+      // below it can report, and awaited, so nothing captures into a service
+      // that has not read the opt-out yet
+      this.services.analytics = new Analytics({
+        settingsStore: this.services.settingsStore
+      })
+      await this.services.analytics.init()
 
       // init cookie manager
       this.services.cookieManager = new CookieManager()
       await this.services.cookieManager.initialize()
 
+      // init the yt-dlp engine - every download flow runs on the binary
+      this.services.ytdlpEngine = new YtdlpEngine({
+        resourcesPath,
+        cookieManager: this.services.cookieManager
+      })
+      this.services.ytdlpUpdater = new YtdlpUpdater({
+        engine: this.services.ytdlpEngine
+      })
+
+      // make sure userData holds a runnable binary before anything needs it
+      const seeded = await this.services.ytdlpUpdater.seed()
+      console.log("yt-dlp engine:", this.services.ytdlpEngine.getBinaryPath(), seeded)
+
+      // whatever the seed decided, the version it reports is the engine this
+      // session runs on - and the probe happens once, so this is the only
+      // chance to hand it on. a refusal reports no version at all, which both
+      // consumers ignore rather than storing
+      this.noteEngineVersion(seeded.version)
+
+      if (seeded.seeded) {
+        this.services.analytics.capture("engine_seeded", {
+          reason: seeded.reason,
+          engine_version: seeded.version
+        })
+      }
+
       // init ipc handlers
       this.autoUpdater = autoUpdater
       this.ipcHandlers = new IPCHandlers(this.services, this.autoUpdater)
+
+      // background update check, deferred
+      //
+      // the update holds the engine gate until it finishes, and the user's very
+      // first action would otherwise queue behind it - which reads as a frozen
+      // app on a slow connection. giving them a head start costs nothing: if
+      // they are busy when the timer fires the check simply refuses and runs
+      // next launch.
+      const updateCheckTimer = setTimeout(() => {
+        this.checkForEngineUpdate()
+      }, UPDATE_CHECK_DELAY_MS)
+      updateCheckTimer.unref()
     } catch (error) {
       console.error("Service initialization failed:", error)
       throw error
     }
+  }
+
+  /**
+   * pass a freshly probed engine version to everything that shows it
+   *
+   * the engine service is where this lives. analytics is a consumer of it and
+   * not its home: the user can switch telemetry off, and the menu and the
+   * issue report still have to be able to say what is running when they do.
+   *
+   * @param {string} version - what the seed or the update probed, if anything
+   */
+  noteEngineVersion(version) {
+    const shown = this.services.ytdlpEngine.getKnownVersion()
+
+    this.services.ytdlpEngine.rememberVersion(version)
+    this.services.analytics.setEngineVersion(version)
+
+    // the menu was built from whatever we knew at startup, and an update lands
+    // long after that. a menu item's label is copied into the native menu when
+    // the item is inserted - there is no delegate that reads it back - so the
+    // only way to correct the line is to build the menu again.
+    if (this.menu && this.services.ytdlpEngine.getKnownVersion() !== shown) {
+      this.createMenu()
+    }
+  }
+
+  /**
+   * run the deferred engine update check and say what came of it
+   * @returns {Promise<void>} resolves however the check went
+   */
+  checkForEngineUpdate() {
+    return this.services.ytdlpUpdater
+      .checkForUpdate()
+      .then((result) => {
+        console.log("yt-dlp update check:", result)
+        this.reportEngineUpdate(result)
+      })
+      .catch((error) => {
+        // the check threw rather than reporting - probeVersion rejecting, a
+        // rename that could not be recovered. an install that cannot even ask
+        // whether its engine is stale is the silent degradation this event
+        // exists to surface, and nothing else in the pipeline says so
+        //
+        // read through describeError, because `.message` is a property access
+        // and a getter can throw - here, inside the catch, where the event this
+        // is trying to send is what pays for it. nothing thrown at all is still
+        // absence, which is what the omitted property says
+        const message = error ? describeError(error) : null
+
+        console.warn("yt-dlp update check failed:", message)
+        this.reportEngineUpdate({ reason: "check-rejected", error: message })
+      })
+  }
+
+  /**
+   * turn an update check's result into at most one event
+   *
+   * a stale engine is what breaks downloads, so the question here is not "did
+   * the update work" but "is there a reason this install is not on the newest
+   * engine". a refusal counts as one; being current already does not.
+   *
+   * @param {Object} result - what checkForUpdate() returned
+   */
+  reportEngineUpdate(result) {
+    if (!result) return
+
+    if (result.updated) {
+      this.services.analytics.capture("engine_updated", {
+        // a probe that failed leaves no from-version. absence says that,
+        // where a null pretends there was a value to send
+        ...(result.from ? { from_version: result.from } : {}),
+        to_version: result.to
+      })
+      this.noteEngineVersion(result.to)
+      return
+    }
+
+    if (!result.reason || ENGINE_CURRENT_REASONS.has(result.reason)) return
+
+    this.services.analytics.capture("engine_update_failed", {
+      update_reason: result.reason,
+      ...(result.error ? { error_message: result.error } : {})
+    })
   }
 
   // setup auto-updater
@@ -354,7 +476,7 @@ class CliplyApp {
     // app ready
     app.whenReady().then(() => {
       this.createWindow()
-      this.startPythonServer()
+      this.reportLaunch()
 
       // macos: re-create window when dock icon clicked
       app.on("activate", () => {
@@ -407,6 +529,42 @@ class CliplyApp {
         event.preventDefault()
       })
     })
+  }
+
+  /**
+   * send app_launched, then record this version for the next launch to read.
+   *
+   * the stored version has to be read before it is overwritten - that ordering
+   * is the whole of what makes previous_version meaningful, and it is how an
+   * upgrade becomes visible in the data.
+   */
+  reportLaunch() {
+    return this.services.settingsStore
+      .readAll()
+      .then((settings) => {
+        const previousVersion = settings.last_version
+
+        this.services.analytics.capture("app_launched", {
+          is_first_launch: isFirstLaunch(),
+          // spread rather than `|| null`: a first launch genuinely has no
+          // previous version, and absence says that where a null pretends
+          // there was a value to send
+          ...(previousVersion ? { previous_version: previousVersion } : {})
+        })
+
+        const version = getAppVersion()
+
+        if (!version || version === UNKNOWN_VERSION) {
+          return
+        }
+
+        return this.services.settingsStore.writeSettings({
+          last_version: version
+        })
+      })
+      .catch(() => {
+        // a settings read or write failure must never stop the app launching
+      })
   }
 
   // create main window
@@ -521,78 +679,111 @@ class CliplyApp {
     }
   }
 
-  // start python server
-  async startPythonServer() {
-    try {
-      // server event listeners
-      this.eventEmitter.on("python:server:ready", () => {
-        // notify renderer that download functionality is available
-        if (this.mainWindow && !this.mainWindow.isDestroyed()) {
-          this.mainWindow.webContents.send("python:server:ready")
-        }
-      })
-
-      this.eventEmitter.on("python:server:error", (error) => {
-        console.error("Python server error:", error.message)
-
-        // show user-friendly error
-        if (this.mainWindow && !this.mainWindow.isDestroyed()) {
-          dialog.showErrorBox(
-            "Download Engine Error",
-            `The download engine encountered an error:\n\n${error.message}\n\nSome features may not work correctly.`
-          )
-        }
-      })
-
-      // start the server
-      const success = await this.services.serverManager.startServer()
-
-      if (!success) {
-        console.warn("Python server failed to start")
-      }
-    } catch (error) {
-      console.error("Failed to start Python server:", error)
-
-      // show user-friendly error
-      if (this.mainWindow && !this.mainWindow.isDestroyed()) {
-        dialog.showErrorBox(
-          "Download Engine Error",
-          `Failed to start the download engine:\n\n${error.message}\n\nThe app will continue to work, but downloads may not be available.`
-        )
-      }
-    }
-  }
-
   // handle main window closed
   onWindowClosed() {
     this.mainWindow = null
   }
 
-  // handle before quit
-  async onBeforeQuit() {
+  /**
+   * handle before quit
+   *
+   * electron does not await an async before-quit listener: it carries on
+   * tearing the process down the moment this returns at its first await, which
+   * is before a batched analytics flush has left the machine. so the first pass
+   * cancels the quit, drains, and quits again - the second pass sees the flag
+   * and lets it through.
+   * @param {Object} [event] - electron's before-quit event
+   */
+  async onBeforeQuit(event) {
     this.isQuitting = true
 
-    // skip cleanup if updating
-    if (global.isUpdating) {
+    // the quit we re-issued below, arriving back here
+    if (this.hasShutDown) {
       return
     }
 
-    try {
-      // update cleanup
-      this.updateState.isCheckingForUpdates = false
+    this.hasShutDown = true
 
-      // stop python server
-      if (this.services.serverManager) {
-        await this.services.serverManager.stopServer()
+    /**
+     * installing an update is still a quit, and it is the quit whose last
+     * events matter most: it is the boundary between two versions, which is
+     * the whole reason previous_version exists. so it drains like any other.
+     *
+     * what it skips is the teardown that would fight the installer - killing
+     * the running downloads and tearing down ipc. cancelling this quit is safe
+     * for the installer itself: electron-updater has already spawned it by the
+     * time it calls app.quit() (BaseUpdater.quitAndInstall installs first, then
+     * quits from a setImmediate), the spawned installer waits on this process
+     * to exit, and its own quitAndInstallCalled guard means the second quit
+     * below cannot start a second install.
+     */
+    const installing = Boolean(global.isUpdating)
+
+    if (event && typeof event.preventDefault === "function") {
+      event.preventDefault()
+    }
+
+    try {
+      // update cleanup and the engine shutdown wait both only apply to an
+      // ordinary quit - an install-triggered one skips the teardown that
+      // would fight the installer, per the comment above
+      let shutdownPromise = Promise.resolve()
+
+      if (!installing) {
+        this.updateState.isCheckingForUpdates = false
+
+        // kill any running yt-dlp process and actually wait for the tree to
+        // exit - partial .part files stay resumable either way, but a wait
+        // shorter than the engine's own sigterm->sigkill escalation would let
+        // this process quit before that escalation ever fires, orphaning
+        // whatever the signal alone did not clean up. runs alongside the
+        // analytics flush below rather than after it, so a quit with nothing
+        // in flight is not slowed down by a wait that resolves instantly
+        if (this.services.ytdlpEngine) {
+          shutdownPromise = this.services.ytdlpEngine
+            .awaitShutdown()
+            .then((cancelled) => {
+              if (cancelled > 0) {
+                console.log(`cancelled ${cancelled} running download(s) on quit`)
+              }
+            })
+        }
       }
 
+      // batched events are lost if we exit without draining them. capped,
+      // because a flush that cannot finish must not leave the app refusing to
+      // close - telemetry is never worth that, and least of all when an
+      // installer is waiting on this process to go
+      let analyticsPromise = Promise.resolve()
+
+      if (this.services.analytics) {
+        let flushTimer = null
+
+        analyticsPromise = Promise.race([
+          this.services.analytics.flush(),
+          new Promise((resolve) => {
+            flushTimer = setTimeout(resolve, QUIT_FLUSH_TIMEOUT_MS)
+          })
+        ]).then(() => {
+          // the cap loses the race far more often than it wins it, and a timer
+          // left armed behind a won race holds the loop open for two more
+          // seconds
+          clearTimeout(flushTimer)
+        })
+      }
+
+      await Promise.all([shutdownPromise, analyticsPromise])
+
       // cleanup ipc handlers
-      if (this.ipcHandlers) {
+      if (!installing && this.ipcHandlers) {
         this.ipcHandlers.cleanup()
       }
     } catch (error) {
       console.error("Error during shutdown:", error)
     }
+
+    // outside the try: whatever went wrong above, the app still has to quit
+    app.quit()
   }
 
   // get app icon path
@@ -603,6 +794,10 @@ class CliplyApp {
 
   // create application menu
   createMenu() {
+    // synchronous on purpose: the menu is built during startup and again after
+    // an update lands, and neither moment can wait on a --version probe
+    const engineVersion = this.services.ytdlpEngine.getKnownVersion()
+
     const template = [
       {
         label: "File",
@@ -688,6 +883,71 @@ class CliplyApp {
                 dialog.showErrorBox("Error", "Failed to check for updates.")
               }
             }
+          },
+          { type: "separator" },
+          {
+            // which engine this install actually downloads with - the single
+            // most useful thing to know before filing an issue, and the same
+            // string the report attaches.
+            //
+            // read from the engine rather than from analytics: telemetry is
+            // something the user can switch off, and this line has to stay
+            // right when they do. it is deliberately unknown-tolerant - a
+            // failed probe leaves us with no version for the whole run, and
+            // guessing one would be worse than admitting it
+            label: engineVersion
+              ? `Video engine: yt-dlp ${engineVersion}`
+              : "Video engine: version unknown",
+            enabled: false
+          },
+          { type: "separator" },
+          {
+            // deliberately not "anonymous". every event carries a persistent
+            // install id and a city derived from the ip, which is pseudonymous
+            // - and this label is read far more often than PRIVACY.md, so it
+            // is where the word would do its damage
+            label: "Send usage data",
+            type: "checkbox",
+            checked: this.services.analytics.isEnabled(),
+            click: async (menuItem) => {
+              // through the service, never the store: the opt-out gate is only
+              // re-read at init(), so writing the preference behind its back
+              // leaves this session sending for the rest of its life
+              const result = await this.services.analytics.setEnabled(
+                menuItem.checked
+              )
+
+              // this handler closed over the live MenuItem, and electron neither
+              // serialises clicks nor disables the item while one is running -
+              // so an older click resuming late acts on the checkbox the NEWEST
+              // click left behind, not on its own. a result the service has
+              // marked superseded has nothing to say about it, and a dialog
+              // naming a click already replaced is noise with no way to tell
+              // which click it was about.
+              if (result && result.superseded) {
+                return
+              }
+
+              // a privacy control that silently fails to persist would come
+              // back on at the next launch - say so rather than pretend
+              if (result && result.success === false) {
+                // read from the service, never inverted from the click. a tick
+                // derived from isEnabled() cannot disagree with what is
+                // actually being sent; one that flips agrees only as long as
+                // every path gets the arithmetic right, and it has been wrong
+                // twice. note a failed opt-out therefore leaves the tick OFF -
+                // the service is inert for this session either way, and it is
+                // the dialog that says it will not survive a restart.
+                menuItem.checked = this.services.analytics.isEnabled()
+                dialog.showMessageBox(this.mainWindow, {
+                  type: "error",
+                  title: "Couldn't save that preference",
+                  message: "Your analytics preference could not be saved.",
+                  detail: result.error || "Please try again.",
+                  buttons: ["OK"]
+                })
+              }
+            }
           }
         ]
       },
@@ -751,10 +1011,14 @@ class CliplyApp {
                   const health = await this.ipcHandlers.handleSystemHealth()
 
                   const message = health.success
-                    ? `System Status: Healthy\n\nPython Server: ${
-                        health.data.pythonServer.isReady ? "Ready" : "Not Ready"
+                    ? `System Status: Healthy\n\nDownloader: ${
+                        health.data.engine.version || "Unknown"
+                      }\nFFmpeg: ${
+                        health.data.engine.ffmpeg ? "Found" : "Missing"
                       }\nCookies: ${
                         health.data.cookies.hasValid ? "Valid" : "Invalid"
+                      }\nActive downloads: ${
+                        health.data.downloads.active
                       }\nUptime: ${Math.floor(
                         health.data.performance.uptime / 60
                       )} minutes`
@@ -819,8 +1083,10 @@ class CliplyApp {
       ]
     }
 
-    const menu = Menu.buildFromTemplate(template)
-    Menu.setApplicationMenu(menu)
+    // kept so noteEngineVersion can tell "the menu is up and now reads wrong"
+    // from "startup has not built one yet"
+    this.menu = Menu.buildFromTemplate(template)
+    Menu.setApplicationMenu(this.menu)
   }
 }
 

@@ -1,0 +1,166 @@
+{
+  "callSites": [
+    { "event": "url_submitted", "properties": { "platform": "youtube", "url_kind": "video" } },
+    {
+      "event": "media_info_loaded",
+      "properties": { "platform": "youtube", "duration_bucket": "1-5 min", "formats_count": 6 }
+    },
+    { "event": "url_submitted", "properties": { "platform": "youtube", "url_kind": "shorts" } },
+    {
+      "event": "media_info_loaded",
+      "properties": { "platform": "youtube", "duration_bucket": "<1 min", "formats_count": 2 }
+    },
+    { "event": "url_submitted", "properties": { "platform": "youtube", "url_kind": "playlist" } },
+    {
+      "event": "media_info_loaded",
+      "properties": { "platform": "youtube", "duration_bucket": "5-20 min", "formats_count": 4 }
+    },
+    { "event": "url_submitted", "properties": { "platform": "youtube", "url_kind": "short-link" } },
+    {
+      "event": "media_info_loaded",
+      "properties": { "platform": "youtube", "duration_bucket": "20-60 min", "formats_count": 1 }
+    },
+    { "event": "url_submitted", "properties": { "platform": "youtube", "url_kind": "embed" } },
+    {
+      "event": "media_info_loaded",
+      "properties": { "platform": "youtube", "duration_bucket": ">60 min", "formats_count": 3 }
+    },
+    { "event": "url_submitted", "properties": { "platform": "youtube", "url_kind": "video" } },
+    {
+      "event": "media_info_failed",
+      "properties": {
+        "platform": "youtube",
+        "error_category": "BOT_DETECTION",
+        "error_stage": "fetch_info",
+        "error_message": "YouTube asked us to confirm you're not a bot."
+      }
+    },
+    { "event": "url_submitted", "properties": { "platform": "youtube", "url_kind": "video" } },
+    {
+      "event": "media_info_failed",
+      "properties": {
+        "platform": "youtube",
+        "error_category": "UNKNOWN_ERROR",
+        "error_stage": "fetch_info",
+        "error_message": "Communication error with main process"
+      }
+    },
+    { "event": "url_submitted", "properties": { "platform": "pinterest", "url_kind": "short-link" } },
+    {
+      "event": "media_info_loaded",
+      "properties": { "platform": "pinterest", "duration_bucket": "<1 min" }
+    },
+    { "event": "url_submitted", "properties": { "platform": "pinterest", "url_kind": "video" } },
+    { "event": "media_info_loaded", "properties": { "platform": "pinterest" } },
+    { "event": "url_submitted", "properties": { "platform": "tiktok", "url_kind": "video" } },
+    {
+      "event": "media_info_loaded",
+      "properties": { "platform": "tiktok", "duration_bucket": "<1 min" }
+    },
+    { "event": "url_submitted", "properties": { "platform": "tiktok", "url_kind": "short-link" } },
+    {
+      "event": "media_info_loaded",
+      "properties": { "platform": "tiktok", "duration_bucket": "<1 min" }
+    },
+    { "event": "url_submitted", "properties": { "platform": "tiktok", "url_kind": "video" } },
+    {
+      "event": "media_info_failed",
+      "properties": {
+        "platform": "tiktok",
+        "error_category": "NETWORK_ERROR",
+        "error_stage": "fetch_info",
+        "error_message": "Network interrupted the download."
+      }
+    },
+    {
+      "event": "download_started",
+      "properties": {
+        "platform": "youtube",
+        "media_type": "video",
+        "quality": "1080p",
+        "is_trimmed": false
+      }
+    },
+    {
+      "event": "download_started",
+      "properties": {
+        "platform": "youtube",
+        "media_type": "video",
+        "quality": "2160p",
+        "is_trimmed": true
+      }
+    },
+    {
+      "event": "download_started",
+      "properties": {
+        "platform": "youtube",
+        "media_type": "video",
+        "quality": "720p",
+        "is_trimmed": false
+      }
+    },
+    {
+      "event": "download_started",
+      "properties": { "platform": "youtube", "media_type": "video", "is_trimmed": false }
+    },
+    {
+      "event": "download_started",
+      "properties": {
+        "platform": "youtube",
+        "media_type": "audio",
+        "quality": "mp3",
+        "audio_format": "mp3",
+        "is_trimmed": false
+      }
+    },
+    {
+      "event": "download_started",
+      "properties": {
+        "platform": "youtube",
+        "media_type": "audio",
+        "quality": "m4a",
+        "audio_format": "m4a",
+        "is_trimmed": true
+      }
+    },
+    {
+      "event": "download_started",
+      "properties": {
+        "platform": "youtube",
+        "media_type": "audio",
+        "quality": "original_audio",
+        "audio_format": "original",
+        "is_trimmed": false
+      }
+    },
+    {
+      "event": "download_started",
+      "properties": {
+        "platform": "pinterest",
+        "media_type": "video",
+        "quality": "best_available",
+        "is_trimmed": false
+      }
+    },
+    {
+      "event": "download_started",
+      "properties": {
+        "platform": "tiktok",
+        "media_type": "video",
+        "quality": "best_available",
+        "is_trimmed": false
+      }
+    }
+  ],
+  "unvouchedText": [
+    {
+      "event": "media_info_failed",
+      "properties": {
+        "platform": "youtube",
+        "error_category": "UNKNOWN_ERROR",
+        "error_stage": "fetch_info",
+        "error_message": "ERROR: unable to open for writing: [Errno 13] Permission denied: '/Users/someone/Movies/My Holiday Video.mp4'"
+      }
+    }
+  ]
+}

@@ -209,10 +209,32 @@ export function DisclaimerPage() {
                   privacy
                 </p>
                 <p>
-                  cliply doesn't collect any personal data. your preferences are
-                  stored locally on your device. some non-personal info like
-                  your OS or app version might be used to fetch updates or
-                  improvements. nothing is ever shared or sold.
+                  your preferences and your downloads stay on your device.
+                  cliply does send a little usage data so we can find bugs:
+                  which platform, which quality, whether a download worked, and
+                  error text with paths and urls stripped out of it. never the
+                  links you paste, and no event carries a video title or a
+                  filename.
+                </p>
+                <p>
+                  every event carries a random install id and a country, region
+                  and city worked out from your ip, so it's pseudonymous rather
+                  than anonymous — it isn't your name, but it does follow one
+                  installation over time. posthog stores it for us; we don't
+                  sell it and we won't hand it to anyone else.
+                </p>
+                <p>
+                  untick "Send usage data" in the Tools menu to turn it off. the
+                  whole list, field by field, is in{" "}
+                  <a
+                    href="https://github.com/cliply/cliply/blob/HEAD/PRIVACY.md"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-cyan-600 dark:text-cyan-400 hover:underline"
+                  >
+                    PRIVACY.md
+                  </a>
+                  .
                 </p>
                 <p>
                   if you're submitting feedback (like via{" "}

@@ -1,6 +1,6 @@
 {
   "name": "cliply-desktop",
-  "version": "0.3.4",
+  "version": "0.3.5",
   "description": "Desktop YouTube downloader with segment support",
   "main": "src/main/index.js",
   "homepage": "./",
@@ -15,43 +15,36 @@
     "dev": "npm run dev:renderer & npm run dev:main",
     "dev:main": "cross-env NODE_ENV=development nodemon --watch src/main --exec electron .",
     "dev:renderer": "cd src/main/renderer && npm run dev",
-    "dev:python": "cd python && { test -x venv/bin/python && venv/bin/python server.py || python server.py; }",
-    "setup:python": "cd python && python -m pip install -r requirements.txt",
-    "setup:python-deps": "node scripts/install-python-deps.js",
-    "setup:python:venv": "cd python && python -m venv venv && source venv/bin/activate && pip install -r requirements.txt",
-    "setup:python-runtime": "node scripts/setup-python-runtime.js",
-    "cleanup:binaries": "find binaries -name 'yt-dlp*' -type f -delete || true",
+    "fetch:ytdlp": "node scripts/fetch-ytdlp.js",
+    "smoke:ytdlp": "node scripts/smoke-ytdlp.js",
     "install:renderer": "cd src/main/renderer && npm install",
     "build:renderer": "cd src/main/renderer && npm run build",
     "build:main": "echo 'Main process ready for packaging'",
     "build:app": "npm run install:renderer && npm run build:renderer && npm run build:main",
-    "prepare:python": "npm run cleanup:binaries && npm run setup:python-runtime && npm run setup:python-deps",
-    "prepare:full": "npm run generate:icons && npm run build:app && npm run prepare:python",
+    "prepare:full": "npm run generate:icons && npm run build:app && npm run fetch:ytdlp",
     "prepack": "npm run prepare:full",
     "pack": "electron-builder --dir",
     "predist": "npm run prepare:full",
     "dist": "electron-builder",
-    "dist:all": "npm run prepare:full && cross-env BUILD_ALL_PLATFORMS=true node scripts/setup-python-runtime.js && electron-builder -mwl",
-    "dist:win": "npm run prepare:full && cross-env BUILD_TARGET_PLATFORM=win32-x64 node scripts/setup-python-runtime.js && electron-builder --win",
-    "dist:mac": "npm run prepare:full && cross-env BUILD_TARGET_PLATFORM=darwin-arm64 node scripts/setup-python-runtime.js && electron-builder --mac",
-    "dist:linux": "npm run prepare:full && cross-env BUILD_TARGET_PLATFORM=linux-x64 node scripts/setup-python-runtime.js && electron-builder --linux",
-    "dist:win:safe": "npm run prepare:full && cross-env BUILD_TARGET_PLATFORM=win32-x64 node scripts/setup-python-runtime.js && electron-builder --win --publish never && node scripts/create-update-files.js",
-    "dist:mac:safe": "npm run prepare:full && cross-env BUILD_TARGET_PLATFORM=darwin-arm64 node scripts/setup-python-runtime.js && electron-builder --mac --publish never && node scripts/create-update-files.js",
-    "dist:linux:safe": "npm run prepare:full && cross-env BUILD_TARGET_PLATFORM=linux-x64 node scripts/setup-python-runtime.js && electron-builder --linux --publish never && node scripts/create-update-files.js",
-    "dist:mac:direct": "npm run install:renderer && npm run build:renderer && npm run cleanup:binaries && npm run setup:python-runtime && npm run setup:python-deps && electron-builder --mac",
+    "dist:all": "cross-env BUILD_ALL_PLATFORMS=true npm run prepare:full && electron-builder -mwl",
+    "dist:win": "cross-env BUILD_TARGET_PLATFORM=win32-x64 npm run prepare:full && electron-builder --win",
+    "dist:mac": "cross-env BUILD_TARGET_PLATFORM=darwin-arm64 npm run prepare:full && electron-builder --mac",
+    "dist:linux": "cross-env BUILD_TARGET_PLATFORM=linux-x64 npm run prepare:full && electron-builder --linux",
+    "dist:win:safe": "cross-env BUILD_TARGET_PLATFORM=win32-x64 npm run prepare:full && electron-builder --win --publish never && node scripts/create-update-files.js",
+    "dist:mac:safe": "cross-env BUILD_TARGET_PLATFORM=darwin-arm64 npm run prepare:full && electron-builder --mac --publish never && node scripts/create-update-files.js",
+    "dist:linux:safe": "cross-env BUILD_TARGET_PLATFORM=linux-x64 npm run prepare:full && electron-builder --linux --publish never && node scripts/create-update-files.js",
     "postinstall": "electron-builder install-app-deps",
     "test": "jest",
-    "test:python": "cd python && python -m pytest",
+    "test:renderer": "cd src/main/renderer && npm test",
     "lint": "eslint src/main --ext .js",
     "lint:fix": "eslint src/main --ext .js --fix",
-    "clean": "rimraf dist && rimraf src/main/renderer/dist && rimraf python/venv && rimraf python-runtime && rimraf .python-cache",
+    "clean": "rimraf dist && rimraf src/main/renderer/dist",
     "generate:icons": "node scripts/generate-icons.js"
   },
   "dependencies": {
-    "@aptabase/electron": "^0.3.1",
     "dotenv": "^16.5.0",
     "electron-updater": "^6.1.8",
-    "undici": "^7.10.0",
+    "posthog-node": "^5.50.0",
     "uuid": "^9.0.1"
   },
   "devDependencies": {
@@ -60,10 +53,8 @@
     "electron-builder": "^24.0.0",
     "eslint": "^8.0.0",
     "jest": "^29.0.0",
-    "node-fetch": "^3.3.2",
     "nodemon": "^3.0.0",
-    "rimraf": "^5.0.0",
-    "tar": "^6.2.0"
+    "rimraf": "^5.0.0"
   },
   "build": {
     "appId": "com.cliply.desktop",
@@ -93,25 +84,7 @@
       "!src/main/renderer/tailwind.config.js",
       "!src/main/renderer/tsconfig*.json",
       "!src/main/renderer/vite.config.ts",
-      "!src/main/renderer/components.json",
-      "!**/venv",
-      "!**/__pycache__"
-    ],
-    "extraResources": [
-      {
-        "from": "python/",
-        "to": "python/",
-        "filter": [
-          "server.py",
-          "shared_utils.py",
-          "platforms/**/*.py",
-          "requirements.txt",
-          "cookies/**/*",
-          "!venv/**/*",
-          "!**/__pycache__/**/*",
-          "!**/*.pyc"
-        ]
-      }
+      "!src/main/renderer/components.json"
     ],
     "mac": {
       "icon": "assets/icon.icns",
@@ -136,7 +109,6 @@
       "entitlementsInherit": "build/entitlements.mac.plist",
       "identity": null,
       "signIgnore": [
-        "python-runtime/**/*",
         "binaries/**/*"
       ],
       "extendInfo": {
@@ -159,13 +131,10 @@
           ]
         },
         {
-          "from": "python-runtime/darwin-arm64/",
-          "to": "python-runtime/darwin-arm64/",
+          "from": "binaries/macos/ytdlp/",
+          "to": "binaries/ytdlp/",
           "filter": [
-            "**/*",
-            "!**/*.pyc",
-            "!**/test",
-            "!**/tests"
+            "**/*"
           ]
         },
         {
@@ -212,28 +181,10 @@
           ]
         },
         {
-          "from": "python-runtime/win32-x64/",
-          "to": "python-runtime/win32-x64/",
+          "from": "binaries/windows/ytdlp/",
+          "to": "binaries/ytdlp/",
           "filter": [
-            "**/*",
-            "!**/__pycache__",
-            "!**/*.pyc",
-            "!**/test",
-            "!**/tests"
-          ]
-        },
-        {
-          "from": "python/",
-          "to": "python/",
-          "filter": [
-            "server.py",
-            "shared_utils.py",
-            "platforms/**/*.py",
-            "requirements.txt",
-            "cookies/**/*",
-            "!venv/**/*",
-            "!**/__pycache__/**/*",
-            "!**/*.pyc"
+            "**/*"
           ]
         }
       ]
@@ -280,28 +231,10 @@
           ]
         },
         {
-          "from": "python-runtime/linux-x64/",
-          "to": "python-runtime/linux-x64/",
+          "from": "binaries/linux/ytdlp/",
+          "to": "binaries/ytdlp/",
           "filter": [
-            "**/*",
-            "!**/__pycache__",
-            "!**/*.pyc",
-            "!**/test",
-            "!**/tests"
-          ]
-        },
-        {
-          "from": "python/",
-          "to": "python/",
-          "filter": [
-            "server.py",
-            "shared_utils.py",
-            "platforms/**/*.py",
-            "requirements.txt",
-            "cookies/**/*",
-            "!venv/**/*",
-            "!**/__pycache__/**/*",
-            "!**/*.pyc"
+            "**/*"
           ]
         }
       ]
@@ -383,9 +316,7 @@
     "segment",
     "electron",
     "desktop",
-    "yt-dlp",
-    "python",
-    "hybrid"
+    "yt-dlp"
   ],
   "repository": {
     "type": "git",
@@ -406,6 +337,10 @@
     ]
   },
   "eslintConfig": {
+    "root": true,
+    "ignorePatterns": [
+      "src/main/renderer/**"
+    ],
     "env": {
       "node": true,
       "es2022": true

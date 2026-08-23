@@ -6,27 +6,26 @@ import {
 } from "@/components/ui/tooltip"
 import {
   formatDuration,
-  selectBestAudioFormat,
-  validateTimeRange,
-  type VideoFormat
+  formatFileSize,
+  languageName,
+  validateTimeRange
 } from "@/lib/api"
 import { useVideoDownload } from "@/lib/hooks/useVideoDownload"
 import { useYouTubeStore } from "@/lib/youtubeStore"
-import { showDownloadSuccessToast } from "@/lib/toast-utils"
+import { isTerminalReason } from "@/lib/downloadOutcome"
 import { cn } from "@/lib/utils"
+import { DownloadProgressBar } from "./DownloadProgressBar"
 import { motion } from "framer-motion"
 import { Headphones, Scissors, Video } from "lucide-react"
 
 interface VideoDownloadButtonProps {
   maxDuration: number
-  audioFormats: VideoFormat[]
   isVisible: boolean
   className?: string
 }
 
 export function VideoDownloadButton({
   maxDuration,
-  audioFormats,
   isVisible,
   className
 }: VideoDownloadButtonProps) {
@@ -34,7 +33,8 @@ export function VideoDownloadButton({
     url,
     videoInfo,
     videoTimeRange,
-    selectedVideoQuality,
+    selectedTier,
+    selectedAudioLanguage,
     setIsDownloadingVideo,
     videoPreciseCut,
     setVideoPreciseCut
@@ -42,10 +42,9 @@ export function VideoDownloadButton({
 
   const videoDownloadMutation = useVideoDownload()
 
-  const bestAudioFormat = selectBestAudioFormat(audioFormats)
   const selectedDuration = videoTimeRange.end - videoTimeRange.start
 
-  if (!isVisible || !selectedVideoQuality) return null
+  if (!isVisible || !selectedTier) return null
 
   const isValidRange = validateTimeRange(
     videoTimeRange.start,
@@ -53,8 +52,12 @@ export function VideoDownloadButton({
     maxDuration
   ).isValid
 
+  // Check if user is downloading a specific segment (not full video)
+  const isSegmentDownload =
+    videoTimeRange.start !== 0 || videoTimeRange.end !== maxDuration
+
   const handleDownload = async () => {
-    if (!selectedVideoQuality || !bestAudioFormat || !isValidRange) return
+    if (!selectedTier || !isValidRange) return
 
     // Prevent multiple downloads
     if (videoDownloadMutation.isPending) return
@@ -64,25 +67,29 @@ export function VideoDownloadButton({
 
       await videoDownloadMutation.mutateAsync({
         url,
-        video_format_id: selectedVideoQuality.format.format_id,
-        audio_format_id: bestAudioFormat.format_id,
-        time_range: videoTimeRange,
+        height: selectedTier.height,
+        // the container we displayed, so the label cannot disagree with the file
+        container: selectedTier.container,
+        // absent unless this video really offered a choice of dubs
+        ...(selectedAudioLanguage
+          ? { audio_language: selectedAudioLanguage }
+          : {}),
+        time_range: isSegmentDownload ? videoTimeRange : undefined,
         precise_cut: videoPreciseCut,
         title: videoInfo?.title || "video"
       })
 
-      showDownloadSuccessToast("video")
+      // the completion toast (with the filename and Open Folder) belongs to the
+      // hook's progress-event path - toasting here too would double it
     } catch (error) {
-      // the failure toast (with Report) is owned by the useVideoDownload hook
-      console.error("Video download error:", error)
+      // terminal outcomes (failure, cancellation) are owned by the hook
+      if (!isTerminalReason(error)) {
+        console.error("Video download error:", error)
+      }
     } finally {
       setIsDownloadingVideo(false)
     }
   }
-
-  // Check if user is downloading a specific segment (not full video)
-  const isSegmentDownload =
-    videoTimeRange.start !== 0 || videoTimeRange.end !== maxDuration
 
   return (
     <motion.div
@@ -114,22 +121,35 @@ export function VideoDownloadButton({
               </span>
             </div>
             <span className="font-medium text-slate-900 dark:text-white">
-              {selectedVideoQuality.label}{" "}
-              {selectedVideoQuality.format.ext.toUpperCase()}
+              {selectedTier.height}p {selectedTier.container.toUpperCase()}
             </span>
           </div>
 
-          {/* Auto-selected Audio */}
-          {bestAudioFormat && (
+          {/* Audio comes with it: yt-dlp merges the best track it can find,
+              unless this video carries dubs and the user picked one */}
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Headphones className="h-4 w-4 text-slate-500 dark:text-slate-500" />
+              <span className="text-sm text-slate-600 dark:text-slate-400">
+                Audio Track:
+              </span>
+            </div>
+            <span className="font-medium text-slate-900 dark:text-white">
+              {selectedAudioLanguage
+                ? languageName(selectedAudioLanguage)
+                : "Best available"}
+            </span>
+          </div>
+
+          {/* Size, when the video reported one for this tier - a segment costs
+              some unknown fraction of it, so it is only shown for a full one */}
+          {!isSegmentDownload && selectedTier.filesize && (
             <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Headphones className="h-4 w-4 text-slate-500 dark:text-slate-500" />
-                <span className="text-sm text-slate-600 dark:text-slate-400">
-                  Audio Track:
-                </span>
-              </div>
+              <span className="text-sm text-slate-600 dark:text-slate-400">
+                Size:
+              </span>
               <span className="font-medium text-slate-900 dark:text-white">
-                {bestAudioFormat.quality} {bestAudioFormat.ext.toUpperCase()}
+                {formatFileSize(selectedTier.filesize)}
               </span>
             </div>
           )}
@@ -213,9 +233,11 @@ export function VideoDownloadButton({
 
       {/* Download Progress */}
       {videoDownloadMutation.isPending && (
-        <div className="text-xs text-slate-500 dark:text-slate-500 text-center">
-          Processing your video download...
-        </div>
+        <DownloadProgressBar
+          state={videoDownloadMutation.downloadState}
+          label="video"
+          onCancel={videoDownloadMutation.cancelDownload}
+        />
       )}
 
       {/* Helper Text */}

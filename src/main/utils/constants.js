@@ -3,9 +3,6 @@
 const path = require("path")
 const os = require("os")
 
-// detect dev mode
-const isDevelopment = process.env.NODE_ENV === "development"
-
 // app config
 const APP_CONFIG = {
   // download settings
@@ -17,60 +14,9 @@ const APP_CONFIG = {
   COOKIES_DIR: path.join(os.homedir(), ".config", "app-data-7c4f", "cookies"),
   TEMP_DIR: path.join(os.tmpdir(), "cliply"),
 
-  // python server config
-  PYTHON_SERVER: {
-    HOST: "127.0.0.1",
-    PORT: 8888,
-    STARTUP_TIMEOUT: isDevelopment ? 60000 : 30000, // longer timeout in dev
-    HEALTH_CHECK_INTERVAL: 5000,
-    MAX_STARTUP_RETRIES: 3,
-    ENDPOINTS: {
-      ROOT: "/",
-      VIDEO_INFO: "/api/video/info",
-      DOWNLOAD_COMBINED: "/api/video/download-combined",
-      DOWNLOAD_AUDIO: "/api/audio/download",
-      PINTEREST_INFO: "/api/pinterest/info",
-      PINTEREST_DOWNLOAD: "/api/pinterest/download",
-      TIKTOK_INFO: "/api/tiktok/info",
-      TIKTOK_DOWNLOAD: "/api/tiktok/download"
-    }
-  },
-
   // binary paths
   BINARIES: {
     FFMPEG: process.platform === "win32" ? "ffmpeg.exe" : "ffmpeg"
-  },
-
-  // python runtime config
-  PYTHON_RUNTIME: {
-    // development: use system python
-    DEVELOPMENT_PYTHON: process.platform === "win32" ? "python" : "python3",
-
-    // production: embedded python path (relative to app resources)
-    EMBEDDED_PYTHON_DIR: (() => {
-      const platform = process.platform
-      const arch = process.arch
-
-      if (platform === "win32") {
-        return arch === "x64"
-          ? "python-runtime/win32-x64"
-          : "python-runtime/win32-ia32"
-      } else if (platform === "darwin") {
-        return arch === "arm64"
-          ? "python-runtime/darwin-arm64"
-          : "python-runtime/darwin-x64"
-      } else if (platform === "linux") {
-        return "python-runtime/linux-x64"
-      }
-
-      return "python-runtime"
-    })(),
-
-    EMBEDDED_PYTHON_EXE:
-      process.platform === "win32" ? "python.exe" : "bin/python3",
-    SERVER_SCRIPT: "server.py",
-    REQUIREMENTS_FILE: "requirements.txt",
-    VENV_DIR: "venv"
   },
 
   // update config - all updates are treated as important
@@ -88,17 +34,12 @@ const APP_CONFIG = {
 
   // analytics configuration
   ANALYTICS_CONFIG: {
-    // aptabase app key
-    APP_KEY: "A-EU-7558244378",
+    // posthog project token - write-only, safe to ship in a client app
+    POSTHOG_KEY: "phc_ojaWgWDpqKCTwLym4U6b4pa6br6H5X7a7vRmLXkhMVmk",
+    POSTHOG_HOST: "https://us.i.posthog.com",
 
-    // enable analytics
-    ENABLED: true,
-
-    // events to track
-    EVENTS: {
-      DOWNLOAD_COMPLETED: "download_completed",
-      DOWNLOAD_FAILED: "download_failed"
-    }
+    // build-time kill switch - flip to false for a telemetry-free build
+    ENABLED: true
   }
 }
 
@@ -138,10 +79,8 @@ const IPC_CHANNELS = {
   SYSTEM_OPEN_EXTERNAL: "system:open-external",
   SYSTEM_GET_DIAGNOSTICS: "system:get-diagnostics",
 
-  // python server events
-  PYTHON_SERVER_STARTING: "python:server:starting",
-  PYTHON_SERVER_READY: "python:server:ready",
-  PYTHON_SERVER_ERROR: "python:server:error"
+  // telemetry the renderer reports, which main gates before anything is sent
+  ANALYTICS_TRACK: "analytics:track"
 }
 
 // supported platforms
@@ -171,37 +110,12 @@ const FORMATS = {
   SUBTITLE: ["srt", "vtt", "ass"]
 }
 
-// error types
-const ERROR_TYPES = {
-  // network and connectivity
-  NETWORK_ERROR: "NETWORK_ERROR",
-  BOT_DETECTION: "BOT_DETECTION",
-  VIDEO_UNAVAILABLE: "VIDEO_UNAVAILABLE",
-  INVALID_URL: "INVALID_URL",
-  DOWNLOAD_FAILED: "DOWNLOAD_FAILED",
-
-  // python server errors
-  PYTHON_SERVER_NOT_READY: "PYTHON_SERVER_NOT_READY",
-  PYTHON_SERVER_ERROR: "PYTHON_SERVER_ERROR",
-  PERMISSION_ERROR: "PERMISSION_ERROR"
-}
-
-// http client config
-const HTTP_CONFIG = {
-  TIMEOUT: isDevelopment ? 2400000 : 3600000, // Long videos: 40min dev, 60min prod
-  RETRIES: 1, // Single attempt for long downloads
-  RETRY_DELAY: 1000,
-  HEADERS: {
-    "Content-Type": "application/json",
-    "User-Agent": "Cliply-Desktop/0.0.1"
-  }
-}
+// error codes live in utils/error-taxonomy.js - this file used to carry a
+// six-entry copy of them that nothing kept in step
 
 module.exports = {
   APP_CONFIG,
   IPC_CHANNELS,
   SUPPORTED_PLATFORMS,
-  FORMATS,
-  ERROR_TYPES,
-  HTTP_CONFIG
+  FORMATS
 }

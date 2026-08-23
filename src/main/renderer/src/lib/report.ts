@@ -34,17 +34,44 @@ export function buildIssueTitle(context: ReportContext): string {
   return `[${category}] ${message}`
 }
 
-function environmentSection(env: ReportEnvironment | null): string {
+export interface EnvironmentField {
+  label: string
+  value: string
+}
+
+/**
+ * everything the report says about the user's machine, in one list
+ *
+ * the dialog renders this and the issue body tabulates it, so what the user
+ * reads before they send is the same set of facts that goes out. a field
+ * nobody probed reads "unknown" rather than going quiet - an omission would
+ * look like we chose not to ask.
+ */
+export function environmentFields(
+  env: ReportEnvironment | null
+): EnvironmentField[] {
   const value = (v: string | boolean | null | undefined) =>
     v === null || v === undefined ? "unknown" : String(v)
+
+  return [
+    { label: "Cliply", value: value(env?.appVersion) },
+    {
+      label: "OS",
+      value: `${value(env?.platform)} ${value(env?.osRelease)} (${value(env?.arch)})`
+    },
+    { label: "Electron", value: value(env?.electronVersion) },
+    { label: "yt-dlp", value: value(env?.ytDlpVersion) },
+    { label: "FFmpeg available", value: value(env?.ffmpegAvailable) }
+  ]
+}
+
+function environmentSection(env: ReportEnvironment | null): string {
   return [
     "| Field | Value |",
     "| --- | --- |",
-    `| Cliply | ${value(env?.appVersion)} |`,
-    `| OS | ${value(env?.platform)} ${value(env?.osRelease)} (${value(env?.arch)}) |`,
-    `| Electron | ${value(env?.electronVersion)} |`,
-    `| yt-dlp | ${value(env?.ytDlpVersion)} |`,
-    `| FFmpeg available | ${value(env?.ffmpegAvailable)} |`
+    ...environmentFields(env).map(
+      (field) => `| ${field.label} | ${field.value} |`
+    )
   ].join("\n")
 }
 

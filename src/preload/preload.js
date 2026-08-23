@@ -39,7 +39,10 @@ const IPC_CHANNELS = {
   // system
   SYSTEM_HEALTH: "system:health",
   SYSTEM_OPEN_EXTERNAL: "system:open-external",
-  SYSTEM_GET_DIAGNOSTICS: "system:get-diagnostics"
+  SYSTEM_GET_DIAGNOSTICS: "system:get-diagnostics",
+
+  // telemetry
+  ANALYTICS_TRACK: "analytics:track"
 }
 
 // simple invoke wrapper
@@ -126,6 +129,13 @@ contextBridge.exposeInMainWorld("electronAPI", {
     selectDownloadFolder: () => invoke("system:select-download-folder")
   },
 
+  // telemetry. main owns the opt-out gate, the event allowlist and the
+  // redaction, so this is a pipe and nothing more
+  analytics: {
+    track: (event, properties) =>
+      invoke(IPC_CHANNELS.ANALYTICS_TRACK, { event, properties })
+  },
+
   // settings operations
   settings: {
     getDownloadPath: () => invoke("settings:get-download-path"),
@@ -199,27 +209,6 @@ contextBridge.exposeInMainWorld("electronAPI", {
       ipcRenderer.on(IPC_CHANNELS.UPDATE_SECURITY_CRITICAL, handler)
       return () =>
         ipcRenderer.removeListener(IPC_CHANNELS.UPDATE_SECURITY_CRITICAL, handler)
-    }
-  },
-
-  // server status events
-  server: {
-    onStarting: (callback) => {
-      const handler = () => callback()
-      ipcRenderer.on("python:server:starting", handler)
-      return () => ipcRenderer.removeListener("python:server:starting", handler)
-    },
-
-    onReady: (callback) => {
-      const handler = () => callback()
-      ipcRenderer.on("python:server:ready", handler)
-      return () => ipcRenderer.removeListener("python:server:ready", handler)
-    },
-
-    onError: (callback) => {
-      const handler = (_, data) => callback(data)
-      ipcRenderer.on("python:server:error", handler)
-      return () => ipcRenderer.removeListener("python:server:error", handler)
     }
   },
 

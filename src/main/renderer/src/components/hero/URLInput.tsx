@@ -1,6 +1,6 @@
 import { motion } from "framer-motion"
 import { ChevronUp, Folder, Loader2, Send } from "lucide-react"
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import type { UseFormReturn } from "react-hook-form"
 
 import { useDownloadPath } from "@/lib/hooks/useDownloadPath"
@@ -22,7 +22,7 @@ interface URLInputProps {
 
 export function URLInput({ form, onFocusChange, isLoading, platform }: URLInputProps) {
   const { register, formState: { errors }, watch } = form
-  const { selectFolder, isLoading: folderLoading, serverReady } = useDownloadPath()
+  const { selectFolder, isLoading: folderLoading } = useDownloadPath()
   const { selectedPlatform, setSelectedPlatform, setShowMediaDetails } = useAppStore()
   const [isOpen, setIsOpen] = useState(false)
 
@@ -32,7 +32,20 @@ export function URLInput({ form, onFocusChange, isLoading, platform }: URLInputP
   const hasError = !!errors.url
   const hasValue = urlValue && urlValue.length > 0
 
+  // switching platform resets every store, so a switch during an in-flight
+  // fetch would clear the store its late resolve is about to write into
+  useEffect(() => {
+    if (isLoading) setIsOpen(false)
+  }, [isLoading])
+
+  const handleToggle = () => {
+    if (isLoading) return
+    setIsOpen((o) => !o)
+  }
+
   const handlePlatformSelect = (p: Platform) => {
+    if (isLoading) return
+
     if (p !== selectedPlatform) {
       setSelectedPlatform(p)
       Object.values(PLATFORM_REGISTRY).forEach((cfg) => cfg.store.reset())
@@ -81,7 +94,7 @@ export function URLInput({ form, onFocusChange, isLoading, platform }: URLInputP
           <button
             type="button"
             onClick={selectFolder}
-            disabled={!serverReady || folderLoading || isLoading}
+            disabled={folderLoading || isLoading}
             title="Select folder"
             className={cn(
               "w-7 h-7 rounded-lg border transition-all duration-200 ease-out",
@@ -100,17 +113,25 @@ export function URLInput({ form, onFocusChange, isLoading, platform }: URLInputP
 
             {/* Platform dropdown */}
             <div
+              data-testid="platform-picker"
+              data-state={isOpen ? "open" : "closed"}
               className={cn(
-                "select-none cursor-pointer overflow-hidden",
+                "select-none overflow-hidden",
+                isLoading ? "cursor-not-allowed opacity-50" : "cursor-pointer",
                 "transition-all duration-500 ease-[cubic-bezier(0.4,0,0.2,1)]",
                 isOpen ? "rounded-2xl" : "rounded-xl",
                 "border dark:border-slate-700/40 border-slate-200/50",
                 "dark:bg-slate-800 bg-white"
               )}
-              onClick={() => setIsOpen((o) => !o)}
+              onClick={handleToggle}
             >
               {/* trigger row */}
-              <div className="flex items-center gap-2 px-2.5 py-1.5">
+              <div
+                data-testid="platform-picker-trigger"
+                aria-disabled={isLoading}
+                title={isLoading ? "Wait for the current link to finish" : undefined}
+                className="flex items-center gap-2 px-2.5 py-1.5"
+              >
                 <img
                   src={currentPlatform.logo}
                   alt={currentPlatform.label}

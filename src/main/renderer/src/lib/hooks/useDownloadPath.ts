@@ -2,7 +2,6 @@ import { useCallback } from "react"
 import { settingsApi, systemApi } from "@/lib/api"
 import { useYouTubeStore } from "@/lib/youtubeStore"
 import { showFolderSelectedToast } from "@/lib/toast-utils"
-import { useServerStatus } from "./useServerStatus"
 import { toast } from "sonner"
 
 export function useDownloadPath() {
@@ -12,15 +11,11 @@ export function useDownloadPath() {
     setIsLoadingDownloadPath,
     isLoadingDownloadPath
   } = useYouTubeStore()
-  const { isReady: serverReady } = useServerStatus()
 
   // folder selection logic
+  // no engine gate: the download folder is stored by the main process, so
+  // picking one never depended on the download engine being ready
   const selectFolder = useCallback(async () => {
-    if (!serverReady) {
-      toast.error("download engine starting, please wait...")
-      return
-    }
-
     try {
       const selectedPath = await systemApi.selectDownloadFolder()
       if (selectedPath) {
@@ -35,12 +30,11 @@ export function useDownloadPath() {
     } finally {
       setIsLoadingDownloadPath(false)
     }
-  }, [serverReady, setDownloadPath, setIsLoadingDownloadPath])
+  }, [setDownloadPath, setIsLoadingDownloadPath])
 
   return {
     downloadPath,
     isLoading: isLoadingDownloadPath,
-    selectFolder,
-    serverReady
+    selectFolder
   }
 }

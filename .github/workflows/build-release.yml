@@ -49,15 +49,17 @@ jobs:
       - run: npm ci
       - run: npm run install:renderer
       - run: npm run build:renderer
-      - run: npm run setup:python-runtime
+
+      - name: Fetch yt-dlp engine
+        run: npm run fetch:ytdlp
+        env:
+          BUILD_TARGET_PLATFORM: darwin-arm64
 
       - name: Capture versions
         id: versions
         run: |
-          PYTHON_EXE="python-runtime/darwin-arm64/bin/python3"
-          $PYTHON_EXE -c "import fastapi; print(f'fastapi {fastapi.__version__}')"
-          $PYTHON_EXE -c "import yt_dlp; print(f'yt-dlp {yt_dlp.version.__version__}')"
-          $PYTHON_EXE -c "import uvicorn; print('uvicorn OK')"
+          ENGINE=$(node -p "require('./src/main/services/ytdlp-engine').resolveExecutableIn('binaries/macos/ytdlp','darwin')")
+          "$ENGINE" --version
           echo "app_version=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
 
       - run: npx electron-builder --mac --publish never
@@ -98,17 +100,18 @@ jobs:
       - run: npm ci
       - run: npm run install:renderer
       - run: npm run build:renderer
-      - name: Setup Python runtime
-        shell: pwsh
-        run: npm run setup:python-runtime
 
-      - name: Verify Python dependencies
+      - name: Fetch yt-dlp engine
+        shell: pwsh
+        run: npm run fetch:ytdlp
+        env:
+          BUILD_TARGET_PLATFORM: win32-x64
+
+      - name: Verify yt-dlp engine
         shell: pwsh
         run: |
-          $p = "python-runtime/win32-x64/python.exe"
-          & $p -c "import fastapi; print(f'fastapi {fastapi.__version__}')"
-          & $p -c "import yt_dlp; print(f'yt-dlp {yt_dlp.version.__version__}')"
-          & $p -c "import uvicorn; print('uvicorn OK')"
+          $engine = node -p "require('./src/main/services/ytdlp-engine').resolveExecutableIn('binaries/windows/ytdlp','win32')"
+          & $engine --version
 
       - run: npx electron-builder --win --publish never
 

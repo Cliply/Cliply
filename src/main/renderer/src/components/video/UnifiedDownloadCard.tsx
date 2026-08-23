@@ -1,24 +1,24 @@
 import { Button } from "@/components/ui/button"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { SIMPLE_QUALITY, track } from "@/lib/analytics"
 import {
   DownloadError,
   pinterestApi,
   tiktokApi,
   systemApi,
   validateTimeRange,
+  type AudioTrack,
   type PinterestVideoInfoResponse,
-  type TikTokVideoInfoResponse,
-  type VideoFormat
+  type QualityTier,
+  type TikTokVideoInfoResponse
 } from "@/lib/api"
 import { reportActions } from "@/lib/reportStore"
-import { useServerStatus } from "@/lib/hooks/useServerStatus"
 import { usePinterestStore } from "@/lib/pinterestStore"
 import { useTikTokStore } from "@/lib/tiktokStore"
 import { useYouTubeStore } from "@/lib/youtubeStore"
 import {
   showDownloadErrorToast,
-  showServerOverwhelmedToast,
-  showServerStartingToast
+  showServerOverwhelmedToast
 } from "@/lib/toast-utils"
 import { cn } from "@/lib/utils"
 import { motion } from "framer-motion"
@@ -26,6 +26,7 @@ import { useState } from "react"
 import { toast } from "sonner"
 import { AudioDownloadButton } from "./AudioDownloadButton"
 import { AudioFormatDropdown } from "./AudioFormatDropdown"
+import { AudioTrackDropdown } from "./AudioTrackDropdown"
 import { TimeRangeSelector } from "./TimeRangeSelector"
 import { VideoDownloadButton } from "./VideoDownloadButton"
 import { VideoQualityDropdown } from "./VideoQualityDropdown"
@@ -35,8 +36,8 @@ type YouTubeDownloadCardProps = {
   platform?: "youtube"
   videoInfo: {
     duration: number
-    video_formats: VideoFormat[]
-    audio_formats: VideoFormat[]
+    quality_tiers: QualityTier[]
+    audio_tracks?: AudioTrack[]
   }
   className?: string
 }
@@ -80,17 +81,13 @@ function YouTubeDownloadCard({
 }: {
   videoInfo: {
     duration: number
-    video_formats: VideoFormat[]
-    audio_formats: VideoFormat[]
+    quality_tiers: QualityTier[]
+    audio_tracks?: AudioTrack[]
   }
   className?: string
 }) {
-  const {
-    audioTimeRange,
-    selectedAudioFormatForDownload,
-    videoTimeRange,
-    selectedVideoQuality
-  } = useYouTubeStore()
+  const { audioTimeRange, selectedAudioMode, videoTimeRange, selectedTier } =
+    useYouTubeStore()
 
   const [isVideoQualityDropdownOpen, setIsVideoQualityDropdownOpen] =
     useState(false)
@@ -103,8 +100,7 @@ function YouTubeDownloadCard({
   ).isValid
 
   const showAudioFormatDropdown = isValidAudioTimeRange
-  const showAudioDownloadButton =
-    showAudioFormatDropdown && !!selectedAudioFormatForDownload
+  const showAudioDownloadButton = showAudioFormatDropdown && !!selectedAudioMode
 
   const isValidVideoTimeRange = validateTimeRange(
     videoTimeRange.start,
@@ -113,7 +109,9 @@ function YouTubeDownloadCard({
   ).isValid
 
   const showVideoQualityDropdown = isValidVideoTimeRange
-  const showVideoDownloadButton = showVideoQualityDropdown && !!selectedVideoQuality
+  const showVideoDownloadButton = showVideoQualityDropdown && !!selectedTier
+
+  const audioTracks = videoInfo.audio_tracks ?? []
 
   return (
     <motion.div
@@ -160,15 +158,20 @@ function YouTubeDownloadCard({
               <VideoTimeRangeSelector maxDuration={videoInfo.duration} />
 
               <VideoQualityDropdown
-                videoFormats={videoInfo.video_formats}
-                audioFormats={videoInfo.audio_formats}
+                tiers={videoInfo.quality_tiers}
                 isVisible={showVideoQualityDropdown}
                 onOpenChange={setIsVideoQualityDropdownOpen}
               />
 
+              {/* no video to download means no language to pick for it - the
+                  audio tab still offers the choice */}
+              <AudioTrackDropdown
+                tracks={audioTracks}
+                isVisible={showVideoQualityDropdown && !!selectedTier}
+              />
+
               <VideoDownloadButton
                 maxDuration={videoInfo.duration}
-                audioFormats={videoInfo.audio_formats}
                 isVisible={showVideoDownloadButton}
               />
             </div>
@@ -186,8 +189,10 @@ function YouTubeDownloadCard({
             <div className="space-y-6">
               <TimeRangeSelector maxDuration={videoInfo.duration} />
 
-              <AudioFormatDropdown
-                audioFormats={videoInfo.audio_formats}
+              <AudioFormatDropdown isVisible={showAudioFormatDropdown} />
+
+              <AudioTrackDropdown
+                tracks={audioTracks}
                 isVisible={showAudioFormatDropdown}
               />
 
@@ -272,23 +277,27 @@ function PinterestDownloadCard({
   className?: string
 }) {
   const { url, isDownloading, setIsDownloading } = usePinterestStore()
-  const serverStatus = useServerStatus()
 
   const handleDownload = async () => {
     if (!url || isDownloading) return
-    if (serverStatus.isStarting) { showServerStartingToast(); return }
-    if (!serverStatus.isReady && !serverStatus.isUnknown) {
-      toast.error("Download engine not ready", { description: "Please wait for the download engine to start" })
-      return
-    }
     try {
       setIsDownloading(true)
-      await pinterestApi.download({ url })
+
+      // main reports this download's end, so it has to hear about its start:
+      // completions with no starts is a funnel that shows the impossible
+      track("download_started", {
+        platform: "pinterest",
+        media_type: "video",
+        quality: SIMPLE_QUALITY,
+        // there is no trimming here to report - no range is ever sent
+        is_trimmed: false
+      })
+
+      await pinterestApi.download({ url, title: pinInfo?.title })
       toast.success("Download complete!", { action: { label: "Open Folder", onClick: () => systemApi.openDownloadFolder() } })
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to download video"
-      if (message.includes("Download engine starting")) { showServerStartingToast() }
-      else if (message.includes("network") || message.includes("fetch")) { showServerOverwhelmedToast() }
+      if (message.includes("network") || message.includes("fetch")) { showServerOverwhelmedToast() }
       else {
         reportActions.stage({
           shortMessage: message,
@@ -324,23 +333,25 @@ function TikTokDownloadCard({
   className?: string
 }) {
   const { url, isDownloading, setIsDownloading } = useTikTokStore()
-  const serverStatus = useServerStatus()
 
   const handleDownload = async () => {
     if (!url || isDownloading) return
-    if (serverStatus.isStarting) { showServerStartingToast(); return }
-    if (!serverStatus.isReady && !serverStatus.isUnknown) {
-      toast.error("Download engine not ready", { description: "Please wait for the download engine to start" })
-      return
-    }
     try {
       setIsDownloading(true)
-      await tiktokApi.download({ url })
+
+      // as pinterest above: one button, one quality, never a range
+      track("download_started", {
+        platform: "tiktok",
+        media_type: "video",
+        quality: SIMPLE_QUALITY,
+        is_trimmed: false
+      })
+
+      await tiktokApi.download({ url, title: tikTokInfo?.title })
       toast.success("Download complete!", { action: { label: "Open Folder", onClick: () => systemApi.openDownloadFolder() } })
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to download video"
-      if (message.includes("Download engine starting")) { showServerStartingToast() }
-      else if (message.includes("network") || message.includes("fetch")) { showServerOverwhelmedToast() }
+      if (message.includes("network") || message.includes("fetch")) { showServerOverwhelmedToast() }
       else {
         reportActions.stage({
           shortMessage: message,

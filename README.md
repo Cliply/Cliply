@@ -9,7 +9,7 @@
 </div>
 </p>
 
-cliply started as a small weekend project, just wanted a simple way to grab videos without ads, bloat, or shady sites. it's free, fast, and respects your privacy. no logins, no tracking, no bs.
+cliply started as a small weekend project, just wanted a simple way to grab videos without ads, bloat, or shady sites. it's free, fast, and respects your privacy. no logins, no ads, no cross-site tracking, no bs. it does send a little usage data so we can find bugs, and one click in the Tools menu turns that off — [what it sends, exactly](PRIVACY.md).
 
 ## what it is
 
@@ -20,7 +20,6 @@ currently, you can:
 - download videos in multiple qualities (144p to 4k)
 - grab audio-only files
 - trim clips to specific time ranges
-- download entire playlists
 
 new features are being added regularly. got an idea? request it [here](https://cliply.space/hey)
 
@@ -32,11 +31,13 @@ new features are being added regularly. got an idea? request it [here](https://c
 npm install && npm run install:renderer
 ```
 
-**set up python environment**
+**get the yt-dlp engine**
 
 ```bash
-npm run setup:python:venv && npm run setup:python-deps
+npm run fetch:ytdlp
 ```
+
+downloads the official yt-dlp build for your platform into `binaries/`, checksum-verified. no python needed — the app spawns the binary directly and keeps it up to date on its own.
 
 **get ffmpeg (for trimming & conversion)**  
 see [docs/binaries](binaries/README.md) for help
@@ -65,7 +66,7 @@ npm run dist:linux
 ## how it works
 
 **frontend:** react + typescript + tailwind → [`src/main/renderer/`](src/main/renderer/)  
-**backend:** python fastapi + yt-dlp → [`python/`](python/)  
+**engine:** the electron main process spawns the bundled yt-dlp binary once per operation → [`src/main/services/`](src/main/services/)  
 **desktop:** electron handles the app shell → window management, ipc communication, file operations
 
 built with open source tools, depends on [yt-dlp](https://github.com/yt-dlp/yt-dlp).
