@@ -120,7 +120,11 @@ function toolsSubmenu() {
 
 function analyticsMenuItem() {
   return toolsSubmenu().find(
-    (entry) => entry.label === "Send anonymous usage data"
+    // not "anonymous": the data is pseudonymous - a persistent install id and
+    // a derived city ride on every event - and PRIVACY.md says so in those
+    // words. the label is the more-read of the two, so it is the one that has
+    // to be right
+    (entry) => entry.label === "Send usage data"
   )
 }
 

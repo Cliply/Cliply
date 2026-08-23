@@ -104,7 +104,7 @@ what we *do* have is the random install id and the coarse location that ride on 
 
 ## opting out
 
-open the **Tools** menu and untick **"Send anonymous usage data"**. sending stops the moment you click, and the choice is remembered for next time. if the preference can't be written to disk for some reason, the app says so rather than quietly letting it come back on.
+open the **Tools** menu and untick **"Send usage data"**. sending stops the moment you click, and the choice is remembered for next time. if the preference can't be written to disk for some reason, the app says so rather than quietly letting it come back on.
 
 cliply is open source, so if you'd rather the telemetry weren't in the binary at all, flip `ANALYTICS_CONFIG.ENABLED` to `false` in [`src/main/utils/constants.js`](src/main/utils/constants.js) and build your own copy:
 

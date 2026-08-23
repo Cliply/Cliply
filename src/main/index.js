@@ -827,7 +827,11 @@ class CliplyApp {
           },
           { type: "separator" },
           {
-            label: "Send anonymous usage data",
+            // deliberately not "anonymous". every event carries a persistent
+            // install id and a city derived from the ip, which is pseudonymous
+            // - and this label is read far more often than PRIVACY.md, so it
+            // is where the word would do its damage
+            label: "Send usage data",
             type: "checkbox",
             checked: this.services.analytics.isEnabled(),
             click: async (menuItem) => {
