@@ -112,12 +112,34 @@ switch, and the user's own preference is read once at `init()`.
 
 ## two things this repo cannot tell you
 
-both are settings on the posthog project rather than anything in the code, so they
-have to be checked in posthog and kept in step with `PRIVACY.md`:
+both are settings on the posthog project rather than anything in the code. no test can
+reach either, so nothing here will go red if one of them changes.
 
-- **whether the raw client ip is discarded.** the app sets `disableGeoip: false` so
-  posthog resolves country/region/city, and never sends an address as a property of
-  its own. whether `$ip` is retained alongside the derived location is the project's
-  "discard client ip data" setting. `PRIVACY.md` states that it is discarded.
-- **retention.** nothing in the app configures one. `PRIVACY.md` says only that it is
-  a project setting; if the number is ever pinned down, say it there.
+- **whether the raw client ip is discarded.** the app sets `disableGeoip: false`, which
+  is what makes posthog resolve country/region/city, and it never sends an address as a
+  property of its own — both of those are code facts. whether `$ip` is *retained*
+  alongside the derived location is the project's **"discard client IP data"** setting,
+  and nothing in this repo establishes it either way.
+
+  `PRIVACY.md` states that the address is discarded. **That sentence is the one claim in
+  the user-facing document with nothing in the codebase behind it.** If the toggle is
+  ever turned off, `PRIVACY.md` becomes false and no build will notice — so if you touch
+  that project setting, go and change the document too.
+- **retention.** nothing in the app configures one, and `PRIVACY.md` deliberately states
+  no number: it says only that retention is a setting on the posthog project. That is a
+  decision, not an omission waiting to be filled in — an invented figure in a privacy
+  policy is worse than an honest "this is configured elsewhere". If it is ever stated,
+  it has to be checked against the project first.
+
+## a framing note, since it is easy to lose
+
+`PRIVACY.md` calls the data **pseudonymous, not anonymous**, and says so in those words.
+Every event carries a persistent install UUID plus a derived city, and that id survives
+updates *and* reinstalls because it lives in `~/.config/app-data-7c4f/settings.json`,
+outside the bundle. Deleting the file rotates future identity; it cannot unlink events
+already sent.
+
+So the document promises what we *do* — we don't sell it, posthog is the only processor
+— rather than asserting that linking is impossible, which the system does not support.
+Anything added here later should hold the same line: a commitment about our conduct is
+fine, a claim that something is technically impossible needs the code behind it.

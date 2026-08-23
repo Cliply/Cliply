@@ -4,18 +4,18 @@ _last updated: august 23, 2026_
 
 hey. quick note on what cliply does (and doesn't) know about you.
 
-cliply started as a weekend project. it's free, open source, and we built it because we wanted a clean little app to grab videos without ads, bloat, or shady sites. that same idea carries over to privacy: we collect as little as possible, we tell you exactly what it is, and nothing is ever sold or shared.
+cliply started as a weekend project. it's free, open source, and we built it because we wanted a clean little app to grab videos without ads, bloat, or shady sites. that same idea carries over to privacy: we collect as little as possible, we tell you exactly what it is, and we don't sell it.
 
 ## the short version
 
 - no logins. no accounts. no email. no ads.
-- we don't see the urls you paste, the names of the videos you download, or anything in your folders.
+- we don't see the urls you paste, and no event has a field for a video title or a filename.
 - your downloads go **directly** from the source (youtube, pinterest, tiktok) to your disk. nothing passes through our servers. we don't even run one.
-- we do send a small amount of anonymous usage data, so we can spot bugs and keep the app working. one click turns it off. details below.
+- we do send a small amount of usage data, so we can spot bugs and keep the app working. one click turns it off. details below.
 
 ## how the sending works
 
-there is exactly one place in the app that can send anything: [`src/main/services/analytics.js`](src/main/services/analytics.js). everything goes through it, including the events the interface raises.
+there is exactly one place in the app that can send telemetry: [`src/main/services/analytics.js`](src/main/services/analytics.js). every event goes through it, including the ones the interface raises. (the app does use the network for other things — fetching your download from youtube, checking whether yt-dlp needs updating — but neither of those routes through here, and neither carries any of the events below.)
 
 that file holds a list of every event name, and for each name every property it is allowed to carry. anything not on the list is thrown away on your machine, before it goes anywhere — not filtered later, not filtered on a server. each property is then checked against the kind of value it is meant to be: a yes/no, a number, a name from a fixed list, a version number, or a pre-computed range like `1-5 min`. a value that doesn't fit is dropped and the event goes without it.
 
@@ -23,7 +23,7 @@ that's what makes the list below a complete list rather than a summary of one. a
 
 ## what rides on every event
 
-- **a random install id** — a dice roll made on first launch, not derived from you or your machine. it lives in a settings file in your home folder (`~/.config/app-data-7c4f/settings.json`). it survives app updates, and it's gone the moment you delete that file.
+- **a random install id** — a dice roll made on first launch, not derived from you or your machine. it is persistent, though: it lives in a settings file in your home folder (`~/.config/app-data-7c4f/settings.json`), outside the app itself, so it survives updates *and* an uninstall-and-reinstall. [what that actually means](#what-the-install-id-actually-is) is worth a section of its own, below.
 - the app version
 - your operating system, its version, and your cpu type (`darwin`, `25.5.0`, `arm64`)
 - your system language (`en-GB`)
@@ -69,7 +69,7 @@ that's what makes the list below a complete list rather than a summary of one. a
 
 - whether the import worked, and whether the file turned out to have youtube cookies in it
 
-that's the whole list. there is nothing else.
+that's the whole list of what *we* send. posthog adds a little of its own on top: which sdk and version delivered the event (`$lib`, `$lib_version`), and the location worked out from your ip described above.
 
 ## the one free-text field
 
@@ -93,12 +93,14 @@ so, stated exactly rather than rounded up: **no event has a field for a video ti
 
 ## what we do NOT collect
 
-- your name, email, or anything that identifies you
+- your name, your email, or any account — there is no login here, so there is nothing of that sort to attach an event to
 - the urls you paste
-- video titles — no event has a property for one, and one can't be added without editing the allow-list on purpose
+- video titles — no event has a property for one, and one can't be added without a deliberate edit to the allow-list
 - filenames, or anything about the contents of your downloads folder
 - your ip address as a stored field
 - any browsing activity outside of cliply
+
+what we *do* have is the random install id and the coarse location that ride on every event. that pair is not your name, but it is persistent and it is yours, so it gets its own section rather than a footnote.
 
 ## opting out
 
@@ -117,13 +119,25 @@ straight from the video platform to your computer. we don't proxy, cache, or tou
 
 ## where the analytics data lives
 
-with [posthog](https://posthog.com), on their **united states** cloud (`us.i.posthog.com`). their own privacy policy is at <https://posthog.com/privacy>. we keep no copy anywhere else, and nothing is ever sold or shared.
+with [posthog](https://posthog.com), on their **united states** cloud (`us.i.posthog.com`). their own privacy policy is at <https://posthog.com/privacy>.
+
+so the data *is* shared, in the plain sense of the word: posthog receives it, stores it and processes it on our behalf. they are the only company besides us who sees it. we don't sell it, and we won't hand it to anyone else — that one is a promise about how we intend to run this, not something the source code can demonstrate. what the code can show you is the list above, and it does.
 
 how long events are kept is a retention setting on that posthog project rather than something the app decides.
 
+## what the install id actually is
+
+worth being precise about, because it's the one persistent thing in here.
+
+it is a random uuid: a dice roll made on first launch, not derived from your name, your hardware, your account or anything else about you. but it doesn't change. it survives app updates, and because it lives in `~/.config/app-data-7c4f/settings.json` rather than inside the app bundle, it survives an uninstall and reinstall too. every event carries it, next to a country, region and city.
+
+which means: there is nothing on our side to look it up against — no account, no email, no name — and it *does* tie one installation's events to each other over time. that's the honest shape of it: pseudonymous rather than anonymous. we'd rather say that than call it anonymous and let you find out.
+
+if you want a fresh one, delete `~/.config/app-data-7c4f/settings.json`. the app rolls a new id on the next launch and doesn't link it to the old one. what that does **not** do is reach backwards — events already sent sit in posthog under the old id, and deleting the file doesn't touch them; they stay until the retention window expires. if what you want is for nothing further to be sent, the Tools menu toggle above is the thing that does that.
+
 ## your rights
 
-we don't collect anything tied to you, so there is nothing we could look up, export or delete even if you asked. the closest thing to a handle on you is the random install id, and it's a dice roll with nothing on the other end of it. if you want it gone, delete `~/.config/app-data-7c4f/settings.json` — the app rolls a new one and the old one becomes an orphan nobody can join to anything.
+we hold no name, no email and no account, so there is no profile here to look up or export — nothing on our side that a request could be matched against, which is a limitation as much as it is a protection. the one handle that exists is the install id, and it's in that settings file if you want to read it. if you'd like the events already filed under it dealt with, or anything here is on your mind, ping us and we'll do what we can.
 
 ## changes to this page
 
