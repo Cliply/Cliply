@@ -325,7 +325,7 @@
   "bugs": {
     "url": "https://github.com/Cliply/Cliply/issues"
   },
-  "license": "MIT",
+  "license": "GPL-3.0-only",
   "jest": {
     "testEnvironment": "node",
     "testMatch": [
