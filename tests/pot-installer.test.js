@@ -13,7 +13,12 @@ const os = require("os")
 const path = require("path")
 
 const { makeZip } = require("./helpers/zip-fixture")
-const { PotInstaller, VERSION_MARKER } = require("../src/main/services/pot-installer")
+const {
+  PotInstaller,
+  VERSION_MARKER,
+  POT_CHECKSUMS,
+  payloadAssetFor
+} = require("../src/main/services/pot-installer")
 
 let root
 let potDir
@@ -118,18 +123,38 @@ describe("nothing unverified is ever installed", () => {
     expect(fs.existsSync(potDir)).toBe(false)
   })
 
-  // the state this ships in: no artifact is published yet, so there is no
-  // digest to pin and the installer must decline rather than fetch whatever
-  // answers the url
+  // a platform we have not published and digested a payload for must decline
+  // rather than fetch whatever answers the url. every shipping platform now
+  // has a digest, so the unpublished case is reached by taking this one's away
   test("an asset nobody has vouched for is never fetched at all", async () => {
     const { installer, http } = createInstaller({ archive: makeZip(PAYLOAD_ENTRIES) })
     delete process.env.CLIPLY_POT_SHA256
 
-    const result = await installer.ensureInstalled()
+    const asset = payloadAssetFor()
+    const pinned = POT_CHECKSUMS[asset]
+    delete POT_CHECKSUMS[asset]
 
-    expect(result.installed).toBe(false)
-    expect(result.reason).toBe("no-payload-published")
-    expect(http.download).not.toHaveBeenCalled()
+    try {
+      expect(installer.canInstall()).toBe(false)
+
+      const result = await installer.ensureInstalled()
+
+      expect(result.installed).toBe(false)
+      expect(result.reason).toBe("no-payload-published")
+      expect(http.download).not.toHaveBeenCalled()
+    } finally {
+      POT_CHECKSUMS[asset] = pinned
+    }
+  })
+
+  // and the platforms we do ship are pinned, or the feature is dead on arrival
+  test("every platform we ship has a digest pinned", () => {
+    for (const platform of [
+      ["win32", "x64"],
+      ["darwin", "arm64"]
+    ]) {
+      expect(POT_CHECKSUMS[payloadAssetFor(...platform)]).toMatch(/^[0-9a-f]{64}$/)
+    }
   })
 
   test("an archive missing half the payload is refused", async () => {

@@ -1774,10 +1774,19 @@ class YtdlpEngine {
       denoPath: params.denoPath || this.getDenoPath(),
       cookieFile:
         params.cookieFile !== undefined ? params.cookieFile : this.getCookieFile(),
-      potPaths: params.potPaths !== undefined ? params.potPaths : this.getPotPaths(),
+      // buildCommonArgs needs both, and needs potEnabled first - so an install
+      // that was never refused, which is most of them, does not pay two stat
+      // calls per operation to look for a payload it would not use anyway
       potEnabled:
         params.potEnabled !== undefined ? params.potEnabled : this.potEnabled
     }
+
+    resolved.potPaths =
+      params.potPaths !== undefined
+        ? params.potPaths
+        : resolved.potEnabled
+          ? this.getPotPaths()
+          : null
 
     const id = options.id || `${operation}_${Date.now()}_${this.operations.size}`
     const isInfo = operation === "info" || operation === "playlist-info"

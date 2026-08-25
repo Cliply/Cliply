@@ -969,14 +969,6 @@ function isRedirect(response) {
 // =============================================================================
 
 /**
- * copy a directory tree, preserving permission bits
- * fs.promises.cp would do this in one line, but it still prints an
- * experimental warning on the node electron 28 ships
- * @param {string} source - directory to copy
- * @param {string} destination - directory to create
- * @returns {Promise<void>}
- */
-/**
  * put a prepared directory in place of the live one
  *
  * both directories live under the same userData parent, so the renames are
@@ -1024,6 +1016,14 @@ async function swapIn(preparedDir, installedDir) {
   await removeQuietly(retiredDir)
 }
 
+/**
+ * copy a directory tree, preserving permission bits
+ * fs.promises.cp would do this in one line, but it still prints an
+ * experimental warning on the node electron 28 ships
+ * @param {string} source - directory to copy
+ * @param {string} destination - directory to create
+ * @returns {Promise<void>}
+ */
 async function copyDirectory(source, destination) {
   await fsp.mkdir(destination, { recursive: true })
 

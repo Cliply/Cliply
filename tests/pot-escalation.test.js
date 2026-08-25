@@ -18,7 +18,6 @@ const { EventEmitter } = require("events")
 
 const IPCHandlers = require("../src/main/ipc-handlers")
 const { ERROR_CODES } = require("../src/main/services/ytdlp-engine")
-const { PotInstaller } = require("../src/main/services/pot-installer")
 
 const settle = () => new Promise((resolve) => setImmediate(resolve))
 
@@ -185,19 +184,21 @@ describe("everything else leaves it alone", () => {
 
 /**
  * the sentence appended to the error is a promise, and it is only ours to make
- * when a payload can really arrive. no artifact is published yet, so the
- * shipping answer to "is a fix on its way" is no - and a user told to try again
- * in a minute would retry into the same wall for the life of the install.
+ * when a payload can really arrive. a platform we have not published one for
+ * cannot keep it, and a user told to try again in a minute would retry into the
+ * same wall for the life of the install.
  */
 describe("what the user is told", () => {
   const refused = () =>
     engineError(ERROR_CODES.BOT_DETECTION, "Sign in to confirm you're not a bot")
 
   test("no payload to fetch means no fix is promised", async () => {
+    const ensureInstalled = jest.fn()
     const { handlers } = createHandlers({
       infoError: refused(),
-      // the real one, with the real empty checksum table
-      potInstaller: new PotInstaller({ engine: { getUserDataPath: () => "/tmp" } })
+      // a platform nobody has published a payload for. the sentence is a
+      // promise, and there is nothing here that could keep it
+      potInstaller: { canInstall: () => false, ensureInstalled }
     })
 
     const response = await handlers.handleGetVideoInfo(null, {
@@ -207,7 +208,10 @@ describe("what the user is told", () => {
     await settle()
 
     expect(response.error.message).toBe("Sign in to confirm you're not a bot")
-    // the escalation itself still happens - it costs nothing and outlives this
+    // nothing is fetched either - there is no vouched-for payload to fetch
+    expect(ensureInstalled).not.toHaveBeenCalled()
+    // but the escalation itself still happens: it costs nothing, it outlives
+    // this session, and it arms the install for the day a payload does exist
     expect(handlers.engine.setPotEnabled).toHaveBeenCalledWith(true)
   })
 
