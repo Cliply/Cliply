@@ -139,6 +139,11 @@ class IPCHandlers {
     // one source of truth for the download folder, shared with the settings ipc
     this.settings = services.settingsStore || new SettingsStore()
 
+    // fetches the PO token payload the first time an install is refused.
+    // absent in a build that never constructed one, and a refusal still
+    // escalates without it - there is just nothing yet to escalate with
+    this.potInstaller = services.potInstaller || null
+
     // drives engine downloads and forwards their progress to the renderer
     this.runner = new DownloadRunner({
       engine: this.engine,
@@ -329,6 +334,86 @@ class IPCHandlers {
       success: Boolean(imported),
       has_youtube_cookies: Boolean(this.cookieManager.hasValidCookies())
     })
+  }
+
+  /**
+   * escalate to a PO token, because this install has just been refused
+   *
+   * yt-dlp's advice is to run the default clients until they stop working and
+   * only then reach for a token provider. this is the "stop working" - the one
+   * signal that says the default clients are done for this connection, so it is
+   * the only thing that turns the escalation on. RATE_LIMITED deliberately does
+   * not: the audit found throttling landing mostly on installs that were never
+   * blocked at all, which makes it a reading of the user's network rather than
+   * of youtube's door policy.
+   *
+   * both halves are set, because they answer different questions. the engine
+   * field is what the *next* operation reads, so a user who was refused once
+   * does not have to restart the app to benefit; the settings write is what a
+   * restart reads back, so they do not have to be refused again to re-learn it.
+   *
+   * re-stamped on every refusal rather than written once. the stored timestamp
+   * expires the escalation after a week, and refreshing it here is what makes
+   * that window mean "a week since youtube last turned us away" instead of "a
+   * week since the first time it ever did".
+   *
+   * @param {string} category - what the taxonomy made of the failure
+   * @returns {boolean} whether a payload is being fetched because of this
+   */
+  noteRefusal(category) {
+    if (category !== ERROR_CATEGORIES.BOT_DETECTION) return false
+
+    this.engine.setPotEnabled(true)
+
+    // fired, never awaited: the operation that failed is already answering the
+    // user, and it must not wait on our disk to do it. a write that does not
+    // land costs one more refusal after the next launch, which is the same
+    // failure this install just had - not a new way to break
+    Promise.resolve(this.settings.setPotEnabled(true))
+      .then((result) => {
+        if (result && result.success === false) {
+          console.warn(`could not persist the PO token escalation: ${result.error}`)
+        }
+      })
+      .catch((error) => {
+        console.warn(
+          "could not persist the PO token escalation:",
+          describeError(error)
+        )
+      })
+
+    // the flag alone escalates nothing: the engine only emits the flags when
+    // the payload is actually on disk, so this is what makes the escalation
+    // real. also fired rather than awaited - a ~70 mb download is not
+    // something to hold a failed request open for
+    // nothing published for this platform means nothing to fetch, and the
+    // sentence we would otherwise add to the error promises a fix that is
+    // never coming. asked before starting rather than after, because the user
+    // is told now and the download answers later
+    if (!this.potInstaller || !this.potInstaller.canInstall()) return false
+
+    const needed = !this.engine.getPotPaths()
+
+    this.potInstaller
+      .ensureInstalled()
+      .then((result) => {
+        // the payload arrives partway through a session, so the super property
+        // that reports whether this install has one is not fixed at startup.
+        // left stale it would read as "the download never works"
+        if (result && result.installed && this.analytics) {
+          this.analytics.setPotEnvironment({
+            denoPresent: Boolean(this.engine.getDenoPath()),
+            potProvider: Boolean(this.engine.getPotPaths())
+          })
+        }
+      })
+      .catch((error) => {
+        // ensureInstalled already keeps a never-rejects promise; this is here so
+        // that a broken collaborator cannot surface as an unhandled rejection
+        console.warn("PO token payload install failed:", describeError(error))
+      })
+
+    return needed
   }
 
   // audit logging
@@ -532,13 +617,40 @@ class IPCHandlers {
       return this.createSuccess(videoInfo)
     } catch (error) {
       console.error("Info extraction failed:", error.message)
+
+      const { category } = classify(error, ERROR_STAGES.FETCH_INFO)
+
+      // the metadata fetch is the first thing a blocked install fails at, so
+      // this is usually where the refusal is discovered
+      const fetching = this.noteRefusal(category)
+
+      /**
+       * the only thing the user is told about the download, and it is told
+       * here because this is the one error surface that actually reaches them:
+       * `suggestion` is carried all the way to the renderer's DownloadError and
+       * then never rendered by anything.
+       *
+       * a sentence rather than a progress bar. the work is not something they
+       * asked for or can act on, and the honest report of it is short: a fix is
+       * coming, try again shortly. saying nothing at all would leave a user
+       * retrying into the same wall with no idea it was about to stop - and a
+       * bare percentage would explain even less than silence.
+       *
+       * only when a fetch really did start. an install that already has the
+       * payload and is still being refused has nothing to wait for, and
+       * promising it would be a lie the second time.
+       */
+      const message = error.message || "Failed to get media information"
+
       return this.createError(
-        error.message || "Failed to get media information",
+        fetching
+          ? `${message} Setting up a fix in the background - try again in a minute.`
+          : message,
         error.suggestion || "Please check the URL and try again",
         error.code || "GENERAL_ERROR",
         {
           details: error.details || undefined,
-          category: classify(error, ERROR_STAGES.FETCH_INFO).category
+          category
         }
       )
     }
@@ -826,9 +938,18 @@ class IPCHandlers {
   // knows the download id before the first progress event reaches it
   startDownload(options) {
     setImmediate(() => {
-      this.runner.run(options).catch((error) => {
-        console.error("download runner crashed:", error.message)
-      })
+      this.runner
+        .run(options)
+        .then((result) => {
+          // the download half of the refusal check. a cancel is not a refusal,
+          // and it settles through here wearing the same `success: false`
+          if (result && !result.success && !result.cancelled) {
+            this.noteRefusal(classify(result.error, ERROR_STAGES.DOWNLOAD).category)
+          }
+        })
+        .catch((error) => {
+          console.error("download runner crashed:", error.message)
+        })
     })
   }
 

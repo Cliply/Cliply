@@ -157,6 +157,7 @@ beforeEach(() => {
     flush: jest.fn().mockResolvedValue(undefined),
     setEnabled: jest.fn().mockResolvedValue({ success: true }),
     setEngineVersion: jest.fn(),
+    setPotEnvironment: jest.fn(),
     isEnabled: jest.fn(() => true)
   }
 
@@ -165,7 +166,8 @@ beforeEach(() => {
     writeSettings: jest.fn().mockResolvedValue(undefined),
     setAnalyticsEnabled: jest.fn().mockResolvedValue({ success: true }),
     isAnalyticsEnabled: jest.fn().mockResolvedValue(true),
-    getInstallId: jest.fn().mockResolvedValue("install-id")
+    getInstallId: jest.fn().mockResolvedValue("install-id"),
+    isPotEnabled: jest.fn().mockResolvedValue(false)
   }
 
   mockIpcHandlers = {
@@ -188,7 +190,10 @@ beforeEach(() => {
     rememberVersion: jest.fn((version) => {
       if (version) knownVersion = version
     }),
-    getKnownVersion: jest.fn(() => knownVersion)
+    getKnownVersion: jest.fn(() => knownVersion),
+    setPotEnabled: jest.fn(),
+    getDenoPath: jest.fn(() => "/tmp/deno"),
+    getPotPaths: jest.fn(() => null)
   }
 
   mockUpdater = {
@@ -250,6 +255,25 @@ describe("initializeServices", () => {
     // id mints racing the same file
     expect(servicesAtIpcConstruction.settingsStore).toBe(mockSettingsStore)
     expect(servicesAtIpcConstruction.analytics).toBe(mockAnalytics)
+  })
+
+  // a refusal is remembered so the user does not have to be refused a second
+  // time to get the benefit of the first. that only works if the stored answer
+  // is put back into the engine before the first operation runs
+  it("arms the engine with a refusal it was told about in an earlier session", async () => {
+    mockSettingsStore.isPotEnabled.mockResolvedValue(true)
+    app.services = {}
+
+    await app.initializeServices()
+
+    expect(mockEngine.setPotEnabled).toHaveBeenCalledWith(true)
+  })
+
+  it("leaves an install nobody has refused paying nothing", async () => {
+    app.services = {}
+    await app.initializeServices()
+
+    expect(mockEngine.setPotEnabled).toHaveBeenCalledWith(false)
   })
 })
 

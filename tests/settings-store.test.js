@@ -4,7 +4,10 @@ const fs = require("fs")
 const os = require("os")
 const path = require("path")
 
-const { SettingsStore } = require("../src/main/services/settings-store")
+const {
+  SettingsStore,
+  POT_ESCALATION_TTL_MS
+} = require("../src/main/services/settings-store")
 
 let root
 let store
@@ -185,6 +188,47 @@ describe("po token escalation", () => {
 
     expect(result.success).toBe(false)
     expect(typeof result.error).toBe("string")
+  })
+
+  // backdate the stored escalation without waiting a week for one
+  const refusedAgo = (ms) =>
+    fs.writeFileSync(
+      store.settingsFile,
+      JSON.stringify({ pot_enabled: true, pot_enabled_at: Date.now() - ms })
+    )
+
+  // a quarter of the blocked installs went on to succeed with no change from
+  // us, so the escalation has to be able to switch itself back off - otherwise
+  // those users pay a token mint per video forever for a block that has lifted
+  describe("expiry", () => {
+    test("holds right up to the last moment of the window", async () => {
+      refusedAgo(POT_ESCALATION_TTL_MS - 60_000)
+
+      expect(await store.isPotEnabled()).toBe(true)
+    })
+
+    test("lapses once the window has passed", async () => {
+      refusedAgo(POT_ESCALATION_TTL_MS + 60_000)
+
+      expect(await store.isPotEnabled()).toBe(false)
+    })
+
+    test("re-arms on the next refusal, dated from that one", async () => {
+      refusedAgo(POT_ESCALATION_TTL_MS + 60_000)
+      expect(await store.isPotEnabled()).toBe(false)
+
+      await store.setPotEnabled(true)
+
+      // the fresh refusal has to restart the clock rather than land inside the
+      // window that just closed, or a long-blocked install expires permanently
+      expect(await store.isPotEnabled()).toBe(true)
+    })
+
+    test("treats an escalation with no date as lapsed", async () => {
+      fs.writeFileSync(store.settingsFile, JSON.stringify({ pot_enabled: true }))
+
+      expect(await store.isPotEnabled()).toBe(false)
+    })
   })
 })
 
