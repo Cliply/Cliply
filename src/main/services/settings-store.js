@@ -18,6 +18,9 @@ const { APP_CONFIG } = require("../utils/constants")
 const SETTINGS_DIR = path.join(os.homedir(), ".config", "app-data-7c4f")
 const SETTINGS_FILE = path.join(SETTINGS_DIR, "settings.json")
 
+// how long a refusal keeps the PO token escalation on - see isPotEnabled()
+const POT_ESCALATION_TTL_MS = 7 * 24 * 60 * 60 * 1000
+
 /**
  * the layout crypto.randomUUID() produces, which is the only thing the
  * install id field has ever held.
@@ -327,6 +330,75 @@ class SettingsStore {
     return installId
   }
 
+  /**
+   * whether this install has to send a PO token to be served
+   *
+   * yt-dlp's guidance is to run the default clients, which need no token, and
+   * escalate to `mweb` plus a token provider only once those stop working.
+   * minting a token costs seconds per video, so the escalation is not paid by
+   * every install - only by one that has actually been refused.
+   *
+   * off by default on purpose: the answer for an install nobody has blocked is
+   * "no", and that is also the answer when the settings file cannot be read.
+   *
+   * the escalation expires because the blocks do. a quarter of the installs
+   * that were refused went on to succeed without any change from us, which
+   * means the block sits on the connection and lifts on its own - so a flag
+   * set once and kept forever would charge those users a token mint per video
+   * for the rest of the install's life to solve a problem they no longer have.
+   * a refusal after the window simply re-arms it, at the cost of the one failed
+   * request that already told us.
+   *
+   * a stamp we cannot read is treated as expired rather than as forever, which
+   * is the same direction as every other default here: the escalation has to be
+   * earned, and re-earning it costs one request.
+   *
+   * @returns {Promise<boolean>} true once this install has been refused
+   */
+  async isPotEnabled() {
+    const settings = await this.readAll()
+
+    if (settings.pot_enabled !== true) {
+      return false
+    }
+
+    const setAt = settings.pot_enabled_at
+
+    if (!Number.isFinite(setAt)) {
+      return false
+    }
+
+    // a stamp in the future is left alone rather than expired: that is a clock
+    // that moved, and punishing the user for it means blocking them again
+    return Date.now() - setAt < POT_ESCALATION_TTL_MS
+  }
+
+  /**
+   * remember that this install needs a PO token
+   *
+   * the timestamp is written with the flag rather than beside it, because the
+   * two are one fact: an escalation with no date is one isPotEnabled() cannot
+   * expire, and the whole point of storing it is that it should.
+   *
+   * a failed write is reported rather than swallowed: a flag that does not
+   * reach disk leaves the user blocked again at the next launch, having
+   * already paid a failure to discover it.
+   *
+   * @param {boolean} enabled
+   * @returns {Promise<{success: boolean, error?: string}>}
+   */
+  async setPotEnabled(enabled) {
+    try {
+      await this.writeSettings({
+        pot_enabled: Boolean(enabled),
+        pot_enabled_at: enabled ? Date.now() : null
+      })
+      return { success: true }
+    } catch (error) {
+      return { success: false, error: error.message }
+    }
+  }
+
   /** @returns {Promise<boolean>} analytics is on unless the user turned it off */
   async isAnalyticsEnabled() {
     const settings = await this.readAll()
@@ -350,4 +422,4 @@ class SettingsStore {
   }
 }
 
-module.exports = { SettingsStore, SETTINGS_FILE }
+module.exports = { SettingsStore, SETTINGS_FILE, POT_ESCALATION_TTL_MS }

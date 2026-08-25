@@ -12,6 +12,7 @@ const isDev = process.env.NODE_ENV === "development"
 const CookieManager = require("./services/cookie-manager")
 const { YtdlpEngine } = require("./services/ytdlp-engine")
 const { YtdlpUpdater } = require("./services/ytdlp-updater")
+const { PotInstaller } = require("./services/pot-installer")
 const { SettingsStore } = require("./services/settings-store")
 const { Analytics } = require("./services/analytics")
 const IPCHandlers = require("./ipc-handlers")
@@ -164,6 +165,23 @@ class CliplyApp {
         engine: this.services.ytdlpEngine
       })
 
+      // an install that was refused before is still refused now - the block
+      // follows the connection, not the session - so the escalation is read
+      // back before the first operation rather than rediscovered by failing
+      // again. the store expires it on its own after a week, so a stale `true`
+      // never survives here as one
+      this.services.ytdlpEngine.setPotEnabled(
+        await this.services.settingsStore.isPotEnabled()
+      )
+
+      // nothing is fetched here - it is built now and asked for later, by the
+      // first refusal that finds the payload missing
+      this.services.potInstaller = new PotInstaller({
+        engine: this.services.ytdlpEngine
+      })
+
+      this.notePotEnvironment()
+
       // make sure userData holds a runnable binary before anything needs it
       const seeded = await this.services.ytdlpUpdater.seed()
       console.log("yt-dlp engine:", this.services.ytdlpEngine.getBinaryPath(), seeded)
@@ -200,6 +218,21 @@ class CliplyApp {
       console.error("Service initialization failed:", error)
       throw error
     }
+  }
+
+  /**
+   * tell analytics what this install could mint a PO token with
+   *
+   * both answers are read from the engine rather than passed in, because the
+   * engine is what actually decides: it is the same two lookups buildCommonArgs
+   * gates the flags on, so what is reported is what was used rather than a
+   * second opinion about it.
+   */
+  notePotEnvironment() {
+    this.services.analytics.setPotEnvironment({
+      denoPresent: Boolean(this.services.ytdlpEngine.getDenoPath()),
+      potProvider: Boolean(this.services.ytdlpEngine.getPotPaths())
+    })
   }
 
   /**

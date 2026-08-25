@@ -1007,3 +1007,51 @@ describe("the version the engine knows", () => {
     expect(await version).toBe("2026.09.01")
   })
 })
+
+// the escalation has to survive the trip through run(): buildCommonArgs is
+// unit-tested on its own inputs, which proves nothing about whether the engine
+// actually hands it the flag and the payload it resolved
+describe("po token escalation reaches the spawned process", () => {
+  const fs = require("fs")
+  let payloadRoot
+
+  beforeEach(() => {
+    payloadRoot = fs.mkdtempSync(path.join(os.tmpdir(), "cliply-pot-run-"))
+    for (const part of ["plugin", "server"]) {
+      fs.mkdirSync(path.join(payloadRoot, "pot", part), { recursive: true })
+    }
+  })
+
+  afterEach(() => {
+    fs.rmSync(payloadRoot, { recursive: true, force: true })
+  })
+
+  // run one download to completion and hand back what was spawned
+  async function argsFor(options) {
+    const spawnFn = createSpawner()
+    const engine = createEngine(spawnFn, { userDataPath: payloadRoot, ...options })
+
+    const handle = engine.downloadCombined(DOWNLOAD)
+    await settle()
+
+    spawnFn.children[0].say("CLIPLY_FILE|/tmp/downloads/out.mp4\n")
+    await settle()
+    spawnFn.children[0].exit(0)
+    await handle.promise
+
+    return spawnFn.calls[0].args
+  }
+
+  test("sends the provider once the install has been refused", async () => {
+    const args = await argsFor({ potEnabled: true })
+
+    expect(args).toContain("--plugin-dirs")
+    expect(args.join(" ")).toContain("youtubepot-bgutilscript:server_home=")
+    // the client stays yt-dlp's call, here as everywhere else
+    expect(args.join(" ")).not.toContain("player_client")
+  })
+
+  test("sends nothing extra for an install that was never refused", async () => {
+    expect(await argsFor({})).not.toContain("--plugin-dirs")
+  })
+})

@@ -1,0 +1,255 @@
+# Builds the PO token payload and puts it on the `binaries` release, beside
+# ffmpeg and deno.
+#
+# Run this by hand, and rarely: once per provider version. bgutil is on 1.3.2
+# today, so the next time this runs is whenever that number changes. It is not
+# part of a release build - the payload is fetched at runtime by the handful of
+# installs YouTube has refused, not bundled into the installer everyone gets.
+#
+# Upstream publishes only the 8 KB plugin, and the half that actually mints
+# tokens is a node project that has to be installed. It carries `canvas`, which
+# is native code, so the tree stops being portable and each platform needs its
+# own build - which is the only reason this is CI rather than a manual upload.
+#
+# Defaults to a dry run: it builds, verifies and reports without touching the
+# release. Tick `publish` when the numbers look right.
+name: Build PO token payload
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'bgutil-ytdlp-pot-provider version (a git tag upstream)'
+        required: true
+        default: '1.3.2'
+      publish:
+        description: 'Upload to the binaries release (leave off for a dry run)'
+        type: boolean
+        default: false
+
+concurrency:
+  group: cliply-pot-payload
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # the two platforms build-release.yml actually ships
+          - os: windows-latest
+            asset: win32-x64
+            deno: deno.exe
+          - os: macos-14
+            asset: darwin-arm64
+            deno: deno
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      # only for our own archive.js, which the verify step reads the finished
+      # zip with. no npm install - it uses node builtins alone
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Fetch the provider source
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fL --retry 3 --retry-delay 2 -o provider.tar.gz \
+            "https://github.com/Brainicism/bgutil-ytdlp-pot-provider/archive/refs/tags/${{ inputs.version }}.tar.gz"
+          tar -xzf provider.tar.gz
+          test -d "bgutil-ytdlp-pot-provider-${{ inputs.version }}"
+
+      - name: Install the generator
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "bgutil-ytdlp-pot-provider-${{ inputs.version }}/server"
+
+          # npm rather than deno on purpose: a deno-installed node_modules is
+          # full of symlinks, and our own zip reader refuses non-regular
+          # entries. this layout has none once .bin is gone
+          npm install --omit=dev --no-audit --no-fund
+
+          # canvas is an optional peer of jsdom, so it needs asking for by
+          # name. botguard probes canvas as a fingerprinting signal, so the
+          # emulation is more faithful with it than without
+          npm install canvas --no-audit --no-fund
+
+          # the only symlinks npm creates, and the deno-run generator never
+          # calls them
+          rm -rf node_modules/.bin
+
+      - name: Assemble the payload
+        shell: bash
+        run: |
+          set -euo pipefail
+          src="bgutil-ytdlp-pot-provider-${{ inputs.version }}"
+          mkdir -p payload/plugin payload/server
+
+          # the plugin stays zipped - yt-dlp reads --plugin-dirs entries
+          # straight out of an archive, so this half is one 8 KB file.
+          #
+          # git bash on the windows runner ships no `zip`, so 7-zip stands in
+          # there. both write deflate, which is what our own reader understands
+          cd "$src/plugin"
+          out="$GITHUB_WORKSPACE/payload/plugin/bgutil-plugin.zip"
+          if command -v zip >/dev/null 2>&1; then
+            zip -q -r -9 "$out" yt_dlp_plugins
+          else
+            7z a -tzip -mx=9 "$out" yt_dlp_plugins >/dev/null
+          fi
+          cd "$GITHUB_WORKSPACE"
+
+          cp -R "$src/server/src" "$src/server/node_modules" payload/server/
+          cp "$src/server/package.json" "$src/server/deno.json" payload/server/
+
+          # the two directories the engine's getPotPaths() insists on
+          test -d payload/plugin && test -d payload/server
+
+      # the generator runs on deno, so deno is what has to be able to load
+      # canvas. a native module that the runtime cannot open is dead weight,
+      # and this is the only place that difference is visible
+      - name: Check that Deno can actually load canvas
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fL --retry 3 -o deno-bin \
+            "https://github.com/${{ github.repository }}/releases/download/binaries/${{ matrix.deno }}"
+          chmod +x deno-bin
+          cat > payload/server/canvas-check.mjs <<'JS'
+          import { createRequire } from "node:module"
+          const require = createRequire(import.meta.url)
+          const canvas = require("canvas")
+          const surface = canvas.createCanvas(32, 32)
+          const ctx = surface.getContext("2d")
+          ctx.fillRect(0, 0, 8, 8)
+          console.log("canvas loaded under deno:", surface.toDataURL().slice(0, 30))
+          JS
+          "$GITHUB_WORKSPACE/deno-bin" run --allow-all payload/server/canvas-check.mjs
+          rm payload/server/canvas-check.mjs
+
+      - name: Zip it
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd payload
+          out="../pot-${{ inputs.version }}-${{ matrix.asset }}.zip"
+          # fastest compression: this is ~9k files of javascript and the wall
+          # clock of a user's one-off download is not worth another minute here
+          if command -v zip >/dev/null 2>&1; then
+            zip -q -r -1 "$out" plugin server
+          else
+            7z a -tzip -mx=1 "$out" plugin server >/dev/null
+          fi
+
+      # the payload is unpacked on the user's machine by our own hand-rolled
+      # reader, not by the system's. so the thing that has to be able to open
+      # it is the thing that opens it, and that is checked here rather than
+      # discovered by a blocked user whose fetch silently achieved nothing
+      - name: Verify with the reader that will have to open it
+        shell: bash
+        env:
+          ZIP: pot-${{ inputs.version }}-${{ matrix.asset }}.zip
+        run: |
+          node -e '
+            const fs = require("fs")
+            const { extractZip, sha256File } = require("./src/main/utils/archive")
+            ;(async () => {
+              await extractZip(process.env.ZIP, "verify-out")
+              for (const half of ["plugin", "server"]) {
+                if (!fs.statSync(`verify-out/${half}`).isDirectory()) {
+                  throw new Error(`${half}/ is missing from the payload`)
+                }
+              }
+              if (!fs.existsSync("verify-out/plugin/bgutil-plugin.zip")) {
+                throw new Error("the plugin zip is missing")
+              }
+              const files = fs.readdirSync("verify-out/server")
+              console.log("server holds:", files.join(", "))
+              console.log("sha256:", await sha256File(process.env.ZIP))
+            })().catch((error) => {
+              console.error(error.message)
+              process.exit(1)
+            })
+          '
+          rm -rf verify-out
+
+      - name: Report
+        shell: bash
+        env:
+          ZIP: pot-${{ inputs.version }}-${{ matrix.asset }}.zip
+        run: |
+          set -euo pipefail
+          if command -v sha256sum >/dev/null; then
+            digest=$(sha256sum "$ZIP" | cut -d' ' -f1)
+          else
+            digest=$(shasum -a 256 "$ZIP" | cut -d' ' -f1)
+          fi
+          size=$(node -e "console.log((require('fs').statSync(process.env.ZIP).size/1048576).toFixed(1))")
+          echo "$digest" > "$ZIP.sha256"
+          {
+            echo "### ${{ matrix.asset }}"
+            echo ""
+            echo "| | |"
+            echo "|---|---|"
+            echo "| asset | \`$ZIP\` |"
+            echo "| size | ${size} MB |"
+            echo "| sha256 | \`$digest\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pot-${{ matrix.asset }}
+          path: |
+            pot-*.zip
+            pot-*.zip.sha256
+
+  publish:
+    needs: build
+    if: ${{ inputs.publish }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: payloads
+          merge-multiple: true
+
+      # the same tag ffmpeg and deno already live on. --clobber so a rebuild of
+      # the same version replaces rather than fails
+      - name: Upload to the binaries release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          gh release upload binaries payloads/pot-*.zip \
+            --repo "${{ github.repository }}" --clobber
+
+      # pinned in code rather than fetched beside the download: a checksum
+      # served from the same host as the bytes it vouches for only proves the
+      # two agree. this prints the block to paste into pot-installer.js
+      - name: What to paste into POT_CHECKSUMS
+        run: |
+          set -euo pipefail
+          {
+            echo "### Pin these in \`src/main/services/pot-installer.js\`"
+            echo ""
+            echo '```js'
+            echo 'const POT_CHECKSUMS = {'
+            for sum in payloads/*.sha256; do
+              asset=$(basename "$sum" .sha256)
+              echo "  \"$asset\":"
+              echo "    \"$(cat "$sum")\","
+            done
+            echo '}'
+            echo '```'
+            echo ""
+            echo "Until they are pinned, the installer declines every fetch."
+          } >> "$GITHUB_STEP_SUMMARY"

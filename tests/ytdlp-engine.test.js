@@ -81,6 +81,76 @@ describe("common args", () => {
   })
 })
 
+// yt-dlp's default clients need no PO token, so the escalation is only for an
+// install that has already been refused. see the PO Token Guide: the prescribed
+// setup is the `mweb` client plus a provider plugin.
+describe("po token escalation", () => {
+  const POT = {
+    ...PATHS,
+    potPaths: { pluginDir: "/res/binaries/pot/plugin", serverHome: "/res/binaries/pot/server" }
+  }
+
+  test("asks for nothing extra until the install has been refused", () => {
+    const args = buildCommonArgs(POT)
+
+    expect(args).not.toContain("--plugin-dirs")
+    expect(args.join(" ")).not.toContain("player_client")
+  })
+
+  test("offers the provider without dictating a client", () => {
+    const args = buildCommonArgs({ ...POT, potEnabled: true })
+
+    expect(valueAfter(args, "--plugin-dirs")).toBe("/res/binaries/pot/plugin")
+    expect(args).toContain(
+      "youtubepot-bgutilscript:server_home=/res/binaries/pot/server"
+    )
+    // making the provider reachable is the whole escalation. given one,
+    // yt-dlp picks a client, notices that client needs a token and fetches it
+    // with no instruction from us - verified end to end. naming a client here
+    // would override the one choice yt-dlp keeps in step with youtube, and
+    // pin us to whichever client was right on the day this was written
+    expect(args.join(" ")).not.toContain("player_client")
+  })
+
+  // fetch_pot defaults to `auto`, which is yt-dlp deciding whether the chosen
+  // client actually needs a token. overriding it would be us second-guessing
+  // the one component that tracks youtube's rollout
+  test("leaves the fetch policy at yt-dlp's own default", () => {
+    expect(buildCommonArgs({ ...POT, potEnabled: true }).join(" ")).not.toContain(
+      "fetch_pot"
+    )
+  })
+
+  // the provider runs its generator on the js runtime we ship. without deno
+  // there is nothing to run it, so asking for a token would only buy a warning
+  test("stays quiet when there is no js runtime to mint with", () => {
+    const args = buildCommonArgs({ ...POT, denoPath: null, potEnabled: true })
+
+    expect(args).not.toContain("--plugin-dirs")
+  })
+
+  test("stays quiet when the payload has not been installed", () => {
+    const args = buildCommonArgs({ ...PATHS, potEnabled: true })
+
+    expect(args).not.toContain("--plugin-dirs")
+  })
+
+  // --no-js-runtimes must keep leading --js-runtimes. reversed, the runtime is
+  // disabled after being named: the provider goes unavailable and yt-dlp's own
+  // challenge solver dies with it. verified against 2026.08.19
+  test("keeps the js runtime flags in the only order that works", () => {
+    const args = buildCommonArgs({ ...POT, potEnabled: true })
+
+    expect(
+      containsSequence(args, [
+        "--no-js-runtimes",
+        "--js-runtimes",
+        "deno:/res/binaries/deno/deno"
+      ])
+    ).toBe(true)
+  })
+})
+
 describe("info args", () => {
   test("dumps json without downloading", () => {
     const args = buildArgs("info", { ...PATHS, url: "https://youtu.be/abc" })
@@ -952,6 +1022,20 @@ describe("error mapping", () => {
     expect(result.retryable).toBe(true)
   })
 
+  // a throttled connection is the one failure where our own advice made the
+  // problem worse: NETWORK_ERROR told the user to retry, and retrying is what
+  // deepens a rate limit. it must not be retryable, and it must not blame the
+  // user's connection - theirs is fine, it is youtube refusing us
+  test("rate limiting is not retryable and does not blame the connection", () => {
+    const result = map(
+      "ERROR: unable to download webpage: HTTP Error 429: Too Many Requests"
+    )
+
+    expect(result.code).toBe(ERROR_CODES.RATE_LIMITED)
+    expect(result.retryable).toBe(false)
+    expect(`${result.message} ${result.suggestion}`).not.toMatch(/connection/i)
+  })
+
   test("extraction failures are the ones an update can fix", () => {
     const result = map("ERROR: [youtube] abc: nsig extraction failed: Some players may fail")
 
@@ -1157,5 +1241,81 @@ describe("cookie file detection", () => {
     expect(buildCommonArgs({ cookieFile: engine.getCookieFile() })).toContain(
       "--cookies"
     )
+  })
+})
+
+describe("locating the po token payload", () => {
+  const { YtdlpEngine } = require("../src/main/services/ytdlp-engine")
+  let tempDir
+
+  beforeEach(() => {
+    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "cliply-pot-"))
+  })
+
+  afterEach(() => {
+    fs.rmSync(tempDir, { recursive: true, force: true })
+  })
+
+  // both halves are needed to mint anything: the plugin is what yt-dlp loads,
+  // the server is what the plugin runs. half an install is not an install
+  function seed(base, parts = ["plugin", "server"]) {
+    for (const part of parts) {
+      fs.mkdirSync(path.join(base, "pot", part), { recursive: true })
+    }
+  }
+
+  test("finds nothing when the payload was never installed", () => {
+    const engine = new YtdlpEngine({
+      userDataPath: tempDir,
+      resourcesPath: tempDir
+    })
+
+    expect(engine.getPotPaths()).toBeNull()
+  })
+
+  test("uses the copy that ships with the app", () => {
+    const resources = path.join(tempDir, "resources")
+    seed(path.join(resources, "binaries"))
+
+    const engine = new YtdlpEngine({
+      userDataPath: path.join(tempDir, "userdata"),
+      resourcesPath: resources
+    })
+
+    expect(engine.getPotPaths()).toEqual({
+      pluginDir: path.join(resources, "binaries", "pot", "plugin"),
+      serverHome: path.join(resources, "binaries", "pot", "server")
+    })
+  })
+
+  // the payload can also arrive after install, downloaded only by the users who
+  // turn out to need it. a downloaded copy is the newer one, so it wins - the
+  // same precedence getBinaryPath() already uses for the engine itself
+  test("prefers a downloaded copy over the bundled one", () => {
+    const resources = path.join(tempDir, "resources")
+    const userData = path.join(tempDir, "userdata")
+    seed(path.join(resources, "binaries"))
+    seed(userData)
+
+    const engine = new YtdlpEngine({
+      userDataPath: userData,
+      resourcesPath: resources
+    })
+
+    expect(engine.getPotPaths().pluginDir).toBe(
+      path.join(userData, "pot", "plugin")
+    )
+  })
+
+  test("refuses a half-installed payload rather than minting with part of it", () => {
+    const userData = path.join(tempDir, "userdata")
+    seed(userData, ["plugin"])
+
+    const engine = new YtdlpEngine({
+      userDataPath: userData,
+      resourcesPath: path.join(tempDir, "resources")
+    })
+
+    expect(engine.getPotPaths()).toBeNull()
   })
 })

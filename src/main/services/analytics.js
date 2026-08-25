@@ -153,6 +153,19 @@ const PROPERTY_KINDS = {
   arch: "vocabulary",
   locale: "locale",
 
+  /**
+   * whether this install can mint a PO token at all, which is two separate
+   * questions: is there a js runtime to run the generator on, and is the
+   * payload actually installed. neither is answerable from a single event -
+   * they describe the machine, not the operation - and both have to ride every
+   * event to be joinable against the failures they explain.
+   *
+   * media_info_failed is the one that matters: a renderer event, raised by the
+   * half of the app that cannot see either of these facts.
+   */
+  deno_present: "bool",
+  pot_provider: "bool",
+
   // two values, both ours, listed in PROPERTY_VOCABULARIES - a closed kind,
   // which is what a build indicator should be: it exists so a dev session is
   // filterable rather than indistinguishable, and nothing about that needs a
@@ -1042,6 +1055,7 @@ class Analytics {
     this.superProperties = {}
     // kept apart from superProperties because init() rebuilds those wholesale
     this.engineVersion = null
+    this.potEnvironment = null
 
     /**
      * which toggle currently speaks for the user.
@@ -1104,6 +1118,12 @@ class Analytics {
         this.superProperties.engine_version = this.engineVersion
       }
 
+      // same reason as the engine version above: probed once, at startup, and
+      // this rebuild would otherwise drop it for the rest of the session
+      if (this.potEnvironment) {
+        Object.assign(this.superProperties, this.potEnvironment)
+      }
+
       this.client = this.createClient(
         APP_CONFIG.ANALYTICS_CONFIG.POSTHOG_KEY,
         APP_CONFIG.ANALYTICS_CONFIG.POSTHOG_HOST
@@ -1141,6 +1161,34 @@ class Analytics {
 
     this.engineVersion = checked.value
     this.superProperties.engine_version = checked.value
+  }
+
+  /**
+   * record what this install could mint a PO token with, if it had to
+   *
+   * both are facts about the machine rather than about any one operation, so
+   * they are super properties: they ride every event, and the one that matters
+   * most is media_info_failed, which the renderer raises and which therefore
+   * cannot know either of them first-hand.
+   *
+   * set again whenever the answer changes - the payload arrives by download
+   * partway through a session, so `pot_provider` is not fixed at startup the
+   * way the engine version is.
+   *
+   * validated rather than trusted, for the same reason setEngineVersion() is:
+   * capture() spreads super properties last, so anything landing here outranks
+   * even a validated caller value.
+   *
+   * @param {Object} environment - {denoPresent, potProvider}
+   */
+  setPotEnvironment({ denoPresent, potProvider } = {}) {
+    const checked = checkSuperProperties({
+      deno_present: Boolean(denoPresent),
+      pot_provider: Boolean(potProvider)
+    })
+
+    this.potEnvironment = checked
+    Object.assign(this.superProperties, checked)
   }
 
   /**
