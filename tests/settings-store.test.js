@@ -157,6 +157,37 @@ function tempFilesIn(dir) {
   return fs.readdirSync(dir).filter((name) => name.endsWith(".tmp"))
 }
 
+// yt-dlp's own advice is to use the default clients until they stop working,
+// and only then escalate to a client that needs a PO token. an install that
+// has been refused once stays refused - the block follows the connection, not
+// the request - so the escalation is remembered rather than rediscovered.
+describe("po token escalation", () => {
+  test("starts off, so an install that was never refused pays nothing", async () => {
+    expect(await store.isPotEnabled()).toBe(false)
+  })
+
+  test("stays on once an install has been refused", async () => {
+    await store.setPotEnabled(true)
+
+    expect(await store.isPotEnabled()).toBe(true)
+    // and it survives the process that set it - a flag only held in memory
+    // would re-block the user on every launch
+    const relaunched = new SettingsStore({ settingsFile: store.settingsFile })
+    expect(await relaunched.isPotEnabled()).toBe(true)
+  })
+
+  test("reports a write it could not persist", async () => {
+    const unwritable = new SettingsStore({
+      settingsFile: path.join(root, "no-such-dir", "\0bad", "settings.json")
+    })
+
+    const result = await unwritable.setPotEnabled(true)
+
+    expect(result.success).toBe(false)
+    expect(typeof result.error).toBe("string")
+  })
+})
+
 describe("analytics preferences", () => {
   test("generates an install id once and reuses it", async () => {
     const first = await store.getInstallId()

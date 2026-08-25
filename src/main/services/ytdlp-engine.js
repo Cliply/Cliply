@@ -65,6 +65,12 @@ const PROBE_TIMEOUT_MS = 2 * 60 * 1000
 // why the engine lives in a directory now
 const ENGINE_DIR_NAME = "ytdlp"
 
+// the PO token payload sits beside the engine rather than inside it: the
+// updater replaces the engine directory wholesale on every upgrade, and
+// upstream's archives carry no plugins, so anything kept in there is deleted
+// the next time yt-dlp updates itself
+const POT_DIR_NAME = "pot"
+
 // the executable keeps the release asset's own name, and that name differs per
 // platform and per arch - never assume one
 const EXECUTABLE_NAMES = {
@@ -489,7 +495,13 @@ function formatSectionTime(value) {
 }
 
 // common args for every invocation
-function buildCommonArgs({ ffmpegPath, denoPath, cookieFile } = {}) {
+function buildCommonArgs({
+  ffmpegPath,
+  denoPath,
+  cookieFile,
+  potPaths,
+  potEnabled
+} = {}) {
   const args = []
 
   // deno is required for youtube's js challenges since yt-dlp 2025.11.12
@@ -509,6 +521,45 @@ function buildCommonArgs({ ffmpegPath, denoPath, cookieFile } = {}) {
 
   if (cookieFile) {
     args.push("--cookies", cookieFile)
+  }
+
+  /**
+   * the PO token escalation, which is yt-dlp's own and not ours
+   *
+   * their guidance: "By default, yt-dlp will attempt to download videos using
+   * clients that do not currently require a PO Token [...] if you are having
+   * issues with the default clients, it is suggested to use the `mweb` client
+   * with a PO Token." So the default path passes no player_client at all and
+   * gets yt-dlp's own client list, including the fallbacks it adds itself.
+   *
+   * three conditions, each of which alone is a reason to stay quiet:
+   *   - potEnabled: this install has actually been refused. minting costs
+   *     seconds per video and youtube binds a token to the video id, so a new
+   *     one is paid for every new video - not something to charge the ~84% who
+   *     are never blocked
+   *   - potPaths: the payload is installed. missing means degrade to today's
+   *     behaviour, never fail
+   *   - denoPath: the provider runs its generator on the js runtime we ship.
+   *     no runtime, nothing to mint with
+   *
+   * fetch_pot is deliberately not set: it defaults to `auto`, which is yt-dlp
+   * deciding whether the chosen client needs a token for a given context, and
+   * that is the part which tracks youtube's rollout.
+   *
+   * --plugin-dirs is given explicitly rather than relying on a yt-dlp-plugins
+   * folder beside the binary. the engine self-updates by replacing its whole
+   * directory, so anything parked next to it is deleted by the next update -
+   * and the binary itself moves between the bundled copy and the userData one.
+   * naming the directory also means yt-dlp does not scan the user's own plugin
+   * directories, which is code we neither ship nor control.
+   */
+  if (potEnabled && potPaths && denoPath) {
+    args.push("--plugin-dirs", potPaths.pluginDir)
+    args.push("--extractor-args", "youtube:player_client=mweb")
+    args.push(
+      "--extractor-args",
+      `youtubepot-bgutilscript:server_home=${potPaths.serverHome}`
+    )
   }
 
   return args
@@ -1484,6 +1535,12 @@ class YtdlpEngine {
     this.denoPath = options.denoPath || null
     this.cookieFile = options.cookieFile || null
     this.cookieManager = options.cookieManager || null
+    // whether this install has been refused and needs to escalate to a PO
+    // token. it lives on the engine as a plain boolean because run() is
+    // synchronous while the setting it comes from is on disk - whoever reads
+    // settings pushes the answer in here, the same way the engine version is
+    // pushed into analytics
+    this.potEnabled = Boolean(options.potEnabled)
     this.watchdogMs = options.watchdogMs || DEFAULT_WATCHDOG_MS
     this.killGraceMs = options.killGraceMs || KILL_GRACE_MS
     this.spawnFn = options.spawnFn || spawn
@@ -1599,6 +1656,53 @@ class YtdlpEngine {
     return this.denoPath
   }
 
+  /**
+   * where the PO token payload lives, or null when it is not installed
+   *
+   * two halves, both required: `plugin` is the provider yt-dlp loads through
+   * --plugin-dirs, `server` is the generator the provider runs on deno. a jar
+   * with only one of them cannot mint anything, so it is treated as absent
+   * rather than passed on to fail later with a warning nobody reads.
+   *
+   * userData wins over the bundled copy, which is the precedence
+   * getBinaryPath() already uses for the engine: the payload can either ship in
+   * the installer or be downloaded later by the installs that turn out to need
+   * it, and a downloaded copy is the newer of the two.
+   *
+   * @returns {{pluginDir: string, serverHome: string}|null}
+   */
+  /**
+   * remember that this install has to send a PO token from now on
+   *
+   * separate from the constructor because the answer lives in the settings
+   * file, which is read asynchronously long after the engine is built - and
+   * because a refusal can arrive mid-session, at which point every later
+   * operation should escalate without waiting for a restart.
+   *
+   * @param {boolean} enabled
+   */
+  setPotEnabled(enabled) {
+    this.potEnabled = Boolean(enabled)
+  }
+
+  getPotPaths() {
+    const roots = [
+      path.join(this.getUserDataPath(), POT_DIR_NAME),
+      path.join(this.getResourcesPath(), "binaries", POT_DIR_NAME)
+    ]
+
+    for (const root of roots) {
+      const pluginDir = path.join(root, "plugin")
+      const serverHome = path.join(root, "server")
+
+      if (directoryExists(pluginDir) && directoryExists(serverHome)) {
+        return { pluginDir, serverHome }
+      }
+    }
+
+    return null
+  }
+
   // first existing candidate under <resources>/binaries, packaged layout first
   resolveBundled(candidates, allowMissing = false) {
     const base = path.join(this.getResourcesPath(), "binaries")
@@ -1661,7 +1765,10 @@ class YtdlpEngine {
       ffmpegPath: params.ffmpegPath || this.getFfmpegPath(),
       denoPath: params.denoPath || this.getDenoPath(),
       cookieFile:
-        params.cookieFile !== undefined ? params.cookieFile : this.getCookieFile()
+        params.cookieFile !== undefined ? params.cookieFile : this.getCookieFile(),
+      potPaths: params.potPaths !== undefined ? params.potPaths : this.getPotPaths(),
+      potEnabled:
+        params.potEnabled !== undefined ? params.potEnabled : this.potEnabled
     }
 
     const id = options.id || `${operation}_${Date.now()}_${this.operations.size}`

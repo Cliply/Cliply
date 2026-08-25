@@ -327,6 +327,43 @@ class SettingsStore {
     return installId
   }
 
+  /**
+   * whether this install has to send a PO token to be served
+   *
+   * yt-dlp's guidance is to run the default clients, which need no token, and
+   * escalate to `mweb` plus a token provider only once those stop working.
+   * minting a token costs seconds per video, so the escalation is not paid by
+   * every install - only by one that has actually been refused.
+   *
+   * off by default on purpose: the answer for an install nobody has blocked is
+   * "no", and that is also the answer when the settings file cannot be read.
+   *
+   * @returns {Promise<boolean>} true once this install has been refused
+   */
+  async isPotEnabled() {
+    const settings = await this.readAll()
+    return settings.pot_enabled === true
+  }
+
+  /**
+   * remember that this install needs a PO token
+   *
+   * a failed write is reported rather than swallowed: a flag that does not
+   * reach disk leaves the user blocked again at the next launch, having
+   * already paid a failure to discover it.
+   *
+   * @param {boolean} enabled
+   * @returns {Promise<{success: boolean, error?: string}>}
+   */
+  async setPotEnabled(enabled) {
+    try {
+      await this.writeSettings({ pot_enabled: Boolean(enabled) })
+      return { success: true }
+    } catch (error) {
+      return { success: false, error: error.message }
+    }
+  }
+
   /** @returns {Promise<boolean>} analytics is on unless the user turned it off */
   async isAnalyticsEnabled() {
     const settings = await this.readAll()
