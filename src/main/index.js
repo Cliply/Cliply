@@ -922,6 +922,24 @@ class CliplyApp {
           },
           { type: "separator" },
           {
+            /**
+             * the GPL asks that the user be told about the license, not only
+             * that the text exist somewhere in the repository. the bundled
+             * ffmpeg is a GPLv3 build, which is what makes cliply GPL, and
+             * this menu item is the notice.
+             *
+             * it opens the notices file rather than showing a dialog: the
+             * point is the links to the license texts and to the vendored
+             * source, and neither is clickable in a native message box.
+             */
+            label: "Third-Party Licenses",
+            click: () => {
+              shell.openExternal(
+                "https://github.com/Cliply/Cliply/blob/master/THIRD-PARTY-NOTICES.md"
+              )
+            }
+          },
+          {
             label: "Report Issue",
             click: () => {
               shell.openExternal("https://github.com/Cliply/Cliply/issues")
