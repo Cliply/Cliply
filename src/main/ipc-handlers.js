@@ -41,6 +41,7 @@ const { getSimplePlatformOptions } = require("./utils/ytdlp-formats")
 const { resolveDownloadId } = require("./utils/download-id")
 
 const { DownloadRunner } = require("./services/download-runner")
+const { CHECK_RESULTS } = require("./services/app-updater")
 const { SettingsStore } = require("./services/settings-store")
 const { ERROR_CODES } = require("./services/ytdlp-engine")
 
@@ -141,7 +142,13 @@ const shortErrorMessage = (message) =>
   (message || "").split(/\n\s*\n/, 1)[0].trim() || "Download failed"
 
 class IPCHandlers {
-  constructor(services, autoUpdater = null) {
+  /**
+   * @param {Object} services - the app's service bag
+   * @param {Object|null} appUpdater - services/app-updater.js. it owns what
+   *   this build can do about an update and whether anybody is waiting to hear
+   *   about it; nothing here reaches electron-updater directly any more
+   */
+  constructor(services, appUpdater = null) {
     this.cookieManager = services.cookieManager
     // every download flow runs on the binary engine
     this.engine = services.ytdlpEngine
@@ -149,7 +156,7 @@ class IPCHandlers {
     // the one exit point telemetry leaves through. absent in a build that
     // never constructed one, and nothing here may depend on it existing
     this.analytics = services.analytics || null
-    this.autoUpdater = autoUpdater
+    this.appUpdater = appUpdater || services.appUpdater || null
     this.mainWindow = null
 
     // audit logging
@@ -1419,111 +1426,136 @@ class IPCHandlers {
     }
   }
 
-  // handle check for updates (manual check - always runs)
+  /**
+   * check for an app update, because a person asked
+   *
+   * every call that reaches here is manual by definition: this ipc channel is
+   * the menu item and the renderer's buttons, and the background schedule
+   * never comes through the ipc layer at all. that is exactly what the updater
+   * needs to know to decide whether a failure is worth interrupting anybody
+   * over.
+   *
+   * @param {Object} _event - the ipc event, unused
+   * @returns {Promise<Object>} whether a check is now under way
+   */
   async handleCheckForUpdates(_event) {
-    try {
-      if (!this.autoUpdater) {
-        return this.createError(
-          "Auto-updater not available",
-          "Updates are only available in production builds"
-        )
-      }
-
-      // manual check always runs
-      await this.autoUpdater.checkForUpdates()
-      return this.createSuccess({ checking: true })
-    } catch (error) {
-      console.error("Check for updates failed:", error.message)
-      return this.createError(
-        "Failed to check for updates",
-        "Please try again later"
-      )
+    if (!this.appUpdater) {
+      return this.updaterUnavailableError()
     }
+
+    const result = await this.appUpdater.check({ manual: true })
+
+    if (result.status === CHECK_RESULTS.CHECKING) {
+      return this.createSuccess({ checking: true })
+    }
+
+    // nothing published yet is not a failure anybody can act on, and the
+    // updater has already told the renderer it is up to date. reporting it as
+    // success here is what keeps the menu item from raising a dialog about our
+    // own release schedule
+    if (result.status === CHECK_RESULTS.NO_FEED) {
+      return this.createSuccess({ checking: false, upToDate: true })
+    }
+
+    if (result.status === CHECK_RESULTS.UNSUPPORTED) {
+      return this.updaterUnavailableError(result.message)
+    }
+
+    return this.createError(
+      "Failed to check for updates",
+      "Please try again later",
+      "UPDATE_CHECK_FAILED",
+      { details: result.message }
+    )
   }
 
-  // handle download update
+  /**
+   * fetch an update this build can actually install
+   * @param {Object} _event - the ipc event, unused
+   * @returns {Promise<Object>} whether a download started
+   */
   async handleDownloadUpdate(_event) {
+    if (!this.appUpdater) {
+      return this.updaterUnavailableError()
+    }
+
     try {
-      if (!this.autoUpdater) {
+      const started = await this.appUpdater.download()
+
+      if (!started) {
+        // macos, and the linux builds that are not AppImages: the update is
+        // real, it just cannot be applied in place. the renderer offers the
+        // releases page for exactly this case
         return this.createError(
-          "Auto-updater not available",
-          "Updates are only available in production builds"
+          "This build cannot update itself",
+          "Download the new version from our releases page",
+          "UPDATE_MANUAL_ONLY"
         )
       }
 
-      await this.autoUpdater.downloadUpdate()
       return this.createSuccess({ downloading: true })
     } catch (error) {
-      console.error("Download update failed:", error.message)
+      console.error("Download update failed:", describeError(error))
       return this.createError(
         "Failed to download update",
-        "Please try again later"
+        "Please try again later",
+        "UPDATE_DOWNLOAD_FAILED",
+        { details: describeError(error) }
       )
     }
   }
 
-  // handle install update
+  /**
+   * quit and hand over to the installer
+   * @param {Object} _event - the ipc event, unused
+   * @returns {Promise<Object>} whether the install was handed off
+   */
   async handleInstallUpdate(_event) {
-    try {
-      if (!this.autoUpdater) {
-        return this.createError(
-          "Auto-updater not available",
-          "Updates are only available in production builds"
-        )
-      }
+    if (!this.appUpdater) {
+      return this.updaterUnavailableError()
+    }
 
-      // set a flag to indicate we're updating
-      global.isUpdating = true
-
-      // use setImmediate to allow the response to be sent before quitting
-      setImmediate(() => {
-        try {
-          console.log("Attempting to quit and install update...")
-          this.autoUpdater.quitAndInstall(false, true)
-        } catch (error) {
-          console.error("quitAndInstall failed:", error)
-          // force quit as fallback
-          setTimeout(() => {
-            console.log("Force quitting app...")
-            require("electron").app.quit()
-          }, 1000)
-        }
-      })
-
-      return this.createSuccess({ installing: true })
-    } catch (error) {
-      console.error("Install update failed:", error.message)
+    if (!this.appUpdater.install()) {
       return this.createError(
-        "Failed to install update",
-        "Please try again later"
+        "This build cannot install updates",
+        "Download the new version from our releases page",
+        "UPDATE_MANUAL_ONLY"
       )
     }
+
+    return this.createSuccess({ installing: true })
   }
 
-  // handle force security update check (for emergency api key rotation)
-  async handleForceSecurityCheck(_event) {
-    try {
-      if (!this.autoUpdater) {
-        return this.createError(
-          "Auto-updater not available",
-          "Updates are only available in production builds"
-        )
-      }
+  /**
+   * the same check, from the renderer's "check for important updates" button
+   *
+   * it exists so an urgent fix has a path that does not wait for the twelve
+   * hour timer. it is the manual check with a different label - there is no
+   * separate security feed, and pretending otherwise would be a second code
+   * path to keep correct for no gain at all.
+   *
+   * @param {Object} event - the ipc event, forwarded
+   * @returns {Promise<Object>} what the check reported
+   */
+  async handleForceSecurityCheck(event) {
+    const result = await this.handleCheckForUpdates(event)
 
-      // force check for updates
-      await this.autoUpdater.checkForUpdates()
-      return this.createSuccess({
-        checking: true,
-        forced: true,
-        reason: "Security check requested"
-      })
-    } catch (error) {
-      console.error("Force security check failed:", error.message)
-      return this.createError(
-        "Failed to check for security updates",
-        "Please try again later"
-      )
-    }
+    return result.success
+      ? this.createSuccess({ ...result.data, forced: true })
+      : result
+  }
+
+  /**
+   * one wording for "there is nothing here that can update"
+   * @param {string} [suggestion] - what the updater said about why
+   * @returns {Object} an error response
+   */
+  updaterUnavailableError(suggestion) {
+    return this.createError(
+      "Updates are not available in this build",
+      suggestion || "Updates are only available in installed builds",
+      "UPDATER_UNAVAILABLE"
+    )
   }
 
   // downloads now end with their process, so nothing can linger here

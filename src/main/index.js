@@ -14,8 +14,8 @@ const { YtdlpEngine } = require("./services/ytdlp-engine")
 const { YtdlpUpdater } = require("./services/ytdlp-updater")
 const { SettingsStore } = require("./services/settings-store")
 const { Analytics } = require("./services/analytics")
+const { AppUpdater } = require("./services/app-updater")
 const IPCHandlers = require("./ipc-handlers")
-const { APP_CONFIG } = require("./utils/constants")
 const {
   describeError,
   getAppVersion,
@@ -57,12 +57,6 @@ class CliplyApp {
     // cancelled a second time
     this.hasShutDown = false
 
-    // update handling
-    this.updateState = {
-      lastCheckTime: null,
-      isCheckingForUpdates: false
-    }
-
     // bind methods
     this.createWindow = this.createWindow.bind(this)
     this.onWindowClosed = this.onWindowClosed.bind(this)
@@ -88,10 +82,7 @@ class CliplyApp {
       // create menu
       this.createMenu()
 
-      // setup auto-updater in production
-      if (!isDev) {
-        this.setupAutoUpdater()
-      }
+      this.startAppUpdater()
     } catch (error) {
       console.error("Failed to initialize Cliply Desktop:", error)
       dialog.showErrorBox(
@@ -181,9 +172,22 @@ class CliplyApp {
         })
       }
 
+      // the app's own updater - the one that replaces Cliply, as opposed
+      // to ytdlpUpdater above, which keeps the download engine current. it is a
+      // service like the rest of them so the menu, the ipc layer and the
+      // background timer are all driving the same object
+      this.services.appUpdater = new AppUpdater({
+        updater: autoUpdater,
+        isPackaged: app.isPackaged,
+        platform: process.platform,
+        // the only linux format that can replace itself in place. electron
+        // sets APPIMAGE for a running AppImage and nothing else does
+        isAppImage: Boolean(process.env.APPIMAGE),
+        send: (channel, payload) => this.sendToWindow(channel, payload)
+      })
+
       // init ipc handlers
-      this.autoUpdater = autoUpdater
-      this.ipcHandlers = new IPCHandlers(this.services, this.autoUpdater)
+      this.ipcHandlers = new IPCHandlers(this.services, this.services.appUpdater)
 
       // background update check, deferred
       //
@@ -285,195 +289,34 @@ class CliplyApp {
     })
   }
 
-  // setup auto-updater
-  setupAutoUpdater() {
-    try {
-      // configure auto-updater
-      autoUpdater.checkForUpdatesAndNotify = false
-      autoUpdater.autoDownload = false
-      autoUpdater.autoInstallOnAppQuit = false
-
-      // disable code signature verification for unsigned builds
-      autoUpdater.verifyUpdateCodeSignature = false
-
-      // checking for updates
-      autoUpdater.on("checking-for-update", () => {
-        if (this.mainWindow && !this.mainWindow.isDestroyed()) {
-          this.mainWindow.webContents.send("update:checking")
-        }
-      })
-
-      // update available - handle based on platform
-      autoUpdater.on("update-available", (info) => {
-        const isMac = process.platform === "darwin"
-
-        if (isMac) {
-          console.log(
-            "Update available:",
-            info.version,
-            "- showing manual download for macOS"
-          )
-
-          // macOS: Show manual download popup
-          if (this.mainWindow && !this.mainWindow.isDestroyed()) {
-            this.mainWindow.webContents.send("update:available", {
-              version: info.version,
-              releaseNotes: info.releaseNotes,
-              releaseDate: info.releaseDate,
-              requiresManualDownload: true,
-              platform: "darwin"
-            })
-          }
-        } else {
-          console.log(
-            "Update available:",
-            info.version,
-            "- auto-downloading..."
-          )
-
-          // Windows/Linux: Auto-download as before
-          if (this.mainWindow && !this.mainWindow.isDestroyed()) {
-            this.mainWindow.webContents.send("update:available", {
-              version: info.version,
-              releaseNotes: info.releaseNotes,
-              releaseDate: info.releaseDate,
-              autoDownloading: true
-            })
-          }
-
-          // auto-download for non-macOS platforms
-          this.downloadUpdateWithRetry().catch((error) => {
-            console.error("Auto-download failed:", error)
-          })
-        }
-      })
-
-      // update not available
-      autoUpdater.on("update-not-available", () => {
-        if (this.mainWindow && !this.mainWindow.isDestroyed()) {
-          this.mainWindow.webContents.send("update:not-available")
-        }
-      })
-
-      // download progress
-      autoUpdater.on("download-progress", (progress) => {
-        if (this.mainWindow && !this.mainWindow.isDestroyed()) {
-          this.mainWindow.webContents.send("update:download-progress", {
-            percent: Math.round(progress.percent),
-            bytesPerSecond: progress.bytesPerSecond,
-            total: progress.total,
-            transferred: progress.transferred
-          })
-        }
-      })
-
-      // update downloaded - enable auto-install on quit for all updates
-      autoUpdater.on("update-downloaded", (info) => {
-        console.log("Update downloaded:", info.version, "- ready to install")
-
-        // enable auto-install on quit for all updates
-        autoUpdater.autoInstallOnAppQuit = true
-
-        // notify renderer that update is ready
-        if (this.mainWindow && !this.mainWindow.isDestroyed()) {
-          this.mainWindow.webContents.send("update:downloaded", {
-            version: info.version,
-            autoInstallOnQuit: true
-          })
-        }
-      })
-
-      // error
-      autoUpdater.on("error", (error) => {
-        console.error("Auto-updater error:", error.message)
-        if (this.mainWindow && !this.mainWindow.isDestroyed()) {
-          this.mainWindow.webContents.send("update:error", {
-            message: error.message
-          })
-        }
-      })
-
-      // check for updates after app ready
-      app.whenReady().then(() => {
-        const shouldCheck = isDev || Math.random() < 0.9
-
-        if (shouldCheck) {
-          setTimeout(() => {
-            this.checkForUpdatesWithRetry().catch((error) => {
-              console.error("Failed to check for updates:", error)
-            })
-          }, 3000)
-        }
-
-        // setup periodic update checks every 12 hours
-        this.setupPeriodicUpdateChecks()
-      })
-    } catch (error) {
-      console.error("Auto-updater setup failed:", error)
-    }
+  /**
+   * begin checking for a new version of Cliply in the background
+   *
+   * unconditional on purpose: the updater knows for itself whether this build
+   * can update at all, so a dev run schedules nothing and says so once, rather
+   * than failing a check every twelve hours into a log nobody reads.
+   */
+  startAppUpdater() {
+    this.services.appUpdater.start()
   }
 
-  // retry logic for update checks
-  async checkForUpdatesWithRetry(
-    maxRetries = APP_CONFIG.UPDATE_CONFIG.MAX_CHECK_RETRIES
-  ) {
-    for (let attempt = 1; attempt <= maxRetries; attempt++) {
-      try {
-        await autoUpdater.checkForUpdates()
-        return
-      } catch (error) {
-        console.error(`Update check attempt ${attempt} failed:`, error.message)
-
-        if (attempt === maxRetries) {
-          throw error
-        }
-
-        // wait before retry (exponential backoff)
-        const delay = Math.min(1000 * Math.pow(2, attempt - 1), 10000)
-        await new Promise((resolve) => setTimeout(resolve, delay))
-      }
+  /**
+   * send one event to the renderer, if there is one to send it to
+   *
+   * the updater is built before the window is, and it keeps sending long after
+   * a close - so every path out to the renderer goes through here rather than
+   * repeating the destroyed-window check at six call sites, which is where the
+   * old code kept forgetting it.
+   *
+   * @param {string} channel - the ipc channel
+   * @param {Object} [payload] - what to send with it
+   */
+  sendToWindow(channel, payload) {
+    if (!this.mainWindow || this.mainWindow.isDestroyed()) {
+      return
     }
-  }
 
-  // retry logic for update downloads
-  async downloadUpdateWithRetry(
-    maxRetries = APP_CONFIG.UPDATE_CONFIG.MAX_DOWNLOAD_RETRIES
-  ) {
-    for (let attempt = 1; attempt <= maxRetries; attempt++) {
-      try {
-        await autoUpdater.downloadUpdate()
-        return
-      } catch (error) {
-        console.error(
-          `Update download attempt ${attempt} failed:`,
-          error.message
-        )
-
-        if (attempt === maxRetries) {
-          throw error
-        }
-
-        // wait before retry
-        const delay = 2000 * attempt
-        await new Promise((resolve) => setTimeout(resolve, delay))
-      }
-    }
-  }
-
-  // setup periodic update checks
-  setupPeriodicUpdateChecks() {
-    // check every 12 hours using config
-    const checkInterval = APP_CONFIG.UPDATE_CONFIG.PERIODIC_CHECK_INTERVAL
-
-    setInterval(() => {
-      // only check if app is not quitting and in production
-      if (!this.isQuitting && !isDev) {
-        console.log("Performing periodic update check...")
-        this.checkForUpdatesWithRetry().catch((error) => {
-          console.error("Periodic update check failed:", error)
-        })
-      }
-    }, checkInterval)
+    this.mainWindow.webContents.send(channel, payload)
   }
 
   // setup app event handlers
@@ -764,7 +607,13 @@ class CliplyApp {
       let shutdownPromise = Promise.resolve()
 
       if (!installing) {
-        this.updateState.isCheckingForUpdates = false
+        // nothing may fire into an app whose services are being torn down.
+        // the old setInterval was never cleared and never unref'd, so a
+        // background check could still land after the quit that killed the
+        // window it wanted to talk to
+        if (this.services.appUpdater) {
+          this.services.appUpdater.stop()
+        }
 
         // kill any running yt-dlp process and actually wait for the tree to
         // exit - partial .part files stay resumable either way, but a wait

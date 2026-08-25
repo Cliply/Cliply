@@ -267,7 +267,7 @@ describe("initialize", () => {
       .spyOn(CliplyApp.prototype, "createMenu")
       .mockImplementation(() => order.push("menu"))
     jest
-      .spyOn(CliplyApp.prototype, "setupAutoUpdater")
+      .spyOn(CliplyApp.prototype, "startAppUpdater")
       .mockImplementation(() => {})
     jest
       .spyOn(CliplyApp.prototype, "checkSupportedArchitecture")
