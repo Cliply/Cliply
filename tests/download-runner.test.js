@@ -152,6 +152,92 @@ describe("terminal events", () => {
   })
 })
 
+/**
+ * a transcript download writes a file the engine never names: `--skip-download`
+ * prints no destination and fires no after_move, so the caller is the only one
+ * that can say what landed. without the hook the completion event carries no
+ * filename and analytics reports a finished download as zero bytes.
+ */
+describe("the resolveFile hook", () => {
+  test("names the file the engine could not", async () => {
+    const { runner, events } = createRunner()
+    const handle = new FakeHandle()
+
+    const running = runner.run({
+      ...BASE,
+      type: "transcript",
+      formatId: "srt",
+      createHandle: () => handle,
+      resolveFile: () => "/downloads/clip.en.srt"
+    })
+    await settle()
+
+    handle.resolve({ filePath: null })
+    const result = await running
+
+    expect(result.file_path).toBe("/downloads/clip.en.srt")
+    expect(result.filename).toBe("clip.en.srt")
+    expect(events.at(-1)).toMatchObject({
+      status: "completed",
+      filename: "clip.en.srt"
+    })
+  })
+
+  test("a resolver that finds nothing leaves the engine's answer alone", async () => {
+    const { runner } = createRunner()
+    const handle = new FakeHandle()
+
+    const running = runner.run({
+      ...BASE,
+      createHandle: () => handle,
+      resolveFile: () => null
+    })
+    await settle()
+
+    handle.resolve({ filePath: "/downloads/a.mp4" })
+
+    expect((await running).file_path).toBe("/downloads/a.mp4")
+  })
+
+  // it runs on the success path, so a throw must cost the filename and nothing
+  // else - never turn a finished download into a reported failure
+  test("a resolver that throws does not fail the download", async () => {
+    const warn = jest.spyOn(console, "warn").mockImplementation(() => {})
+    const { runner } = createRunner()
+    const handle = new FakeHandle()
+
+    const running = runner.run({
+      ...BASE,
+      createHandle: () => handle,
+      resolveFile: () => {
+        throw new Error("the directory went away")
+      }
+    })
+    await settle()
+
+    handle.resolve({ filePath: "/downloads/a.mp4" })
+    const result = await running
+
+    expect(result.success).toBe(true)
+    expect(result.file_path).toBe("/downloads/a.mp4")
+    expect(warn).toHaveBeenCalled()
+
+    warn.mockRestore()
+  })
+
+  test("no hook at all is the ordinary download, untouched", async () => {
+    const { runner } = createRunner()
+    const handle = new FakeHandle()
+
+    const running = runner.run({ ...BASE, createHandle: () => handle })
+    await settle()
+
+    handle.resolve({ filePath: "/downloads/a.mp4" })
+
+    expect((await running).file_path).toBe("/downloads/a.mp4")
+  })
+})
+
 describe("repair-on-failure", () => {
   let log
 

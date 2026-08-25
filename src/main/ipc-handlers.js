@@ -7,6 +7,7 @@ const {
   describeError,
   extractQuality,
   audioFormat,
+  transcriptFormat,
   elapsedBucket,
   speedBucket
 } = require("./utils/analytics-helpers")
@@ -21,8 +22,21 @@ const {
   hasPlayableVideo,
   buildVideoOutputTemplate,
   buildAudioOutputTemplate,
+  buildTranscriptStem,
+  buildTranscriptOutputTemplate,
   buildSimpleOutputTemplate
 } = require("./utils/ytdlp-mappers")
+const {
+  TRANSCRIPT_FORMATS,
+  TRANSCRIPT_EXTENSIONS,
+  PLAIN_TEXT_SOURCES,
+  listDirectory,
+  extensionOf,
+  findTranscriptFiles,
+  preferExtension,
+  writePlainText,
+  removeLeftovers
+} = require("./utils/transcript")
 const { getSimplePlatformOptions } = require("./utils/ytdlp-formats")
 const { resolveDownloadId } = require("./utils/download-id")
 
@@ -113,7 +127,12 @@ function cookieJarProblem({ total, youtube, expired }) {
  * answers what the user took away. anything else is left out rather than
  * guessed at: absence is silent, and a value outside the vocabulary is not.
  */
-const MEDIA_TYPES = { combined: "video", video: "video", audio: "audio" }
+const MEDIA_TYPES = {
+  combined: "video",
+  video: "video",
+  audio: "audio",
+  transcript: "transcript"
+}
 
 // an error message may arrive as "<short user message>\n\n<full technical>".
 // the first paragraph is what the user is shown; the rest travels as details.
@@ -224,12 +243,19 @@ class IPCHandlers {
     // than in either branch so the two ends cannot drift apart later.
     const format = audioFormat(payload.formatId)
 
+    // and the same again for a transcript, whose format id is the srt/vtt/txt
+    // the renderer sent as download_started's transcript_format. the two are
+    // mutually exclusive by construction - a format id names one kind of
+    // download - so a bag never carries both
+    const transcript = transcriptFormat(payload.formatId)
+
     const base = {
       platform: payload.platform,
       media_type: MEDIA_TYPES[payload.type],
       quality: extractQuality(payload.formatId),
       is_trimmed: Boolean(payload.trimmed),
-      ...(format ? { audio_format: format } : {})
+      ...(format ? { audio_format: format } : {}),
+      ...(transcript ? { transcript_format: transcript } : {})
     }
 
     if (name === "download_completed") {
@@ -402,6 +428,10 @@ class IPCHandlers {
     ipcMain.handle(
       IPC_CHANNELS.AUDIO_DOWNLOAD,
       this.handleDownloadAudio.bind(this)
+    )
+    ipcMain.handle(
+      IPC_CHANNELS.TRANSCRIPT_DOWNLOAD,
+      this.handleDownloadTranscript.bind(this)
     )
 
     // download management
@@ -796,6 +826,159 @@ class IPCHandlers {
       })
     } catch (error) {
       console.error(`[${downloadId}] Audio download failed:`, error.message)
+
+      return this.createError(
+        shortErrorMessage(error.message),
+        error.suggestion || "Please try again or check your connection",
+        error.code || "DOWNLOAD_FAILED",
+        {
+          details: error.details || error.message,
+          category: classify(error, ERROR_STAGES.DOWNLOAD).category
+        }
+      )
+    }
+  }
+
+  /**
+   * transcript download - one subtitle track, no media
+   *
+   * this one resolves when the file is on disk rather than when the process
+   * starts. a transcript is a few hundred kilobytes and yt-dlp reports no
+   * progress for it, so a progress ui would be a spinner pretending to be a
+   * bar - the tiktok/pinterest contract fits it, and the renderer just awaits.
+   *
+   * @param {Object} _event - the ipc event, unused
+   * @param {Object} data - {url, language, is_auto, format, title, download_id}
+   * @returns {Promise<Object>} the finished file, or a classified error
+   */
+  async handleDownloadTranscript(_event, data) {
+    const downloadId = resolveDownloadId(data && data.download_id, "transcript")
+
+    if (!downloadId) {
+      return this.createError(
+        "Invalid download id",
+        "Please restart the app and try again",
+        "INVALID_DOWNLOAD_ID"
+      )
+    }
+
+    try {
+      this.validateRequest(data, ["url", "language"])
+
+      const {
+        url,
+        language,
+        is_auto: isAuto,
+        format: requestedFormat,
+        title = "transcript"
+      } = data
+
+      // the engine validates this too, and has to: it is what decides the
+      // download's args. reading it here as well is what lets the response
+      // name the file - a request for txt that fell back to srt inside the
+      // engine would otherwise be looked for under the wrong extension
+      const format = Object.hasOwn(
+        TRANSCRIPT_FORMATS,
+        String(requestedFormat || "").toLowerCase()
+      )
+        ? String(requestedFormat).toLowerCase()
+        : "srt"
+
+      const outputDir = await this.getDownloadDirectory()
+
+      // yt-dlp appends the language and the extension to this
+      const stem = buildTranscriptStem({ title })
+
+      // the snapshot has to be taken before the run, not after: it is the
+      // fallback for finding the file when the stem was truncated
+      const before = listDirectory(outputDir)
+
+      const createHandle = () =>
+        this.engine.downloadTranscript({
+          url,
+          transcriptLanguage: language,
+          transcriptFormat: format,
+          autoGenerated: Boolean(isAuto),
+          outputDir,
+          outputTemplate: buildTranscriptOutputTemplate(stem)
+        })
+
+      if (
+        !this.runner.reserve(downloadId, {
+          type: "transcript",
+          platform: "youtube",
+          title
+        })
+      ) {
+        return this.duplicateDownloadError(downloadId)
+      }
+
+      // what the runner is handed as the finished file, since the engine has
+      // no destination line to report for a --skip-download run
+      let written = []
+
+      const result = await this.runner.run({
+        downloadId,
+        type: "transcript",
+        platform: "youtube",
+        title,
+        formatId: format,
+        createHandle,
+        resolveFile: () => {
+          written = findTranscriptFiles(outputDir, { stem, before })
+
+          const source = preferExtension(
+            written,
+            format === "txt" ? ".srt" : TRANSCRIPT_EXTENSIONS[format]
+          )
+
+          if (!source) {
+            return null
+          }
+
+          // txt is ours to make: yt-dlp cannot convert to it, so the srt it
+          // did write is read back and stripped of its timings here
+          if (format === "txt" && PLAIN_TEXT_SOURCES.has(extensionOf(source))) {
+            const plain = writePlainText(source)
+            written = written.filter((file) => file !== source)
+            return plain
+          }
+
+          return source
+        }
+      })
+
+      if (!result.success) {
+        return this.createError(
+          result.message || "Transcript download failed",
+          "Please try another language, or try again later",
+          result.error?.code || "DOWNLOAD_FAILED",
+          {
+            details: result.details,
+            category: classify(result.error, ERROR_STAGES.DOWNLOAD).category
+          }
+        )
+      }
+
+      // a run that exits 0 having written nothing is the ordinary shape of
+      // "that language is not there": yt-dlp warns and succeeds. the user asked
+      // for a file, so this is a failure to them however it looked to yt-dlp
+      if (!result.file_path) {
+        return this.createError(
+          "No transcript was available for that language.",
+          "Try a different language, or the automatic captions.",
+          ERROR_CATEGORIES.TRANSCRIPT_UNAVAILABLE,
+          { category: ERROR_CATEGORIES.TRANSCRIPT_UNAVAILABLE }
+        )
+      }
+
+      // --convert-subs keeps the file it converted from, so the folder can end
+      // up holding the vtt behind the srt the user asked for
+      removeLeftovers(written, result.file_path)
+
+      return this.createSuccess({ ...result, format, language })
+    } catch (error) {
+      console.error(`[${downloadId}] Transcript download failed:`, error.message)
 
       return this.createError(
         shortErrorMessage(error.message),
@@ -1372,6 +1555,7 @@ class IPCHandlers {
       IPC_CHANNELS.VIDEO_GET_INFO,
       IPC_CHANNELS.VIDEO_DOWNLOAD_COMBINED,
       IPC_CHANNELS.AUDIO_DOWNLOAD,
+      IPC_CHANNELS.TRANSCRIPT_DOWNLOAD,
       IPC_CHANNELS.DOWNLOAD_CANCEL,
       IPC_CHANNELS.COOKIES_IMPORT,
       IPC_CHANNELS.COOKIES_TEST,

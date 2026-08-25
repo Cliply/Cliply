@@ -47,6 +47,14 @@ function extractQuality(formatId) {
     m4a: "m4a",
     original: "original_audio",
 
+    // a transcript has no quality to pick - the track is whatever the uploader
+    // or the machine wrote. all three formats collapse to one label, because
+    // the format is its own property (transcript_format) and a quality axis
+    // that duplicated it would only split the same downloads twice
+    srt: "transcript",
+    vtt: "transcript",
+    txt: "transcript",
+
     // platforms that always use best available (no user format selection)
     pinterest: "best_available",
     tiktok: "best_available"
@@ -185,6 +193,29 @@ function audioFormat(formatId) {
 }
 
 /**
+ * the three formats the transcript flow can ask for.
+ *
+ * the same arrangement AUDIO_MODES has: handleDownloadTranscript passes the
+ * requested format straight through as `formatId`, and the renderer sends the
+ * same string as download_started's `transcript_format` - so both ends of the
+ * funnel join on a value neither of them derived.
+ */
+const TRANSCRIPT_MODES = new Set(["srt", "vtt", "txt"])
+
+/**
+ * the transcript format behind a format id, if it is one
+ * @param {string} formatId - the format id the download ran with
+ * @returns {string|undefined} the format, or nothing when it names none
+ */
+function transcriptFormat(formatId) {
+  if (!formatId) return undefined
+
+  const id = formatId.toString().toLowerCase()
+
+  return TRANSCRIPT_MODES.has(id) ? id : undefined
+}
+
+/**
  * how long a download took, as a label rather than a measurement
  *
  * the boundaries are deliberately uneven. an even split would spend most of
@@ -291,6 +322,7 @@ module.exports = {
   describeError,
   extractQuality,
   audioFormat,
+  transcriptFormat,
   elapsedBucket,
   speedBucket,
   isFirstLaunch,

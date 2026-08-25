@@ -14,6 +14,10 @@ const path = require("path")
 // "#HttpOnly_" lines, downloads dropped a jar the ui called loaded
 const { cookieFileHasEntries } = require("../utils/cookie-jar")
 
+// the transcript vocabulary lives beside the code that turns the files into
+// plain text, so the format list and the thing that reads it cannot drift
+const { TRANSCRIPT_FORMATS } = require("../utils/transcript")
+
 // stdout is machine-readable only: --print implies --quiet, so the only lines
 // yt-dlp writes are our two prefixed templates (verified against 2026.08.19)
 const PROGRESS_PREFIX = "CLIPLY|"
@@ -557,6 +561,32 @@ const AUDIO_MODE_PRESETS = { mp3: "mp3", m4a: "aac", original: null }
 const AUDIO_LANGUAGE_PATTERN = /^[a-zA-Z0-9-]{2,16}$/
 
 /**
+ * a caption tag, on its way to --sub-langs.
+ *
+ * same whitelist rule as AUDIO_LANGUAGE_PATTERN, one tag wide, but longer -
+ * caption tags run past 16 characters where dub tags do not ("zh-Hant-HK",
+ * and youtube's own "en-orig").
+ *
+ * **the first character must be alphanumeric.** --sub-langs reads a leading
+ * "-" as an exclusion ("-en" is *not* english, it is everything but), and a
+ * value that starts with a dash is one argv quirk away from being read as an
+ * option in its own right. a real tag never starts with one.
+ */
+const TRANSCRIPT_LANGUAGE_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9-]{1,31}$/
+
+/**
+ * tags --sub-langs gives a meaning of its own.
+ *
+ * "all" is every language the video has - two hundred files on a youtube video
+ * with automatic captions, where the user asked for one. it passes the pattern
+ * above on shape alone, so it is named here instead.
+ *
+ * this does cost the ISO 639-3 code for Allar, a Dravidian language youtube
+ * has never served a caption track in. that is the right side of the trade.
+ */
+const RESERVED_SUBTITLE_LANGUAGES = new Set(["all"])
+
+/**
  * read the requested audio language off the download params
  *
  * anything unrecognised comes back as null, which means the args are built
@@ -633,8 +663,56 @@ function normalizeAudioMode(params = {}) {
 }
 
 /**
+ * read the transcript format off the download params
+ *
+ * the value names what the *user* asked for, which is not always a subtitle
+ * format: `txt` is stripped out of the srt afterwards. TRANSCRIPT_FORMATS maps
+ * one to the other, and its keys are the valid-format list.
+ *
+ * @param {Object} params - operation parameters
+ * @returns {string} srt | vtt | txt
+ */
+function normalizeTranscriptFormat(params = {}) {
+  const value = String(params.transcriptFormat || "").toLowerCase()
+
+  // srt is the fallback for anything unrecognised: it is the format every
+  // player and every editor opens, so a malformed payload still produces a
+  // usable file rather than an unplayable one
+  return Object.hasOwn(TRANSCRIPT_FORMATS, value) ? value : "srt"
+}
+
+/**
+ * read the requested subtitle language off the download params
+ *
+ * `--sub-langs` takes a comma-separated list with globs and `-` exclusions, so
+ * an unvetted value would let a renderer ask for every language at once - or
+ * for none, silently. one whitelisted tag is all this flow needs.
+ *
+ * the pattern is looser than AUDIO_LANGUAGE_PATTERN's 16 characters because
+ * caption tags run longer than dub tags do: "zh-Hant-HK" and youtube's own
+ * "en-orig" are both real, and neither is an audio track.
+ *
+ * @param {Object} params - operation parameters
+ * @returns {string|null} the language code, or null when there is no usable one
+ */
+function normalizeTranscriptLanguage(params = {}) {
+  if (typeof params.transcriptLanguage !== "string") {
+    return null
+  }
+
+  const code = params.transcriptLanguage.trim()
+
+  if (RESERVED_SUBTITLE_LANGUAGES.has(code.toLowerCase())) {
+    return null
+  }
+
+  return TRANSCRIPT_LANGUAGE_PATTERN.test(code) ? code : null
+}
+
+/**
  * build the full arg list for one operation
- * @param {string} operation - info | playlist-info | combined | audio | simple
+ * @param {string} operation - info | playlist-info | combined | audio |
+ *   transcript | simple
  * @param {Object} params - operation parameters
  * @returns {string[]} yt-dlp args, url last
  */
@@ -708,6 +786,51 @@ function buildArgs(operation, params = {}) {
       args.push("--no-playlist")
       args.push(...buildDownloadArgs(params))
       args.push(...buildTrimArgs(params))
+      break
+    }
+
+    case "transcript": {
+      const language = normalizeTranscriptLanguage(params)
+      const format = normalizeTranscriptFormat(params)
+
+      // no media at all: the subtitle writer runs on the metadata, so this is
+      // a few hundred kilobytes rather than the whole video
+      args.push("--skip-download")
+
+      /**
+       * which of the two subtitle stores to read.
+       *
+       * they are separate switches in yt-dlp and the difference is visible to
+       * the user: a real subtitle track was written by a person, an automatic
+       * one was transcribed by a machine and reads like it. so a track the
+       * info response called human never falls back to captions - being handed
+       * machine text under a human label is the one outcome worth failing over.
+       *
+       * an automatic pick asks for both, because when yt-dlp finds a language
+       * in both stores the human one wins - and being handed the better track
+       * than the one you clicked is an upgrade, not a surprise.
+       */
+      if (params.autoGenerated) {
+        args.push("--write-auto-subs", "--write-subs")
+      } else {
+        args.push("--write-subs")
+      }
+
+      // a missing language is not "all of them": --sub-langs defaults to
+      // nothing, and the whitelist above turns a malformed tag into null, so
+      // the fallback has to name one track rather than let the flag go absent
+      args.push("--sub-langs", language || "en")
+
+      // what to fetch, before conversion. vtt is youtube's own and srt is
+      // everyone else's; `best` is the tail for a site that offers neither
+      args.push("--sub-format", "vtt/srt/best")
+
+      // conversion is ffmpeg's, and it keeps the original next to the result -
+      // utils/transcript.js is what clears up after it
+      args.push("--convert-subs", TRANSCRIPT_FORMATS[format])
+
+      args.push("--no-playlist")
+      args.push(...buildDownloadArgs(params))
       break
     }
 
@@ -1700,6 +1823,23 @@ class YtdlpEngine {
   }
 
   /**
+   * write one subtitle track to disk, without the video
+   *
+   * the handle settles like any other download, but nothing it reports names
+   * the file: `--skip-download` means there is no destination line and no
+   * after_move print. the caller finds what was written with
+   * utils/transcript.js instead.
+   *
+   * @param {Object} params - {url, transcriptLanguage, transcriptFormat,
+   *   autoGenerated, outputDir, outputTemplate}
+   * @param {Object} options - {id, watchdogMs}
+   * @returns {YtdlpOperation} handle with promise / cancel() / events
+   */
+  downloadTranscript(params, options = {}) {
+    return this.run("transcript", params, options)
+  }
+
+  /**
    * the engine version, cached
    *
    * a freshly unpacked onedir bundle pays a one-time os scan on its first run
@@ -1976,6 +2116,8 @@ module.exports = {
   normalizeQualityTier,
   normalizeAudioMode,
   normalizeAudioLanguage,
+  normalizeTranscriptFormat,
+  normalizeTranscriptLanguage,
   expectedStreamCount,
   parseProgressLine,
   parseDestinationLine,

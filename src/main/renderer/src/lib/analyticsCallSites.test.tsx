@@ -17,7 +17,13 @@ import type { ReactNode } from "react"
 import { beforeEach, describe, expect, test, vi } from "vitest"
 
 import payloads from "./analytics-payloads.fixture.json"
-import type { AudioDownloadRequest, VideoDownloadRequest } from "@/lib/api"
+import type {
+  AudioDownloadRequest,
+  TranscriptFormat,
+  TranscriptTrack,
+  VideoDownloadRequest,
+  VideoInfoResponse
+} from "@/lib/api"
 import type { Platform } from "@/lib/store"
 
 type Bag = { event: string; properties: Record<string, unknown> }
@@ -31,6 +37,7 @@ const mocks = vi.hoisted(() => ({
   downloadAudio: vi.fn(),
   downloadPin: vi.fn(),
   downloadTikTok: vi.fn(),
+  downloadTranscript: vi.fn(),
   listeners: [] as ProgressListener[]
 }))
 
@@ -65,6 +72,12 @@ vi.mock("@/lib/api", () => {
       getInfo: (url: string) => mocks.getTikTokInfo(url),
       download: (request: unknown) => mocks.downloadTikTok(request)
     },
+    transcriptApi: {
+      download: (request: unknown) => mocks.downloadTranscript(request)
+    },
+    // the transcript button prints the language as a name; the code is what
+    // travels, and it is the same either way
+    languageName: (code: string) => code,
     // the youtube card reads it; the two cards driven here never render it
     validateTimeRange: () => ({ isValid: true }),
     downloadApi: {
@@ -90,6 +103,7 @@ vi.mock("sonner", () => ({
   toast: { success: vi.fn(), info: vi.fn(), error: vi.fn() }
 }))
 
+import { TranscriptDownloadButton } from "@/components/video/TranscriptDownloadButton"
 import { UnifiedDownloadCard } from "@/components/video/UnifiedDownloadCard"
 import { DownloadError } from "@/lib/api"
 import { useAudioDownload } from "@/lib/hooks/useAudioDownload"
@@ -97,6 +111,7 @@ import { useMediaSearch } from "@/lib/hooks/useMediaSearch"
 import { useVideoDownload } from "@/lib/hooks/useVideoDownload"
 import { usePinterestStore } from "@/lib/pinterestStore"
 import { useTikTokStore } from "@/lib/tiktokStore"
+import { useYouTubeStore } from "@/lib/youtubeStore"
 
 let recorded: Bag[]
 
@@ -147,7 +162,8 @@ const youtubeInfo = (duration: number | null, tiers: number) => ({
     filesize: null,
     fps: null
   })),
-  audio_tracks: []
+  audio_tracks: [],
+  transcripts: []
 })
 
 const simpleInfo = (duration: number | null) => ({
@@ -247,6 +263,34 @@ async function startSimpleDownload(platform: "pinterest" | "tiktok") {
   view.unmount()
 }
 
+/**
+ * click the transcript button, which is the whole flow
+ *
+ * there is no hook here and no progress to follow: a subtitle track is small
+ * enough that the ipc call resolves with the finished file, so the component
+ * is driven directly with the store seeded the way the tab would have left it.
+ */
+async function startTranscript(
+  track: TranscriptTrack,
+  format: TranscriptFormat
+) {
+  useYouTubeStore.setState({
+    url: "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+    videoInfo: youtubeInfo(240, 1) as unknown as VideoInfoResponse,
+    selectedTranscript: track.code,
+    selectedTranscriptFormat: format,
+    isDownloadingTranscript: false
+  })
+
+  const view = render(<TranscriptDownloadButton tracks={[track]} isVisible />)
+
+  await act(async () => {
+    screen.getByRole("button", { name: /download transcript/i }).click()
+  })
+
+  view.unmount()
+}
+
 const startAudio = (request: Partial<AudioDownloadRequest>) =>
   download(
     useAudioDownload,
@@ -341,6 +385,20 @@ describe("the bags the call sites build", () => {
     mocks.downloadTikTok.mockResolvedValue({ downloadId: "ignored" })
     await startSimpleDownload("pinterest")
     await startSimpleDownload("tiktok")
+
+    // a transcript has no quality axis, so all three formats report the same
+    // quality label and differ only in transcript_format
+    mocks.downloadTranscript.mockResolvedValue({
+      filename: "clip.en.srt",
+      file_path: "/downloads/clip.en.srt",
+      file_size: 1234,
+      download_id: "ignored",
+      format: "srt",
+      language: "en"
+    })
+    await startTranscript({ code: "en", is_auto: false }, "srt")
+    await startTranscript({ code: "es", is_auto: true }, "vtt")
+    await startTranscript({ code: "en", is_auto: false }, "txt")
 
     expect(recorded).toEqual(payloads.callSites)
   })

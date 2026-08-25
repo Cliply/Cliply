@@ -12,6 +12,9 @@ const IPC_CHANNELS = {
   VIDEO_DOWNLOAD_COMBINED: "video:download-combined",
   AUDIO_DOWNLOAD: "audio:download",
 
+  // subtitles / transcripts - one track, no media
+  TRANSCRIPT_DOWNLOAD: "transcript:download",
+
   // download management
   DOWNLOAD_PROGRESS: "download:progress",
   DOWNLOAD_COMPLETE: "download:complete",
@@ -71,7 +74,11 @@ contextBridge.exposeInMainWorld("electronAPI", {
     },
     downloadCombined: (options) =>
       invoke(IPC_CHANNELS.VIDEO_DOWNLOAD_COMBINED, options),
-    downloadAudio: (options) => invoke(IPC_CHANNELS.AUDIO_DOWNLOAD, options)
+    downloadAudio: (options) => invoke(IPC_CHANNELS.AUDIO_DOWNLOAD, options),
+    // resolves with the finished file rather than with a started download:
+    // a subtitle track is small enough that there is no progress to follow
+    downloadTranscript: (options) =>
+      invoke(IPC_CHANNELS.TRANSCRIPT_DOWNLOAD, options)
   },
 
   // pinterest operations

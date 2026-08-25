@@ -129,7 +129,8 @@ describe("a dubbed video", () => {
         duration_string: "1:00",
         uploader: "someone",
         quality_tiers: [],
-        audio_tracks: NEXT
+        audio_tracks: NEXT,
+        transcripts: []
       })
     })
     rerender(<AudioTrackDropdown tracks={NEXT} isVisible />)

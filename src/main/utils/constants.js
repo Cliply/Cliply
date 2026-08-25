@@ -50,6 +50,9 @@ const IPC_CHANNELS = {
   VIDEO_DOWNLOAD_COMBINED: "video:download-combined",
   AUDIO_DOWNLOAD: "audio:download",
 
+  // subtitles / transcripts - one track, no media
+  TRANSCRIPT_DOWNLOAD: "transcript:download",
+
   // download management
   DOWNLOAD_PROGRESS: "download:progress",
   DOWNLOAD_COMPLETE: "download:complete",

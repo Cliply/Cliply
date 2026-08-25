@@ -6,11 +6,14 @@ const {
   formatDuration,
   extractQualityTiers,
   extractAudioTracks,
+  extractTranscripts,
   mapVideoInfo,
   mapSimpleInfo,
   hasPlayableVideo,
   buildVideoOutputTemplate,
   buildAudioOutputTemplate,
+  buildTranscriptStem,
+  buildTranscriptOutputTemplate,
   buildSimpleOutputTemplate
 } = require("../src/main/utils/ytdlp-mappers")
 
@@ -468,6 +471,7 @@ describe("mapVideoInfo", () => {
       "quality_tiers",
       "thumbnail",
       "title",
+      "transcripts",
       "uploader"
     ])
     expect(mapped.title).toBe("Big Buck Bunny")
@@ -587,6 +591,157 @@ describe("hasPlayableVideo", () => {
   })
 })
 
+describe("extractTranscripts", () => {
+  // one caption track as yt-dlp reports it: a list of the formats it is served
+  // in, each with the timedtext url the format is fetched from
+  const captionTrack = (code, { translated = false } = {}) => [
+    {
+      ext: "json3",
+      url: `https://youtube.com/api/timedtext?lang=${code}${
+        translated ? "&tlang=" + code : ""
+      }`
+    },
+    {
+      ext: "vtt",
+      url: `https://youtube.com/api/timedtext?lang=${code}&fmt=vtt${
+        translated ? "&tlang=" + code : ""
+      }`
+    }
+  ]
+
+  test("human-written subtitles come through as not-automatic", () => {
+    const tracks = extractTranscripts({
+      subtitles: { en: captionTrack("en"), fr: captionTrack("fr") }
+    })
+
+    expect(tracks).toEqual([
+      { code: "en", is_auto: false },
+      { code: "fr", is_auto: false }
+    ])
+  })
+
+  test("the machine transcript is marked as one", () => {
+    const tracks = extractTranscripts({
+      automatic_captions: { en: captionTrack("en") }
+    })
+
+    expect(tracks).toEqual([{ code: "en", is_auto: true }])
+  })
+
+  /**
+   * the filter that makes the menu a menu.
+   *
+   * a youtube video with automatic captions reports one real transcript and
+   * about two hundred machine translations of it, all under
+   * automatic_captions. the translations carry tlang= in their urls.
+   */
+  test("machine translations of the transcript are left out", () => {
+    const tracks = extractTranscripts({
+      automatic_captions: {
+        en: captionTrack("en"),
+        fr: captionTrack("fr", { translated: true }),
+        de: captionTrack("de", { translated: true })
+      }
+    })
+
+    expect(tracks).toEqual([{ code: "en", is_auto: true }])
+  })
+
+  test("a language in both stores appears once, as the human one", () => {
+    const tracks = extractTranscripts({
+      subtitles: { en: captionTrack("en") },
+      automatic_captions: { en: captionTrack("en") }
+    })
+
+    expect(tracks).toEqual([{ code: "en", is_auto: false }])
+  })
+
+  test("human tracks lead, whichever order the stores were in", () => {
+    const tracks = extractTranscripts({
+      automatic_captions: { de: captionTrack("de") },
+      subtitles: { en: captionTrack("en") }
+    })
+
+    expect(tracks.map((track) => track.code)).toEqual(["en", "de"])
+  })
+
+  // youtube files the chat replay of a stream under `subtitles`, as json
+  test("a live chat replay is not a transcript", () => {
+    const tracks = extractTranscripts({
+      subtitles: {
+        live_chat: [{ ext: "json", url: "https://youtube.com/chat" }],
+        en: captionTrack("en")
+      }
+    })
+
+    expect(tracks).toEqual([{ code: "en", is_auto: false }])
+  })
+
+  test("a track served in no subtitle format at all is not offered", () => {
+    const tracks = extractTranscripts({
+      subtitles: { en: [{ ext: "json", url: "https://youtube.com/x" }] }
+    })
+
+    expect(tracks).toEqual([])
+  })
+
+  // the menu must never offer a code the engine's --sub-langs guard refuses:
+  // that download would silently fetch english under another language's label
+  test("keys that are not language tags are not offered", () => {
+    const tracks = extractTranscripts({
+      subtitles: {
+        all: captionTrack("all"),
+        "-en": captionTrack("en"),
+        e: captionTrack("e"),
+        "en,fr": captionTrack("enfr")
+      }
+    })
+
+    expect(tracks).toEqual([])
+  })
+
+  test("the long caption tags youtube really serves survive", () => {
+    const tracks = extractTranscripts({
+      subtitles: {
+        "pt-BR": captionTrack("pt-BR"),
+        "zh-Hant-HK": captionTrack("zh-Hant-HK"),
+        "en-orig": captionTrack("en-orig")
+      }
+    })
+
+    expect(tracks.map((track) => track.code)).toEqual([
+      "pt-BR",
+      "zh-Hant-HK",
+      "en-orig"
+    ])
+  })
+
+  test("the list is capped, and human tracks are what survive the cap", () => {
+    const subtitles = {}
+    for (let index = 0; index < 60; index += 1) {
+      subtitles[`l${index}`] = captionTrack(`l${index}`)
+    }
+
+    const tracks = extractTranscripts({
+      subtitles,
+      automatic_captions: { en: captionTrack("en") }
+    })
+
+    expect(tracks).toHaveLength(50)
+    expect(tracks.every((track) => track.is_auto === false)).toBe(true)
+  })
+
+  // a video with no subtitles at all is most videos - a real answer, and not
+  // something to report as a failure to look
+  test("a video with no subtitle fields has no transcripts", () => {
+    expect(extractTranscripts({})).toEqual([])
+    expect(extractTranscripts(null)).toEqual([])
+    expect(extractTranscripts({ subtitles: [], automatic_captions: "no" })).toEqual(
+      []
+    )
+  })
+})
+
 describe("output templates", () => {
   // the title, the sanitising and the byte-safe truncation are yt-dlp's own now
   test("video: title, the height it really got, and the epoch", () => {
@@ -614,6 +769,52 @@ describe("output templates", () => {
     expect(
       buildAudioOutputTemplate({ timeRange: { start: 65, end: 70 } })
     ).toBe("%(title).120B_audio_%(section_start)s-%(section_end)s_%(epoch)s.%(ext)s")
+  })
+
+  /**
+   * the transcript name is the one the app has to be able to find again.
+   *
+   * every other download prints its destination; a --skip-download run does
+   * not, so the stem is matched against the output directory afterwards - and
+   * a stem that does not survive the round trip loses the file.
+   */
+  test("transcript: a stem the download can be found by", () => {
+    expect(buildTranscriptStem({ title: "Big Buck Bunny", now: NOW })).toBe(
+      "Big Buck Bunny_transcript_68123"
+    )
+  })
+
+  test("transcript: the template only adds the extension", () => {
+    // yt-dlp puts the language between the two, so the file lands as
+    // "<stem>.en.srt" - which is what the "<stem>." prefix match expects
+    expect(
+      buildTranscriptOutputTemplate("Big Buck Bunny_transcript_68123")
+    ).toBe("Big Buck Bunny_transcript_68123.%(ext)s")
+  })
+
+  test("transcript: the title is sanitized and kept short enough to survive", () => {
+    const stem = buildTranscriptStem({ title: "x".repeat(300), now: NOW })
+
+    // 120 characters of title, and the suffix - well inside --trim-filenames
+    expect(stem).toBe(`${"x".repeat(120)}_transcript_68123`)
+    expect(stem.length).toBeLessThan(240)
+  })
+
+  test("transcript: a title that sanitizes to nothing still names a file", () => {
+    expect(buildTranscriptStem({ title: "///", now: NOW })).toBe(
+      "video_transcript_68123"
+    )
+    expect(buildTranscriptStem({ now: NOW })).toBe("transcript_transcript_68123")
+  })
+
+  test("transcript: a percent in the title is escaped in the template", () => {
+    const stem = buildTranscriptStem({ title: "100% real", now: NOW })
+
+    expect(stem).toBe("100% real_transcript_68123")
+    // the stem is what lands on disk; the template is what yt-dlp reads
+    expect(buildTranscriptOutputTemplate(stem)).toBe(
+      "100%% real_transcript_68123.%(ext)s"
+    )
   })
 
   test("simple platforms carry the platform name", () => {

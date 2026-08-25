@@ -3,7 +3,7 @@ export interface ReportContext {
   details?: string
   category?: string
   platform?: string
-  downloadType?: "video" | "audio"
+  downloadType?: "video" | "audio" | "transcript"
   videoUrl?: string
 }
 

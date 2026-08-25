@@ -67,7 +67,8 @@ describe("the video download request", () => {
         uploader: "Blender",
         quality_tiers: [TIER],
         // Big Buck Bunny has one audio language, like nearly every video
-        audio_tracks: []
+        audio_tracks: [],
+        transcripts: []
       }
     })
 
