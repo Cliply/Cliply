@@ -1,0 +1,133 @@
+name: Bump version and release
+
+# the manual half of releasing. auto-release-on-merge.yml covers the automated
+# path (a merged auto-update/* branch tags itself); this is the one a person
+# runs to cut a release on purpose, so that "make a new version" is a button
+# rather than four commands somebody has to remember in the right order.
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: 'Which part of the version to raise'
+        required: true
+        default: patch
+        type: choice
+        options: [patch, minor, major]
+      version:
+        description: 'Exact version instead (e.g. 0.4.0). Overrides the choice above.'
+        required: false
+        type: string
+      dry_run:
+        description: 'Work out the new version and stop, without committing anything'
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+  # the build is started explicitly below rather than by the tag push - see the
+  # comment on the last step
+  actions: write
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Work out the new version
+        id: version
+        run: |
+          set -euo pipefail
+
+          CURRENT=$(node -p "require('./package.json').version")
+
+          if [[ -n "${{ inputs.version }}" ]]; then
+            NEXT="${{ inputs.version }}"
+
+            # npm accepts a lot of things a release tag should not be. this is
+            # the shape every existing tag has, and the shape electron-updater
+            # compares against
+            if [[ ! "$NEXT" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]]; then
+              echo "::error::'$NEXT' is not a version - expected something like 0.4.0"
+              exit 1
+            fi
+          else
+            NEXT=$(node -p "
+              const [major, minor, patch] = require('./package.json').version.split('.').map(Number);
+              ({
+                major: [major + 1, 0, 0],
+                minor: [major, minor + 1, 0],
+                patch: [major, minor, patch + 1]
+              })['${{ inputs.bump }}'].join('.')
+            ")
+          fi
+
+          echo "current=$CURRENT" >> "$GITHUB_OUTPUT"
+          echo "next=$NEXT" >> "$GITHUB_OUTPUT"
+          echo "tag=v$NEXT" >> "$GITHUB_OUTPUT"
+          echo "$CURRENT -> $NEXT (v$NEXT)"
+
+      # a tag that already exists means a release already went out under this
+      # number. moving it would leave every install that had already fetched
+      # the old one pointing at a file that no longer matches its checksum
+      - name: Refuse a version that has already shipped
+        run: |
+          TAG="${{ steps.version.outputs.tag }}"
+
+          if git rev-parse "$TAG" >/dev/null 2>&1; then
+            echo "::error::$TAG already exists"
+            exit 1
+          fi
+
+      - name: Bump package.json and the lockfile
+        if: ${{ !inputs.dry_run }}
+        run: npm version "${{ steps.version.outputs.next }}" --no-git-tag-version
+
+      - name: Commit and tag
+        if: ${{ !inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          TAG="${{ steps.version.outputs.tag }}"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git add package.json package-lock.json
+          git commit -m "chore: release ${{ steps.version.outputs.next }}"
+          git tag -a "$TAG" -m "Release $TAG"
+
+          git push origin HEAD
+          git push origin "$TAG"
+
+      # a tag pushed with GITHUB_TOKEN does not start another workflow - github
+      # blocks that to keep workflows from triggering each other in a loop - so
+      # the build is asked for by name. -r pins it to the tagged commit, since
+      # the default branch can move between the push above and this step
+      - name: Trigger the release build
+        if: ${{ !inputs.dry_run }}
+        run: |
+          gh workflow run build-release.yml \
+            -f tag=${{ steps.version.outputs.tag }} \
+            -r ${{ steps.version.outputs.tag }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Summary
+        run: |
+          {
+            echo "### ${{ steps.version.outputs.current }} → ${{ steps.version.outputs.next }}"
+            echo
+            if [[ "${{ inputs.dry_run }}" == "true" ]]; then
+              echo "Dry run - nothing was committed, tagged or built."
+            else
+              echo "Tagged \`${{ steps.version.outputs.tag }}\` and started the release build."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

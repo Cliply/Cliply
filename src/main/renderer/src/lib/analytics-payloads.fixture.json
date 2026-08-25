@@ -150,6 +150,36 @@
         "quality": "best_available",
         "is_trimmed": false
       }
+    },
+    {
+      "event": "download_started",
+      "properties": {
+        "platform": "youtube",
+        "media_type": "transcript",
+        "quality": "transcript",
+        "transcript_format": "srt",
+        "is_trimmed": false
+      }
+    },
+    {
+      "event": "download_started",
+      "properties": {
+        "platform": "youtube",
+        "media_type": "transcript",
+        "quality": "transcript",
+        "transcript_format": "vtt",
+        "is_trimmed": false
+      }
+    },
+    {
+      "event": "download_started",
+      "properties": {
+        "platform": "youtube",
+        "media_type": "transcript",
+        "quality": "transcript",
+        "transcript_format": "txt",
+        "is_trimmed": false
+      }
     }
   ],
   "unvouchedText": [

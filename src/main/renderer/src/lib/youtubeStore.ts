@@ -2,6 +2,7 @@ import type {
   AudioMode,
   TimeRange,
   QualityTier,
+  TranscriptFormat,
   VideoInfoResponse,
   DownloadPathInfo
 } from "@/lib/api"
@@ -43,6 +44,15 @@ interface YouTubeState {
   audioPreciseCut: boolean
   setAudioPreciseCut: (enabled: boolean) => void
 
+  // the transcript track the user picked - one of `videoInfo.transcripts`, and
+  // null until this video's list has been seen
+  selectedTranscript: string | null
+  setSelectedTranscript: (code: string | null) => void
+  selectedTranscriptFormat: TranscriptFormat
+  setSelectedTranscriptFormat: (format: TranscriptFormat) => void
+  isDownloadingTranscript: boolean
+  setIsDownloadingTranscript: (downloading: boolean) => void
+
   // Download path management
   downloadPath: DownloadPathInfo | null
   setDownloadPath: (pathInfo: DownloadPathInfo) => void
@@ -70,6 +80,11 @@ export const useYouTubeStore = create<YouTubeState>((set) => ({
   isDownloadingVideo: false,
   videoPreciseCut: true,
   audioPreciseCut: true,
+  selectedTranscript: null,
+  // srt is what every player and every editor opens, and it is the same choice
+  // on every video - so it is the initial value rather than a defaulting effect
+  selectedTranscriptFormat: "srt",
+  isDownloadingTranscript: false,
   downloadPath: null,
   isLoadingDownloadPath: false,
 
@@ -82,7 +97,16 @@ export const useYouTubeStore = create<YouTubeState>((set) => ({
   // tier object still carrying the last video's size, and a dub silently
   // replacing the original on any video that happens to share the code
   setVideoInfo: (info) =>
-    set({ videoInfo: info, selectedTier: null, selectedAudioLanguage: null }),
+    set({
+      videoInfo: info,
+      selectedTier: null,
+      selectedAudioLanguage: null,
+      // same reason as the two above: a language code both videos happen to
+      // carry would otherwise leave the picker pointing at the old video's
+      // track, including at a human one where the new video only has a machine
+      // transcription of it
+      selectedTranscript: null
+    }),
   setIsLoadingVideoInfo: (loading) => set({ isLoadingVideoInfo: loading }),
   setAudioTimeRange: (range) => set({ audioTimeRange: range }),
   setSelectedAudioMode: (mode) => set({ selectedAudioMode: mode }),
@@ -94,6 +118,11 @@ export const useYouTubeStore = create<YouTubeState>((set) => ({
     set({ isDownloadingVideo: downloading }),
   setVideoPreciseCut: (enabled) => set({ videoPreciseCut: enabled }),
   setAudioPreciseCut: (enabled) => set({ audioPreciseCut: enabled }),
+  setSelectedTranscript: (code) => set({ selectedTranscript: code }),
+  setSelectedTranscriptFormat: (format) =>
+    set({ selectedTranscriptFormat: format }),
+  setIsDownloadingTranscript: (downloading) =>
+    set({ isDownloadingTranscript: downloading }),
   setDownloadPath: (pathInfo) => set({ downloadPath: pathInfo }),
   setIsLoadingDownloadPath: (loading) => set({ isLoadingDownloadPath: loading }),
 
@@ -112,6 +141,9 @@ export const useYouTubeStore = create<YouTubeState>((set) => ({
       isDownloadingVideo: false,
       videoPreciseCut: true,
       audioPreciseCut: true,
+      selectedTranscript: null,
+      selectedTranscriptFormat: "srt",
+      isDownloadingTranscript: false,
       downloadPath: null,
       isLoadingDownloadPath: false
     })

@@ -10,7 +10,8 @@ import {
   type AudioTrack,
   type PinterestVideoInfoResponse,
   type QualityTier,
-  type TikTokVideoInfoResponse
+  type TikTokVideoInfoResponse,
+  type TranscriptTrack
 } from "@/lib/api"
 import { reportActions } from "@/lib/reportStore"
 import { usePinterestStore } from "@/lib/pinterestStore"
@@ -28,6 +29,9 @@ import { AudioDownloadButton } from "./AudioDownloadButton"
 import { AudioFormatDropdown } from "./AudioFormatDropdown"
 import { AudioTrackDropdown } from "./AudioTrackDropdown"
 import { TimeRangeSelector } from "./TimeRangeSelector"
+import { TranscriptDownloadButton } from "./TranscriptDownloadButton"
+import { TranscriptFormatDropdown } from "./TranscriptFormatDropdown"
+import { TranscriptLanguageDropdown } from "./TranscriptLanguageDropdown"
 import { VideoDownloadButton } from "./VideoDownloadButton"
 import { VideoQualityDropdown } from "./VideoQualityDropdown"
 import { VideoTimeRangeSelector } from "./VideoTimeRangeSelector"
@@ -38,6 +42,7 @@ type YouTubeDownloadCardProps = {
     duration: number
     quality_tiers: QualityTier[]
     audio_tracks?: AudioTrack[]
+    transcripts?: TranscriptTrack[]
   }
   className?: string
 }
@@ -83,6 +88,7 @@ function YouTubeDownloadCard({
     duration: number
     quality_tiers: QualityTier[]
     audio_tracks?: AudioTrack[]
+    transcripts?: TranscriptTrack[]
   }
   className?: string
 }) {
@@ -113,6 +119,10 @@ function YouTubeDownloadCard({
 
   const audioTracks = videoInfo.audio_tracks ?? []
 
+  // optional so an older main process (or a fixture written before the field
+  // existed) renders the tab empty rather than crashing on a missing array
+  const transcripts = videoInfo.transcripts ?? []
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 20 }}
@@ -130,7 +140,7 @@ function YouTubeDownloadCard({
     >
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
         <div className="p-6 pb-0">
-          <TabsList className="grid w-full grid-cols-2 bg-slate-100/50 dark:bg-slate-800/50 border border-slate-200/50 dark:border-slate-700/50">
+          <TabsList className="grid w-full grid-cols-3 bg-slate-100/50 dark:bg-slate-800/50 border border-slate-200/50 dark:border-slate-700/50">
             <TabsTrigger
               value="video"
               className="flex items-center gap-2 data-[state=active]:bg-white data-[state=active]:shadow-sm dark:data-[state=active]:bg-slate-700 dark:data-[state=active]:border-slate-600 transition-all duration-200"
@@ -142,6 +152,12 @@ function YouTubeDownloadCard({
               className="flex items-center gap-2 data-[state=active]:bg-white data-[state=active]:shadow-sm dark:data-[state=active]:bg-slate-700 dark:data-[state=active]:border-slate-600 transition-all duration-200"
             >
               🎵 Audio Only
+            </TabsTrigger>
+            <TabsTrigger
+              value="transcript"
+              className="flex items-center gap-2 data-[state=active]:bg-white data-[state=active]:shadow-sm dark:data-[state=active]:bg-slate-700 dark:data-[state=active]:border-slate-600 transition-all duration-200"
+            >
+              📝 Transcript
             </TabsTrigger>
           </TabsList>
         </div>
@@ -199,6 +215,29 @@ function YouTubeDownloadCard({
               <AudioDownloadButton
                 maxDuration={videoInfo.duration}
                 isVisible={showAudioDownloadButton}
+              />
+            </div>
+          </div>
+        </TabsContent>
+
+        <TabsContent value="transcript" className="p-6 pt-4 m-0">
+          <div className="space-y-4">
+            <div className="mb-6">
+              <p className="text-sm text-slate-600 dark:text-slate-400">
+                Save the subtitles or captions as a file
+              </p>
+            </div>
+
+            {/* no time range here on purpose: yt-dlp writes a subtitle track
+                whole, and trimming one is a text edit rather than a download */}
+            <div className="space-y-6">
+              <TranscriptLanguageDropdown tracks={transcripts} />
+
+              <TranscriptFormatDropdown isVisible={transcripts.length > 0} />
+
+              <TranscriptDownloadButton
+                tracks={transcripts}
+                isVisible={transcripts.length > 0}
               />
             </div>
           </div>

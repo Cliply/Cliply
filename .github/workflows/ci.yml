@@ -1,0 +1,83 @@
+name: CI
+
+# every push to a long-lived branch, and every pull request into one. the
+# release workflow builds installers and is far too slow to run on a branch;
+# this is the one that has to stay fast enough that people wait for it.
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+
+# a second push to the same branch makes the first run's answer worthless
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  main:
+    name: main process
+    # the suite covers process trees, POSIX signals and executable bits, so it
+    # is meaningful on a POSIX runner and partly vacuous anywhere else. both
+    # shipped POSIX platforms are here because macOS is where the engine's
+    # onedir first-run behaviour differs
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-14]
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: package-lock.json
+
+      # the full install, scripts and all: several suites require modules that
+      # reach for electron at load time, and an install that skipped its
+      # postinstall would fail them in a way no contributor ever sees
+      - run: npm ci
+
+      - run: npm run lint
+
+      - run: npm test
+
+  renderer:
+    name: renderer
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: src/main/renderer/package-lock.json
+
+      - name: Install renderer dependencies
+        working-directory: src/main/renderer
+        run: npm ci
+
+      - name: Lint
+        working-directory: src/main/renderer
+        run: npm run lint
+
+      # `npm run build` is `tsc -b && vite build`, so this is the type check and
+      # the bundle in one step - and the bundle is what the packaged app loads,
+      # so a build that only type-checks would miss half of what can break
+      - name: Type check and build
+        working-directory: src/main/renderer
+        run: npm run build
+
+      - name: Test
+        working-directory: src/main/renderer
+        run: npm test

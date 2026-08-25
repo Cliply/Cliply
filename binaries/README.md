@@ -20,6 +20,11 @@ binaries/
 
 for complete installation details, check out the [yt-dlp documentation](https://github.com/yt-dlp/yt-dlp/wiki/Installation) which covers everything in detail.
 
+> the builds below are `--enable-gpl` builds, which is what makes cliply GPLv3.
+> if you are packaging cliply for anyone but yourself, read
+> [docs/ffmpeg.md](../docs/ffmpeg.md) first - the source obligation travels with
+> the binary you ship.
+
 ## what you need to do
 
 grab ffmpeg for your system and drop it in the right folder:

@@ -21,6 +21,15 @@ import {
 } from "./dialog"
 import { Progress } from "./progress"
 
+// where a build that cannot update itself sends people instead
+const RELEASES_URL = "https://github.com/Cliply/Cliply/releases/latest"
+
+// the page explaining why an unsigned mac app cannot auto-update. it is about
+// code signing specifically, so it is only offered on mac - on linux the
+// reason is a package manager, and this page would answer the wrong question
+const MACOS_UPDATE_HELP_URL =
+  "https://www.cliply.space/download/macos/autoupdates"
+
 interface UpdateNotificationProps {
   onUpdateAvailable?: (info: UpdateInfo) => void
   onUpdateDownloaded?: (info: UpdateInfo) => void
@@ -53,17 +62,17 @@ export const UpdateNotification: React.FC<UpdateNotificationProps> = ({
       toast.dismiss("update-check") // Dismiss the checking toast
 
       if (info.requiresManualDownload) {
-        // macOS: Show manual download dialog
+        // this build cannot replace itself - an unsigned mac app, or a linux
+        // install that belongs to a package manager. the update is real, so
+        // it is still offered, as a link rather than as a download
         setShowUpdateDialog(true)
         toast.success("Update Available", {
-          description: `Version ${info.version} requires manual download on Mac`,
+          description: `Version ${info.version} has to be downloaded manually on ${
+            info.platform === "darwin" ? "Mac" : "this build"
+          }`,
           action: {
             label: "Download",
-            onClick: () =>
-              window.open(
-                `https://github.com/Cliply/Cliply/releases/latest`,
-                "_blank"
-              )
+            onClick: () => window.open(RELEASES_URL, "_blank")
           },
           duration: 10000
         })
@@ -451,9 +460,11 @@ export const UpdateNotification: React.FC<UpdateNotificationProps> = ({
                     Update Available
                   </DialogTitle>
                   <DialogDescription className="text-left">
-                    {updateInfo?.requiresManualDownload
-                      ? "We can't auto-update on Mac. Click 'Learn Why' to find out more."
-                      : "A new version of Cliply is available."}
+                    {!updateInfo?.requiresManualDownload
+                      ? "A new version of Cliply is available."
+                      : updateInfo.platform === "darwin"
+                        ? "We can't auto-update on Mac. Click 'Learn Why' to find out more."
+                        : "This build can't replace itself, so the new version has to be downloaded."}
                   </DialogDescription>
                 </div>
               </div>
@@ -487,25 +498,17 @@ export const UpdateNotification: React.FC<UpdateNotificationProps> = ({
                 >
                   Later
                 </Button>
+                {updateInfo.platform === "darwin" && (
+                  <Button
+                    onClick={() => window.open(MACOS_UPDATE_HELP_URL, "_blank")}
+                    variant="outline"
+                    className="w-full sm:w-auto"
+                  >
+                    Learn Why
+                  </Button>
+                )}
                 <Button
-                  onClick={() =>
-                    window.open(
-                      "https://www.cliply.space/download/macos/autoupdates",
-                      "_blank"
-                    )
-                  }
-                  variant="outline"
-                  className="w-full sm:w-auto"
-                >
-                  Learn Why
-                </Button>
-                <Button
-                  onClick={() =>
-                    window.open(
-                      `https://github.com/Cliply/Cliply/releases/latest`,
-                      "_blank"
-                    )
-                  }
+                  onClick={() => window.open(RELEASES_URL, "_blank")}
                   className="w-full sm:w-auto bg-cyan-600 hover:bg-cyan-700 text-white border-2 border-cyan-600 hover:border-cyan-700 transition-all duration-200"
                 >
                   Download from GitHub

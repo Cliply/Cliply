@@ -73,7 +73,8 @@ class DownloadRunner {
   /**
    * run a download to completion, emitting progress events as it goes
    * @param {Object} options - {downloadId, type, platform, title, formatId,
-   *   trimmed, createHandle} - createHandle() returns a fresh engine handle
+   *   trimmed, createHandle, resolveFile} - createHandle() returns a fresh
+   *   engine handle, resolveFile() names the file when the engine could not
    * @returns {Promise<Object>} {success, filename, file_path, file_size} or {success:false, error}
    */
   async run(options) {
@@ -84,7 +85,8 @@ class DownloadRunner {
       title = "unknown",
       formatId = "unknown",
       trimmed = false,
-      createHandle
+      createHandle,
+      resolveFile = null
     } = options
 
     if (!this.active.has(downloadId)) {
@@ -139,7 +141,14 @@ class DownloadRunner {
 
       try {
         const result = await handle.promise
-        return this.settleCompleted({ downloadId, type, platform, formatId, trimmed, result })
+        return this.settleCompleted({
+          downloadId,
+          type,
+          platform,
+          formatId,
+          trimmed,
+          result: this.applyResolvedFile(result, resolveFile)
+        })
       } catch (error) {
         lastError = error
 
@@ -193,6 +202,37 @@ class DownloadRunner {
       this.trackEvent(name, payload)
     } catch (error) {
       console.warn(`failed to track ${name}:`, describeError(error))
+    }
+  }
+
+  /**
+   * let the caller name the file when the engine could not
+   *
+   * every media download prints its destination, so the engine already knows.
+   * a transcript does not: `--skip-download` means yt-dlp writes a subtitle and
+   * says nothing about where, and the caller is the only one holding what it
+   * takes to find it. without this the completion event would carry no filename
+   * and `file_size_mb` would report a finished download as zero bytes.
+   *
+   * guarded, because it runs on the success path: a resolver that throws must
+   * cost the filename and nothing else, never turn a finished download into a
+   * reported failure.
+   *
+   * @param {Object} result - what the engine handle resolved with
+   * @param {Function|null} resolveFile - the caller's resolver, if any
+   * @returns {Object} the result, with filePath filled in when it could be
+   */
+  applyResolvedFile(result, resolveFile) {
+    if (typeof resolveFile !== "function") {
+      return result
+    }
+
+    try {
+      const filePath = resolveFile(result)
+      return filePath ? { ...result, filePath } : result
+    } catch (error) {
+      console.warn("could not resolve the downloaded file:", describeError(error))
+      return result
     }
   }
 

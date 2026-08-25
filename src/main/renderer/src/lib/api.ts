@@ -33,6 +33,22 @@ export interface AudioTrack {
   is_original: boolean
 }
 
+/**
+ * one transcript track the video carries
+ *
+ * `code` is yt-dlp's own BCP-47 tag and is what the download request sends
+ * back; `is_auto` marks a machine transcription rather than a human-written
+ * subtitle. a language that has both appears once, as the human one.
+ */
+export interface TranscriptTrack {
+  code: string
+  is_auto: boolean
+}
+
+// what the transcript menu offers: two subtitle formats, and the plain text
+// main strips out of the srt
+export type TranscriptFormat = "srt" | "vtt" | "txt"
+
 export interface DownloadProgress {
   downloadId: string
   status: "downloading" | "completed" | "failed" | "cancelled"
@@ -88,6 +104,9 @@ export interface VideoInfoResponse {
   uploader: string
   quality_tiers: QualityTier[]
   audio_tracks: AudioTrack[]
+  // empty when the video has no subtitles at all, which is a real answer and
+  // not a failure to look
+  transcripts: TranscriptTrack[]
 }
 
 export interface PinterestVideoInfoResponse {
@@ -188,6 +207,28 @@ export interface VideoDownloadRequest {
   output_path?: string
 }
 
+export interface TranscriptDownloadRequest {
+  url: string
+  // one of VideoInfoResponse.transcripts
+  language: string
+  // whether that track was the machine one - it decides which of yt-dlp's two
+  // subtitle switches the download runs with
+  is_auto?: boolean
+  format: TranscriptFormat
+  // see AudioDownloadRequest.download_id
+  download_id?: string
+  title?: string
+}
+
+export interface TranscriptDownloadResponse {
+  filename: string
+  file_path: string
+  file_size: number
+  download_id: string
+  format: TranscriptFormat
+  language: string
+}
+
 export interface ApiError {
   type?: string
   message: string
@@ -284,6 +325,9 @@ declare global {
             type: string
           }>
         >
+        downloadTranscript: (
+          options: TranscriptDownloadRequest
+        ) => Promise<IPCResponse<TranscriptDownloadResponse>>
       }
       pinterest: {
         getInfo: (url: string) => Promise<IPCResponse<PinterestVideoInfoResponse>>
@@ -423,6 +467,34 @@ export const videoApi = {
     return {
       downloadId: response.data.download_id
     }
+  }
+}
+
+export const transcriptApi = {
+  /**
+   * Download one subtitle track
+   *
+   * Unlike the media downloads this resolves when the file is on disk: a
+   * transcript is small and yt-dlp reports no progress for it, so there is
+   * nothing for a progress bar to show.
+   *
+   * @param request Transcript download request
+   * @returns Promise<TranscriptDownloadResponse>
+   */
+  async download(
+    request: TranscriptDownloadRequest
+  ): Promise<TranscriptDownloadResponse> {
+    const electronAPI = getElectronAPI()
+    const response = await electronAPI.video.downloadTranscript(request)
+
+    if (!response.success || !response.data) {
+      const errorMessage =
+        response.error?.message || "Failed to download transcript"
+      console.error("Transcript download failed:", errorMessage)
+      throw new DownloadError(errorMessage, response.error)
+    }
+
+    return response.data
   }
 }
 

@@ -66,11 +66,18 @@ jobs:
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: false
 
+      # the zip is not an alternative download - it is what latest-mac.yml
+      # points at, and electron-updater 404s without it. these builds are
+      # unsigned so squirrel.mac cannot install one anyway (the app routes mac
+      # to a manual download for exactly that reason), but publishing a feed
+      # whose only asset is missing is the kind of thing that stays broken
+      # right up until the day signing is added
       - uses: actions/upload-artifact@v4
         with:
           name: cliply-macos
           path: |
             dist/*.dmg
+            dist/*.zip
             dist/latest-mac.yml
           retention-days: 30
 
@@ -123,13 +130,83 @@ jobs:
             dist/latest.yml
           retention-days: 30
 
-  create-release:
-    needs: [build-macos, build-windows]
+  # linux was missing entirely, and its absence was not neutral: an AppImage
+  # install checks for updates like any other, gets a 404 for latest-linux.yml
+  # because nothing publishes one, and used to show the user an error about it
+  # every twelve hours
+  build-linux:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag != '' && inputs.tag || github.ref }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      # the other two platforms take their ffmpeg from this repo's `binaries`
+      # release, which only carries the mac and windows builds. linux takes the
+      # same yt-dlp GPL build that binaries/README.md tells contributors to use
+      - name: Download FFmpeg for Linux
+        run: |
+          mkdir -p binaries/linux
+          curl -fL --retry 3 --retry-delay 2 -o ffmpeg-linux.tar.xz \
+            "https://github.com/yt-dlp/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-linux64-gpl.tar.xz"
+          tar -xf ffmpeg-linux.tar.xz --wildcards --strip-components=2 -C binaries/linux '*/bin/ffmpeg'
+          rm ffmpeg-linux.tar.xz
+          chmod +x binaries/linux/ffmpeg
+          binaries/linux/ffmpeg -version | head -n 1
+
+      - name: Download Deno for Linux
+        run: |
+          mkdir -p binaries/deno/linux
+          curl -fL --retry 3 --retry-delay 2 -o deno-linux.zip \
+            "https://github.com/denoland/deno/releases/latest/download/deno-x86_64-unknown-linux-gnu.zip"
+          unzip -o -q deno-linux.zip -d binaries/deno/linux
+          rm deno-linux.zip
+          chmod +x binaries/deno/linux/deno
+          binaries/deno/linux/deno --version | head -n 1
+
+      - run: npm ci
+      - run: npm run install:renderer
+      - run: npm run build:renderer
+
+      - name: Fetch yt-dlp engine
+        run: npm run fetch:ytdlp
+        env:
+          BUILD_TARGET_PLATFORM: linux-x64
+
+      - name: Verify yt-dlp engine
+        run: |
+          ENGINE=$(node -p "require('./src/main/services/ytdlp-engine').resolveExecutableIn('binaries/linux/ytdlp','linux')")
+          "$ENGINE" --version
+
+      - run: npx electron-builder --linux --publish never
+
+      # the AppImage is the only linux format that can replace itself, so it is
+      # the one latest-linux.yml describes - the deb and the tarball are here
+      # because people want them, not because the updater can use them
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cliply-linux
+          path: |
+            dist/*.AppImage
+            dist/*.deb
+            dist/*.tar.gz
+            dist/latest-linux.yml
+          retention-days: 30
+
+  create-release:
+    needs: [build-macos, build-windows, build-linux]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag != '' && inputs.tag || github.ref }}
+          # the generated changelog is built from the commits since the last
+          # tag, which a shallow checkout does not have
+          fetch-depth: 0
 
       - name: Determine tag
         id: info
@@ -153,31 +230,66 @@ jobs:
           name: cliply-windows
           path: artifacts/windows
 
+      - uses: actions/download-artifact@v4
+        with:
+          name: cliply-linux
+          path: artifacts/linux
+
       - name: List downloaded artifacts
         run: find artifacts -type f
 
       - name: Create GitHub Release
         run: |
+          set -euo pipefail
           TAG="${{ steps.info.outputs.tag }}"
 
           FILES=()
           while IFS= read -r f; do
             FILES+=("$f")
-          done < <(find artifacts -type f \( -name "*.dmg" -o -name "*Setup*.exe" -o -name "latest*.yml" \))
+          done < <(find artifacts -type f \( \
+            -name "*.dmg" -o \
+            -name "*.zip" -o \
+            -name "*Setup*.exe" -o \
+            -name "*.AppImage" -o \
+            -name "*.deb" -o \
+            -name "*.tar.gz" -o \
+            -name "latest*.yml" \
+          \) | sort)
 
           if [ ${#FILES[@]} -eq 0 ]; then
             echo "::error::No release files found in artifacts"
             exit 1
           fi
 
+          # every platform has to be in there. a release missing one of the
+          # three update feeds is what leaves that platform's installs checking
+          # against nothing, which is the failure this job exists to prevent
+          for feed in latest.yml latest-mac.yml latest-linux.yml; do
+            if ! printf '%s\n' "${FILES[@]}" | grep -q "/$feed$"; then
+              echo "::error::$feed is missing - $TAG would ship without an update feed for that platform"
+              exit 1
+            fi
+          done
+
           echo "Attaching ${#FILES[@]} files:"
           printf '  %s\n' "${FILES[@]}"
 
+          # named by basename, because that is what somebody who downloaded one
+          # file has on disk to check it against
+          sha256sum "${FILES[@]}" \
+            | awk '{ n = split($2, parts, "/"); print $1 "  " parts[n] }' \
+            > SHA256SUMS.txt
+          FILES+=("SHA256SUMS.txt")
+
           gh release delete "$TAG" --yes 2>/dev/null || true
 
+          # --generate-notes on top of the file: RELEASE_NOTES.md is the
+          # standing macOS gatekeeper explainer, and github appends the commit
+          # log since the previous tag underneath it
           gh release create "$TAG" \
             --title "Cliply ${{ needs.build-macos.outputs.app_version }}" \
             --notes-file .github/RELEASE_NOTES.md \
+            --generate-notes \
             --latest \
             "${FILES[@]}"
         env:

@@ -178,6 +178,17 @@ export function audioQuality(mode: AudioMode): string {
 export const SIMPLE_QUALITY = "best_available"
 
 /**
+ * the quality of a transcript download
+ *
+ * a subtitle track has no quality ladder - it is whatever the uploader or the
+ * machine wrote - so all three formats report the same label, and the format
+ * itself travels as `transcript_format`. main derives the same value from the
+ * format id for this download's later events (analytics-helpers.js knownIds),
+ * so the two ends join on it.
+ */
+export const TRANSCRIPT_QUALITY = "transcript"
+
+/**
  * whether this download is really a segment
  *
  * mirrors normalizeTimeRange (ipc-handlers.js:55), which throws away a range

@@ -19,7 +19,8 @@ const videoInfo = (
   duration_string: "1:00",
   uploader: "someone",
   quality_tiers,
-  audio_tracks
+  audio_tracks,
+  transcripts: []
 })
 
 beforeEach(() => useYouTubeStore.getState().reset())

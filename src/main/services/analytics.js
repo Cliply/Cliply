@@ -44,7 +44,8 @@ const ALLOWED_PROPERTIES = {
     "media_type",
     "quality",
     "is_trimmed",
-    "audio_format"
+    "audio_format",
+    "transcript_format"
   ],
   // download_started's properties plus the completion measures, which is what
   // makes the two ends of the funnel join on the same dimensions
@@ -54,6 +55,7 @@ const ALLOWED_PROPERTIES = {
     "quality",
     "is_trimmed",
     "audio_format",
+    "transcript_format",
     "file_size_mb",
     "elapsed_bucket",
     "speed_bucket"
@@ -67,6 +69,7 @@ const ALLOWED_PROPERTIES = {
     "quality",
     "is_trimmed",
     "audio_format",
+    "transcript_format",
     "error_category",
     "error_stage",
     "error_message",
@@ -114,6 +117,7 @@ const PROPERTY_KINDS = {
   url_kind: "vocabulary",
   media_type: "vocabulary",
   audio_format: "vocabulary",
+  transcript_format: "vocabulary",
   reason: "vocabulary",
   update_reason: "vocabulary",
   error_category: "vocabulary",
@@ -200,6 +204,9 @@ const QUALITY_VALUES = new Set([
   "medium_quality",
   "mp3",
   "original_audio",
+  // every transcript download, whatever format it asked for - there is no
+  // quality axis to a subtitle track. see extractQuality's knownIds
+  "transcript",
   "unknown"
 ])
 
@@ -309,11 +316,15 @@ const PROPERTY_VOCABULARIES = {
   // before sending. the raw term is deliberately absent rather than missing:
   // this taxonomy answers whether people take video or audio, and should not
   // carry a word that describes how the engine assembled the file
-  media_type: new Set(["video", "audio"]),
+  media_type: new Set(["video", "audio", "transcript"]),
 
   // the keys of AUDIO_MODE_PRESETS - normalizeAudioMode returns the key, not
   // the codec it maps to (ytdlp-engine.js:536, :617)
   audio_format: new Set(["mp3", "m4a", "original"]),
+
+  // the keys of TRANSCRIPT_FORMATS (utils/transcript.js) - what the user asked
+  // for, which is not always a subtitle format: txt is made from the srt
+  transcript_format: new Set(["srt", "vtt", "txt"]),
 
   // every reason ytdlp-updater can report: its `reason:` literals, the three
   // passed positionally to installDirectory(), and "download-failed", which is

@@ -30,6 +30,66 @@ const AUDIO_TRIM_TEMPLATE =
   "%(title).120B_audio_%(section_start)s-%(section_end)s_%(epoch)s.%(ext)s"
 
 /**
+ * how much of the title a transcript name keeps.
+ *
+ * shorter than the 120 bytes the media templates allow, and for a reason the
+ * others do not have: a transcript is found on disk by matching the name we
+ * asked for, so the name has to survive `--trim-filenames 240` intact. 120
+ * characters of title plus the suffix leaves well over a hundred to spare.
+ */
+const TRANSCRIPT_TITLE_LIMIT = 120
+
+/**
+ * caption tracks are keyed by a bcp-47 tag, and anything else in the subtitles
+ * field is not a language - which is the first half of keeping live_chat out.
+ *
+ * deliberately the same shape normalizeTranscriptLanguage enforces in the
+ * engine (services/ytdlp-engine.js), leading character included. a menu that
+ * offered a code the engine then refused would download english under another
+ * language's label, which is the one failure worth spending a duplicated
+ * regex to make impossible.
+ */
+const TRANSCRIPT_LANGUAGE_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9-]{1,31}$/
+
+/**
+ * keys in the subtitle fields that are not transcript tracks.
+ *
+ * `live_chat` is the chat replay of a stream, served as json. it is a real
+ * entry in a real field and it is not what anybody means by a transcript.
+ *
+ * `all` is here for the same reason the engine refuses it: --sub-langs reads
+ * it as every language at once, and a menu row must never be able to ask for
+ * something the engine will not run.
+ */
+const NON_TRANSCRIPT_TRACKS = new Set(["live_chat", "rechat", "all"])
+
+// what a caption track is actually served as. live_chat's `json` is not on
+// this list, which is the second half of keeping it out
+const TRANSCRIPT_SOURCE_EXTENSIONS = new Set([
+  "vtt",
+  "srt",
+  "ass",
+  "ssa",
+  "ttml",
+  "srv1",
+  "srv2",
+  "srv3",
+  "json3",
+  "lrc"
+])
+
+/**
+ * a ceiling on how long the transcript menu may get.
+ *
+ * the machine-translation filter below normally leaves a handful of tracks,
+ * but it reads a youtube url convention, and an extractor that does not follow
+ * it would hand the menu every language google can translate into. a list that
+ * long is not a menu, so it is cut - manual tracks first, which are the ones
+ * somebody actually wrote.
+ */
+const MAX_TRANSCRIPT_TRACKS = 50
+
+/**
  * strip characters that are illegal in filenames (ported from shared_utils)
  * @param {string} filename - raw title
  * @returns {string} safe filename fragment
@@ -374,6 +434,99 @@ function extractAudioTracks(info) {
   ]
 }
 
+// `subtitles` and `automatic_captions` are objects keyed by language tag. an
+// extractor that reported neither leaves them missing, not empty
+function subtitleStore(value) {
+  return value && typeof value === "object" && !Array.isArray(value) ? value : {}
+}
+
+// one language's entry is a list of the formats it is served in
+function trackFormats(entry) {
+  return Array.isArray(entry)
+    ? entry.filter((format) => format && typeof format === "object")
+    : []
+}
+
+/**
+ * is this entry a caption track we can actually download?
+ *
+ * @param {string} code - the language tag it is keyed by
+ * @param {Object[]} formats - the formats it is served in
+ * @returns {boolean} whether it belongs in the menu
+ */
+function isUsableTrack(code, formats) {
+  if (!TRANSCRIPT_LANGUAGE_PATTERN.test(code)) return false
+  if (NON_TRANSCRIPT_TRACKS.has(code)) return false
+
+  return formats.some((format) =>
+    TRANSCRIPT_SOURCE_EXTENSIONS.has(String(format.ext || "").toLowerCase())
+  )
+}
+
+/**
+ * is this automatic track a machine *translation* of another one?
+ *
+ * it matters because of scale. a youtube video with automatic captions reports
+ * one real transcript and then roughly two hundred translations of it, and a
+ * menu that lists all of them is not a menu. the translations are the ones
+ * whose timedtext url carries a target language - `tlang=` - which is youtube's
+ * own convention rather than ours, and the only thing in the payload that
+ * separates the machine transcript from the machine translations of it.
+ *
+ * a track with no urls at all is not called a translation: unknown is not the
+ * same as excluded, and the cap above is what stops an extractor we have never
+ * seen from flooding the list.
+ *
+ * @param {Object[]} formats - the formats the track is served in
+ * @returns {boolean} whether it is a translation of another track
+ */
+function isMachineTranslated(formats) {
+  return formats.some(
+    (format) => typeof format.url === "string" && /[?&]tlang=/.test(format.url)
+  )
+}
+
+/**
+ * the transcript tracks this video offers
+ *
+ * human-written subtitles first, then the machine transcript, and a language
+ * present in both appears once - as the human one, because that is the better
+ * file and the one a download would get anyway.
+ *
+ * an empty array means "this video has no transcript", which is a real answer
+ * for plenty of videos: the renderer shows the tab with nothing to pick rather
+ * than pretending a track is there.
+ *
+ * @param {Object} info - parsed --dump-json payload
+ * @returns {Object[]} [{code, is_auto}], human tracks first
+ */
+function extractTranscripts(info) {
+  const manual = subtitleStore(info && info.subtitles)
+  const automatic = subtitleStore(info && info.automatic_captions)
+
+  const tracks = new Map()
+
+  for (const [code, entry] of Object.entries(manual)) {
+    const formats = trackFormats(entry)
+    if (!isUsableTrack(code, formats)) continue
+
+    tracks.set(code, { code, is_auto: false })
+  }
+
+  for (const [code, entry] of Object.entries(automatic)) {
+    // a human track already answers this language
+    if (tracks.has(code)) continue
+
+    const formats = trackFormats(entry)
+    if (!isUsableTrack(code, formats)) continue
+    if (isMachineTranslated(formats)) continue
+
+    tracks.set(code, { code, is_auto: true })
+  }
+
+  return [...tracks.values()].slice(0, MAX_TRANSCRIPT_TRACKS)
+}
+
 /**
  * youtube video info -> the VideoInfoResponse shape the renderer renders
  *
@@ -391,7 +544,8 @@ function mapVideoInfo(info) {
     thumbnail: info.thumbnail || null,
     uploader: info.uploader || "Unknown",
     quality_tiers: extractQualityTiers(info),
-    audio_tracks: extractAudioTracks(info)
+    audio_tracks: extractAudioTracks(info),
+    transcripts: extractTranscripts(info)
   }
 }
 
@@ -457,6 +611,40 @@ function buildAudioOutputTemplate({ timeRange } = {}) {
 }
 
 /**
+ * the file name stem a transcript download writes under
+ *
+ * the media downloads let yt-dlp name the file from its own fields, because
+ * nothing has to find them again - the destination is printed. a transcript is
+ * not: `--skip-download` prints nothing, so the name has to be one we chose
+ * and can match against the directory afterwards. hence a stem built here.
+ *
+ * yt-dlp appends the language itself, so the file lands as
+ * `<stem>.<lang>.<ext>` - which is why callers match on `<stem>.` and not on
+ * the whole name.
+ *
+ * @param {Object} params - {title, now}
+ * @returns {string} the stem, before yt-dlp's language and extension
+ */
+function buildTranscriptStem({ title, now } = {}) {
+  const safeTitle = sanitizeFilename(title || "transcript").slice(
+    0,
+    TRANSCRIPT_TITLE_LIMIT
+  )
+  const timestamp = filenameTimestamp(now)
+
+  return `${safeTitle}_transcript_${timestamp}`
+}
+
+/**
+ * output template for a transcript download
+ * @param {string} stem - what buildTranscriptStem returned
+ * @returns {string} yt-dlp -o template
+ */
+function buildTranscriptOutputTemplate(stem) {
+  return `${escapeTemplateLiteral(stem)}.%(ext)s`
+}
+
+/**
  * output template for a simple platform download (tiktok / pinterest)
  * @param {Object} params - {title, platform, now}
  * @returns {string} yt-dlp -o template
@@ -476,9 +664,12 @@ module.exports = {
   filenameTimestamp,
   extractQualityTiers,
   extractAudioTracks,
+  extractTranscripts,
   mapVideoInfo,
   mapSimpleInfo,
   buildVideoOutputTemplate,
   buildAudioOutputTemplate,
+  buildTranscriptStem,
+  buildTranscriptOutputTemplate,
   buildSimpleOutputTemplate
 }

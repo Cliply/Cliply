@@ -24,6 +24,17 @@ const ERROR_CATEGORIES = Object.freeze({
   // no pattern produces it and none should: it is raised by inspecting a format
   // list (ipc-handlers' pinterest branch), never by reading stderr
   NOT_A_VIDEO: "NOT_A_VIDEO",
+  // the video is fine and the language is not there. yt-dlp treats a subtitle
+  // track it could not find as a warning and exits 0, so nothing downstream
+  // would call this a failure - but the user asked for a file and there is no
+  // file, which is a failure to them.
+  //
+  // its own category rather than VIDEO_UNAVAILABLE (the video was reachable) or
+  // NOT_A_VIDEO (there was one): the question it answers is how often people
+  // want a transcript from a video that has none, which is a feature question
+  // and not a content one. like NOT_A_VIDEO, no pattern produces it - it is
+  // raised by looking at what was written to disk
+  TRANSCRIPT_UNAVAILABLE: "TRANSCRIPT_UNAVAILABLE",
   GEO_BLOCKED: "GEO_BLOCKED",
   EXTRACTION_FAILED: "EXTRACTION_FAILED",
   INVALID_URL: "INVALID_URL",

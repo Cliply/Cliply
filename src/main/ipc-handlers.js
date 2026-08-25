@@ -7,6 +7,7 @@ const {
   describeError,
   extractQuality,
   audioFormat,
+  transcriptFormat,
   elapsedBucket,
   speedBucket
 } = require("./utils/analytics-helpers")
@@ -21,12 +22,26 @@ const {
   hasPlayableVideo,
   buildVideoOutputTemplate,
   buildAudioOutputTemplate,
+  buildTranscriptStem,
+  buildTranscriptOutputTemplate,
   buildSimpleOutputTemplate
 } = require("./utils/ytdlp-mappers")
+const {
+  TRANSCRIPT_FORMATS,
+  TRANSCRIPT_EXTENSIONS,
+  PLAIN_TEXT_SOURCES,
+  listDirectory,
+  extensionOf,
+  findTranscriptFiles,
+  preferExtension,
+  writePlainText,
+  removeLeftovers
+} = require("./utils/transcript")
 const { getSimplePlatformOptions } = require("./utils/ytdlp-formats")
 const { resolveDownloadId } = require("./utils/download-id")
 
 const { DownloadRunner } = require("./services/download-runner")
+const { CHECK_RESULTS } = require("./services/app-updater")
 const { SettingsStore } = require("./services/settings-store")
 const { ERROR_CODES } = require("./services/ytdlp-engine")
 
@@ -113,7 +128,12 @@ function cookieJarProblem({ total, youtube, expired }) {
  * answers what the user took away. anything else is left out rather than
  * guessed at: absence is silent, and a value outside the vocabulary is not.
  */
-const MEDIA_TYPES = { combined: "video", video: "video", audio: "audio" }
+const MEDIA_TYPES = {
+  combined: "video",
+  video: "video",
+  audio: "audio",
+  transcript: "transcript"
+}
 
 // an error message may arrive as "<short user message>\n\n<full technical>".
 // the first paragraph is what the user is shown; the rest travels as details.
@@ -122,7 +142,13 @@ const shortErrorMessage = (message) =>
   (message || "").split(/\n\s*\n/, 1)[0].trim() || "Download failed"
 
 class IPCHandlers {
-  constructor(services, autoUpdater = null) {
+  /**
+   * @param {Object} services - the app's service bag
+   * @param {Object|null} appUpdater - services/app-updater.js. it owns what
+   *   this build can do about an update and whether anybody is waiting to hear
+   *   about it; nothing here reaches electron-updater directly any more
+   */
+  constructor(services, appUpdater = null) {
     this.cookieManager = services.cookieManager
     // every download flow runs on the binary engine
     this.engine = services.ytdlpEngine
@@ -130,7 +156,7 @@ class IPCHandlers {
     // the one exit point telemetry leaves through. absent in a build that
     // never constructed one, and nothing here may depend on it existing
     this.analytics = services.analytics || null
-    this.autoUpdater = autoUpdater
+    this.appUpdater = appUpdater || services.appUpdater || null
     this.mainWindow = null
 
     // audit logging
@@ -224,12 +250,19 @@ class IPCHandlers {
     // than in either branch so the two ends cannot drift apart later.
     const format = audioFormat(payload.formatId)
 
+    // and the same again for a transcript, whose format id is the srt/vtt/txt
+    // the renderer sent as download_started's transcript_format. the two are
+    // mutually exclusive by construction - a format id names one kind of
+    // download - so a bag never carries both
+    const transcript = transcriptFormat(payload.formatId)
+
     const base = {
       platform: payload.platform,
       media_type: MEDIA_TYPES[payload.type],
       quality: extractQuality(payload.formatId),
       is_trimmed: Boolean(payload.trimmed),
-      ...(format ? { audio_format: format } : {})
+      ...(format ? { audio_format: format } : {}),
+      ...(transcript ? { transcript_format: transcript } : {})
     }
 
     if (name === "download_completed") {
@@ -402,6 +435,10 @@ class IPCHandlers {
     ipcMain.handle(
       IPC_CHANNELS.AUDIO_DOWNLOAD,
       this.handleDownloadAudio.bind(this)
+    )
+    ipcMain.handle(
+      IPC_CHANNELS.TRANSCRIPT_DOWNLOAD,
+      this.handleDownloadTranscript.bind(this)
     )
 
     // download management
@@ -796,6 +833,159 @@ class IPCHandlers {
       })
     } catch (error) {
       console.error(`[${downloadId}] Audio download failed:`, error.message)
+
+      return this.createError(
+        shortErrorMessage(error.message),
+        error.suggestion || "Please try again or check your connection",
+        error.code || "DOWNLOAD_FAILED",
+        {
+          details: error.details || error.message,
+          category: classify(error, ERROR_STAGES.DOWNLOAD).category
+        }
+      )
+    }
+  }
+
+  /**
+   * transcript download - one subtitle track, no media
+   *
+   * this one resolves when the file is on disk rather than when the process
+   * starts. a transcript is a few hundred kilobytes and yt-dlp reports no
+   * progress for it, so a progress ui would be a spinner pretending to be a
+   * bar - the tiktok/pinterest contract fits it, and the renderer just awaits.
+   *
+   * @param {Object} _event - the ipc event, unused
+   * @param {Object} data - {url, language, is_auto, format, title, download_id}
+   * @returns {Promise<Object>} the finished file, or a classified error
+   */
+  async handleDownloadTranscript(_event, data) {
+    const downloadId = resolveDownloadId(data && data.download_id, "transcript")
+
+    if (!downloadId) {
+      return this.createError(
+        "Invalid download id",
+        "Please restart the app and try again",
+        "INVALID_DOWNLOAD_ID"
+      )
+    }
+
+    try {
+      this.validateRequest(data, ["url", "language"])
+
+      const {
+        url,
+        language,
+        is_auto: isAuto,
+        format: requestedFormat,
+        title = "transcript"
+      } = data
+
+      // the engine validates this too, and has to: it is what decides the
+      // download's args. reading it here as well is what lets the response
+      // name the file - a request for txt that fell back to srt inside the
+      // engine would otherwise be looked for under the wrong extension
+      const format = Object.hasOwn(
+        TRANSCRIPT_FORMATS,
+        String(requestedFormat || "").toLowerCase()
+      )
+        ? String(requestedFormat).toLowerCase()
+        : "srt"
+
+      const outputDir = await this.getDownloadDirectory()
+
+      // yt-dlp appends the language and the extension to this
+      const stem = buildTranscriptStem({ title })
+
+      // the snapshot has to be taken before the run, not after: it is the
+      // fallback for finding the file when the stem was truncated
+      const before = listDirectory(outputDir)
+
+      const createHandle = () =>
+        this.engine.downloadTranscript({
+          url,
+          transcriptLanguage: language,
+          transcriptFormat: format,
+          autoGenerated: Boolean(isAuto),
+          outputDir,
+          outputTemplate: buildTranscriptOutputTemplate(stem)
+        })
+
+      if (
+        !this.runner.reserve(downloadId, {
+          type: "transcript",
+          platform: "youtube",
+          title
+        })
+      ) {
+        return this.duplicateDownloadError(downloadId)
+      }
+
+      // what the runner is handed as the finished file, since the engine has
+      // no destination line to report for a --skip-download run
+      let written = []
+
+      const result = await this.runner.run({
+        downloadId,
+        type: "transcript",
+        platform: "youtube",
+        title,
+        formatId: format,
+        createHandle,
+        resolveFile: () => {
+          written = findTranscriptFiles(outputDir, { stem, before })
+
+          const source = preferExtension(
+            written,
+            format === "txt" ? ".srt" : TRANSCRIPT_EXTENSIONS[format]
+          )
+
+          if (!source) {
+            return null
+          }
+
+          // txt is ours to make: yt-dlp cannot convert to it, so the srt it
+          // did write is read back and stripped of its timings here
+          if (format === "txt" && PLAIN_TEXT_SOURCES.has(extensionOf(source))) {
+            const plain = writePlainText(source)
+            written = written.filter((file) => file !== source)
+            return plain
+          }
+
+          return source
+        }
+      })
+
+      if (!result.success) {
+        return this.createError(
+          result.message || "Transcript download failed",
+          "Please try another language, or try again later",
+          result.error?.code || "DOWNLOAD_FAILED",
+          {
+            details: result.details,
+            category: classify(result.error, ERROR_STAGES.DOWNLOAD).category
+          }
+        )
+      }
+
+      // a run that exits 0 having written nothing is the ordinary shape of
+      // "that language is not there": yt-dlp warns and succeeds. the user asked
+      // for a file, so this is a failure to them however it looked to yt-dlp
+      if (!result.file_path) {
+        return this.createError(
+          "No transcript was available for that language.",
+          "Try a different language, or the automatic captions.",
+          ERROR_CATEGORIES.TRANSCRIPT_UNAVAILABLE,
+          { category: ERROR_CATEGORIES.TRANSCRIPT_UNAVAILABLE }
+        )
+      }
+
+      // --convert-subs keeps the file it converted from, so the folder can end
+      // up holding the vtt behind the srt the user asked for
+      removeLeftovers(written, result.file_path)
+
+      return this.createSuccess({ ...result, format, language })
+    } catch (error) {
+      console.error(`[${downloadId}] Transcript download failed:`, error.message)
 
       return this.createError(
         shortErrorMessage(error.message),
@@ -1236,111 +1426,136 @@ class IPCHandlers {
     }
   }
 
-  // handle check for updates (manual check - always runs)
+  /**
+   * check for an app update, because a person asked
+   *
+   * every call that reaches here is manual by definition: this ipc channel is
+   * the menu item and the renderer's buttons, and the background schedule
+   * never comes through the ipc layer at all. that is exactly what the updater
+   * needs to know to decide whether a failure is worth interrupting anybody
+   * over.
+   *
+   * @param {Object} _event - the ipc event, unused
+   * @returns {Promise<Object>} whether a check is now under way
+   */
   async handleCheckForUpdates(_event) {
-    try {
-      if (!this.autoUpdater) {
-        return this.createError(
-          "Auto-updater not available",
-          "Updates are only available in production builds"
-        )
-      }
-
-      // manual check always runs
-      await this.autoUpdater.checkForUpdates()
-      return this.createSuccess({ checking: true })
-    } catch (error) {
-      console.error("Check for updates failed:", error.message)
-      return this.createError(
-        "Failed to check for updates",
-        "Please try again later"
-      )
+    if (!this.appUpdater) {
+      return this.updaterUnavailableError()
     }
+
+    const result = await this.appUpdater.check({ manual: true })
+
+    if (result.status === CHECK_RESULTS.CHECKING) {
+      return this.createSuccess({ checking: true })
+    }
+
+    // nothing published yet is not a failure anybody can act on, and the
+    // updater has already told the renderer it is up to date. reporting it as
+    // success here is what keeps the menu item from raising a dialog about our
+    // own release schedule
+    if (result.status === CHECK_RESULTS.NO_FEED) {
+      return this.createSuccess({ checking: false, upToDate: true })
+    }
+
+    if (result.status === CHECK_RESULTS.UNSUPPORTED) {
+      return this.updaterUnavailableError(result.message)
+    }
+
+    return this.createError(
+      "Failed to check for updates",
+      "Please try again later",
+      "UPDATE_CHECK_FAILED",
+      { details: result.message }
+    )
   }
 
-  // handle download update
+  /**
+   * fetch an update this build can actually install
+   * @param {Object} _event - the ipc event, unused
+   * @returns {Promise<Object>} whether a download started
+   */
   async handleDownloadUpdate(_event) {
+    if (!this.appUpdater) {
+      return this.updaterUnavailableError()
+    }
+
     try {
-      if (!this.autoUpdater) {
+      const started = await this.appUpdater.download()
+
+      if (!started) {
+        // macos, and the linux builds that are not AppImages: the update is
+        // real, it just cannot be applied in place. the renderer offers the
+        // releases page for exactly this case
         return this.createError(
-          "Auto-updater not available",
-          "Updates are only available in production builds"
+          "This build cannot update itself",
+          "Download the new version from our releases page",
+          "UPDATE_MANUAL_ONLY"
         )
       }
 
-      await this.autoUpdater.downloadUpdate()
       return this.createSuccess({ downloading: true })
     } catch (error) {
-      console.error("Download update failed:", error.message)
+      console.error("Download update failed:", describeError(error))
       return this.createError(
         "Failed to download update",
-        "Please try again later"
+        "Please try again later",
+        "UPDATE_DOWNLOAD_FAILED",
+        { details: describeError(error) }
       )
     }
   }
 
-  // handle install update
+  /**
+   * quit and hand over to the installer
+   * @param {Object} _event - the ipc event, unused
+   * @returns {Promise<Object>} whether the install was handed off
+   */
   async handleInstallUpdate(_event) {
-    try {
-      if (!this.autoUpdater) {
-        return this.createError(
-          "Auto-updater not available",
-          "Updates are only available in production builds"
-        )
-      }
+    if (!this.appUpdater) {
+      return this.updaterUnavailableError()
+    }
 
-      // set a flag to indicate we're updating
-      global.isUpdating = true
-
-      // use setImmediate to allow the response to be sent before quitting
-      setImmediate(() => {
-        try {
-          console.log("Attempting to quit and install update...")
-          this.autoUpdater.quitAndInstall(false, true)
-        } catch (error) {
-          console.error("quitAndInstall failed:", error)
-          // force quit as fallback
-          setTimeout(() => {
-            console.log("Force quitting app...")
-            require("electron").app.quit()
-          }, 1000)
-        }
-      })
-
-      return this.createSuccess({ installing: true })
-    } catch (error) {
-      console.error("Install update failed:", error.message)
+    if (!this.appUpdater.install()) {
       return this.createError(
-        "Failed to install update",
-        "Please try again later"
+        "This build cannot install updates",
+        "Download the new version from our releases page",
+        "UPDATE_MANUAL_ONLY"
       )
     }
+
+    return this.createSuccess({ installing: true })
   }
 
-  // handle force security update check (for emergency api key rotation)
-  async handleForceSecurityCheck(_event) {
-    try {
-      if (!this.autoUpdater) {
-        return this.createError(
-          "Auto-updater not available",
-          "Updates are only available in production builds"
-        )
-      }
+  /**
+   * the same check, from the renderer's "check for important updates" button
+   *
+   * it exists so an urgent fix has a path that does not wait for the twelve
+   * hour timer. it is the manual check with a different label - there is no
+   * separate security feed, and pretending otherwise would be a second code
+   * path to keep correct for no gain at all.
+   *
+   * @param {Object} event - the ipc event, forwarded
+   * @returns {Promise<Object>} what the check reported
+   */
+  async handleForceSecurityCheck(event) {
+    const result = await this.handleCheckForUpdates(event)
 
-      // force check for updates
-      await this.autoUpdater.checkForUpdates()
-      return this.createSuccess({
-        checking: true,
-        forced: true,
-        reason: "Security check requested"
-      })
-    } catch (error) {
-      console.error("Force security check failed:", error.message)
-      return this.createError(
-        "Failed to check for security updates",
-        "Please try again later"
-      )
-    }
+    return result.success
+      ? this.createSuccess({ ...result.data, forced: true })
+      : result
+  }
+
+  /**
+   * one wording for "there is nothing here that can update"
+   * @param {string} [suggestion] - what the updater said about why
+   * @returns {Object} an error response
+   */
+  updaterUnavailableError(suggestion) {
+    return this.createError(
+      "Updates are not available in this build",
+      suggestion || "Updates are only available in installed builds",
+      "UPDATER_UNAVAILABLE"
+    )
   }
 
   // downloads now end with their process, so nothing can linger here
@@ -1372,6 +1587,7 @@ class IPCHandlers {
       IPC_CHANNELS.VIDEO_GET_INFO,
       IPC_CHANNELS.VIDEO_DOWNLOAD_COMBINED,
       IPC_CHANNELS.AUDIO_DOWNLOAD,
+      IPC_CHANNELS.TRANSCRIPT_DOWNLOAD,
       IPC_CHANNELS.DOWNLOAD_CANCEL,
       IPC_CHANNELS.COOKIES_IMPORT,
       IPC_CHANNELS.COOKIES_TEST,
