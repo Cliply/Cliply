@@ -4,13 +4,36 @@ name: Trim ffmpeg loglevel check
 #
 # a release comes from exactly two places in this repo: build-release.yml on a
 # `v*` tag, and auto-release-on-merge.yml on a merged `auto-update/*` PR. this
-# workflow can reach neither, so it can run on a branch as often as it likes
-# without cutting anything.
+# workflow can reach neither, so it never cuts anything.
+#
+# the schedule is the load-bearing trigger, and it is here because nothing in
+# this repo pins yt-dlp: scripts/fetch-ytdlp.js resolves the latest tag at
+# build time, and ytdlp-updater.js resolves it again on the user's machine at
+# runtime. so a yt-dlp release reaches users without passing through any commit
+# of ours - and the bug this check exists for was yt-dlp's own flag semantics
+# silently changing what our arguments mean. a check that only ran on our
+# commits could not see that class of break at all.
 on:
   workflow_dispatch:
+  schedule:
+    # weekly, on an odd minute - nothing here is urgent enough to want the
+    # top of the hour, where every other cron on the platform already is
+    - cron: "17 6 * * 1"
+  # the two path lists are written out rather than shared with a yaml anchor:
+  # github actions does not resolve anchors, so an alias here is a workflow
+  # that silently never triggers
   push:
     branches:
-      - "ci/**"
+      - master
+    paths:
+      - "src/main/services/ytdlp-engine.js"
+      - "scripts/check-ffmpeg-loglevel.js"
+      - ".github/workflows/trim-loglevel-check.yml"
+  pull_request:
+    paths:
+      - "src/main/services/ytdlp-engine.js"
+      - "scripts/check-ffmpeg-loglevel.js"
+      - ".github/workflows/trim-loglevel-check.yml"
 
 # nothing here writes; the default read is enough to check out the repo
 permissions:
