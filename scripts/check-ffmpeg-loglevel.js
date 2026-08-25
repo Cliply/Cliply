@@ -40,8 +40,12 @@ const {
 
 const PLATFORM_DIRS = { darwin: "macos", win32: "windows", linux: "linux" }
 
-// yt-dlp prints this under --verbose, right before it hands over to ffmpeg
-const COMMAND_LINE_MARKER = "ffmpeg command line"
+// yt-dlp prints this under --verbose, right before it hands over to ffmpeg.
+//
+// it names the binary by its *basename*, so windows says "ffmpeg.exe command
+// line:" where macos says "ffmpeg command line:" - matching the bare word cost
+// a full CI round trip, and matching a fixed extension would cost the next one
+const COMMAND_LINE_MARKER = /\bffmpeg\S*\s+command line:/i
 
 // give up rather than hang a CI job forever if the marker never arrives
 const TIMEOUT_MS = 90 * 1000
@@ -185,7 +189,7 @@ function ffmpegCommandLine(engine, args) {
         tail.push(line)
         if (tail.length > 12) tail.shift()
 
-        if (line.includes(COMMAND_LINE_MARKER)) {
+        if (COMMAND_LINE_MARKER.test(line)) {
           found = line
           finish()
           return
