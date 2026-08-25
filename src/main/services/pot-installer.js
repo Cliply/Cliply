@@ -47,7 +47,12 @@ const DEFAULT_BASE_URL =
  * being empty is the correct state today: it makes the installer inert until
  * the artifacts exist, instead of trusting whatever answers the url.
  */
-const POT_CHECKSUMS = {}
+const POT_CHECKSUMS = {
+  "pot-1.3.2-darwin-arm64.zip":
+    "7357586086aaf6b116af1acbc3051723c8e98104777764efe9a54dd2e233a240",
+  "pot-1.3.2-win32-x64.zip":
+    "57d9db2a1494becf7e434292cbec30fa05577661da31f2ed013bbc92bca932de"
+}
 
 // the payload is a node_modules tree; a slow connection needs room for ~70 mb
 const INSTALL_TIMEOUT_MS = 10 * 60 * 1000
@@ -269,5 +274,9 @@ module.exports = {
   PotInstaller,
   payloadAssetFor,
   POT_VERSION,
-  VERSION_MARKER
+  VERSION_MARKER,
+  // exported for tests - "an asset nobody vouched for is refused" has no seam
+  // once every shipping platform has a digest, and it is the guard that keeps
+  // an unpublished platform from fetching whatever answers the url
+  POT_CHECKSUMS
 }
