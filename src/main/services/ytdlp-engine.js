@@ -32,6 +32,20 @@ const STDERR_BUFFER_LINES = 200
 // kill a process that has printed nothing at all for this long
 const DEFAULT_WATCHDOG_MS = 2 * 60 * 1000
 
+// ...except while postprocessing, where silence is the expected shape rather
+// than a symptom. yt-dlp pipes a postprocessor's ffmpeg output instead of
+// letting it through, so a merge, a remux or an mp3 conversion prints nothing
+// from the moment it starts until the file lands - minutes, on a long video.
+// the download that reaches this phase has already fetched every byte, so the
+// only thing DEFAULT_WATCHDOG_MS achieves here is killing a job that is working
+const POSTPROCESS_WATCHDOG_MS = 30 * 60 * 1000
+
+// ffmpeg's periodic status line, which it rewrites over a carriage return.
+// these are load-bearing for the watchdog and worthless in an issue report:
+// one trim can print thousands of them, and a 200-line buffer full of them
+// would be a report with the actual failure scrolled out of it
+const FFMPEG_PROGRESS_PATTERN = /^(?:frame|size|Lsize)=/
+
 // how long a cancelled process gets to exit before it is killed outright
 const KILL_GRACE_MS = 5000
 
@@ -504,7 +518,26 @@ function buildDownloadArgs({ outputDir, outputTemplate } = {}) {
     "--print",
     STREAM_TEMPLATE,
     "--print",
-    FILE_TEMPLATE
+    FILE_TEMPLATE,
+    // ...and --quiet does not stop at yt-dlp. a trimmed download is handed to
+    // yt-dlp's ffmpeg downloader, which *fetches the media itself* over https,
+    // and it passes our quiet straight through as `-loglevel quiet` - verified
+    // against 2026.08.19. ffmpeg then runs the entire download without printing
+    // one byte, which costs two things:
+    //
+    //   - the no-output watchdog has nothing to see, so it kills any trim that
+    //     runs longer than DEFAULT_WATCHDOG_MS. an ffmpeg section download runs
+    //     at roughly real time, so that is a clip of a couple of minutes.
+    //   - a failure arrives as a bare "ERROR: ffmpeg exited with code N" with
+    //     ffmpeg's own reason discarded. "Permission denied" reaches us as
+    //     FFMPEG_ERROR / "Something went wrong while processing the video"
+    //     rather than as the PERMISSION_ERROR the taxonomy would have named.
+    //
+    // --no-quiet re-enables both. it also restores yt-dlp's own line-oriented
+    // output on stdout, which is what parseDestinationLine's non-quiet
+    // fallbacks were already written for - the after_move print still lands
+    // last, so it is still the final filePath
+    "--no-quiet"
   ]
 
   if (outputDir) {
@@ -1179,6 +1212,10 @@ class YtdlpOperation extends EventEmitter {
   handleStderrLine(line) {
     if (!line || !line.trim()) return
 
+    // the watchdog was already fed by the chunk this line arrived in, before
+    // anything was parsed - so dropping the line here costs it nothing
+    if (FFMPEG_PROGRESS_PATTERN.test(line.trimStart())) return
+
     const redacted = redactLogLine(line.trimEnd())
     this.stderrBuffer.push(redacted)
     this.emit("stderr", redacted)
@@ -1187,7 +1224,31 @@ class YtdlpOperation extends EventEmitter {
   setPhase(phase) {
     if (this.phase === phase) return
     this.phase = phase
+
+    // the deadline is per-phase, and postprocessing's is much longer. re-arm on
+    // the way in rather than waiting for output that, in this phase, is not
+    // coming - the timer running right now was started under the old deadline.
+    //
+    // only this phase: the terminal phases are set either side of the close
+    // handler's clearTimers(), where arming anything would be a timer nobody
+    // clears again
+    if (phase === "processing") {
+      this.touch()
+    }
+
     this.emit("phase", phase)
+  }
+
+  /**
+   * how long this phase gets to stay silent before it is called wedged
+   * @returns {number} milliseconds, or 0 when the watchdog is off entirely
+   */
+  watchdogDeadline() {
+    if (!this.watchdogMs) return 0
+
+    return this.phase === "processing"
+      ? Math.max(this.watchdogMs, POSTPROCESS_WATCHDOG_MS)
+      : this.watchdogMs
   }
 
   // reset the no-output watchdog
@@ -1196,14 +1257,16 @@ class YtdlpOperation extends EventEmitter {
 
     if (this.watchdog) {
       clearTimeout(this.watchdog)
+      this.watchdog = null
     }
 
-    if (!this.watchdogMs) return
+    const deadline = this.watchdogDeadline()
+    if (!deadline) return
 
     this.watchdog = setTimeout(() => {
       this.stalled = true
       this.killChild()
-    }, this.watchdogMs)
+    }, deadline)
   }
 
   clearTimers() {
@@ -2003,6 +2066,7 @@ module.exports = {
   ENGINE_DIR_NAME,
   STDERR_BUFFER_LINES,
   DEFAULT_WATCHDOG_MS,
+  POSTPROCESS_WATCHDOG_MS,
   PROBE_TIMEOUT_MS,
   KILL_GRACE_MS,
   SHUTDOWN_WAIT_MS

@@ -140,6 +140,67 @@ describe("combined download args", () => {
   })
 })
 
+describe("nothing that downloads is run quiet", () => {
+  const OPERATION_PARAMS = {
+    combined: { height: 720, container: "mp4" },
+    audio: { audioMode: "mp3" },
+    simple: { formatSelector: "best" }
+  }
+
+  /**
+   * --print implies --quiet, and --quiet does not stop at yt-dlp: a trimmed
+   * download runs on yt-dlp's ffmpeg downloader, which fetches the media over
+   * https itself and inherits our quiet as `-loglevel quiet`. ffmpeg then runs
+   * the whole download in silence - nothing for the no-output watchdog to see,
+   * and a failure that arrives as "ffmpeg exited with code N" with ffmpeg's own
+   * reason thrown away.
+   *
+   * so the rule is a pairing, not a flag: an operation that prints must also
+   * say --no-quiet.
+   */
+  for (const [operation, extra] of Object.entries(OPERATION_PARAMS)) {
+    test(`${operation} pairs --print with --no-quiet`, () => {
+      const args = buildArgs(operation, {
+        ...PATHS,
+        ...extra,
+        url: "https://youtu.be/abc",
+        outputDir: "/downloads",
+        outputTemplate: "out.%(ext)s"
+      })
+
+      expect(args).toContain("--print")
+      expect(args).toContain("--no-quiet")
+    })
+
+    test(`${operation} stays audible when it is trimmed`, () => {
+      const args = buildArgs(operation, {
+        ...PATHS,
+        ...extra,
+        url: "https://youtu.be/abc",
+        outputDir: "/downloads",
+        outputTemplate: "out.%(ext)s",
+        timeRange: { start: 5, end: 65 }
+      })
+
+      expect(args).toContain("--no-quiet")
+      expect(args).not.toContain("--quiet")
+    })
+  }
+
+  // the other half of the pairing: --dump-json hands stdout to JSON.parse, so
+  // chatter there is not noise, it is a parse error. these two print no CLIPLY
+  // markers and have no ffmpeg downloader behind them, so they stay quiet
+  for (const operation of ["info", "playlist-info"]) {
+    test(`${operation} is left quiet`, () => {
+      const args = buildArgs(operation, { ...PATHS, url: "https://youtu.be/abc" })
+
+      expect(args).toContain("--dump-json")
+      expect(args).not.toContain("--print")
+      expect(args).not.toContain("--no-quiet")
+    })
+  }
+})
+
 describe("quality tier download args", () => {
   const TIER = {
     ...PATHS,
