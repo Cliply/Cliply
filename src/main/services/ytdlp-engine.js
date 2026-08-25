@@ -524,13 +524,22 @@ function buildCommonArgs({
   }
 
   /**
-   * the PO token escalation, which is yt-dlp's own and not ours
+   * the PO token escalation
    *
-   * their guidance: "By default, yt-dlp will attempt to download videos using
-   * clients that do not currently require a PO Token [...] if you are having
-   * issues with the default clients, it is suggested to use the `mweb` client
-   * with a PO Token." So the default path passes no player_client at all and
-   * gets yt-dlp's own client list, including the fallbacks it adds itself.
+   * all this does is make a token provider reachable. it names no client and
+   * sets no fetch policy, because yt-dlp already owns both: it picks from its
+   * own client list, applies its own fallbacks, and - given a provider - it
+   * notices the client it chose needs a token and fetches one unprompted.
+   * That was verified end to end: no player_client passed, and the log still
+   * read "Generating a gvs PO Token for web client" followed by a download.
+   *
+   * yt-dlp's wiki does suggest `mweb` "if you are having issues with the
+   * default clients", but that advice is written for someone with no provider
+   * at all - the missing token *is* the issue it describes. Pinning a client
+   * here would override the one decision yt-dlp keeps in step with youtube,
+   * and freeze us on whichever client happened to be right today. If telemetry
+   * ever shows the defaults still failing with a provider present, `mweb`
+   * becomes a second escalation step rather than the first.
    *
    * three conditions, each of which alone is a reason to stay quiet:
    *   - potEnabled: this install has actually been refused. minting costs
@@ -555,7 +564,6 @@ function buildCommonArgs({
    */
   if (potEnabled && potPaths && denoPath) {
     args.push("--plugin-dirs", potPaths.pluginDir)
-    args.push("--extractor-args", "youtube:player_client=mweb")
     args.push(
       "--extractor-args",
       `youtubepot-bgutilscript:server_home=${potPaths.serverHome}`

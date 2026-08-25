@@ -1046,7 +1046,9 @@ describe("po token escalation reaches the spawned process", () => {
     const args = await argsFor({ potEnabled: true })
 
     expect(args).toContain("--plugin-dirs")
-    expect(args).toContain("youtube:player_client=mweb")
+    expect(args.join(" ")).toContain("youtubepot-bgutilscript:server_home=")
+    // the client stays yt-dlp's call, here as everywhere else
+    expect(args.join(" ")).not.toContain("player_client")
   })
 
   test("sends nothing extra for an install that was never refused", async () => {
