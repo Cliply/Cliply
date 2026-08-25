@@ -589,47 +589,12 @@ class YtdlpUpdater {
 
   /**
    * put a prepared directory in place of the live one
-   *
-   * both live in userData/engine, so the renames are same-filesystem and
-   * atomic; the old engine is only deleted once the new one is in place, and a
-   * failure halfway puts it straight back
-   *
    * @param {string} preparedDir - directory to move in
    * @param {string} installedDir - directory to replace
    * @returns {Promise<void>}
    */
   async swapIn(preparedDir, installedDir) {
-    const retiredDir = `${installedDir}.retired-${Date.now()}`
-    let retired = false
-
-    try {
-      // whatever is there goes, directory or not - an older build's onefile
-      // could be sitting on this exact path
-      if (await pathExists(installedDir)) {
-        await fsp.rename(installedDir, retiredDir)
-        retired = true
-      }
-
-      await fsp.rename(preparedDir, installedDir)
-    } catch (error) {
-      if (retired) {
-        await removeQuietly(installedDir)
-
-        try {
-          await fsp.rename(retiredDir, installedDir)
-        } catch (restoreError) {
-          // the previous engine is still on disk, just not where the engine
-          // looks for it. losing that fact here is how a user ends up with no
-          // downloader at all, so it travels with the error
-          error.retiredDir = retiredDir
-          error.restoreError = restoreError.message
-        }
-      }
-
-      throw error
-    }
-
-    await removeQuietly(retiredDir)
+    return swapIn(preparedDir, installedDir)
   }
 
   /**
@@ -1011,6 +976,54 @@ function isRedirect(response) {
  * @param {string} destination - directory to create
  * @returns {Promise<void>}
  */
+/**
+ * put a prepared directory in place of the live one
+ *
+ * both directories live under the same userData parent, so the renames are
+ * same-filesystem and atomic; the old copy is only deleted once the new one is
+ * in place, and a failure halfway puts it straight back. nothing ever observes
+ * a half-written directory at the live path, which is the whole point - both
+ * the engine and the PO token payload are found by looking for files inside
+ * one, so a directory that is partly there reads as one that is fully there.
+ *
+ * @param {string} preparedDir - directory to move in
+ * @param {string} installedDir - directory to replace
+ * @returns {Promise<void>}
+ */
+async function swapIn(preparedDir, installedDir) {
+  const retiredDir = `${installedDir}.retired-${Date.now()}`
+  let retired = false
+
+  try {
+    // whatever is there goes, directory or not - an older build's onefile
+    // could be sitting on this exact path
+    if (await pathExists(installedDir)) {
+      await fsp.rename(installedDir, retiredDir)
+      retired = true
+    }
+
+    await fsp.rename(preparedDir, installedDir)
+  } catch (error) {
+    if (retired) {
+      await removeQuietly(installedDir)
+
+      try {
+        await fsp.rename(retiredDir, installedDir)
+      } catch (restoreError) {
+        // the previous engine is still on disk, just not where the engine
+        // looks for it. losing that fact here is how a user ends up with no
+        // downloader at all, so it travels with the error
+        error.retiredDir = retiredDir
+        error.restoreError = restoreError.message
+      }
+    }
+
+    throw error
+  }
+
+  await removeQuietly(retiredDir)
+}
+
 async function copyDirectory(source, destination) {
   await fsp.mkdir(destination, { recursive: true })
 
@@ -1112,6 +1125,10 @@ module.exports = {
   compareVersions,
   releaseAssetFor,
   createHttpClient,
+  // the atomic install, shared with the PO token payload - it lands the same
+  // way, beside the engine, for the same reason
+  swapIn,
+  removeQuietly,
   // exported for tests - the address fallback has no seam through the client
   httpGet,
   resolveAddresses,
