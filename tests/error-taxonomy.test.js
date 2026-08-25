@@ -314,6 +314,13 @@ describe("parity with the engine's retired pattern table", () => {
     ["unable to download webpage", "NETWORK_ERROR"],
     ["HTTP Error 503: Service Unavailable", "NETWORK_ERROR"],
     ["remote end closed connection without response", "NETWORK_ERROR"],
+    // 429 arrives wrapped in the same "unable to download webpage" wording as a
+    // genuine network fault, so it has to be read before that pattern claims it
+    [
+      "unable to download webpage: HTTP Error 429: Too Many Requests",
+      "RATE_LIMITED"
+    ],
+    ["HTTP Error 429: Too Many Requests", "RATE_LIMITED"],
     ["ffmpeg exited with code 1", "FFMPEG_ERROR"],
     ["ERROR: Postprocessing: something went wrong", "FFMPEG_ERROR"],
     // the engine folded these into one FFMPEG_ERROR; the taxonomy splits them

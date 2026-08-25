@@ -952,6 +952,20 @@ describe("error mapping", () => {
     expect(result.retryable).toBe(true)
   })
 
+  // a throttled connection is the one failure where our own advice made the
+  // problem worse: NETWORK_ERROR told the user to retry, and retrying is what
+  // deepens a rate limit. it must not be retryable, and it must not blame the
+  // user's connection - theirs is fine, it is youtube refusing us
+  test("rate limiting is not retryable and does not blame the connection", () => {
+    const result = map(
+      "ERROR: unable to download webpage: HTTP Error 429: Too Many Requests"
+    )
+
+    expect(result.code).toBe(ERROR_CODES.RATE_LIMITED)
+    expect(result.retryable).toBe(false)
+    expect(`${result.message} ${result.suggestion}`).not.toMatch(/connection/i)
+  })
+
   test("extraction failures are the ones an update can fix", () => {
     const result = map("ERROR: [youtube] abc: nsig extraction failed: Some players may fail")
 

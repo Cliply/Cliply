@@ -28,6 +28,10 @@ const ERROR_CATEGORIES = Object.freeze({
   EXTRACTION_FAILED: "EXTRACTION_FAILED",
   INVALID_URL: "INVALID_URL",
   NETWORK_ERROR: "NETWORK_ERROR",
+  // youtube refusing us for asking too often, which is not a network fault and
+  // is made worse by retrying - see the pattern entry for why it must be read
+  // before NETWORK_ERROR
+  RATE_LIMITED: "RATE_LIMITED",
   STALLED: "STALLED",
   DISK_FULL: "DISK_FULL",
   PERMISSION_ERROR: "PERMISSION_ERROR",
@@ -176,6 +180,16 @@ const CATEGORY_PATTERNS = [
       // picked, and an engine update is what fixes it
       /some web client https formats have been skipped/i
     ]
+  },
+  // --- throttling before the generic network entry that used to swallow it ---
+  {
+    // yt-dlp reports a 429 as "unable to download webpage: HTTP Error 429",
+    // which the NETWORK_ERROR entry below matches on its first pattern. that
+    // made a throttled connection look like a broken one, and NETWORK_ERROR is
+    // retryable and says "check your connection" - so we told the user to do
+    // the one thing that deepens a rate limit. this entry has to stay above it.
+    category: ERROR_CATEGORIES.RATE_LIMITED,
+    patterns: [/http error 429/i, /too many requests/i]
   },
   {
     category: ERROR_CATEGORIES.NETWORK_ERROR,

@@ -129,6 +129,12 @@ const ERROR_METADATA = {
     suggestion: "Check your connection and try again.",
     retryable: true
   },
+  // deliberately not retryable, and deliberately silent about the connection:
+  // the user's network is fine, and retrying is what extends the block
+  [ERROR_CODES.RATE_LIMITED]: {
+    message: "YouTube is temporarily limiting this device.",
+    suggestion: "Wait a few minutes before trying again."
+  },
   [ERROR_CODES.DISK_FULL]: {
     message: "Not enough disk space to save this download.",
     suggestion: "Free up some space and try again."
