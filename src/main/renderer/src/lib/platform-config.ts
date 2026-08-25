@@ -93,7 +93,7 @@ export const PLATFORM_REGISTRY: Record<Platform, PlatformConfig> = {
     logo: "./pinterest-logo.svg",
     formResolver: zodResolver(pinterestUrlSchema),
     placeholder: "paste video url here...",
-    helperText: "supports pinterest videos from pin.it urls",
+    helperText: "supports pin.it and pinterest.com/pin links, any country domain",
     loadingText: "\u{1F40B} getting video information",
     successMessage: "Video information loaded successfully!",
     errorMessages: {

@@ -1,7 +1,22 @@
 import { z } from "zod"
 
 const YOUTUBE_URL_REGEX = /^(https?:\/\/)?(www\.)?(youtube\.com\/(watch\?v=|embed\/|v\/|shorts\/)|youtu\.be\/)[\w-]+/
-const PINTEREST_URL_REGEX = /^https?:\/\/(www\.)?(pinterest\.com\/pin\/[\w-]+|pin\.it\/[\w-]+)/
+/**
+ * pinterest sends people to their own country's domain, so `www.pinterest.com`
+ * is the shape in the documentation rather than the shape in a clipboard -
+ * `ru.pinterest.com`, `in.pinterest.com` and `pinterest.co.uk` are all the same
+ * pin, and all of them used to be refused here. the protocol is optional for
+ * the same reason it already is for youtube: a link pasted out of a chat window
+ * often arrives without one.
+ *
+ * the host is deliberately not `pinterest\.[\w.]+`. that would also accept
+ * `pinterest.com.evil.com`, because the interesting part of a hostname is its
+ * end, not whether our word appears somewhere in it. so: any subdomains, then
+ * a literal `pinterest.`, then a tld with at most one country suffix after it,
+ * and then `/pin/` immediately - nothing may sit between the tld and the path.
+ */
+const PINTEREST_URL_REGEX =
+  /^(?:https?:\/\/)?(?:(?:[a-z0-9-]+\.)*pinterest\.[a-z]{2,3}(?:\.[a-z]{2})?\/pin\/[\w-]+|pin\.it\/[\w-]+)/i
 const TIKTOK_URL_REGEX = /^https?:\/\/(?:(?:www\.)?tiktok\.com\/@[\w.-]+\/video\/\d+|vm\.tiktok\.com\/[\w-]+|vt\.tiktok\.com\/[\w-]+|(?:www\.)?tiktok\.com\/t\/[\w-]+|(?:www\.)?tiktok\.com\/embed\/\d+)/
 
 export const youtubeUrlSchema = z.object({
