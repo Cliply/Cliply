@@ -237,6 +237,63 @@ describe("failure paths", () => {
     expect(handle.getStderr()).not.toContain("203.0.113.7")
     expect(handle.getStderr()).toContain("<redacted>")
   })
+
+  test("ffmpeg's status line is kept out of the buffer, and its failure is not", async () => {
+    const spawnFn = createSpawner()
+    const engine = createEngine(spawnFn, { watchdogMs: 5000 })
+
+    const handle = engine.downloadCombined(DOWNLOAD)
+    await settle()
+
+    const child = spawnFn.children[0]
+
+    // a trim runs ffmpeg as the downloader, and it rewrites this line about
+    // twice a second for the whole run - more than the buffer holds, several
+    // times over
+    for (let index = 0; index < 400; index++) {
+      child.complain(
+        `frame= ${index} fps=102 q=-1.0 size=   ${index}KiB time=00:00:01.00 bitrate=2318.9kbits/s speed=1.71x\r`
+      )
+    }
+
+    child.complain(
+      "[out#0/mp4 @ 0x600] Error opening output file file:/tmp/downloads/out.mp4.part: Permission denied\n"
+    )
+    child.complain("ERROR: ffmpeg exited with code 243\n")
+    await settle()
+
+    child.exit(1)
+    const error = await handle.promise.catch((thrown) => thrown)
+
+    expect(handle.getStderr()).not.toMatch(/frame=/)
+    expect(handle.getStderr()).toContain("Permission denied")
+
+    // the whole point of keeping it: the taxonomy can name what went wrong
+    expect(error.code).toBe(ERROR_CODES.PERMISSION_ERROR)
+  })
+
+  test("ffmpeg's status line still holds the watchdog off", async () => {
+    const spawnFn = createSpawner()
+    const engine = createEngine(spawnFn, { watchdogMs: 60 })
+
+    const handle = engine.downloadCombined(DOWNLOAD)
+    await settle()
+
+    // dropped from the buffer, but never from the watchdog: a trimmed download
+    // has nothing else to say for minutes at a time
+    for (let index = 0; index < 4; index++) {
+      await new Promise((resolve) => setTimeout(resolve, 25))
+      spawnFn.children[0].complain(
+        `frame= ${index} fps=102 q=-1.0 size=   1KiB time=00:00:01.00\r`
+      )
+      await settle()
+    }
+
+    expect(spawnFn.children[0].killed).toBe(false)
+
+    spawnFn.children[0].exit(0)
+    await expect(handle.promise).resolves.toBeDefined()
+  })
 })
 
 describe("cancellation", () => {
@@ -530,6 +587,66 @@ describe("watchdog", () => {
 
     spawnFn.children[0].exit(0)
     await expect(handle.promise).resolves.toBeDefined()
+  })
+
+  test("postprocessing is allowed to be silent", async () => {
+    const spawnFn = createSpawner()
+    const engine = createEngine(spawnFn, { watchdogMs: 20, killGraceMs: 10 })
+
+    const handle = engine.downloadCombined(DOWNLOAD)
+    await settle()
+
+    const child = spawnFn.children[0]
+
+    // one stream, and it has finished: everything from here is ffmpeg merging,
+    // remuxing or converting, and yt-dlp pipes that output instead of letting
+    // it through - so the process goes quiet until the file lands
+    child.say("CLIPLY_STREAM|140\n")
+    child.say("CLIPLY|100.0%|1.00MiB/s|00:00|0\n")
+    await settle()
+
+    expect(handle.phase).toBe("processing")
+
+    // far past the deadline the download phase was running under
+    await new Promise((resolve) => setTimeout(resolve, 80))
+
+    expect(child.killed).toBe(false)
+    expect(child.signals).toHaveLength(0)
+    expect(handle.stalled).toBe(false)
+
+    child.say("CLIPLY_FILE|/tmp/downloads/out.mp4\n")
+    await settle()
+    child.exit(0)
+
+    await expect(handle.promise).resolves.toMatchObject({
+      filePath: "/tmp/downloads/out.mp4"
+    })
+  })
+
+  test("a download that never reaches postprocessing keeps the short deadline", async () => {
+    const spawnFn = createSpawner()
+    const engine = createEngine(spawnFn, { watchdogMs: 20, killGraceMs: 10 })
+
+    const handle = engine.downloadCombined(DOWNLOAD)
+    await settle()
+
+    const child = spawnFn.children[0]
+
+    // mid-stream, so the phase is still `downloading`
+    child.say("CLIPLY_STREAM|140\n")
+    child.say("CLIPLY| 40.0%|1.00MiB/s|00:10|10\n")
+    await settle()
+
+    expect(handle.phase).toBe("downloading")
+
+    await new Promise((resolve) => setTimeout(resolve, 80))
+
+    expect(child.signals).toContain("SIGTERM")
+
+    child.exit(null)
+    await expect(handle.promise).rejects.toMatchObject({
+      code: ERROR_CODES.STALLED
+    })
   })
 
   test("the timer is cleared on a normal exit", async () => {

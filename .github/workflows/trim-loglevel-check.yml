@@ -1,0 +1,68 @@
+name: Trim ffmpeg loglevel check
+
+# deliberately NOT on tags and NOT on pull_request close.
+#
+# a release comes from exactly two places in this repo: build-release.yml on a
+# `v*` tag, and auto-release-on-merge.yml on a merged `auto-update/*` PR. this
+# workflow can reach neither, so it can run on a branch as often as it likes
+# without cutting anything.
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - "ci/**"
+
+# nothing here writes; the default read is enough to check out the repo
+permissions:
+  contents: read
+
+jobs:
+  loglevel:
+    name: ${{ matrix.label }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      # windows is the platform this cannot be verified on locally, so it must
+      # not be cancelled by an unrelated macos failure
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            label: windows
+            target: win32-x64
+          - os: macos-14
+            label: macos
+            target: darwin-arm64
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Download FFmpeg (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path "binaries/windows"
+          Invoke-WebRequest -Uri "https://github.com/${{ github.repository }}/releases/download/binaries/ffmpeg.exe" -OutFile "binaries/windows/ffmpeg.exe"
+
+      - name: Download FFmpeg (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          mkdir -p binaries/macos
+          curl -fL --retry 3 --retry-delay 2 -o binaries/macos/ffmpeg \
+            "https://github.com/${{ github.repository }}/releases/download/binaries/ffmpeg"
+          chmod +x binaries/macos/ffmpeg
+
+      # no renderer install or build: the check loads one main-process module
+      # and shells out to the two binaries, so the ui is not involved
+      - run: npm ci
+
+      - name: Fetch yt-dlp engine
+        run: npm run fetch:ytdlp
+        env:
+          BUILD_TARGET_PLATFORM: ${{ matrix.target }}
+
+      - name: Check ffmpeg is not run quiet on a trim
+        run: node scripts/check-ffmpeg-loglevel.js
