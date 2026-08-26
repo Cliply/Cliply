@@ -97,19 +97,18 @@ describe("po token escalation", () => {
     expect(args.join(" ")).not.toContain("player_client")
   })
 
-  test("offers the provider without dictating a client", () => {
+  test("asks for the client that has to have a token, and the provider", () => {
     const args = buildCommonArgs({ ...POT, potEnabled: true })
 
     expect(valueAfter(args, "--plugin-dirs")).toBe("/res/binaries/pot/plugin")
     expect(args).toContain(
       "youtubepot-bgutilscript:server_home=/res/binaries/pot/server"
     )
-    // making the provider reachable is the whole escalation. given one,
-    // yt-dlp picks a client, notices that client needs a token and fetches it
-    // with no instruction from us - verified end to end. naming a client here
-    // would override the one choice yt-dlp keeps in step with youtube, and
-    // pin us to whichever client was right on the day this was written
-    expect(args.join(" ")).not.toContain("player_client")
+    // 0.3.6 shipped this without naming a client and the telemetry said why
+    // that is not enough: a provider yt-dlp never consults mints nothing. mweb
+    // requires a gvs token, so asking for it is what guarantees the provider
+    // is actually used - see the comment in buildCommonArgs
+    expect(args).toContain("youtube:player_client=mweb")
   })
 
   // fetch_pot defaults to `auto`, which is yt-dlp deciding whether the chosen

@@ -551,9 +551,26 @@ function buildCommonArgs({
    *   - denoPath: the provider runs its generator on the js runtime we ship.
    *     no runtime, nothing to mint with
    *
-   * fetch_pot is deliberately not set: it defaults to `auto`, which is yt-dlp
-   * deciding whether the chosen client needs a token for a given context, and
-   * that is the part which tracks youtube's rollout.
+   * mweb is named because a provider yt-dlp never consults mints nothing.
+   *
+   * 0.3.6 shipped this without a player_client, on the reasoning that yt-dlp
+   * picks its own clients and asks for a token when the one it picked needs
+   * one. That was measured on a machine youtube was not refusing, where the
+   * default `web` client did ask. On refused machines it mostly does not: the
+   * default clients are chosen precisely to avoid needing a token, so the
+   * payload sat installed and idle. The telemetry put a number on it - the
+   * same installs went from 3.7% to 16.3% of metadata fetches succeeding once
+   * the payload landed, which is a token being fetched sometimes rather than
+   * always.
+   *
+   * mweb requires a gvs token, so asking for it is what turns "the provider
+   * may be consulted" into "the provider is consulted". It is also what
+   * yt-dlp's own guidance says to reach for once the default clients are the
+   * thing failing, which is exactly the state an escalated install is in.
+   *
+   * fetch_pot stays at its `auto` default. `always` would force a token even
+   * where the client does not need one, and with mweb selected the two agree
+   * anyway - so this remains yt-dlp's call, tracking youtube's rollout.
    *
    * --plugin-dirs is given explicitly rather than relying on a yt-dlp-plugins
    * folder beside the binary. the engine self-updates by replacing its whole
@@ -564,6 +581,7 @@ function buildCommonArgs({
    */
   if (potEnabled && potPaths && denoPath) {
     args.push("--plugin-dirs", potPaths.pluginDir)
+    args.push("--extractor-args", "youtube:player_client=mweb")
     args.push(
       "--extractor-args",
       `youtubepot-bgutilscript:server_home=${potPaths.serverHome}`
