@@ -43,9 +43,13 @@ const DEFAULT_BASE_URL =
  * to pin next to it.
  *
  * an asset with no entry here is one nobody has published and digested yet,
- * and it is refused rather than fetched - see checksumFor(). that is why this
- * being empty is the correct state today: it makes the installer inert until
- * the artifacts exist, instead of trusting whatever answers the url.
+ * and it is refused rather than fetched - see checksumFor(), and canInstall(),
+ * which is that same question asked before a user is told a fix is coming.
+ * the entries are therefore the whole list of platforms this feature works on:
+ * build-pot-payload.yml publishes exactly these two, and an install on any
+ * other platform declines quietly rather than trusting whatever answers the
+ * url. adding a platform means publishing its payload and pinning it here, in
+ * that order.
  */
 const POT_CHECKSUMS = {
   "pot-1.3.2-darwin-arm64.zip":
