@@ -1,0 +1,63 @@
+[youtube:tab] Extracting URL: https://www.youtube.com/playlist?list=PL590L5WQmH8fJ54F369BLDSqIwcs-TCfs
+[youtube:tab] PL590L5WQmH8fJ54F369BLDSqIwcs-TCfs: Downloading webpage
+[youtube:tab] Sleeping 1.0 seconds ...
+[youtube:tab] PL590L5WQmH8fJ54F369BLDSqIwcs-TCfs: Redownloading playlist API JSON with unavailable videos
+[download] Downloading playlist: Google - Year In Search (unofficial)
+[youtube:tab] Playlist Google - Year In Search (unofficial): Downloading 3 items of 19
+[download] Downloading item 1 of 3
+[youtube] Extracting URL: https://www.youtube.com/watch?v=Hs5IuUOs2y4
+[youtube] Sleeping 1.0 seconds ...
+[youtube] Hs5IuUOs2y4: Downloading webpage
+[youtube] Sleeping 1.0 seconds ...
+[youtube] Hs5IuUOs2y4: Downloading visionos player API JSON
+[youtube] Sleeping 1.0 seconds ...
+[youtube] Hs5IuUOs2y4: Downloading m3u8 information
+[info] Hs5IuUOs2y4: Downloading 1 format(s): 134+140
+CLIPLY_STREAM|1|5|Hs5IuUOs2y4|134+140
+[download] Destination: /tmp/plcap/fin/out2/Google - Year In Search (unofficial) [PL590L5WQmH8fJ54F369BLDSqIwcs-TCfs]/005 - Google - Year in Search 2014 [Hs5IuUOs2y4] 360p.f134.mp4
+CLIPLY|  0.0%| Unknown B/s|Unknown|NA|1
+CLIPLY|  0.1%| Unknown B/s|Unknown|NA|1
+CLIPLY|  0.2%| Unknown B/s|Unknown|NA|1
+CLIPLY|  0.4%| Unknown B/s|Unknown|NA|1
+CLIPLY|  0.7%|   1.80MiB/s|00:02|2|1
+CLIPLY|  1.5%|   2.19MiB/s|00:01|1|1
+CLIPLY|  3.0%|   2.92MiB/s|00:01|1|1
+CLIPLY|  6.0%|   4.19MiB/s|00:00|0|1
+CLIPLY| 12.0%|   6.87MiB/s|00:00|0|1
+CLIPLY| 24.0%|   5.26MiB/s|00:00|0|1
+CLIPLY| 48.1%|   4.02MiB/s|00:00|0|1
+CLIPLY| 96.1%|   3.04MiB/s|00:00|0|1
+CLIPLY|100.0%|   3.00MiB/s|00:00|0|1
+CLIPLY|100.0%|2.81MiB/s|NA|NA|1
+[download] Destination: /tmp/plcap/fin/out2/Google - Year In Search (unofficial) [PL590L5WQmH8fJ54F369BLDSqIwcs-TCfs]/005 - Google - Year in Search 2014 [Hs5IuUOs2y4] 360p.f140.m4a
+CLIPLY|  0.1%| 760.39KiB/s|00:01|1|1
+CLIPLY|  0.2%| 783.49KiB/s|00:01|1|1
+CLIPLY|  0.5%|   1.64MiB/s|00:00|0|1
+CLIPLY|  1.0%|   3.31MiB/s|00:00|0|1
+CLIPLY|  2.1%|   3.81MiB/s|00:00|0|1
+CLIPLY|  4.3%|   3.32MiB/s|00:00|0|1
+CLIPLY|  8.7%|   3.20MiB/s|00:00|0|1
+CLIPLY| 17.5%|   3.49MiB/s|00:00|0|1
+CLIPLY| 35.0%|   4.46MiB/s|00:00|0|1
+CLIPLY| 70.2%|   4.56MiB/s|00:00|0|1
+CLIPLY|100.0%|   4.13MiB/s|00:00|0|1
+CLIPLY|100.0%|3.68MiB/s|NA|NA|1
+[Merger] Merging formats into "/tmp/plcap/fin/out2/Google - Year In Search (unofficial) [PL590L5WQmH8fJ54F369BLDSqIwcs-TCfs]/005 - Google - Year in Search 2014 [Hs5IuUOs2y4] 360p.mp4"
+Deleting original file /tmp/plcap/fin/out2/Google - Year In Search (unofficial) [PL590L5WQmH8fJ54F369BLDSqIwcs-TCfs]/005 - Google - Year in Search 2014 [Hs5IuUOs2y4] 360p.f134.mp4 (pass -k to keep)
+Deleting original file /tmp/plcap/fin/out2/Google - Year In Search (unofficial) [PL590L5WQmH8fJ54F369BLDSqIwcs-TCfs]/005 - Google - Year in Search 2014 [Hs5IuUOs2y4] 360p.f140.m4a (pass -k to keep)
+[VideoRemuxer] Not remuxing media file "/tmp/plcap/fin/out2/Google - Year In Search (unofficial) [PL590L5WQmH8fJ54F369BLDSqIwcs-TCfs]/005 - Google - Year in Search 2014 [Hs5IuUOs2y4] 360p.mp4"; already is in target format mp4
+CLIPLY_FILE|1|"/tmp/plcap/fin/out2/Google - Year In Search (unofficial) [PL590L5WQmH8fJ54F369BLDSqIwcs-TCfs]/005 - Google - Year in Search 2014 [Hs5IuUOs2y4] 360p.mp4"
+[info] Writing '%(playlist_autonumber)s|%(filepath)j' to: /tmp/plcap/fin/runs/partial.records
+[download] Downloading item 2 of 3
+[youtube] Extracting URL: https://www.youtube.com/watch?v=mt7rGhAm2CY
+[youtube] Sleeping 1.0 seconds ...
+[youtube] mt7rGhAm2CY: Downloading webpage
+[youtube] Sleeping 1.0 seconds ...
+[youtube] mt7rGhAm2CY: Downloading visionos player API JSON
+[download] Downloading item 3 of 3
+[youtube] Extracting URL: https://www.youtube.com/watch?v=JcDTARrdoRs
+[youtube] Sleeping 1.0 seconds ...
+[youtube] JcDTARrdoRs: Downloading webpage
+[youtube] Sleeping 1.0 seconds ...
+[youtube] JcDTARrdoRs: Downloading visionos player API JSON
+[download] Finished downloading playlist: Google - Year In Search (unofficial)

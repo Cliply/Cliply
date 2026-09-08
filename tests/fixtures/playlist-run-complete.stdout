@@ -1,0 +1,98 @@
+[youtube:tab] Extracting URL: https://www.youtube.com/playlist?list=PLLojVvWCZ5N4
+[youtube:tab] PLLojVvWCZ5N4: Downloading webpage
+[youtube:tab] Sleeping 1.0 seconds ...
+[youtube:tab] PLLojVvWCZ5N4: Redownloading playlist API JSON with unavailable videos
+[download] Downloading playlist: Short talks to watch during your coffee break
+[youtube:tab] Playlist Short talks to watch during your coffee break: Downloading 2 items of 11
+[download] Downloading item 1 of 2
+[youtube] Extracting URL: https://www.youtube.com/watch?v=TeVE4TQPEwM
+[youtube] Sleeping 1.0 seconds ...
+[youtube] TeVE4TQPEwM: Downloading webpage
+[youtube] Sleeping 1.0 seconds ...
+[youtube] TeVE4TQPEwM: Downloading visionos player API JSON
+[youtube] Sleeping 1.0 seconds ...
+[youtube] TeVE4TQPEwM: Downloading m3u8 information
+[info] TeVE4TQPEwM: Downloading 1 format(s): 134+140
+CLIPLY_STREAM|1|1|TeVE4TQPEwM|134+140
+[download] Destination: /tmp/plcap/fin/out/Short talks to watch during your coffee break [PLLojVvWCZ5N4]/001 - The Power of Imagination — Onstage and Off ｜ Suki Hillier ｜ TED [TeVE4TQPEwM] 360p.f134.mp4
+CLIPLY|  0.0%| Unknown B/s|Unknown|NA|1
+CLIPLY|  0.1%| Unknown B/s|Unknown|NA|1
+CLIPLY|  0.1%| Unknown B/s|Unknown|NA|1
+CLIPLY|  0.3%| Unknown B/s|Unknown|NA|1
+CLIPLY|  0.6%|   1.53MiB/s|00:03|3|1
+CLIPLY|  1.2%|   2.21MiB/s|00:02|2|1
+CLIPLY|  2.4%|   3.41MiB/s|00:01|1|1
+CLIPLY|  4.9%|   5.34MiB/s|00:00|0|1
+CLIPLY|  9.8%|   6.97MiB/s|00:00|0|1
+CLIPLY| 19.5%|   5.38MiB/s|00:00|0|1
+CLIPLY| 39.1%|   4.39MiB/s|00:00|0|1
+CLIPLY| 78.2%|   3.87MiB/s|00:00|0|1
+CLIPLY|100.0%|   3.82MiB/s|00:00|0|1
+CLIPLY|100.0%|3.56MiB/s|NA|NA|1
+[download] Destination: /tmp/plcap/fin/out/Short talks to watch during your coffee break [PLLojVvWCZ5N4]/001 - The Power of Imagination — Onstage and Off ｜ Suki Hillier ｜ TED [TeVE4TQPEwM] 360p.f140.m4a
+CLIPLY|  0.0%| Unknown B/s|Unknown|NA|1
+CLIPLY|  0.1%|   1.45MiB/s|00:03|3|1
+CLIPLY|  0.1%|   2.90MiB/s|00:01|1|1
+CLIPLY|  0.3%|   5.55MiB/s|00:00|0|1
+CLIPLY|  0.6%|  10.31MiB/s|00:00|0|1
+CLIPLY|  1.3%|   6.19MiB/s|00:00|0|1
+CLIPLY|  2.6%|   5.49MiB/s|00:00|0|1
+CLIPLY|  5.3%|   5.21MiB/s|00:00|0|1
+CLIPLY| 10.5%|   5.26MiB/s|00:00|0|1
+CLIPLY| 21.1%|   4.65MiB/s|00:00|0|1
+CLIPLY| 42.3%|   3.81MiB/s|00:00|0|1
+CLIPLY| 84.5%|   3.73MiB/s|00:00|0|1
+CLIPLY|100.0%|   3.71MiB/s|00:00|0|1
+CLIPLY|100.0%|3.55MiB/s|NA|NA|1
+[Merger] Merging formats into "/tmp/plcap/fin/out/Short talks to watch during your coffee break [PLLojVvWCZ5N4]/001 - The Power of Imagination — Onstage and Off ｜ Suki Hillier ｜ TED [TeVE4TQPEwM] 360p.mp4"
+Deleting original file /tmp/plcap/fin/out/Short talks to watch during your coffee break [PLLojVvWCZ5N4]/001 - The Power of Imagination — Onstage and Off ｜ Suki Hillier ｜ TED [TeVE4TQPEwM] 360p.f140.m4a (pass -k to keep)
+Deleting original file /tmp/plcap/fin/out/Short talks to watch during your coffee break [PLLojVvWCZ5N4]/001 - The Power of Imagination — Onstage and Off ｜ Suki Hillier ｜ TED [TeVE4TQPEwM] 360p.f134.mp4 (pass -k to keep)
+[VideoRemuxer] Not remuxing media file "/tmp/plcap/fin/out/Short talks to watch during your coffee break [PLLojVvWCZ5N4]/001 - The Power of Imagination — Onstage and Off ｜ Suki Hillier ｜ TED [TeVE4TQPEwM] 360p.mp4"; already is in target format mp4
+CLIPLY_FILE|1|"/tmp/plcap/fin/out/Short talks to watch during your coffee break [PLLojVvWCZ5N4]/001 - The Power of Imagination \u2014 Onstage and Off \uff5c Suki Hillier \uff5c TED [TeVE4TQPEwM] 360p.mp4"
+[info] Writing '%(playlist_autonumber)s|%(filepath)j' to: /tmp/plcap/fin/runs/complete.records
+[download] Downloading item 2 of 2
+[youtube] Extracting URL: https://www.youtube.com/watch?v=kz-I5zIGbj4
+[youtube] Sleeping 1.0 seconds ...
+[youtube] kz-I5zIGbj4: Downloading webpage
+[youtube] Sleeping 1.0 seconds ...
+[youtube] kz-I5zIGbj4: Downloading visionos player API JSON
+[youtube] Sleeping 1.0 seconds ...
+[youtube] kz-I5zIGbj4: Downloading m3u8 information
+[info] kz-I5zIGbj4: Downloading 1 format(s): 134+140
+CLIPLY_STREAM|2|2|kz-I5zIGbj4|134+140
+[download] Destination: /tmp/plcap/fin/out/Short talks to watch during your coffee break [PLLojVvWCZ5N4]/002 - Why I Love My Bad Days ｜ Alexi Pappas ｜ TED [kz-I5zIGbj4] 360p.f134.mp4
+CLIPLY|  0.0%| Unknown B/s|Unknown|NA|2
+CLIPLY|  0.1%| Unknown B/s|Unknown|NA|2
+CLIPLY|  0.2%| Unknown B/s|Unknown|NA|2
+CLIPLY|  0.5%| Unknown B/s|Unknown|NA|2
+CLIPLY|  1.0%|   3.33MiB/s|00:00|0|2
+CLIPLY|  2.1%|   3.76MiB/s|00:00|0|2
+CLIPLY|  4.3%|   5.47MiB/s|00:00|0|2
+CLIPLY|  8.6%|   6.69MiB/s|00:00|0|2
+CLIPLY| 17.3%|  10.27MiB/s|00:00|0|2
+CLIPLY| 34.5%|   4.97MiB/s|00:00|0|2
+CLIPLY| 69.1%|   4.35MiB/s|00:00|0|2
+CLIPLY|100.0%|   4.17MiB/s|00:00|0|2
+CLIPLY|100.0%|3.99MiB/s|NA|NA|2
+[download] Destination: /tmp/plcap/fin/out/Short talks to watch during your coffee break [PLLojVvWCZ5N4]/002 - Why I Love My Bad Days ｜ Alexi Pappas ｜ TED [kz-I5zIGbj4] 360p.f140.m4a
+CLIPLY|  0.0%| Unknown B/s|Unknown|NA|2
+CLIPLY|  0.1%|   1.37MiB/s|00:03|3|2
+CLIPLY|  0.1%|   2.36MiB/s|00:02|2|2
+CLIPLY|  0.3%|   4.09MiB/s|00:01|1|2
+CLIPLY|  0.6%|   4.57MiB/s|00:01|1|2
+CLIPLY|  1.3%|   4.44MiB/s|00:01|1|2
+CLIPLY|  2.6%|   4.33MiB/s|00:01|1|2
+CLIPLY|  5.2%|   4.21MiB/s|00:01|1|2
+CLIPLY| 10.4%|   3.94MiB/s|00:01|1|2
+CLIPLY| 20.8%|   4.47MiB/s|00:00|0|2
+CLIPLY| 41.7%|   4.40MiB/s|00:00|0|2
+CLIPLY| 83.3%|   4.01MiB/s|00:00|0|2
+CLIPLY|100.0%|   3.92MiB/s|00:00|0|2
+CLIPLY|100.0%|3.37MiB/s|NA|NA|2
+[Merger] Merging formats into "/tmp/plcap/fin/out/Short talks to watch during your coffee break [PLLojVvWCZ5N4]/002 - Why I Love My Bad Days ｜ Alexi Pappas ｜ TED [kz-I5zIGbj4] 360p.mp4"
+Deleting original file /tmp/plcap/fin/out/Short talks to watch during your coffee break [PLLojVvWCZ5N4]/002 - Why I Love My Bad Days ｜ Alexi Pappas ｜ TED [kz-I5zIGbj4] 360p.f140.m4a (pass -k to keep)
+Deleting original file /tmp/plcap/fin/out/Short talks to watch during your coffee break [PLLojVvWCZ5N4]/002 - Why I Love My Bad Days ｜ Alexi Pappas ｜ TED [kz-I5zIGbj4] 360p.f134.mp4 (pass -k to keep)
+[VideoRemuxer] Not remuxing media file "/tmp/plcap/fin/out/Short talks to watch during your coffee break [PLLojVvWCZ5N4]/002 - Why I Love My Bad Days ｜ Alexi Pappas ｜ TED [kz-I5zIGbj4] 360p.mp4"; already is in target format mp4
+CLIPLY_FILE|2|"/tmp/plcap/fin/out/Short talks to watch during your coffee break [PLLojVvWCZ5N4]/002 - Why I Love My Bad Days \uff5c Alexi Pappas \uff5c TED [kz-I5zIGbj4] 360p.mp4"
+[info] Writing '%(playlist_autonumber)s|%(filepath)j' to: /tmp/plcap/fin/runs/complete.records
+[download] Finished downloading playlist: Short talks to watch during your coffee break

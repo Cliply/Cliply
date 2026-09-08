@@ -16,7 +16,11 @@ const { cookieFileHasEntries } = require("../utils/cookie-jar")
 
 // the playlist item cap is owned by the mappers, next to the output templates
 // whose index padding is derived from it - see the playlists section below
-const { PLAYLIST_MAX_ITEMS } = require("../utils/ytdlp-mappers")
+const {
+  PLAYLIST_MAX_ITEMS,
+  PLAYLIST_ARCHIVE_DIR,
+  escapeTemplateLiteral
+} = require("../utils/ytdlp-mappers")
 
 // stdout is machine-readable only: --print implies --quiet, so the only lines
 // yt-dlp writes are our two prefixed templates (verified against 2026.08.19)
@@ -29,6 +33,75 @@ const FILE_TEMPLATE = `after_move:${FILE_PREFIX}%(filepath)s`
 // ("160+139" for a merge, "18" for a pre-muxed file) - that is how many 0-100%
 // sweeps the progress lines will make
 const STREAM_TEMPLATE = `before_dl:${STREAM_PREFIX}%(format_id)s`
+
+// the playlist half of the same three prints. a parallel set rather than three
+// fields bolted onto the templates above, because a single-video run has no
+// playlist context at all: %(info.playlist_autonumber)s renders as `NA` there,
+// and every parser that reads these lines today would have to learn to ignore
+// it. an operation picks one set or the other and the two never meet.
+//
+// PROGRESS carries **playlist_autonumber, never playlist_index**. autonumber
+// is the item's position in the download *queue*: measured with `-I "1,5,9"`
+// it reads 1, 2, 3 while playlist_index reads 1, 5, 9, so a bar built from the
+// index would render "video 9 of 3". STREAM carries both, because the index is
+// what names the file and what the per-row ui maps onto.
+//
+// there is no n_entries, which yt-dlp would happily supply. **the denominator
+// is the selection the user made**, which the engine already knows and which
+// nothing on this channel is allowed to contradict: an item that left the
+// playlist between the listing and the download is one of the skipped, not a
+// reason to quietly redefine the job as the smaller one that turned out to be
+// possible. it is also the last number here that a forged line could move
+const PLAYLIST_PROGRESS_TEMPLATE =
+  `download:${PROGRESS_PREFIX}%(progress._percent_str)s|%(progress._speed_str)s|` +
+  `%(progress._eta_str)s|%(progress.eta)s|%(info.playlist_autonumber)s`
+const PLAYLIST_STREAM_TEMPLATE =
+  `before_dl:${STREAM_PREFIX}%(playlist_autonumber)s|%(playlist_index)s|%(id)s|%(format_id)s`
+// ...and FILE carries the path as **json**, not as a bare string. yt-dlp
+// sanitises the parts of a name it derives from a title, but it does not touch
+// the -P the user chose: a legal directory holding a newline splits a bare
+// print across two lines, and the engine would record the truncation as the
+// file it saved (measured on 2026.08.19 with a directory named "nl\ndir").
+// the `j` conversion escapes the newline, and escapes non-ascii while it is
+// there, so one marker is always exactly one line
+const PLAYLIST_FILE_TEMPLATE =
+  `after_move:${FILE_PREFIX}%(playlist_autonumber)s|%(filepath)j`
+
+// ...and the same fact again, on a channel nothing else can write to.
+//
+// stdout is a **mixed** channel: --no-quiet puts yt-dlp's own log on it, and
+// some of that log is metadata we did not author. a playlist title carrying a
+// newline and a well-formed CLIPLY_FILE line after it is printed verbatim, so
+// a marker on stdout is not evidence that anything was saved - and no amount
+// of checking the path it names can fix that, because it can name a real file
+// in the real download folder. measured: an unrelated mp4 seeded in the
+// destination was reported as the saved item of a run whose only download
+// failed.
+//
+// --print-to-file appends this template to a file only we know the name of,
+// and only yt-dlp's own after_move hook appends to it. the template prints no
+// free text, so nothing that reaches the file came from anywhere else. that
+// file is the single source of truth for what was saved; the stdout marker
+// above is kept for live per-row progress and decides nothing
+const PLAYLIST_RECORD_TEMPLATE = "after_move:%(playlist_autonumber)s|%(filepath)j"
+
+// where those records live, under the engine's own state rather than the
+// user's download folder
+const PLAYLIST_RECORDS_DIR = "runs"
+
+// the extractor half of a download-archive key. the playlist operations are
+// youtube-only, so this is the only prefix an archive line may carry to be a
+// record of something a selection of ours could be talking about
+const PLAYLIST_ARCHIVE_EXTRACTOR = "youtube"
+
+// the record channel is the whole basis for saying anything was saved, so a
+// run that cannot prove the file is fresh does not start at all. its own
+// wording, because the taxonomy's permission entry is about the folder the
+// user picked and this one is about ours
+const RECORDS_UNWRITABLE = {
+  message: "Cliply couldn't prepare its record of this download.",
+  suggestion: "Check permissions on Cliply's app data folder and try again."
+}
 
 // how many stderr lines we keep for the report issue payload
 const STDERR_BUFFER_LINES = 200
@@ -596,16 +669,21 @@ function buildCommonArgs({
 }
 
 // progress + final-filename plumbing, plus the output location
-function buildDownloadArgs({ outputDir, outputTemplate } = {}) {
+//
+// `playlist` swaps in the three PLAYLIST_* templates and changes nothing else.
+// it is a flag rather than a second function because everything below the
+// templates - the --no-quiet reasoning, -P, the filename trimming - is the
+// same argument for both, and a copy of it would be a copy to keep in step
+function buildDownloadArgs({ outputDir, outputTemplate, playlist = false } = {}) {
   // --print implies --quiet, so --progress is what keeps progress lines coming
   const args = [
     "--progress",
     "--progress-template",
-    PROGRESS_TEMPLATE,
+    playlist ? PLAYLIST_PROGRESS_TEMPLATE : PROGRESS_TEMPLATE,
     "--print",
-    STREAM_TEMPLATE,
+    playlist ? PLAYLIST_STREAM_TEMPLATE : STREAM_TEMPLATE,
     "--print",
-    FILE_TEMPLATE,
+    playlist ? PLAYLIST_FILE_TEMPLATE : FILE_TEMPLATE,
     // ...and --quiet does not stop at yt-dlp. a trimmed download is handed to
     // yt-dlp's ffmpeg downloader, which *fetches the media itself* over https,
     // and it passes our quiet straight through as `-loglevel quiet` - verified
@@ -858,7 +936,47 @@ function buildPlaylistItemsSpec(indices) {
  * @param {Object} params - {playlistIndices, archiveFile}
  * @returns {string[]} args
  */
-function buildPlaylistArgs({ playlistIndices, archiveFile } = {}) {
+/**
+ * the positions this run will download
+ *
+ * a caller may send bare positions or `[{index, id}]` entries. the ids are
+ * what lets the engine work out how many items the archive will skip without
+ * reading yt-dlp's English back off stdout, so entries are preferred - but
+ * the selection itself is the indices either way
+ *
+ * @param {Object} params - {playlistIndices, playlistEntries}
+ * @returns {number[]} the 1-based positions
+ */
+function playlistSelection({ playlistIndices, playlistEntries } = {}) {
+  if (Array.isArray(playlistEntries) && playlistEntries.length > 0) {
+    return playlistEntries.map((entry) => (entry ? entry.index : entry))
+  }
+
+  return playlistIndices
+}
+
+/**
+ * where a run's save records live
+ *
+ * engine-owned state, beside the archives and well away from the user's
+ * download folder: nothing but yt-dlp's own after_move hook may append here
+ *
+ * @param {Object} options - {userDataPath, operationId}
+ * @returns {string|null} absolute path, or null without a userData path
+ */
+function buildPlaylistRecordsPath({ userDataPath, operationId } = {}) {
+  if (!userDataPath) {
+    return null
+  }
+
+  // the id reaches a filename, and an id is one of the few things a caller
+  // hands us verbatim - so it is whitelisted rather than trusted
+  const name = String(operationId || "").replace(/[^A-Za-z0-9._-]/g, "") || "run"
+
+  return path.join(userDataPath, PLAYLIST_ARCHIVE_DIR, PLAYLIST_RECORDS_DIR, `${name}.records`)
+}
+
+function buildPlaylistArgs({ playlistIndices, playlistEntries, archiveFile, ignoreArchive } = {}) {
   const args = [
     // a declaration of intent rather than a correction: on a
     // `watch?v=...&list=...` link yt-dlp's own default is already the playlist
@@ -869,7 +987,7 @@ function buildPlaylistArgs({ playlistIndices, archiveFile } = {}) {
     // halves of the app readable side by side
     "--yes-playlist",
     "-I",
-    buildPlaylistItemsSpec(playlistIndices),
+    buildPlaylistItemsSpec(playlistSelection({ playlistIndices, playlistEntries })),
     "--skip-playlist-after-errors",
     String(PLAYLIST_ERROR_BUDGET),
     "--sleep-requests",
@@ -890,12 +1008,307 @@ function buildPlaylistArgs({ playlistIndices, archiveFile } = {}) {
   // resume: yt-dlp skips anything already listed in the archive, so an
   // interrupted run picks up where it stopped instead of starting over.
   // optional in the same way --cookies is - a caller with nowhere to keep the
-  // file still gets a working download, it just re-fetches on a retry
-  if (archiveFile) {
+  // file still gets a working download, it just re-fetches on a retry.
+  //
+  // `ignoreArchive` is "download all of it again", and it *omits* the flag
+  // rather than pointing it somewhere harmless: yt-dlp writes to the archive
+  // it is given as well as reading it, so a decoy would still record this run
+  // and change what the next one does. only a literal true, because this is
+  // the one option whose accidental truthiness re-downloads a hundred videos
+  if (archiveFile && ignoreArchive !== true) {
     args.push("--download-archive", archiveFile)
   }
 
   return args
+}
+
+// the archive skip: an item recorded in --download-archive is never announced,
+// never extracted and never downloaded - yt-dlp prints this one line and moves
+// to the next item (measured against 2026.08.19). the id is the only handle we
+// get on it, which is why this pattern captures it: it is what keeps two skips
+// of the same run from collapsing into one count
+// the title is optional because yt-dlp builds this line with
+// format_field(info, "title", "%s "), which renders as empty for a null title -
+// exactly what a video that was archived while public and has gone private
+// since now reports. the id is always there, and the id is all we need
+const ARCHIVE_SKIP_PATTERN =
+  /^\[download\]\s+([^\s:]+):\s(?:.*\s)?has already been recorded in the archive$/
+
+/**
+ * parse one line of the record file yt-dlp appended to
+ *
+ * the same `<autonumber>|<json path>` shape the stdout marker carries, minus
+ * the prefix - this file holds nothing else, so there is nothing to recognise
+ *
+ * @param {string} line - one line of the record file
+ * @returns {Object|null} {itemIndex, filePath}, or null for anything else
+ */
+function parsePlaylistRecordLine(line) {
+  const text = stripAnsi(line).trim()
+  const separator = text.indexOf("|")
+
+  if (separator === -1) {
+    return null
+  }
+
+  let filePath
+  try {
+    filePath = JSON.parse(text.slice(separator + 1))
+  } catch {
+    return null
+  }
+
+  if (typeof filePath !== "string" || !filePath) {
+    return null
+  }
+
+  return { itemIndex: parsePlaylistCounter(text.slice(0, separator)), filePath }
+}
+
+/**
+ * decide whether a recorded path really is a file in the download folder
+ *
+ * two questions: is it inside the folder we asked yt-dlp to write to, and is
+ * it a file. *which run wrote it* is not one of them, and deliberately so -
+ * the record file already answers that. it is created per run, cleared before
+ * the spawn and deleted on settle, so a line in it was appended by this run's
+ * after_move hook whatever the file's own age. measured: a re-run over files
+ * that are already on disk fires after_move for each of them and leaves their
+ * mtimes untouched, so an "is this newer than the run" test throws away every
+ * item of a legitimate second download.
+ *
+ * containment goes through realpath on both sides. path.resolve collapses
+ * ".." but does not follow links, while statSync does - so a symlink inside
+ * the destination pointing out of it satisfied a resolve-and-stat pair while
+ * naming a file somewhere else entirely. resolving the root too keeps a
+ * download folder that is itself a symlink working, which plenty are.
+ *
+ * @param {string} filePath - the recorded path
+ * @param {string} outputDir - the folder the run was given
+ * @returns {string|null} the resolved path, or null when it proves nothing
+ */
+function verifySavedFile(filePath, outputDir) {
+  if (!filePath || !outputDir) {
+    return null
+  }
+
+  try {
+    const root = fs.realpathSync(outputDir)
+    const resolved = fs.realpathSync(filePath)
+
+    if (resolved !== root && !resolved.startsWith(root + path.sep)) {
+      return null
+    }
+
+    return fs.statSync(resolved).isFile() ? resolved : null
+  } catch {
+    // realpath throws for anything that is not there, which is its own answer
+    return null
+  }
+}
+
+/**
+ * the ids a download archive already holds
+ *
+ * yt-dlp's archive key is the **pair** `<extractor> <id>`, and the pair is
+ * what it skips on. keeping only the id made a `vimeo aaaaaaaaaaa` line vouch
+ * for a youtube video that happens to share those eleven characters, so a run
+ * that downloaded nothing at all reported an item as already had. these
+ * operations are youtube-only and the shipped binary writes exactly
+ * `youtube <id>` for them (measured on the archives our own captures left
+ * behind), so nothing else is an archive record as far as this is concerned.
+ *
+ * a missing file is an empty set rather than an error: that is the first run
+ *
+ * @param {string|null} archiveFile - path to the archive, if there is one
+ * @returns {Set<string>} the ids recorded in it for our own extractor
+ */
+function readArchivedIds(archiveFile) {
+  const ids = new Set()
+
+  if (!archiveFile) {
+    return ids
+  }
+
+  let contents
+  try {
+    contents = fs.readFileSync(archiveFile, "utf8")
+  } catch {
+    return ids
+  }
+
+  for (const line of contents.split(/\r?\n/)) {
+    // exactly two fields, and the first is ours. a line carrying anything
+    // else is a record of something this selection cannot be talking about
+    const parts = line.trim().split(/\s+/)
+
+    if (parts.length === 2 && parts[0] === PLAYLIST_ARCHIVE_EXTRACTOR && parts[1]) {
+      ids.add(parts[1])
+    }
+  }
+
+  return ids
+}
+
+/**
+ * how many of the selected positions this archive will make yt-dlp skip
+ *
+ * counted per **position**, not per id: a playlist can hold one video three
+ * times, and the denominator counts positions. no entries means the caller
+ * sent positions without ids, so there is nothing to match on and the honest
+ * answer is zero - which undercounts rather than inventing reuse
+ *
+ * @param {Array|null} entries - [{index, id}] for the selected positions
+ * @param {Set<string>} archivedIds - what the archive already holds
+ * @returns {number} how many selected positions are already recorded
+ */
+function countArchivedSelections(entries, archivedIds) {
+  if (!Array.isArray(entries) || archivedIds.size === 0) {
+    return 0
+  }
+
+  return entries.filter((entry) => entry && archivedIds.has(entry.id)).length
+}
+
+// there is deliberately no parser for `[download] <path> has already been
+// downloaded` here. yt-dlp prints that sentence for the *input* to a
+// postprocessor as readily as for a finished output: a cancelled mp3
+// conversion leaves a complete .webm behind, and the retry announces that
+// source and then fails the conversion, so the file the user asked for never
+// exists. a merge intermediate does the same with an .f134.mp4. no test on
+// the filename can tell an unfinished input from a finished output, so the
+// line is not evidence and only after_move counts. the shipped binary fires
+// after_move for a genuinely finished existing output, so nothing is lost;
+// a future binary that stopped would undercount, which is the safe direction
+
+/**
+ * read one of the playlist counter fields
+ *
+ * yt-dlp renders these as `NA` whenever it has no playlist context to fill
+ * them from, so "absent" is a normal reading rather than a malformed line
+ *
+ * @param {string} value - one raw field
+ * @returns {number|null} a 1-based position or count, or null
+ */
+function parsePlaylistCounter(value) {
+  if (isUnknownValue(value)) {
+    return null
+  }
+
+  const parsed = parseInt(stripAnsi(value).trim(), 10)
+
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null
+}
+
+/**
+ * parse one playlist CLIPLY| progress line
+ *
+ * @param {string} line - raw stdout line
+ * @returns {Object|null} {progress, speed, eta, etaSeconds, itemIndex, totalItems}
+ */
+function parsePlaylistProgressLine(line) {
+  // the first four fields are the single-video template's, read by the single
+  // video parser: the two templates share that prefix on purpose, and this is
+  // what stops them drifting into two opinions about a percentage or an eta
+  const parsed = parseProgressLine(line)
+
+  if (!parsed) {
+    return null
+  }
+
+  const parts = stripAnsi(line).trim().slice(PROGRESS_PREFIX.length).split("|")
+
+  return {
+    ...parsed,
+    // playlist_autonumber, not playlist_index - see PLAYLIST_PROGRESS_TEMPLATE
+    // for why the other one would render "video 9 of 3".
+    //
+    // and only this one field: anything past it is ignored rather than read.
+    // n_entries used to sit at parts[5], and a fixture or a binary we have not
+    // met may still print it there - it must not become a denominator by the
+    // back door now that the selection owns that number
+    itemIndex: parsePlaylistCounter(parts[4])
+  }
+}
+
+/**
+ * parse the playlist before_dl marker: a new item is starting
+ *
+ * @param {string} line - raw stdout line
+ * @returns {Object|null} {itemIndex, playlistIndex, videoId, streams}
+ */
+function parsePlaylistStreamLine(line) {
+  const text = stripAnsi(line).trim()
+
+  if (!text.startsWith(STREAM_PREFIX)) {
+    return null
+  }
+
+  const parts = text.slice(STREAM_PREFIX.length).split("|")
+  const formatId = stripAnsi(parts[3] || "").trim()
+
+  if (!formatId) {
+    return null
+  }
+
+  return {
+    itemIndex: parsePlaylistCounter(parts[0]),
+    playlistIndex: parsePlaylistCounter(parts[1]),
+    videoId: isUnknownValue(parts[2]) ? null : stripAnsi(parts[2]).trim(),
+    // the same arithmetic parseStreamCountLine does: "134+140" is a merge, so
+    // this item will sweep 0-100 twice
+    streams: formatId.split("+").filter(Boolean).length || 1
+  }
+}
+
+/**
+ * parse the playlist after_move print: an item landed on disk
+ *
+ * @param {string} line - raw stdout line
+ * @returns {Object|null} {itemIndex, filePath}
+ */
+function parsePlaylistFileLine(line) {
+  const text = stripAnsi(line).trim()
+
+  if (!text.startsWith(FILE_PREFIX)) {
+    return null
+  }
+
+  const rest = text.slice(FILE_PREFIX.length)
+  const separator = rest.indexOf("|")
+
+  if (separator === -1) {
+    return null
+  }
+
+  // split on the *first* separator only, then decode. the tail is json (see
+  // PLAYLIST_FILE_TEMPLATE), which is what makes both of those safe: a "|" or
+  // a newline inside the path is escaped, so it can neither be mistaken for a
+  // separator nor cut the marker in half
+  let filePath
+  try {
+    filePath = JSON.parse(rest.slice(separator + 1).trim())
+  } catch {
+    return null
+  }
+
+  if (typeof filePath !== "string" || !filePath) {
+    return null
+  }
+
+  return { itemIndex: parsePlaylistCounter(rest.slice(0, separator)), filePath }
+}
+
+/**
+ * parse an archive skip - an item we already have, that will never download
+ *
+ * @param {string} line - raw stdout line
+ * @returns {string|null} the video id, or null when this is not an archive skip
+ */
+function parseArchiveSkipLine(line) {
+  const match = stripAnsi(line).trim().match(ARCHIVE_SKIP_PATTERN)
+
+  return match ? match[1] : null
 }
 
 /**
@@ -938,6 +1351,13 @@ function normalizeAudioMode(params = {}) {
  */
 function buildArgs(operation, params = {}) {
   const args = buildCommonArgs(params)
+
+  // the output shape follows the **operation**, and is never read off params.
+  // the two template sets are not interchangeable - the single-video parser
+  // reads a playlist `CLIPLY_FILE|1|/path` as the file path "1|/path" - so a
+  // stray `playlist` key arriving over ipc does not get to choose between
+  // them, for the same reason PLAYLIST_ITEMS_PATTERN exists
+  const playlist = operation === "playlist-combined" || operation === "playlist-audio"
 
   switch (operation) {
     case "info": {
@@ -990,7 +1410,7 @@ function buildArgs(operation, params = {}) {
       }
 
       args.push("--no-playlist")
-      args.push(...buildDownloadArgs(params))
+      args.push(...buildDownloadArgs({ ...params, playlist }))
       args.push(...buildTrimArgs(params))
       break
     }
@@ -1017,7 +1437,7 @@ function buildArgs(operation, params = {}) {
       }
 
       args.push("--no-playlist")
-      args.push(...buildDownloadArgs(params))
+      args.push(...buildDownloadArgs({ ...params, playlist }))
       args.push(...buildTrimArgs(params))
       break
     }
@@ -1054,7 +1474,21 @@ function buildArgs(operation, params = {}) {
       }
 
       args.push(...buildPlaylistArgs(params))
-      args.push(...buildDownloadArgs(params))
+
+      // the private save channel, which is what the outcome is read from.
+      // FILE takes output-template syntax, so the path is escaped for the
+      // same reason buildSimpleOutputTemplate escapes a title: a folder
+      // called "100%(id)s" would otherwise be *expanded* and the records
+      // would be written somewhere nobody goes looking
+      if (params.recordsFile) {
+        args.push(
+          "--print-to-file",
+          PLAYLIST_RECORD_TEMPLATE,
+          escapeTemplateLiteral(params.recordsFile)
+        )
+      }
+
+      args.push(...buildDownloadArgs({ ...params, playlist }))
       break
     }
 
@@ -1062,7 +1496,7 @@ function buildArgs(operation, params = {}) {
       // tiktok / pinterest - one muxed file, no format picking
       args.push("-f", params.formatSelector || "best")
       args.push("--no-playlist")
-      args.push(...buildDownloadArgs(params))
+      args.push(...buildDownloadArgs({ ...params, playlist }))
       break
     }
 
@@ -1120,18 +1554,49 @@ function invalidUrlError(message) {
 // real format is known - including the case where the pick turns out to be a
 // single pre-muxed file.
 function expectedStreamCount(operation, params = {}) {
-  if (operation !== "combined") {
+  // a playlist item is a single video: it runs the very same 1-or-2-sweep
+  // cycle, once per item. so for a playlist this is the opening guess for
+  // *each* item rather than for the run, and the per-item before_dl marker
+  // corrects it the same way
+  if (operation !== "combined" && operation !== "playlist-combined") {
     return 1
   }
 
   // a time range hands the whole job to ffmpeg, which reports one sweep no
-  // matter how many formats it is muxing
+  // matter how many formats it is muxing. a playlist can never carry one -
+  // buildArgs refuses it - so this only ever fires for a single video
   if (params.timeRange) {
     return 1
   }
 
   // a video download merges a video stream with an audio one
   return 2
+}
+
+/**
+ * how many items a playlist run is about to walk
+ *
+ * **the denominator, for the bar and for every count the run reports.** it is
+ * the selection the user made, and nothing yt-dlp prints revises it: an item
+ * that left the playlist between the listing and the download is one of the
+ * skipped rather than a reason to shrink the job to fit.
+ *
+ * @param {string} operation - the operation about to run
+ * @param {Object} params - operation parameters
+ * @returns {number|null} the selection size, or null for a non-playlist run
+ */
+function expectedItemCount(operation, params = {}) {
+  if (operation !== "playlist-combined" && operation !== "playlist-audio") {
+    return null
+  }
+
+  try {
+    return normalizePlaylistIndices(playlistSelection(params)).length
+  } catch {
+    // a selection this malformed never reaches a spawn: buildArgs throws on it
+    // first. answering null here keeps the two from racing to report it
+    return null
+  }
 }
 
 /**
@@ -1275,6 +1740,183 @@ class ProgressTracker {
   }
 }
 
+/**
+ * the same bar, one level up: a run of items, each of which is its own download
+ *
+ * one ProgressTracker per item, thrown away and rebuilt at every before_dl
+ * marker. that reset is the point of the class - an item's sweep counter is
+ * only meaningful inside that item, and carrying it across would open item 2
+ * at 50% because item 1 finished two streams.
+ *
+ * the run's own bar is `(itemsCompleted + itemProgress / 100) / totalItems`,
+ * so it advances smoothly through an item instead of jumping only when one
+ * lands.
+ */
+class PlaylistProgressTracker {
+  constructor({ expectedStreams = 1, totalItems = null } = {}) {
+    this.expectedStreamsPerItem = Math.max(1, expectedStreams)
+    this.totalItems = totalItems && totalItems > 0 ? totalItems : null
+
+    this.item = new ProgressTracker(this.expectedStreamsPerItem)
+    this.itemIndex = 1
+    this.playlistIndex = null
+    this.videoId = null
+    this.itemsCompleted = 0
+    // whether the item in flight has already been counted whole. its own
+    // percentage stops being added on top of itemsCompleted the moment it has,
+    // or an item landing would count twice
+    this.itemSettled = false
+    this.lastOverall = 0
+  }
+
+  // the two the operation reads off a tracker without caring which kind it is
+  get streamIndex() {
+    return this.item.streamIndex
+  }
+
+  get expectedStreams() {
+    return this.item.expectedStreams
+  }
+
+  /**
+   * a new item is starting - reset everything that is per-item
+   * @param {Object} marker - {itemIndex, playlistIndex, videoId, streams}
+   */
+  startItem(marker = {}) {
+    if (marker.itemIndex) {
+      // an autonumber past the end of the selection is not a position in this
+      // run. it only ever moves the bar, but there is no reason to let it
+      this.itemIndex = this.totalItems
+        ? Math.min(marker.itemIndex, this.totalItems)
+        : marker.itemIndex
+    }
+
+    // the item before this one is done with, however it ended. an item that
+    // failed extraction prints no progress and no after_move at all, so
+    // counting only the files that landed would freeze the bar for the rest of
+    // a run the moment one video turned out to be private
+    this.itemsCompleted = Math.max(this.itemsCompleted, this.itemIndex - 1)
+
+    if (marker.playlistIndex !== undefined) {
+      this.playlistIndex = marker.playlistIndex
+    }
+    if (marker.videoId !== undefined) {
+      this.videoId = marker.videoId
+    }
+
+    this.item = new ProgressTracker(this.expectedStreamsPerItem)
+    this.itemSettled = false
+
+    if (marker.streams) {
+      this.item.setExpectedStreams(marker.streams)
+    }
+  }
+
+  /**
+   * an item landed on disk
+   * @param {number|null} itemIndex - its autonumber, when the print carried one
+   */
+  completeItem(itemIndex = null) {
+    const completed = Number.isInteger(itemIndex) ? itemIndex : this.itemsCompleted + 1
+
+    this.itemsCompleted = Math.max(this.itemsCompleted, completed)
+
+    // the item in flight is now counted whole, so stop adding its own
+    // percentage on top: item 1 of 2 landing would otherwise read
+    // (1 + 1) / 2 - a full bar with half the playlist still to download, and
+    // the monotonic clamp would pin it there for the rest of the run
+    if (!Number.isInteger(itemIndex) || itemIndex >= this.itemIndex) {
+      this.itemSettled = true
+    }
+  }
+
+  update(parsed) {
+    // the denominator is never taken off the wire - it is the selection, set
+    // once at construction. see PLAYLIST_PROGRESS_TEMPLATE
+
+    // a marker we never saw - the item still has to start, or its progress
+    // would be folded into the previous one's
+    if (parsed.itemIndex && parsed.itemIndex > this.itemIndex) {
+      this.startItem({ itemIndex: parsed.itemIndex })
+    }
+
+    return this.snapshot(this.item.update(parsed))
+  }
+
+  /**
+   * the current reading, with or without a fresh progress line behind it
+   * @param {Object|null} itemUpdate - what the item's own tracker just returned
+   * @returns {Object} the progress event
+   */
+  snapshot(itemUpdate = null) {
+    const item = itemUpdate || {
+      progress: this.item.lastOverall,
+      streamProgress: this.item.lastStreamProgress,
+      streamIndex: this.item.streamIndex,
+      speed: null,
+      eta: null,
+      etaSeconds: null
+    }
+
+    // the selection, set once at construction. a caller that sent none leaves
+    // the item in flight as the only lower bound on the run's length
+    const totalItems = this.totalItems || Math.max(this.itemIndex, 1)
+    const inFlight = this.itemSettled ? 0 : item.progress / 100
+    const overall = ((this.itemsCompleted + inFlight) / totalItems) * 100
+
+    this.lastOverall = Math.min(100, Math.max(this.lastOverall, overall))
+    const rounded = Math.round(this.lastOverall * 10) / 10
+
+    return {
+      // the single 0-100 bar every consumer of a progress event already reads
+      progress: rounded,
+      overallProgress: rounded,
+      itemProgress: item.progress,
+      itemsCompleted: this.itemsCompleted,
+      totalItems,
+      itemIndex: this.itemIndex,
+      playlistIndex: this.playlistIndex,
+      videoId: this.videoId,
+      streamProgress: item.streamProgress,
+      streamIndex: item.streamIndex,
+      speed: item.speed,
+      eta: item.eta,
+      etaSeconds: item.etaSeconds
+    }
+  }
+
+  /**
+   * the reading a finished run ends on
+   *
+   * every item is resolved by now, saved or skipped, so the bar is full. how
+   * many of them actually landed is the outcome's business, not the bar's
+   *
+   * @returns {Object} the final progress event
+   */
+  finalSnapshot() {
+    const totalItems = this.totalItems || Math.max(this.itemIndex, this.itemsCompleted, 1)
+
+    this.itemsCompleted = totalItems
+    this.lastOverall = 100
+
+    return {
+      progress: 100,
+      overallProgress: 100,
+      itemProgress: 100,
+      itemsCompleted: totalItems,
+      totalItems,
+      itemIndex: this.itemIndex,
+      playlistIndex: this.playlistIndex,
+      videoId: this.videoId,
+      streamProgress: 100,
+      streamIndex: this.item.streamIndex,
+      speed: null,
+      eta: null,
+      etaSeconds: 0
+    }
+  }
+}
+
 // splits a stream into lines, holding back partial ones
 class LineSplitter {
   constructor(onLine) {
@@ -1318,6 +1960,12 @@ class YtdlpOperation extends EventEmitter {
     watchdogMs = DEFAULT_WATCHDOG_MS,
     collectStdout = false,
     expectedStreams = 1,
+    expectedItems = null,
+    playlist = false,
+    outputDir = null,
+    recordsFile = null,
+    startupError = null,
+    reusedItems = 0,
     trackStreamMarker = true,
     gate = null,
     killGraceMs = KILL_GRACE_MS,
@@ -1330,6 +1978,11 @@ class YtdlpOperation extends EventEmitter {
     this.killGraceMs = killGraceMs
     this.spawnFn = spawnFn
     this.killFn = killFn
+    this.outputDir = outputDir
+    this.recordsFile = recordsFile
+    // how many positions the user ticked. the denominator of every count this
+    // operation reports, and the one number yt-dlp is not asked about
+    this.expectedItems = expectedItems
 
     this.id = id
     this.operation = operation
@@ -1339,11 +1992,30 @@ class YtdlpOperation extends EventEmitter {
     this.watchdogMs = watchdogMs
     this.collectStdout = collectStdout
     this.trackStreamMarker = trackStreamMarker
+    this.playlist = Boolean(playlist)
 
     this.stderrBuffer = new RingBuffer(STDERR_BUFFER_LINES)
-    this.tracker = new ProgressTracker(expectedStreams)
+    this.tracker = this.playlist
+      ? new PlaylistProgressTracker({ expectedStreams, totalItems: expectedItems })
+      : new ProgressTracker(expectedStreams)
     this.stdout = ""
     this.filePath = null
+
+    // playlist only: the files this run put on disk, keyed by the item's
+    // autonumber so one item cannot be counted twice. filled from the record
+    // file at exit and from nowhere else
+    this.savedItems = new Map()
+    this.recordsRead = false
+
+    // ...and, separately, how many of the selected positions yt-dlp will skip
+    // because the archive already holds them. computed **before the run**, by
+    // intersecting the selection's ids with the archive file, because reading
+    // it afterwards would find everything this run had just added to it.
+    //
+    // it is a different claim from "saved" in any case: the archive records
+    // that a download once succeeded, not that the file is there now - a new
+    // download folder, or a file the user has deleted since, skips the same
+    this.reusedItems = reusedItems
     this.phase = "starting"
     this.cancelled = false
     this.stalled = false
@@ -1361,6 +2033,19 @@ class YtdlpOperation extends EventEmitter {
       this.resolve = resolve
       this.reject = reject
     })
+
+    // the run never happens if its save channel could not be prepared. this is
+    // before begin(), so nothing is spawned and nothing is read: recordsFile
+    // is null in this state, which is what keeps readSavedRecords out of the
+    // stale file that caused the refusal
+    if (startupError) {
+      this.fail({
+        code: ERROR_CODES.PERMISSION_ERROR,
+        cause: startupError,
+        wording: RECORDS_UNWRITABLE
+      })
+      return
+    }
 
     this.begin()
   }
@@ -1443,35 +2128,86 @@ class YtdlpOperation extends EventEmitter {
         return
       }
 
-      if (exitCode === 0 && !this.cancelled && !this.stalled) {
+      // what was saved is read here, once, before anything is decided
+      this.readSavedRecords()
+
+      // **a playlist outcome is decided by counting items, not by the exit
+      // code, in both directions.**
+      //
+      // yt-dlp exits 1 if any item failed, and an old playlist always holds a
+      // few deleted videos, so a run that saved 8 of 9 exits 1 and would
+      // otherwise be reported as "Download failed" with eight files on disk.
+      //
+      // it also exits **0** having done nothing at all: a selected position
+      // that left the playlist between the listing and the download leaves it
+      // "Downloading 0 items of 11" and perfectly happy. accepting that would
+      // draw a full bar over an empty folder, and would hide the day an
+      // upgrade stops printing the markers this all counts.
+      //
+      // a null exit code is excluded on top: that is a process that was
+      // signalled rather than one that finished - an oom kill, Activity
+      // Monitor, a crash - and it never decided it was done, so it does not
+      // get to be `completed` on the strength of whatever it had written.
+      //
+      // every one of those failures goes through fail() with its tally
+      // attached, exactly as a cancel does, so nothing already on disk is lost
+      const succeeded = this.playlist
+        ? exitCode !== null && this.accountedItems() > 0
+        : exitCode === 0
+
+      // the empty-run wording belongs to exactly one branch, and the order
+      // matters: a cancel, a stall and an external kill all have their own
+      // reason already, and saying "finished without saving" over a run that
+      // saved eight files would be a contradiction
+      const emptyRun =
+        this.playlist &&
+        !this.cancelled &&
+        !this.stalled &&
+        exitCode !== null &&
+        this.accountedItems() === 0
+
+      if (succeeded && !this.cancelled && !this.stalled) {
         this.setPhase("completed")
-        this.emit("progress", {
-          progress: 100,
-          streamProgress: 100,
-          streamIndex: this.tracker.streamIndex,
-          speed: null,
-          eta: null,
-          etaSeconds: 0
-        })
+        this.emit(
+          "progress",
+          this.playlist
+            ? this.tracker.finalSnapshot()
+            : {
+                progress: 100,
+                streamProgress: 100,
+                streamIndex: this.tracker.streamIndex,
+                speed: null,
+                eta: null,
+                etaSeconds: 0
+              }
+        )
+
+        // single-video runs get none of these keys, so nothing reading a
+        // result today has to learn about items
+        const tally = this.playlist ? this.itemTally() : null
 
         const result = {
           id: this.id,
           operation: this.operation,
           exitCode,
-          filePath: this.filePath,
+          // a playlist's filePath follows the records too, not the marker the
+          // progress bar was reading
+          filePath: tally ? tally.files[tally.files.length - 1] || null : this.filePath,
           stdout: this.stdout,
           stderr: this.getStderr(),
-          durationMs: Date.now() - this.startedAt
+          durationMs: Date.now() - this.startedAt,
+          ...tally
         }
 
         this.settled = true
+        this.discardRecords()
         this.releaseGateIfHeld()
         this.emit("completed", result)
         this.resolve(result)
         return
       }
 
-      this.fail({ exitCode })
+      this.fail({ exitCode, emptyRun })
     })
 
     this.touch()
@@ -1480,6 +2216,15 @@ class YtdlpOperation extends EventEmitter {
 
   handleStdoutLine(line) {
     if (!line) return
+
+    // the playlist prints are a different shape from the single-video ones, so
+    // they get their own reader rather than a set of conditionals threaded
+    // through this one. that separation is what keeps a single-video download
+    // parsing exactly as it did before playlists existed
+    if (this.playlist) {
+      this.handlePlaylistStdoutLine(line)
+      return
+    }
 
     const streamCount = parseStreamCountLine(line)
     if (streamCount !== null) {
@@ -1521,6 +2266,198 @@ class YtdlpOperation extends EventEmitter {
     }
 
     this.emit("stdout", line)
+  }
+
+  handlePlaylistStdoutLine(line) {
+    const marker = parsePlaylistStreamLine(line)
+    if (marker) {
+      this.tracker.startItem(marker)
+      this.emit("streams", this.tracker.expectedStreams)
+      // out of `processing` the moment a new item starts, or item 2 would run
+      // its whole download under the half-hour merge deadline
+      this.setPhase("downloading")
+      // ...and the flag alone does not do it. the chunk this line arrived in
+      // called touch() *before* anything was parsed, so the timer running now
+      // was armed under the phase the previous item left behind, and setPhase
+      // only re-arms on the way *into* `processing`. without this an item that
+      // announces itself and then hangs before its first byte waits half an
+      // hour to be called stalled
+      this.touch()
+      // an item boundary moves the run's own bar even when the item that just
+      // ended never printed a file, so this is emitted rather than waited on
+      this.emit("progress", this.tracker.snapshot())
+      return
+    }
+
+    const progress = parsePlaylistProgressLine(line)
+    if (progress) {
+      const update = this.tracker.update(progress)
+
+      // yt-dlp prints two 100% lines per stream - without this guard the phase
+      // would flap back to downloading after postprocessing has started
+      if (this.phase !== "processing" || update.streamProgress < 100) {
+        this.setPhase("downloading")
+      }
+
+      this.emit("progress", update)
+
+      // the last stream of *this item* finishing means ffmpeg takes over and
+      // yt-dlp goes quiet until the file lands. the next item's marker is what
+      // brings the phase back
+      if (
+        update.streamProgress >= 100 &&
+        update.streamIndex >= this.tracker.expectedStreams - 1
+      ) {
+        this.setPhase("processing")
+      }
+      return
+    }
+
+    // an item finished. **this moves the bar and nothing else** - what was
+    // saved is read out of the record file at exit, because this channel also
+    // carries metadata we did not write and a marker on it proves nothing
+    const file = parsePlaylistFileLine(line)
+    if (file) {
+      this.tracker.completeItem(file.itemIndex)
+      this.filePath = file.filePath
+      this.emit("destination", file.filePath)
+      // the phase deliberately stays where it is. the item is done and what
+      // follows is yt-dlp choosing the next one, which is allowed to be quiet -
+      // the next marker is what puts the short deadline back
+      this.touch()
+      this.emit("progress", this.tracker.snapshot())
+      return
+    }
+
+    // a line that meant to be a marker and did not parse. it changes no
+    // count, but it is worth saying out loud: this is what a yt-dlp that
+    // changed its output would look like from in here
+    if (stripAnsi(line).trim().startsWith(FILE_PREFIX)) {
+      this.noteUnverifiedMarker("malformed")
+      return
+    }
+
+    this.emit("stdout", line)
+  }
+
+  /**
+   * read what yt-dlp recorded that it saved
+   *
+   * the record file is the only input to the saved count. it is appended to
+   * by yt-dlp's own after_move hook and by nothing else, so a line that
+   * reached it describes a file that reached its destination - and each one
+   * is then checked against the filesystem anyway.
+   *
+   * idempotent: the close handler and fail() may both reach it, and the file
+   * is deleted afterwards either way
+   *
+   * @returns {void}
+   */
+  readSavedRecords() {
+    if (this.recordsRead || !this.playlist) return
+    this.recordsRead = true
+
+    if (!this.recordsFile) return
+
+    let contents
+    try {
+      contents = fs.readFileSync(this.recordsFile, "utf8")
+    } catch {
+      // never created, which is what a run that reached no after_move looks
+      // like. no saves, and not an error
+      return
+    }
+
+    for (const line of contents.split("\n")) {
+      if (!line.trim()) continue
+
+      const record = parsePlaylistRecordLine(line)
+      if (!record) {
+        this.noteUnverifiedMarker("unreadable record")
+        continue
+      }
+
+      const saved = verifySavedFile(record.filePath, this.outputDir)
+      if (!saved) {
+        this.noteUnverifiedMarker("recorded file did not check out")
+        continue
+      }
+
+      this.savedItems.set(
+        Number.isInteger(record.itemIndex) ? record.itemIndex : `path:${saved}`,
+        saved
+      )
+    }
+  }
+
+  /**
+   * throw the record file away
+   *
+   * it is per run and describes nothing once the run is over, and it lives in
+   * the engine's own state directory rather than the user's. left behind only
+   * when the app dies without settling the operation, where it is the one
+   * trace of what a crashed run had managed to do
+   *
+   * @returns {void}
+   */
+  discardRecords() {
+    if (!this.recordsFile) return
+
+    try {
+      fs.unlinkSync(this.recordsFile)
+    } catch {
+      // never created, or already gone
+    }
+  }
+
+  /**
+   * say out loud that a marker was ignored
+   *
+   * into the stderr buffer rather than nowhere: this is the one thing that
+   * turns "the download failed" into a diagnosable report, and it is exactly
+   * what a future yt-dlp changing its output would look like from in here.
+   * the wording deliberately avoids every phrase the taxonomy matches on, so
+   * a diagnostic can never become somebody else's classification.
+   *
+   * @param {string} reason - why it was not counted
+   */
+  noteUnverifiedMarker(reason) {
+    this.stderrBuffer.push(`cliply: ignored an unverified file marker (${reason})`)
+  }
+
+  /**
+   * items this run can account for, saved or reused
+   *
+   * the success test, and the reason it is not the exit code: yt-dlp exits 1
+   * if any item failed, and 0 for a selection that turned out to be empty
+   *
+   * @returns {number} how many of the selected positions are accounted for
+   */
+  accountedItems() {
+    return this.savedItems.size + this.reusedItems
+  }
+
+  /**
+   * what a playlist run did, for a result or for a failure
+   * @returns {Object} {files, itemsSaved, itemsReused, itemsSkipped, itemsTotal}
+   */
+  itemTally() {
+    const files = [...this.savedItems.values()]
+    const itemsSaved = files.length
+    const itemsReused = this.reusedItems
+    // the selection, always. an item that vanished from the playlist between
+    // the listing and the download is one of the skipped - reporting "2 of 2"
+    // for a run the user asked three videos of would redefine the job as
+    // whatever turned out to be possible
+    const itemsTotal = this.expectedItems || this.accountedItems()
+
+    return {
+      files,
+      itemsSaved,
+      itemsReused,
+      itemsSkipped: Math.max(0, itemsTotal - this.accountedItems()),
+      itemsTotal
+    }
   }
 
   handleStderrLine(line) {
@@ -1618,8 +2555,15 @@ class YtdlpOperation extends EventEmitter {
 
     this.signalGroup("SIGTERM")
 
-    // yt-dlp cleans up its .part files and its children on sigterm; kill hard
-    // if it hangs
+    // sigterm first so yt-dlp gets the chance to stop on its own, then kill
+    // hard if it hangs. it does *not* tidy up on the way out: the binary
+    // installs no sigterm handler, so python dies where it stands and whatever
+    // it had open stays on disk - measured, a cancelled 1080p download leaves
+    // a `clip.f137.mp4.part` behind and prints nothing about it. that is by
+    // design rather than a leak, since a .part is what makes the next run
+    // resume instead of restart - but a *completed* stream left next to a
+    // half-written one is why handlePlaylistStdoutLine refuses to count a
+    // format intermediate as a saved video
     this.killTimer = setTimeout(() => {
       this.signalGroup("SIGKILL")
     }, this.killGraceMs)
@@ -1675,11 +2619,14 @@ class YtdlpOperation extends EventEmitter {
     return true
   }
 
-  fail({ code = null, exitCode = null, cause = null }) {
+  fail({ code = null, exitCode = null, cause = null, emptyRun = false, wording = null }) {
     if (this.settled) return
     this.settled = true
     this.clearTimers()
     this.releaseGateIfHeld()
+
+    // a cancel or a spawn failure never reaches the close handler's read
+    this.readSavedRecords()
 
     const stderrLines = this.stderrBuffer.tail()
     // both branches go through errorShape, so an explicit code carries the same
@@ -1694,16 +2641,37 @@ class YtdlpOperation extends EventEmitter {
           stalled: this.stalled
         })
 
-    const error = new Error(mapped.message)
+    // an explicit code may bring its own words. the taxonomy's entries are
+    // shared and frozen, so a caller that knows something more specific than
+    // the table does says it here rather than editing the table
+    const error = new Error(wording ? wording.message : mapped.message)
     error.code = mapped.code
-    error.suggestion = mapped.suggestion
-    error.details = mapped.details
+    error.suggestion = wording ? wording.suggestion : mapped.suggestion
+    // the empty-run wording replaces the technical detail *after* the taxonomy
+    // has had the untouched stderr, and only when the taxonomy found nothing.
+    // pushing it into the ring buffer instead would evict a line: 200 lines
+    // is the whole buffer, and a bot-detection error followed by 199 ordinary
+    // ones is one push away from being classified as a generic failure
+    error.details =
+      emptyRun && mapped.code === ERROR_CODES.DOWNLOAD_FAILED
+        ? "yt-dlp finished without saving any of the selected videos."
+        : mapped.details
     error.retryable = Boolean(mapped.retryable)
     error.updateMayFix = Boolean(mapped.updateMayFix)
     error.needsCookies = Boolean(mapped.needsCookies)
     error.exitCode = exitCode
     error.operationId = this.id
     error.stderrTail = stderrLines
+
+    // a cancelled or stalled playlist keeps whatever it already saved: those
+    // files are on disk either way, and discarding the list is how a cancel
+    // turns into "we downloaded nothing" in front of a user looking at eight
+    // finished videos. a total failure reports an empty list, which is the
+    // same statement made honestly
+    if (this.playlist) {
+      Object.assign(error, this.itemTally())
+      this.discardRecords()
+    }
 
     this.emit("failed", error)
     this.reject(error)
@@ -2040,6 +3008,59 @@ class YtdlpEngine {
 
     const id = options.id || `${operation}_${Date.now()}_${this.operations.size}`
     const isInfo = operation === "info" || operation === "playlist-info"
+    const isPlaylistDownload =
+      operation === "playlist-combined" || operation === "playlist-audio"
+
+    // both of these have to happen *before* the spawn.
+    //
+    // the record file, because --print-to-file appends: a repeated operation
+    // id would otherwise inherit whatever a crashed run left behind, and the
+    // directory is engine-owned state that nothing else creates.
+    //
+    // the archive read, because yt-dlp writes to the archive as it goes -
+    // reading it afterwards would report everything this run just added as
+    // something it had skipped
+    let reusedItems = 0
+    let recordsError = null
+
+    if (isPlaylistDownload) {
+      resolved.recordsFile = buildPlaylistRecordsPath({
+        userDataPath: this.getUserDataPath(),
+        operationId: id
+      })
+
+      // and it has to actually work. a removal that quietly failed left the
+      // path pointing at a *readable* record from the last run under this id,
+      // and a download that then failed resolved as having saved the previous
+      // run's file. there is no safe way to carry on from here - a channel we
+      // cannot vouch for is not a channel - so this throws and the operation
+      // settles without yt-dlp ever being spawned
+      try {
+        if (!resolved.recordsFile) {
+          throw new Error("No records path for a playlist download.")
+        }
+
+        fs.mkdirSync(path.dirname(resolved.recordsFile), { recursive: true })
+        // not recursive on purpose: a directory sitting on the records path is
+        // a state nobody should be able to explain, and quietly deleting it is
+        // a worse answer than refusing
+        fs.rmSync(resolved.recordsFile, { force: true })
+        // created, not merely absent, so "we could not write here" and "yt-dlp
+        // recorded nothing" stay different states for the rest of the run
+        fs.writeFileSync(resolved.recordsFile, "")
+      } catch (error) {
+        recordsError = error
+        resolved.recordsFile = null
+      }
+
+      reusedItems =
+        resolved.ignoreArchive === true
+          ? 0
+          : countArchivedSelections(
+              resolved.playlistEntries,
+              readArchivedIds(resolved.archiveFile)
+            )
+    }
 
     const handle = new YtdlpOperation({
       id,
@@ -2052,6 +3073,17 @@ class YtdlpEngine {
       watchdogMs: options.watchdogMs || this.watchdogMs,
       collectStdout: isInfo,
       expectedStreams: expectedStreamCount(operation, resolved),
+      // a playlist download reads its stdout through the PLAYLIST_* templates
+      // and ends on a count of saved files rather than on the exit code
+      playlist: isPlaylistDownload,
+      expectedItems: expectedItemCount(operation, resolved),
+      // what a recorded save is checked against: the same folder -P was built
+      // from, so a save has to land where we asked for it
+      outputDir: resolved.outputDir || null,
+      recordsFile: resolved.recordsFile || null,
+      // a records channel we could not prepare stops the run before it starts
+      startupError: recordsError,
+      reusedItems,
       // a trimmed download is muxed by ffmpeg in a single pass, so the format
       // marker would over-count the sweeps
       trackStreamMarker: !resolved.timeRange,
@@ -2412,6 +3444,7 @@ module.exports = {
   OperationGate,
   RingBuffer,
   ProgressTracker,
+  PlaylistProgressTracker,
   LineSplitter,
   buildArgs,
   buildCommonArgs,
@@ -2424,9 +3457,20 @@ module.exports = {
   normalizeAudioMode,
   normalizeAudioLanguage,
   expectedStreamCount,
+  expectedItemCount,
   parseProgressLine,
   parseDestinationLine,
   parseStreamCountLine,
+  parsePlaylistProgressLine,
+  parsePlaylistStreamLine,
+  parsePlaylistFileLine,
+  parsePlaylistRecordLine,
+  parseArchiveSkipLine,
+  verifySavedFile,
+  readArchivedIds,
+  countArchivedSelections,
+  playlistSelection,
+  buildPlaylistRecordsPath,
   normalizeUrl,
   killProcessTree,
   redactLogLine,
@@ -2447,6 +3491,10 @@ module.exports = {
   PROGRESS_TEMPLATE,
   FILE_TEMPLATE,
   STREAM_TEMPLATE,
+  PLAYLIST_PROGRESS_TEMPLATE,
+  PLAYLIST_FILE_TEMPLATE,
+  PLAYLIST_STREAM_TEMPLATE,
+  PLAYLIST_RECORD_TEMPLATE,
   ENGINE_DIR_NAME,
   PLAYLIST_MAX_ITEMS,
   PLAYLIST_ERROR_BUDGET,

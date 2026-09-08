@@ -747,43 +747,94 @@ describe("the item cap", () => {
 
 describe("playlist archive path", () => {
   const USER_DATA = "/userData"
+  const DEST = "/Users/someone/Downloads/Cliply"
 
   /**
    * the archive is keyed by video id and nothing else, so it is quality-blind:
    * one archive.txt per playlist would make "download this again in 4K"
-   * silently do nothing
+   * silently do nothing. it is also destination-blind, which is the second
+   * half of the same problem - see the destination test below
    */
-  test("scopes the file per playlist and per quality", () => {
-    expect(
-      buildPlaylistArchivePath({
-        userDataPath: USER_DATA,
-        playlistId: "PLBCF2DAC6FFB574DE",
-        mode: "1080p-mp4"
-      })
-    ).toBe(path.join(USER_DATA, "playlists", "PLBCF2DAC6FFB574DE__1080p-mp4.txt"))
+  test("scopes the file per playlist, per quality and per destination", () => {
+    const at1080 = buildPlaylistArchivePath({
+      userDataPath: USER_DATA,
+      playlistId: "PLBCF2DAC6FFB574DE",
+      mode: "1080p-mp4",
+      outputDir: DEST
+    })
+
+    expect(path.dirname(at1080)).toBe(path.join(USER_DATA, "playlists"))
+    expect(path.basename(at1080)).toMatch(
+      /^PLBCF2DAC6FFB574DE__1080p-mp4__[0-9a-f]{8}\.txt$/
+    )
+  })
+
+  test("the name is stable for the same three inputs", () => {
+    const once = buildPlaylistArchivePath({
+      userDataPath: USER_DATA,
+      playlistId: "PL1",
+      mode: "mp3",
+      outputDir: DEST
+    })
 
     expect(
       buildPlaylistArchivePath({
         userDataPath: USER_DATA,
-        playlistId: "PLBCF2DAC6FFB574DE",
-        mode: "mp3"
+        playlistId: "PL1",
+        mode: "mp3",
+        outputDir: DEST
       })
-    ).toBe(path.join(USER_DATA, "playlists", "PLBCF2DAC6FFB574DE__mp3.txt"))
+    ).toBe(once)
+
+    // ...and does not depend on how the caller spelled the destination
+    expect(
+      buildPlaylistArchivePath({
+        userDataPath: USER_DATA,
+        playlistId: "PL1",
+        mode: "mp3",
+        outputDir: `${DEST}/sub/..`
+      })
+    ).toBe(once)
   })
 
   test("two qualities of one playlist never share an archive", () => {
     const at1080 = buildPlaylistArchivePath({
       userDataPath: USER_DATA,
       playlistId: "PL1",
-      mode: "1080p-mp4"
+      mode: "1080p-mp4",
+      outputDir: DEST
     })
     const at2160 = buildPlaylistArchivePath({
       userDataPath: USER_DATA,
       playlistId: "PL1",
-      mode: "2160p-mp4"
+      mode: "2160p-mp4",
+      outputDir: DEST
     })
 
     expect(at1080).not.toBe(at2160)
+  })
+
+  /**
+   * an archive records that a download once succeeded, not that the file is
+   * on disk now. downloading to folder A and then choosing folder B would
+   * otherwise skip everything and report a run with no files in it, so the
+   * destination is part of what the resume state is scoped to
+   */
+  test("two destinations for one playlist never share an archive", () => {
+    const toA = buildPlaylistArchivePath({
+      userDataPath: USER_DATA,
+      playlistId: "PL1",
+      mode: "1080p-mp4",
+      outputDir: "/Users/someone/Downloads/Cliply"
+    })
+    const toB = buildPlaylistArchivePath({
+      userDataPath: USER_DATA,
+      playlistId: "PL1",
+      mode: "1080p-mp4",
+      outputDir: "/Volumes/External/Cliply"
+    })
+
+    expect(toA).not.toBe(toB)
   })
 
   // the id becomes a path component, and nothing arriving over ipc gets to
@@ -792,24 +843,32 @@ describe("playlist archive path", () => {
     const escaped = buildPlaylistArchivePath({
       userDataPath: USER_DATA,
       playlistId: "../../etc/passwd",
-      mode: "1080p/../mp4"
+      mode: "1080p/../mp4",
+      outputDir: DEST
     })
 
     // dots go too, so no component can ever be `..`
-    expect(escaped).toBe(path.join(USER_DATA, "playlists", "etcpasswd__1080pmp4.txt"))
+    expect(path.basename(escaped)).toMatch(/^etcpasswd__1080pmp4__[0-9a-f]{8}\.txt$/)
     expect(escaped.startsWith(path.join(USER_DATA, "playlists"))).toBe(true)
   })
 
   test("an id that sanitises away still lands on a usable name", () => {
     expect(
-      buildPlaylistArchivePath({ userDataPath: USER_DATA, playlistId: "///", mode: "mp3" })
-    ).toBe(path.join(USER_DATA, "playlists", "playlist__mp3.txt"))
+      path.basename(
+        buildPlaylistArchivePath({
+          userDataPath: USER_DATA,
+          playlistId: "///",
+          mode: "mp3",
+          outputDir: DEST
+        })
+      )
+    ).toMatch(/^playlist__mp3__[0-9a-f]{8}\.txt$/)
   })
 
   test("refuses to guess where userData is", () => {
-    expect(() => buildPlaylistArchivePath({ playlistId: "PL1", mode: "mp3" })).toThrow(
-      /userData path/
-    )
+    expect(() =>
+      buildPlaylistArchivePath({ playlistId: "PL1", mode: "mp3", outputDir: DEST })
+    ).toThrow(/userData path/)
   })
 
   /**
@@ -821,8 +880,26 @@ describe("playlist archive path", () => {
   test("refuses to write an archive that is scoped to nothing", () => {
     for (const mode of [undefined, null, ""]) {
       expect(() =>
-        buildPlaylistArchivePath({ userDataPath: USER_DATA, playlistId: "PL1", mode })
+        buildPlaylistArchivePath({
+          userDataPath: USER_DATA,
+          playlistId: "PL1",
+          mode,
+          outputDir: DEST
+        })
       ).toThrow(/quality it is scoped to/)
+    }
+  })
+
+  test("refuses an archive that is scoped to no destination", () => {
+    for (const outputDir of [undefined, null, ""]) {
+      expect(() =>
+        buildPlaylistArchivePath({
+          userDataPath: USER_DATA,
+          playlistId: "PL1",
+          mode: "mp3",
+          outputDir
+        })
+      ).toThrow(/where the files go/)
     }
   })
 })

@@ -2,6 +2,7 @@
 // and picks the -o templates downloads are named by
 // the simple-platform half is still ported from python/platforms/*.py
 
+const crypto = require("crypto")
 const path = require("path")
 
 // yt-dlp's own default vcodec preference, best first. mirroring it is what
@@ -702,7 +703,7 @@ function buildPlaylistOutputTemplate({ audioOnly } = {}) {
  * @returns {string} absolute path to the archive file
  * @throws {Error} when there is no userData path, or no mode to scope by
  */
-function buildPlaylistArchivePath({ userDataPath, playlistId, mode } = {}) {
+function buildPlaylistArchivePath({ userDataPath, playlistId, mode, outputDir } = {}) {
   if (!userDataPath) {
     throw new Error("A playlist archive needs a userData path.")
   }
@@ -715,7 +716,30 @@ function buildPlaylistArchivePath({ userDataPath, playlistId, mode } = {}) {
     throw new Error("A playlist archive needs the quality it is scoped to.")
   }
 
-  const name = `${archiveComponent(playlistId, "playlist")}__${archiveComponent(mode, "any")}`
+  // ...and the destination for the same reason one layer out. an archive
+  // records that a download once succeeded, not that a file is on disk now:
+  // download to one folder, pick another, run again, and a destination-blind
+  // archive skips the lot and reports a finished run over an empty folder.
+  // scoping by folder does not make the archive a claim about the filesystem -
+  // nothing can, which is why an archive skip is reported as `itemsReused`
+  // rather than as a save - but it does stop the commonest way of being wrong
+  if (!outputDir) {
+    throw new Error("A playlist archive needs to know where the files go.")
+  }
+
+  // the folder is hashed rather than sanitised into the name: a full path is
+  // far longer than the component limit, and squeezing it would collide two
+  // different folders under one archive. resolved first so `a/sub/..` and `a`
+  // are one scope
+  const destination = crypto
+    .createHash("sha256")
+    .update(path.resolve(outputDir))
+    .digest("hex")
+    .slice(0, 8)
+
+  const name =
+    `${archiveComponent(playlistId, "playlist")}__` +
+    `${archiveComponent(mode, "any")}__${destination}`
 
   return path.join(userDataPath, PLAYLIST_ARCHIVE_DIR, `${name}.txt`)
 }
