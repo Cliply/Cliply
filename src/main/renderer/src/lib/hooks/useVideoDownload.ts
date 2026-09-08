@@ -138,7 +138,8 @@ export const useVideoDownload = () => {
               showDownloadErrorToast(
                 "Video download failed",
                 progressData.error || "Something went wrong. You can send us the details.",
-                progressData.category
+                progressData.category,
+                "youtube"
               )
 
               // already surfaced here; onError must not report it twice
@@ -216,7 +217,8 @@ export const useVideoDownload = () => {
       showDownloadErrorToast(
         "Video download failed",
         error.message,
-        error instanceof DownloadError ? error.category : undefined
+        error instanceof DownloadError ? error.category : undefined,
+        "youtube"
       )
     }
   })

@@ -144,7 +144,9 @@ function handleSearchError(
     error instanceof DownloadError &&
     error.category === "BOT_DETECTION"
   ) {
-    showBotDetectionToast(errorMessage)
+    // the platform decides which action the toast offers: BOT_DETECTION also
+    // catches tiktok and pinterest, and the cookie dialog is youtube's alone
+    showBotDetectionToast(errorMessage, config.id)
   } else if (errorMessage.includes(config.errorMessages.invalidUrl)) {
     toast.error(config.errorMessages.invalidUrlToast)
     form.setError("url", { message: config.errorMessages.invalidUrl })

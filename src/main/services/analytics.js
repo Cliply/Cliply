@@ -76,7 +76,7 @@ const ALLOWED_PROPERTIES = {
   engine_seeded: ["reason", "engine_version", "elapsed_bucket"],
   engine_updated: ["from_version", "to_version"],
   engine_update_failed: ["update_reason", "error_message"],
-  cookies_imported: ["success", "has_youtube_cookies"]
+  cookies_imported: ["success", "has_youtube_cookies", "signed_in"]
 }
 
 // built once, so a capture is a set lookup rather than a scan
@@ -100,6 +100,7 @@ const PROPERTY_KINDS = {
   is_trimmed: "bool",
   success: "bool",
   has_youtube_cookies: "bool",
+  signed_in: "bool",
 
   // counts and measures
   formats_count: "number",

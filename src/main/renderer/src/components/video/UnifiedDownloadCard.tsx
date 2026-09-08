@@ -310,7 +310,8 @@ function PinterestDownloadCard({
         showDownloadErrorToast(
           "Download failed",
           message,
-          error instanceof DownloadError ? error.category : undefined
+          error instanceof DownloadError ? error.category : undefined,
+          "pinterest"
         )
       }
     } finally {
@@ -368,7 +369,8 @@ function TikTokDownloadCard({
         showDownloadErrorToast(
           "Download failed",
           message,
-          error instanceof DownloadError ? error.category : undefined
+          error instanceof DownloadError ? error.category : undefined,
+          "tiktok"
         )
       }
     } finally {

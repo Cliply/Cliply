@@ -30,8 +30,8 @@ beforeEach(() => {
 })
 
 describe("showDownloadErrorToast", () => {
-  test("sends a blocked user to the cookie import", () => {
-    showDownloadErrorToast("Download failed", "blocked", "BOT_DETECTION")
+  test("sends a blocked youtube user to the cookie import", () => {
+    showDownloadErrorToast("Download failed", "blocked", "BOT_DETECTION", "youtube")
 
     expect(actionOf().label).toBe("Fix with cookies")
 
@@ -45,7 +45,7 @@ describe("showDownloadErrorToast", () => {
   test.each([["NETWORK_ERROR"], ["RATE_LIMITED"], [undefined]])(
     "%s still offers Report",
     (category) => {
-      showDownloadErrorToast("Download failed", "went wrong", category)
+      showDownloadErrorToast("Download failed", "went wrong", category, "youtube")
 
       expect(actionOf().label).toBe("Report")
 
@@ -54,12 +54,36 @@ describe("showDownloadErrorToast", () => {
       expect(openCookies).not.toHaveBeenCalled()
     }
   )
+
+  /**
+   * BOT_DETECTION is not youtube's alone: the taxonomy matches a bare
+   * "use --cookies", which tiktok and pinterest emit too. The dialog behind
+   * this action imports youtube cookies and nothing else, so offering it for
+   * one of those sends the user somewhere that cannot help them. An unnamed
+   * platform gets Report as well - a missing action beats a wrong one.
+   */
+  test.each([["pinterest"], ["tiktok"], [undefined]])(
+    "a %s block is not offered youtube cookies",
+    (platform) => {
+      showDownloadErrorToast(
+        "Download failed",
+        "blocked",
+        "BOT_DETECTION",
+        platform as "pinterest" | "tiktok" | undefined
+      )
+
+      expect(actionOf().label).toBe("Report")
+
+      actionOf().onClick()
+      expect(openCookies).not.toHaveBeenCalled()
+    }
+  )
 })
 
 describe("showBotDetectionToast", () => {
   // the lookup path had no action at all, and it is where most blocks land
   test("carries main's wording and the cookie action", () => {
-    showBotDetectionToast("YouTube asked us to confirm you're not a bot.")
+    showBotDetectionToast("YouTube asked us to confirm you're not a bot.", "youtube")
 
     expect(toastError).toHaveBeenCalledWith(
       "YouTube asked us to confirm you're not a bot.",
@@ -70,4 +94,21 @@ describe("showBotDetectionToast", () => {
     actionOf().onClick()
     expect(openCookies).toHaveBeenCalled()
   })
+
+  // the search hook is shared across all three platforms, so this path reaches
+  // tiktok and pinterest too
+  test.each([["pinterest"], ["tiktok"]])(
+    "a %s block keeps main's wording but not the cookie action",
+    (platform) => {
+      showBotDetectionToast("They asked us to confirm we're not a bot.", platform as "pinterest" | "tiktok")
+
+      expect(toastError.mock.calls[0][0]).toBe(
+        "They asked us to confirm we're not a bot."
+      )
+      expect(actionOf().label).toBe("Report")
+
+      actionOf().onClick()
+      expect(openCookies).not.toHaveBeenCalled()
+    }
+  )
 })

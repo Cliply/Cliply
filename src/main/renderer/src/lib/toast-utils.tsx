@@ -1,6 +1,7 @@
 import { toast } from "sonner"
 import { cookieActions } from "@/lib/cookieStore"
 import { reportActions } from "@/lib/reportStore"
+import type { Platform } from "@/lib/store"
 
 export const showServerOverwhelmedToast = () => {
   toast(
@@ -29,6 +30,17 @@ export const showFolderSelectedToast = () => {
 }
 
 /**
+ * the cookie jar is youtube's, and so is the only failure it can fix
+ *
+ * BOT_DETECTION is not a youtube-only category: the taxonomy matches a bare
+ * "use --cookies", which tiktok and pinterest emit too. Offering to fix one of
+ * those with a dialog that imports youtube cookies sends the user somewhere
+ * that cannot help. An unknown platform gets the report action rather than the
+ * cookie one, because a missing action is better than a wrong one.
+ */
+const cookiesCanHelp = (platform?: Platform) => platform === "youtube"
+
+/**
  * youtube refused us, and the user can do something about it
  *
  * kept separate from the download failure toast because the metadata fetch is
@@ -39,15 +51,16 @@ export const showFolderSelectedToast = () => {
  * the title is main's own wording, so the sentence the user reads is the one
  * the taxonomy wrote.
  */
-export const showBotDetectionToast = (message: string) => {
+export const showBotDetectionToast = (message: string, platform?: Platform) => {
   toast.error(message, {
     id: "bot-detected",
-    description: "Signing in with a throwaway account usually clears this.",
+    description: cookiesCanHelp(platform)
+      ? "Signing in with a throwaway account usually clears this."
+      : "This site is asking us to prove we're not a bot.",
     duration: 12000,
-    action: {
-      label: "Fix with cookies",
-      onClick: () => cookieActions.open()
-    }
+    action: cookiesCanHelp(platform)
+      ? { label: "Fix with cookies", onClick: () => cookieActions.open() }
+      : { label: "Report", onClick: () => reportActions.open() }
   })
 }
 
@@ -69,9 +82,10 @@ export const showBotDetectionToast = (message: string) => {
 export const showDownloadErrorToast = (
   title: string,
   description?: string,
-  category?: string
+  category?: string,
+  platform?: Platform
 ) => {
-  const blocked = category === "BOT_DETECTION"
+  const blocked = category === "BOT_DETECTION" && cookiesCanHelp(platform)
 
   toast.error(title, {
     id: "download-failed",

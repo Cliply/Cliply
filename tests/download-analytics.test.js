@@ -57,11 +57,20 @@ function engineError(code, message) {
   return error
 }
 
-function createHandlers({ hasValidCookies = true, importCookies } = {}) {
+function createHandlers({
+  hasValidCookies = true,
+  // "does the jar hold youtube cookies" is a wider question than "is it a
+  // login", and the double used to answer both with the same flag - so a state
+  // the real manager cannot produce (a login that holds no youtube cookies)
+  // was the one being tested
+  hasYouTubeCookies = hasValidCookies,
+  importCookies
+} = {}) {
   const captured = []
 
   const cookieManager = {
     hasValidCookies: jest.fn(() => hasValidCookies),
+    hasYouTubeCookies: jest.fn(() => hasYouTubeCookies),
     importCookies:
       importCookies || jest.fn().mockResolvedValue(true),
     importCookieFile: jest.fn().mockResolvedValue(true)
@@ -729,7 +738,8 @@ describe("cookies_imported", () => {
     expect(captured[0].event).toBe("cookies_imported")
     expect(captured[0].properties).toEqual({
       success: true,
-      has_youtube_cookies: true
+      has_youtube_cookies: true,
+      signed_in: true
     })
   })
 
@@ -740,7 +750,27 @@ describe("cookies_imported", () => {
 
     expect(captured[0].properties).toEqual({
       success: true,
-      has_youtube_cookies: false
+      has_youtube_cookies: false,
+      signed_in: false
+    })
+  })
+
+  // the state the funnel most needs to see, and the one the old payload could
+  // not express: the file imported fine and simply was not a login. success and
+  // has_youtube_cookies were both the signed-in flag, so this looked identical
+  // to a jar that failed to import at all
+  it("tells a signed-out youtube jar from a failed import", async () => {
+    const { handlers, captured } = createHandlers({
+      hasValidCookies: false,
+      hasYouTubeCookies: true
+    })
+
+    await handlers.handleImportCookies(null, { cookies: "# Netscape" })
+
+    expect(captured[0].properties).toEqual({
+      success: true,
+      has_youtube_cookies: true,
+      signed_in: false
     })
   })
 
@@ -814,6 +844,7 @@ describe("an analytics service that throws", () => {
     return new IPCHandlers({
       cookieManager: {
         hasValidCookies: jest.fn(() => true),
+        hasYouTubeCookies: jest.fn(() => true),
         importCookies: jest.fn().mockResolvedValue(true),
         importCookieFile: jest.fn().mockResolvedValue(true)
       },
@@ -1132,7 +1163,8 @@ describe("the download payloads survive the real validator", () => {
 
     expect(message.properties).toMatchObject({
       success: true,
-      has_youtube_cookies: false
+      has_youtube_cookies: false,
+      signed_in: false
     })
     expect(warn).not.toHaveBeenCalled()
   })
