@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { toast } from "sonner"
-import { Check, Cookie, Copy, HardDrive, KeyRound, Trash2 } from "lucide-react"
+import { Check, Cookie, Copy, KeyRound } from "lucide-react"
 import { cookiesApi, systemApi, type CookieStatus } from "@/lib/api"
 import { useCookieStore } from "@/lib/cookieStore"
 import {
@@ -27,10 +27,10 @@ const YTDLP_COOKIE_GUIDE =
 /**
  * copied rather than opened, and that is not a shortcut we failed to take
  *
- * openExternal hands the url to the *default* browser, which opens a normal
- * window - the exact thing step 2 just talked them out of. A copy button lands
- * the address in the private window they already have open, which is the only
- * place it does any good.
+ * openExternal hands the url to the *default* browser, which may not be the
+ * one they just signed into, and lands them on a fresh tab rather than the one
+ * holding the session. A copy button puts the address where it does some good:
+ * the tab they already have open.
  */
 const ROBOTS_URL = "https://www.youtube.com/robots.txt"
 
@@ -176,7 +176,7 @@ export function CookieDialog() {
     } catch {
       // clipboard is best-effort, and the address is on screen to type
       toast.error("couldn't copy that", {
-        description: "type youtube.com/robots.txt into the private window."
+        description: "type youtube.com/robots.txt into that tab instead."
       })
     }
   }
@@ -213,23 +213,18 @@ export function CookieDialog() {
           </DialogDescription>
         </DialogHeader>
 
-        {/* before the ask, not after it. someone who is uneasy about handing
-            over a youtube session has already decided by the time they reach a
-            footnote, so the three things that answer the worry go up here and
-            stay put whether or not there is a jar yet */}
-        <ul className="space-y-2 rounded-xl bg-cyan-50/70 p-3 text-sm text-slate-600 dark:bg-cyan-950/20 dark:text-slate-300">
-          <Assurance icon={KeyRound}>
-            you&apos;re not signing in to cliply. there&apos;s nothing here to
-            sign in to. you sign in to youtube in your own browser, and we read
-            the file it hands you.
-          </Assurance>
-          <Assurance icon={HardDrive}>
-            that file stays on this device. cliply has no server to send it to.
-          </Assurance>
-          <Assurance icon={Trash2}>
-            press remove and it&apos;s deleted off your disk.
-          </Assurance>
-        </ul>
+        {/* before the ask, not after it. someone uneasy about handing over a
+            youtube session has already decided by the time they reach a
+            footnote. three bullets was the reassurance arguing its case, which
+            protests slightly too much - one line lands better and stays put
+            whether or not there is a jar yet */}
+        <p className="flex gap-2.5 rounded-xl bg-cyan-50/70 p-3 text-sm text-slate-600 dark:bg-cyan-950/20 dark:text-slate-300">
+          <KeyRound className="mt-0.5 h-3.5 w-3.5 shrink-0 text-cyan-600 dark:text-cyan-400" />
+          <span>
+            you sign in to youtube in your own browser, never to cliply. the
+            file it gives you stays on this device, and remove deletes it.
+          </span>
+        </p>
 
         <div className="space-y-3">
           <div className="flex items-center gap-2.5 border-b border-slate-200 pb-3 text-sm dark:border-slate-700/60">
@@ -295,12 +290,12 @@ export function CookieDialog() {
                   n={2}
                   note="use a spare account if you have one. youtube has been known to ban accounts it catches using downloaders."
                 >
-                  open a <Em>private window</Em> and sign in to youtube there
+                  open youtube in your browser and sign in
                 </Step>
 
                 <Step
                   n={3}
-                  note="parks the tab somewhere youtube isn't refreshing your session."
+                  note="parks the tab somewhere youtube isn't handing out fresh cookies."
                 >
                   in that same tab, go to{" "}
                   <button
@@ -321,9 +316,9 @@ export function CookieDialog() {
 
                 <Step
                   n={4}
-                  note="this is the part that keeps them working. youtube expires cookies from tabs you leave open, so a window you close is a session it stops touching."
+                  note="worth doing straight away. youtube refreshes its cookies on open youtube tabs, so the longer that one stays up the sooner your export goes stale."
                 >
-                  export the cookies, then <Em>close the private window</Em>
+                  export the cookies, then <Em>close that tab</Em>
                 </Step>
 
                 <Step n={5}>import that file here</Step>
@@ -369,7 +364,10 @@ export function CookieDialog() {
               "youtube rotates these out eventually. when it does, cliply will say so right here."
             ) : (
               <>
-                these steps are yt-dlp&apos;s own, we didn&apos;t make them up.{" "}
+                {/* "these steps are yt-dlp's own" stopped being true once the
+                    private window came out of step 2. based on is honest,
+                    are is not */}
+                based on yt-dlp&apos;s own guide.{" "}
                 <button className={linkClass} onClick={openLink(YTDLP_COOKIE_GUIDE)}>
                   read theirs
                 </button>
@@ -379,28 +377,6 @@ export function CookieDialog() {
         </div>
       </DialogContent>
     </Dialog>
-  )
-}
-
-/**
- * one reassurance, sitting on the worry it answers
- *
- * plain rows rather than another bordered card: the steps below are already a
- * block, and two stacked panels is the shape of a form rather than of somebody
- * explaining something.
- */
-function Assurance({
-  icon: Icon,
-  children
-}: {
-  icon: typeof KeyRound
-  children: React.ReactNode
-}) {
-  return (
-    <li className="flex gap-2.5">
-      <Icon className="mt-0.5 h-3.5 w-3.5 shrink-0 text-cyan-600 dark:text-cyan-400" />
-      <span>{children}</span>
-    </li>
   )
 }
 

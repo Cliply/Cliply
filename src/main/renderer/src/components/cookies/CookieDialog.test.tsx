@@ -93,7 +93,7 @@ describe("CookieDialog", () => {
 
     await waitFor(() => expect(screen.getByText(/signed in · 22 cookies/)).toBeTruthy())
     // the recipe is the empty state, not permanent furniture
-    expect(screen.queryByText(/close the private window/i)).toBeNull()
+    expect(screen.queryByText(/close that tab/i)).toBeNull()
     expect(screen.getByText(/replace/)).toBeTruthy()
   })
 
@@ -103,7 +103,7 @@ describe("CookieDialog", () => {
     await open()
 
     await waitFor(() => expect(screen.getByText("nothing imported yet")).toBeTruthy())
-    expect(screen.getByText(/close the private window/i)).toBeTruthy()
+    expect(screen.getByText(/close that tab/i)).toBeTruthy()
     // the account warning moved onto the step it is about, rather than sitting
     // apart with an amber bar down its side
     expect(screen.getByText(/spare account/i)).toBeTruthy()
@@ -154,7 +154,7 @@ describe("CookieDialog", () => {
 
     await waitFor(() => expect(screen.getByText(problem)).toBeTruthy())
     // still unusable, so the instructions stay up
-    expect(screen.getByText(/close the private window/i)).toBeTruthy()
+    expect(screen.getByText(/close that tab/i)).toBeTruthy()
   })
 })
 
@@ -282,10 +282,9 @@ describe("removing the cookies", () => {
  */
 describe("what the dialog promises about the file", () => {
   test.each([
-    [/not signing in to cliply/i],
+    [/never to cliply/i],
     [/stays on this device/i],
-    [/no server to send it to/i],
-    [/deleted off your disk/i]
+    [/remove deletes it/i]
   ])("says %s whether or not cookies are imported", async (phrase) => {
     getStatus.mockResolvedValue(status())
 
@@ -307,7 +306,7 @@ describe("what the dialog promises about the file", () => {
     await open()
 
     await waitFor(() => expect(screen.getByText(/stays on this device/i)).toBeTruthy())
-    expect(screen.getByText(/not signing in to cliply/i)).toBeTruthy()
+    expect(screen.getByText(/never to cliply/i)).toBeTruthy()
   })
 })
 
