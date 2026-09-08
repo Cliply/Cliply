@@ -411,11 +411,35 @@ function killProcessTree(child, options = {}) {
 // the user's home folder and signed media urls (which carry their ip address)
 // must never reach an issue report or analytics payload
 const HOME_DIR = os.homedir()
+
+/**
+ * a netscape cookie row, as yt-dlp quotes one back at you
+ *
+ * both of its loaders print the offending line verbatim - "skipping cookie file
+ * entry due to invalid length 8: '...'" and "invalid Netscape format cookies
+ * file: '...'" - and the last column of that row is the cookie's value. Those
+ * lines are kept in the stderr tail, the tail is attached to a failure, and the
+ * report dialog puts the failure in a github issue url and on the clipboard. So
+ * a single malformed row was a session token one click from being published.
+ *
+ * the six structural columns are left alone, because knowing which cookie and
+ * which domain is what makes the report useful.
+ */
+const COOKIE_ROW_RE =
+  /((?:^|['"\s])[^\t\n'"]*\t(?:TRUE|FALSE)\t[^\t\n]*\t(?:TRUE|FALSE)\t[^\t\n]*\t[^\t\n]*\t)[^\t\n'"]+/g
+
 const REDACTIONS = [
   [/\/Users\/[^/\\\s"'<>]+/g, "/Users/~"],
   [/\/home\/[^/\\\s"'<>]+/g, "/home/~"],
   [/([A-Za-z]):\\Users\\[^\\<>"|?*\n\r]+/g, "$1:\\Users\\~"],
-  [/(https?:\/\/[^\s"'<>]+?)\?[^\s"'<>]*/g, "$1?<redacted>"]
+  [/(https?:\/\/[^\s"'<>]+?)\?[^\s"'<>]*/g, "$1?<redacted>"],
+  [COOKIE_ROW_RE, "$1<cookie value redacted>"],
+  // the same row with its tabs already escaped, which is how python renders it
+  // inside a quoted repr
+  [
+    /((?:\\t(?:TRUE|FALSE))\\t[^\t\n'"]*\\t(?:TRUE|FALSE)\\t[^\t\n'"]*\\t[^\t\n'"]*\\t)[^\t\n'"\\]+/g,
+    "$1<cookie value redacted>"
+  ]
 ]
 
 /**
