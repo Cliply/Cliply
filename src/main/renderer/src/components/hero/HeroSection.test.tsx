@@ -21,8 +21,16 @@ vi.mock("sonner", () => ({
 }))
 // the hero pulls in the whole search stack, none of which this is about
 vi.mock("./SearchCard", () => ({ SearchCard: () => <div /> }))
+// renders the labels rather than a blank div: a test asserting an item is
+// absent is worthless against a mock that never rendered any item at all
 vi.mock("@/components/ui/menu-vertical", () => ({
-  MenuVertical: () => <div />
+  MenuVertical: ({ menuItems }: { menuItems: { label: string }[] }) => (
+    <div>
+      {menuItems.map((item) => (
+        <span key={item.label}>{item.label}</span>
+      ))}
+    </div>
+  )
 }))
 vi.mock("@/components/ui/mode-toggle", () => ({ ModeToggle: () => <div /> }))
 vi.mock("react-router-dom", () => ({
@@ -52,4 +60,32 @@ describe("the line in the top chrome", () => {
 
     expect(useCookieStore.getState().isOpen).toBe(true)
   })
+})
+
+// the passive donate ask. it never interrupts, so the only thing that can go
+// wrong is it quietly disappearing in a refactor and nobody noticing
+describe("the donate line", () => {
+  test("says who is on the other end, and links out", async () => {
+    const { HeroSection } = await import("./HeroSection")
+    render(<HeroSection />)
+
+    expect(screen.getByText(/made by one person/i)).toBeTruthy()
+
+    const link = screen.getByText("buy me a coffee")
+    expect(link.getAttribute("href")).toBe("https://buymeacoffee.com/itssdevk")
+  })
+})
+
+// two doors to the same room made the menu longer for nothing, once the line
+// in the top chrome started offering it to people who would never go looking
+test("the menu no longer carries its own cookies entry", async () => {
+  const { HeroSection } = await import("./HeroSection")
+  render(<HeroSection />)
+
+  // the two that prove the mock is rendering anything at all, so the absence
+  // below means something
+  expect(screen.getByText("update")).toBeTruthy()
+  expect(screen.getByText("donate")).toBeTruthy()
+
+  expect(screen.queryByText("cookies")).toBeNull()
 })

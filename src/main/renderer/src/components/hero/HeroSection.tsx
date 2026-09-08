@@ -32,10 +32,11 @@ export function HeroSection() {
               label: "update",
               onClick: handleCheckForUpdates
             },
-            {
-              label: "cookies",
-              onClick: () => cookieActions.open()
-            },
+            // cookies came out of here once the line in the top chrome started
+            // offering the same dialog. That one reaches people while they are
+            // wondering why downloads keep failing; this one only ever found
+            // the users who already went looking, and two doors to the same
+            // room made the menu longer for nothing
             {
               label: "donate",
               href: "https://buymeacoffee.com/itssdevk",
@@ -143,6 +144,34 @@ export function HeroSection() {
         transition={{ duration: 0.8, delay: 1.0 }}
         className="absolute bottom-8 left-0 right-0 z-20"
       >
+        {/*
+          the donate ask, sitting still rather than interrupting anything.
+
+          it is one line above the existing row instead of a fourth item inside
+          it, because as a link among links it reads as navigation and gets
+          skipped with the rest. What makes a passive ask work is sounding like
+          a person rather than a button, so it says who is on the other end and
+          leaves the decision alone. Nothing here blocks, times out, or comes
+          back a second time.
+        */}
+        <p
+          className="mb-3 text-center text-xs text-slate-400 dark:text-slate-500"
+          style={{
+            fontFamily:
+              'Geist Mono, ui-monospace, SFMono-Regular, "SF Mono", Consolas, "Liberation Mono", Menlo, monospace'
+          }}
+        >
+          cliply is free, and made by one person.{" "}
+          <a
+            href="https://buymeacoffee.com/itssdevk"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-slate-500 underline underline-offset-4 transition-colors duration-200 hover:text-cyan-500 dark:text-slate-400 dark:hover:text-cyan-400"
+          >
+            buy me a coffee
+          </a>
+        </p>
+
         <div className="flex justify-center items-center px-4 gap-6">
           <Link
             to="/disclaimer"
