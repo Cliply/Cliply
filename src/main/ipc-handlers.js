@@ -115,19 +115,19 @@ function cookieJarProblem({
   // and "no cookies imported" is the wrong thing to say about a file that is
   // sitting there full of them and taking every download down with it
   if (loadError === JAR_DOMAIN_FLAG) {
-    return "This cookie file is malformed - export it again rather than editing it"
+    return "that file is malformed, export a fresh one instead of editing it"
   }
 
   if (loadError) {
-    return "This file isn't a Netscape cookies.txt - export it again"
+    return "that isn't a cookies.txt file, export it again"
   }
 
   if (total === 0) {
-    return "No cookies imported"
+    return "nothing imported yet"
   }
 
   if (youtube === 0) {
-    return "This file has no YouTube cookies in it"
+    return "no youtube cookies in that file"
   }
 
   // any expiry at all is worth saying so, rather than only a jar where every
@@ -135,16 +135,16 @@ function cookieJarProblem({
   // PREF used to fall through to "you were never signed in", which sends the
   // user to fix something that was never wrong
   if (!signedIn && expired > 0) {
-    return "Your YouTube cookies have expired - export them again"
+    return "your cookies expired, grab a fresh export"
   }
 
   if (!signedIn) {
     return hasSid
-      ? "YouTube ended this session - export your cookies again"
-      : "These YouTube cookies aren't from a signed-in session - sign in first, then export"
+      ? "youtube ended this session, export your cookies again"
+      : "these cookies aren't from a signed-in session, sign in first then export"
   }
 
-  return "No usable YouTube cookies"
+  return "no usable youtube cookies"
 }
 
 /**
@@ -1078,8 +1078,8 @@ class IPCHandlers {
       // the reason goes in the message slot, which is the one that survives
       // the trip to the renderer
       return this.createError(
-        error.message || "Failed to import cookies",
-        "Export cookies.txt with a browser extension, then paste that file."
+        error.message || "couldn't import those cookies",
+        "export cookies.txt with a browser extension, then paste that file."
       )
     }
   }
@@ -1088,9 +1088,9 @@ class IPCHandlers {
   async handleImportCookieFile(_event) {
     try {
       const result = await dialog.showOpenDialog(this.mainWindow, {
-        title: "Select Cookie File",
+        title: "select your cookies.txt",
         filters: [
-          { name: "Cookie Files", extensions: ["txt"] },
+          { name: "cookie files", extensions: ["txt"] },
           { name: "All Files", extensions: ["*"] }
         ],
         properties: ["openFile"]
@@ -1121,8 +1121,8 @@ class IPCHandlers {
       // including the ones with a precise reason, reached the user as the
       // generic "Failed to import cookie file"
       return this.createError(
-        error.message || "Failed to import cookie file",
-        "Export cookies.txt with a browser extension, then pick that file."
+        error.message || "couldn't import that cookie file",
+        "export cookies.txt with a browser extension, then pick that file."
       )
     }
   }
@@ -1191,7 +1191,7 @@ class IPCHandlers {
       })
     } catch (error) {
       console.error("Cookie test failed:", error.message)
-      return this.createError("Cookie test failed", error.message)
+      return this.createError("couldn't test the cookies", error.message)
     }
   }
 
@@ -1215,13 +1215,13 @@ class IPCHandlers {
         if (info && info.title) {
           return {
             extractionCheck: "passed",
-            note: "Extraction worked with your cookies attached. This does not by itself prove YouTube accepted them."
+            note: "the download path worked with your cookies attached. that alone doesn't prove youtube accepted them."
           }
         }
 
         return {
           extractionCheck: "unknown",
-          note: "The test video returned no details."
+          note: "the test video came back with nothing."
         }
       } catch (probeError) {
         console.warn(`cookie probe failed for ${url}:`, probeError.message)
@@ -1235,27 +1235,27 @@ class IPCHandlers {
         if (probeError.code === ERROR_CODES.BOT_DETECTION) {
           return {
             extractionCheck: "rejected",
-            note: "YouTube still asked us to confirm you're not a bot while sending your cookies - they are expired or not being accepted."
+            note: "youtube still asked us to prove we're not a bot while sending your cookies, so they're expired or not being accepted."
           }
         }
 
         if (probeError.code === ERROR_CODES.NETWORK_ERROR) {
           return {
             extractionCheck: "unknown",
-            note: "Couldn't reach YouTube, so the cookies weren't tested."
+            note: "couldn't reach youtube, so the cookies went untested."
           }
         }
 
         return {
           extractionCheck: "unknown",
-          note: `The test couldn't complete: ${probeError.message}`
+          note: `the test couldn't finish: ${probeError.message}`
         }
       }
     }
 
     return {
       extractionCheck: "unknown",
-      note: `All ${deadTargets} of our test videos are unavailable right now, so this test says nothing about your cookies.`
+      note: `all ${deadTargets} of our test videos are down right now, so this says nothing about your cookies.`
     }
   }
 
@@ -1288,7 +1288,7 @@ class IPCHandlers {
       })
     } catch (error) {
       console.error("Get cookie status failed:", error.message)
-      return this.createError("Failed to get cookie status")
+      return this.createError("couldn't read the cookie status")
     }
   }
 
@@ -1306,7 +1306,7 @@ class IPCHandlers {
       // the jar is still on disk, so this has to reach the user rather than
       // resolve into a screen that says the login is gone
       return this.createError(
-        "Couldn't remove the cookies - they're still on this machine",
+        "couldn't remove the cookies, they're still on this machine",
         error.message
       )
     }

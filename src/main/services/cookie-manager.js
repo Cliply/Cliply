@@ -216,7 +216,7 @@ class CookieManager {
    */
   async importCookies(cookieContent) {
     if (!cookieContent || !cookieContent.trim()) {
-      throw new Error("That file is empty.")
+      throw new Error("that file is empty.")
     }
 
     // into yt-dlp's own shape: its line endings, and its magic first line
@@ -239,19 +239,19 @@ class CookieManager {
 
     if (error === JAR_DOMAIN_FLAG) {
       throw new Error(
-        "That cookie file is malformed - a domain column disagrees with its own subdomain flag, and yt-dlp refuses the whole file. Export it again rather than editing it by hand."
+        "that cookie file is malformed. a domain column disagrees with its own subdomain flag, so yt-dlp refuses the whole thing. export a fresh one instead of editing it by hand."
       )
     }
 
     if (cookies.length === 0) {
       throw new Error(
-        "That file has no cookies in it. Export cookies.txt with the extension, then pick that file."
+        "there are no cookies in that file. export cookies.txt with the extension, then pick that one."
       )
     }
 
     if (!cookies.some((cookie) => isYouTubeDomain(cookie.domain))) {
       throw new Error(
-        "That file has cookies, but none of them are YouTube's. Export cookies.txt while you're on youtube.com."
+        "that file has cookies, but none of them are youtube's. export cookies.txt while you're on youtube.com."
       )
     }
 
@@ -285,7 +285,7 @@ class CookieManager {
 
       if (size > MAX_JAR_BYTES) {
         throw new Error(
-          "That file is far too big to be a cookie export. Pick the cookies.txt the extension saved."
+          "that file is way too big to be a cookie export. pick the cookies.txt the extension saved."
         )
       }
 
@@ -309,7 +309,7 @@ class CookieManager {
        */
       if (looksLikeJson(content)) {
         throw new Error(
-          "Cookies file must be Netscape formatted, not JSON. Export it as cookies.txt."
+          "that's json, not a netscape cookies.txt. export it as cookies.txt instead."
         )
       }
 
@@ -476,7 +476,7 @@ class CookieManager {
       valid: false,
       cookiesLoaded: false,
       extractionCheck: "skipped",
-      note: "No cookies imported"
+      note: "nothing imported yet"
     })
 
     return true

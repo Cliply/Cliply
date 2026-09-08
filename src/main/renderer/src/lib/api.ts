@@ -731,7 +731,7 @@ export const cookiesApi = {
     const response = await electronAPI.cookies.getStatus()
 
     if (!response.success || !response.data) {
-      throw new Error(response.error?.message || "Failed to read cookie status")
+      throw new Error(response.error?.message || "couldn't read the cookie status")
     }
 
     return response.data
@@ -748,7 +748,7 @@ export const cookiesApi = {
 
     if (!response.success) {
       if (response.error?.message === "No file selected") return null
-      throw new Error(response.error?.message || "Failed to import cookies")
+      throw new Error(response.error?.message || "couldn't import those cookies")
     }
 
     return response.data ?? null
@@ -774,7 +774,7 @@ export const cookiesApi = {
     const response = await electronAPI.cookies.clear()
 
     if (!response.success) {
-      throw new Error(response.error?.message || "Failed to remove cookies")
+      throw new Error(response.error?.message || "couldn't remove the cookies")
     }
 
     return true

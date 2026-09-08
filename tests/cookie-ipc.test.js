@@ -32,10 +32,10 @@ function handlersWith(cookieManager) {
 }
 
 const REFUSALS = [
-  "That file has no cookies in it. Export cookies.txt with the extension, then pick that file.",
-  "That file has cookies, but none of them are YouTube's. Export cookies.txt while you're on youtube.com.",
-  "Cookies file must be Netscape formatted, not JSON. Export it as cookies.txt.",
-  "That file is far too big to be a cookie export. Pick the cookies.txt the extension saved."
+  "there are no cookies in that file. export cookies.txt with the extension, then pick that one.",
+  "that file has cookies, but none of them are youtube's. export cookies.txt while you're on youtube.com.",
+  "that's json, not a netscape cookies.txt. export it as cookies.txt instead.",
+  "that file is way too big to be a cookie export. pick the cookies.txt the extension saved."
 ]
 
 describe("a refused import reaches the renderer with its reason intact", () => {

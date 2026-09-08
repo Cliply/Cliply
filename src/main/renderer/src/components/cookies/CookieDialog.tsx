@@ -83,22 +83,22 @@ export function CookieDialog() {
         const next = await refresh()
 
         if (result.hasValidCookies) {
-          toast.success("Cookies imported", {
-            description: "YouTube will see you as signed in from now on."
+          toast.success("cookies imported", {
+            description: "youtube will see you as signed in from now on."
           })
         } else {
           // an import that lands but is not a login used to say nothing at all,
           // which reads as the button doing nothing. main already worked out
           // which way it fell short
-          toast.warning("Imported, but not signed in", {
-            description: next?.problem ?? "These cookies won't authenticate you."
+          toast.warning("imported, but not signed in", {
+            description: next?.problem ?? "these cookies won't sign you in."
           })
         }
       }
     } catch (error) {
-      toast.error("Couldn't import that file", {
+      toast.error("couldn't import that file", {
         description:
-          error instanceof Error ? error.message : "Failed to import cookies"
+          error instanceof Error ? error.message : "couldn't import cookies"
       })
     } finally {
       setBusy(null)
@@ -115,16 +115,16 @@ export function CookieDialog() {
       // "Cookies look fine" above a description explaining that YouTube had
       // just refused them
       if (result.rejected) {
-        toast.warning("YouTube turned these cookies down", {
+        toast.warning("youtube turned these down", {
           description: result.note
         })
       } else {
-        toast(result.cookiesLoaded ? "Cookies look fine" : "Cookies aren't usable", {
+        toast(result.cookiesLoaded ? "cookies look fine" : "cookies aren't usable", {
           description: result.note
         })
       }
     } catch (error) {
-      toast.error("Couldn't test the cookies", {
+      toast.error("couldn't test the cookies", {
         description: error instanceof Error ? error.message : undefined
       })
     } finally {
@@ -140,11 +140,11 @@ export function CookieDialog() {
     } catch (error) {
       // a failure here means the jar is still on disk, which is the opposite
       // of what the screen would otherwise go on to show
-      toast.error("Couldn't remove the cookies", {
+      toast.error("couldn't remove the cookies", {
         description:
           error instanceof Error
             ? error.message
-            : "They're still on this machine."
+            : "they're still on this machine."
       })
       await refresh()
     } finally {
@@ -165,7 +165,11 @@ export function CookieDialog() {
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && close()}>
       <DialogContent
-        className="font-space-grotesk sm:max-w-lg"
+        // outline-none is doing real work: radix focuses the content itself,
+        // and chromium then paints its platform focus ring around it - which on
+        // macos follows the system accent colour, so the dialog picked up a
+        // thick orange boundary that is nothing to do with our palette
+        className="font-space-grotesk outline-none sm:max-w-lg"
         onOpenAutoFocus={(event) => {
           event.preventDefault()
           importRef.current?.focus()
@@ -177,12 +181,12 @@ export function CookieDialog() {
               <Cookie className="h-4 w-4" />
             </span>
             <DialogTitle className="text-slate-900 dark:text-white">
-              YouTube cookies
+              youtube cookies
             </DialogTitle>
           </div>
           <DialogDescription className="text-slate-500 dark:text-slate-400">
-            Only needed when YouTube stops trusting this machine. Signing in
-            makes it judge the account instead of your connection.
+            only needed when youtube stops trusting this machine. signing in
+            means it judges the account, not your connection.
           </DialogDescription>
         </DialogHeader>
 
@@ -200,8 +204,8 @@ export function CookieDialog() {
             />
             <span className="text-slate-700 dark:text-slate-200">
               {signedIn
-                ? `Signed in · ${status?.fileInfo.youtubeCookieCount ?? 0} cookies`
-                : (status?.problem ?? "Not imported")}
+                ? `signed in · ${status?.fileInfo.youtubeCookieCount ?? 0} cookies`
+                : (status?.problem ?? "nothing imported yet")}
             </span>
             {imported && daysAgo(status?.status?.lastImport) && (
               <span className="ml-auto shrink-0 text-xs text-slate-400 dark:text-slate-500">
@@ -215,12 +219,12 @@ export function CookieDialog() {
               that an import ever happened. that reads as "it deleted them" */}
           {imported && !signedIn && (
             <p className="text-sm text-slate-600 dark:text-slate-300">
-              The file you imported is still here
+              your file is still here
               {status?.fileInfo.youtubeCookieCount
                 ? ` (${status.fileInfo.youtubeCookieCount} cookies)`
                 : ""}
-              , it just stopped working. Nothing was deleted — export a fresh
-              one and import it over the top.
+              , it just stopped working. nothing got deleted. grab a fresh
+              export and import it over the top.
             </p>
           )}
 
@@ -229,36 +233,41 @@ export function CookieDialog() {
               for losing them */}
           {!signedIn && (
             <>
-              <p className="border-l-2 border-amber-500 pl-3 text-sm text-amber-700 dark:text-amber-300">
-                <span className="font-medium">Use a throwaway account.</span>{" "}
-                YouTube can ban accounts used with downloaders.
+              {/* the amber bar down the side was the only thing on screen
+                  shouting, and a coloured edge on one side of a block reads as
+                  decoration rather than as a warning. the weight carries it */}
+              <p className="text-sm text-slate-600 dark:text-slate-300">
+                <span className="font-medium text-slate-900 dark:text-white">
+                  use a throwaway account.
+                </span>{" "}
+                youtube does ban accounts caught using downloaders.
               </p>
 
               <ol className={cn(cardClass, "space-y-2 text-sm")}>
                 <Step n={1}>
-                  Install{" "}
+                  install{" "}
                   <button className={linkClass} onClick={openLink(CHROME_EXTENSION)}>
-                    Get cookies.txt LOCALLY
+                    get cookies.txt LOCALLY
                   </button>{" "}
-                  (Chrome) or{" "}
+                  (chrome) or{" "}
                   <button className={linkClass} onClick={openLink(FIREFOX_EXTENSION)}>
                     cookies.txt
                   </button>{" "}
-                  (Firefox)
+                  (firefox)
                 </Step>
                 <Step n={2}>
-                  Open a <Em>private window</Em> and sign in to YouTube
+                  open a <Em>private window</Em> and sign in to youtube
                 </Step>
                 <Step n={3}>
-                  In that same tab, go to{" "}
+                  in that same tab, head to{" "}
                   <code className="rounded bg-slate-200/70 px-1 py-0.5 text-xs text-cyan-700 dark:bg-slate-900/60 dark:text-cyan-400">
                     youtube.com/robots.txt
                   </code>
                 </Step>
                 <Step n={4}>
-                  Export the cookies, then <Em>close the private window</Em>
+                  export the cookies, then <Em>close the private window</Em>
                 </Step>
-                <Step n={5}>Import the file below</Step>
+                <Step n={5}>import the file below</Step>
               </ol>
             </>
           )}
@@ -266,12 +275,12 @@ export function CookieDialog() {
           <div className="flex items-center gap-2">
             <Button ref={importRef} onClick={handleImport} disabled={busy !== null}>
               {busy === "import"
-                ? "Importing…"
+                ? "importing…"
                 : signedIn
-                  ? "Replace…"
+                  ? "replace…"
                   : imported
-                    ? "Import again…"
-                    : "Import cookies…"}
+                    ? "try again…"
+                    : "import cookies…"}
             </Button>
 
             {imported && (
@@ -280,7 +289,7 @@ export function CookieDialog() {
                 onClick={handleTest}
                 disabled={busy !== null}
               >
-                {busy === "test" ? "Testing…" : "Test"}
+                {busy === "test" ? "testing…" : "test"}
               </Button>
             )}
 
@@ -291,20 +300,20 @@ export function CookieDialog() {
                 onClick={handleClear}
                 disabled={busy !== null}
               >
-                Remove
+                remove
               </Button>
             )}
           </div>
 
           <p className="text-xs text-slate-400 dark:text-slate-500">
             {signedIn ? (
-              "YouTube rotates these out eventually. When it does, Cliply will say so here."
+              "youtube rotates these out eventually. when it does, cliply will say so right here."
             ) : (
               <>
-                Closing the private window is what keeps them working — YouTube
-                expires cookies from tabs left open.{" "}
+                closing the private window is what keeps them working, youtube
+                expires cookies from tabs you leave open.{" "}
                 <button className={linkClass} onClick={openLink(YTDLP_COOKIE_GUIDE)}>
-                  Why?
+                  why?
                 </button>
               </>
             )}

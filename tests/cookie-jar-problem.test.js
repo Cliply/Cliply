@@ -18,11 +18,11 @@ const jar = (over = {}) => ({
 })
 
 test("an empty jar", () => {
-  expect(cookieJarProblem(jar({ total: 0, youtube: 0 }))).toBe("No cookies imported")
+  expect(cookieJarProblem(jar({ total: 0, youtube: 0 }))).toBe("nothing imported yet")
 })
 
 test("a jar exported for some other site", () => {
-  expect(cookieJarProblem(jar({ youtube: 0 }))).toMatch(/no YouTube cookies/)
+  expect(cookieJarProblem(jar({ youtube: 0 }))).toMatch(/no youtube cookies/)
 })
 
 test("every youtube cookie past its expiry", () => {
@@ -32,13 +32,13 @@ test("every youtube cookie past its expiry", () => {
 // the two that used to share a sentence
 test("signed out by youtube: the SAPISID remnant is the tell", () => {
   expect(cookieJarProblem(jar({ hasSid: true }))).toBe(
-    "YouTube ended this session - export your cookies again"
+    "youtube ended this session, export your cookies again"
   )
 })
 
 test("never signed in: no remnant to find", () => {
   expect(cookieJarProblem(jar({ hasSid: false }))).toBe(
-    "These YouTube cookies aren't from a signed-in session - sign in first, then export"
+    "these cookies aren't from a signed-in session, sign in first then export"
   )
 })
 
@@ -60,7 +60,7 @@ describe("a file yt-dlp will not open at all", () => {
   })
 
   test("a file with no netscape header", () => {
-    expect(refused(JAR_UNREADABLE)).toMatch(/isn't a Netscape/)
+    expect(refused(JAR_UNREADABLE)).toMatch(/isn't a cookies\.txt/)
   })
 })
 

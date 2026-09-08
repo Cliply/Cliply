@@ -512,7 +512,9 @@ describe("importing", () => {
 
     await fs.writeFile(file, '[{"name": "SID", "domain": ".youtube.com"}]', "utf8")
 
-    await expect(manager.importCookieFile(file)).rejects.toThrow(/not JSON/)
+    await expect(manager.importCookieFile(file)).rejects.toThrow(
+      /json, not a netscape/i
+    )
   })
 })
 
@@ -556,7 +558,7 @@ describe("refusing a file that is not a cookie jar", () => {
     const manager = await withLogin()
 
     await expect(manager.importCookies("milk\neggs\nbread\n")).rejects.toThrow(
-      /no cookies in it/i
+      /no cookies in that file/i
     )
   })
 

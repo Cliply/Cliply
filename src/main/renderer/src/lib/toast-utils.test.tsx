@@ -33,7 +33,7 @@ describe("showDownloadErrorToast", () => {
   test("sends a blocked youtube user to the cookie import", () => {
     showDownloadErrorToast("Download failed", "blocked", "BOT_DETECTION", "youtube")
 
-    expect(actionOf().label).toBe("Fix with cookies")
+    expect(actionOf().label).toBe("fix with cookies")
 
     actionOf().onClick()
     expect(openCookies).toHaveBeenCalled()
@@ -47,7 +47,7 @@ describe("showDownloadErrorToast", () => {
     (category) => {
       showDownloadErrorToast("Download failed", "went wrong", category, "youtube")
 
-      expect(actionOf().label).toBe("Report")
+      expect(actionOf().label).toBe("report")
 
       actionOf().onClick()
       expect(openReport).toHaveBeenCalled()
@@ -72,7 +72,7 @@ describe("showDownloadErrorToast", () => {
         platform as "pinterest" | "tiktok" | undefined
       )
 
-      expect(actionOf().label).toBe("Report")
+      expect(actionOf().label).toBe("report")
 
       actionOf().onClick()
       expect(openCookies).not.toHaveBeenCalled()
@@ -89,7 +89,7 @@ describe("showBotDetectionToast", () => {
       "YouTube asked us to confirm you're not a bot.",
       expect.objectContaining({ id: "bot-detected" })
     )
-    expect(actionOf().label).toBe("Fix with cookies")
+    expect(actionOf().label).toBe("fix with cookies")
 
     actionOf().onClick()
     expect(openCookies).toHaveBeenCalled()
@@ -105,7 +105,7 @@ describe("showBotDetectionToast", () => {
       expect(toastError.mock.calls[0][0]).toBe(
         "They asked us to confirm we're not a bot."
       )
-      expect(actionOf().label).toBe("Report")
+      expect(actionOf().label).toBe("report")
 
       actionOf().onClick()
       expect(openCookies).not.toHaveBeenCalled()

@@ -88,10 +88,10 @@ describe("CookieDialog", () => {
 
     await open()
 
-    await waitFor(() => expect(screen.getByText(/Signed in · 22 cookies/)).toBeTruthy())
+    await waitFor(() => expect(screen.getByText(/signed in · 22 cookies/)).toBeTruthy())
     // the recipe is the empty state, not permanent furniture
     expect(screen.queryByText(/close the private window/i)).toBeNull()
-    expect(screen.getByText(/Replace/)).toBeTruthy()
+    expect(screen.getByText(/replace/)).toBeTruthy()
   })
 
   test("an empty jar teaches the export, and warns about the account", async () => {
@@ -99,12 +99,12 @@ describe("CookieDialog", () => {
 
     await open()
 
-    await waitFor(() => expect(screen.getByText("Not imported")).toBeTruthy())
+    await waitFor(() => expect(screen.getByText("nothing imported yet")).toBeTruthy())
     expect(screen.getByText(/close the private window/i)).toBeTruthy()
     expect(screen.getByText(/throwaway account/i)).toBeTruthy()
-    expect(screen.getByText("Import cookies…")).toBeTruthy()
+    expect(screen.getByText("import cookies…")).toBeTruthy()
     // nothing on disk, so nothing to reassure anyone about
-    expect(screen.queryByText(/Nothing was deleted/)).toBeNull()
+    expect(screen.queryByText(/nothing got deleted/)).toBeNull()
   })
 
   // a jar that stopped working used to render exactly like one that never
@@ -113,7 +113,7 @@ describe("CookieDialog", () => {
   test("a jar that stopped working still shows that it was imported", async () => {
     getStatus.mockResolvedValue(
       status({
-        problem: "YouTube ended this session - export your cookies again",
+        problem: "youtube ended this session, export your cookies again",
         status: { lastImport: new Date(Date.now() - 2 * 86400000).toISOString() },
         fileInfo: { ...status().fileInfo, cookieCount: 12, youtubeCookieCount: 12, hasSid: true }
       })
@@ -122,21 +122,21 @@ describe("CookieDialog", () => {
     await open()
 
     await waitFor(() =>
-      expect(screen.getByText(/YouTube ended this session/)).toBeTruthy()
+      expect(screen.getByText(/youtube ended this session/)).toBeTruthy()
     )
     // the three things that say "your file is still there"
-    expect(screen.getByText(/Nothing was deleted/)).toBeTruthy()
+    expect(screen.getByText(/nothing got deleted/)).toBeTruthy()
     expect(screen.getByText(/12 cookies/)).toBeTruthy()
     expect(screen.getByText("imported 2 days ago")).toBeTruthy()
     // and a button that reads as a redo rather than a first run
-    expect(screen.getByText("Import again…")).toBeTruthy()
+    expect(screen.getByText("try again…")).toBeTruthy()
   })
 
   // the two failures that look identical to a user and mean different things.
   // both come from main word for word
   test.each([
-    ["These YouTube cookies aren't from a signed-in session - sign in first, then export"],
-    ["Your YouTube cookies have expired - export them again"]
+    ["these cookies aren't from a signed-in session, sign in first then export"],
+    ["your cookies expired, grab a fresh export"]
   ])("renders main's sentence: %s", async (problem) => {
     getStatus.mockResolvedValue(
       status({
@@ -159,16 +159,16 @@ describe("CookieDialog", () => {
 describe("a file that isn't a cookie jar", () => {
   test("says so, with main's reason", async () => {
     importFile.mockRejectedValue(
-      new Error("That file has no cookies in it. Export cookies.txt with the extension, then pick that file.")
+      new Error("there are no cookies in that file. export cookies.txt with the extension, then pick that one.")
     )
     getStatus.mockResolvedValue(status())
 
     await open()
-    await waitFor(() => expect(screen.getByText("Not imported")).toBeTruthy())
-    screen.getByText("Import cookies…").click()
+    await waitFor(() => expect(screen.getByText("nothing imported yet")).toBeTruthy())
+    screen.getByText("import cookies…").click()
 
     await waitFor(() => expect(toastError).toHaveBeenCalled())
-    expect(toastError.mock.calls[0][1].description).toMatch(/no cookies in it/)
+    expect(toastError.mock.calls[0][1].description).toMatch(/no cookies in that file/)
   })
 
   test("a jar that imports but isn't a login is not silent either", async () => {
@@ -177,14 +177,14 @@ describe("a file that isn't a cookie jar", () => {
       .mockResolvedValueOnce(status())
       .mockResolvedValue(
         status({
-          problem: "These YouTube cookies aren't from a signed-in session - sign in first, then export",
+          problem: "these cookies aren't from a signed-in session, sign in first then export",
           fileInfo: { ...status().fileInfo, cookieCount: 4, youtubeCookieCount: 4 }
         })
       )
 
     await open()
-    await waitFor(() => expect(screen.getByText("Not imported")).toBeTruthy())
-    screen.getByText("Import cookies…").click()
+    await waitFor(() => expect(screen.getByText("nothing imported yet")).toBeTruthy())
+    screen.getByText("import cookies…").click()
 
     await waitFor(() => expect(toastWarning).toHaveBeenCalled())
     expect(toastWarning.mock.calls[0][1].description).toMatch(/signed-in session/)
@@ -214,11 +214,11 @@ describe("testing the cookies", () => {
     })
 
     await open()
-    await waitFor(() => expect(screen.getByText("Test")).toBeTruthy())
-    screen.getByText("Test").click()
+    await waitFor(() => expect(screen.getByText("test")).toBeTruthy())
+    screen.getByText("test").click()
 
     await waitFor(() => expect(toastWarning).toHaveBeenCalled())
-    expect(toastWarning.mock.calls[0][0]).toMatch(/turned these cookies down/i)
+    expect(toastWarning.mock.calls[0][0]).toMatch(/turned these down/i)
     expect(toastPlain).not.toHaveBeenCalled()
   })
 
@@ -232,11 +232,11 @@ describe("testing the cookies", () => {
     })
 
     await open()
-    await waitFor(() => expect(screen.getByText("Test")).toBeTruthy())
-    screen.getByText("Test").click()
+    await waitFor(() => expect(screen.getByText("test")).toBeTruthy())
+    screen.getByText("test").click()
 
     await waitFor(() => expect(toastPlain).toHaveBeenCalled())
-    expect(toastPlain.mock.calls[0][0]).toBe("Cookies look fine")
+    expect(toastPlain.mock.calls[0][0]).toBe("cookies look fine")
   })
 })
 
@@ -252,18 +252,18 @@ describe("removing the cookies", () => {
       })
     )
     clearCookies.mockRejectedValue(
-      new Error("Couldn't remove the cookies - they're still on this machine")
+      new Error("couldn't remove the cookies, they're still on this machine")
     )
 
     await open()
-    await waitFor(() => expect(screen.getByText("Remove")).toBeTruthy())
-    screen.getByText("Remove").click()
+    await waitFor(() => expect(screen.getByText("remove")).toBeTruthy())
+    screen.getByText("remove").click()
 
     await waitFor(() => expect(toastError).toHaveBeenCalled())
     expect(toastError.mock.calls[0][1].description).toMatch(/still on this machine/)
     // and it is a button again rather than a permanent spinner
     await waitFor(() =>
-      expect(screen.getByText("Remove").closest("button")?.disabled).toBe(false)
+      expect(screen.getByText("remove").closest("button")?.disabled).toBe(false)
     )
   })
 })

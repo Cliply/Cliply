@@ -55,12 +55,12 @@ export const showBotDetectionToast = (message: string, platform?: Platform) => {
   toast.error(message, {
     id: "bot-detected",
     description: cookiesCanHelp(platform)
-      ? "Signing in with a throwaway account usually clears this."
-      : "This site is asking us to prove we're not a bot.",
+      ? "signing in with a throwaway account usually clears this."
+      : "this site wants us to prove we're not a bot.",
     duration: 12000,
     action: cookiesCanHelp(platform)
-      ? { label: "Fix with cookies", onClick: () => cookieActions.open() }
-      : { label: "Report", onClick: () => reportActions.open() }
+      ? { label: "fix with cookies", onClick: () => cookieActions.open() }
+      : { label: "report", onClick: () => reportActions.open() }
   })
 }
 
@@ -92,7 +92,7 @@ export const showDownloadErrorToast = (
     description,
     duration: 12000,
     action: blocked
-      ? { label: "Fix with cookies", onClick: () => cookieActions.open() }
-      : { label: "Report", onClick: () => reportActions.open() }
+      ? { label: "fix with cookies", onClick: () => cookieActions.open() }
+      : { label: "report", onClick: () => reportActions.open() }
   })
 }
