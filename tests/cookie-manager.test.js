@@ -61,6 +61,7 @@ describe("inspectCookieFile", () => {
       total: 2,
       youtube: 2,
       expired: 0,
+      hasSid: true,
       signedIn: true,
       usable: true
     })
@@ -82,6 +83,7 @@ describe("inspectCookieFile", () => {
       total: 2,
       youtube: 2,
       expired: 0,
+      hasSid: false,
       signedIn: false,
       usable: false
     })
@@ -98,6 +100,8 @@ describe("inspectCookieFile", () => {
     expect(await manager.inspectCookieFile()).toMatchObject({
       youtube: 1,
       expired: 0,
+      // the tell: the session's remnant is still here, so this jar used to work
+      hasSid: true,
       signedIn: false,
       usable: false
     })
@@ -110,6 +114,7 @@ describe("inspectCookieFile", () => {
       total: 0,
       youtube: 0,
       expired: 0,
+      hasSid: false,
       signedIn: false,
       usable: false
     })
@@ -214,6 +219,7 @@ describe("inspectCookieFile", () => {
       total: 0,
       youtube: 0,
       expired: 0,
+      hasSid: false,
       signedIn: false,
       usable: false
     })
@@ -233,6 +239,7 @@ describe("inspectCookieFile", () => {
       total: 1,
       youtube: 1,
       expired: 1,
+      hasSid: false,
       signedIn: false,
       usable: false
     })
@@ -245,6 +252,7 @@ describe("inspectCookieFile", () => {
       total: 2,
       youtube: 2,
       expired: 0,
+      hasSid: true,
       signedIn: true,
       usable: true
     })

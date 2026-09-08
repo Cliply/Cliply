@@ -185,6 +185,24 @@ function isSignedIn(live) {
 }
 
 /**
+ * does this jar carry a SAPISID cookie, signed in or not?
+ *
+ * the half of the pair youtube leaves behind. ending a session clears
+ * LOGIN_INFO and most of the auth cookies but not __Secure-3PAPISID, so a jar
+ * with one of these and no LOGIN_INFO is one that used to work - which is a
+ * different thing to tell someone than "you were never signed in", and asks
+ * for a different fix.
+ *
+ * @param {Object[]} live - unexpired youtube cookies
+ * @returns {boolean} true when the remnant of a session is present
+ */
+function hasSidCookie(live) {
+  const names = new Set(live.map((cookie) => cookie.name))
+
+  return SID_COOKIES.some((name) => names.has(name))
+}
+
+/**
  * describe what a jar holds
  *
  * `usable` answers the only question the app has - will passing this to
@@ -195,13 +213,20 @@ function isSignedIn(live) {
  *
  * @param {string} content - file contents
  * @param {number} now - epoch millis, injectable for tests
- * @returns {Object} {total, youtube, expired, signedIn, usable}
+ * @returns {Object} {total, youtube, expired, hasSid, signedIn, usable}
  */
 function inspectCookieContent(content, now = Date.now()) {
   // no magic line, no cookies - yt-dlp refuses the file rather than reading
   // past it, so counting what is inside would describe a jar nothing will load
   if (!hasNetscapeHeader(content)) {
-    return { total: 0, youtube: 0, expired: 0, signedIn: false, usable: false }
+    return {
+      total: 0,
+      youtube: 0,
+      expired: 0,
+      hasSid: false,
+      signedIn: false,
+      usable: false
+    }
   }
 
   const cookies = parseCookieFile(content)
@@ -213,6 +238,7 @@ function inspectCookieContent(content, now = Date.now()) {
     total: cookies.length,
     youtube: youtube.length,
     expired: youtube.length - live.length,
+    hasSid: hasSidCookie(live),
     signedIn,
     usable: signedIn
   }
@@ -247,6 +273,7 @@ module.exports = {
   hasNetscapeHeader,
   isYouTubeDomain,
   isSignedIn,
+  hasSidCookie,
   isExpired,
   inspectCookieContent,
   cookieFileHasEntries

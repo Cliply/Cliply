@@ -129,7 +129,7 @@ class CookieManager {
    * "has some non-comment lines" was too weak: an expired jar, or one exported
    * for an unrelated site, would still be treated as a working youtube login.
    *
-   * @returns {Promise<Object>} {total, youtube, expired, usable}
+   * @returns {Promise<Object>} {total, youtube, expired, hasSid, signedIn, usable}
    */
   async inspectCookieFile(now = Date.now()) {
     try {
@@ -138,7 +138,14 @@ class CookieManager {
       return inspectCookieContent(content, now)
     } catch (error) {
       console.error("failed to read cookie file:", error.message)
-      return { total: 0, youtube: 0, expired: 0, usable: false }
+      return {
+        total: 0,
+        youtube: 0,
+        expired: 0,
+        hasSid: false,
+        signedIn: false,
+        usable: false
+      }
     }
   }
 
@@ -374,6 +381,7 @@ class CookieManager {
         // carried through so the ui can tell "you were never signed in" from
         // "youtube signed you out", which read the same to a user and ask for
         // different things
+        hasSid: inspection.hasSid,
         signedIn: inspection.signedIn,
         valid: this.isValid,
         path: this.cookieFile
@@ -384,6 +392,7 @@ class CookieManager {
         size: 0,
         modified: null,
         cookieCount: 0,
+        hasSid: false,
         signedIn: false,
         valid: false,
         path: this.cookieFile,

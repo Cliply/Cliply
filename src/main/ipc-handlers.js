@@ -102,7 +102,7 @@ function normalizeTimeRange(range) {
  *     rotated the session away. yt-dlp warns about exactly this, and since
  *     --cookies writes the jar back it is our own copy that lost the marker
  */
-function cookieJarProblem({ total, youtube, expired, signedIn }) {
+function cookieJarProblem({ total, youtube, expired, hasSid, signedIn }) {
   if (total === 0) {
     return "No cookies imported"
   }
@@ -116,7 +116,9 @@ function cookieJarProblem({ total, youtube, expired, signedIn }) {
   }
 
   if (!signedIn) {
-    return "These YouTube cookies aren't from a signed-in session - sign in first, then export"
+    return hasSid
+      ? "YouTube ended this session - export your cookies again"
+      : "These YouTube cookies aren't from a signed-in session - sign in first, then export"
   }
 
   return "No usable YouTube cookies"
@@ -1226,6 +1228,7 @@ class IPCHandlers {
               total: fileInfo.cookieCount,
               youtube: fileInfo.youtubeCookieCount || 0,
               expired: fileInfo.expiredCookieCount || 0,
+              hasSid: fileInfo.hasSid,
               signedIn: fileInfo.signedIn
             })
       })
@@ -1553,3 +1556,9 @@ class IPCHandlers {
 }
 
 module.exports = IPCHandlers
+// exported for tests. this function had no seam and no coverage, and shipped
+// with a comment describing a distinction the code did not make: a jar youtube
+// had signed out was told it was never signed in. the branch is one line and
+// the wrong sentence sends the user to fix the wrong thing, so it is worth a
+// test even though nothing else imports it
+module.exports.cookieJarProblem = cookieJarProblem

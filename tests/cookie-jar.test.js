@@ -189,6 +189,7 @@ describe("inspectCookieContent", () => {
       total: 0,
       youtube: 0,
       expired: 0,
+      hasSid: false,
       signedIn: false,
       usable: false
     })
@@ -199,6 +200,7 @@ describe("inspectCookieContent", () => {
       total: 2,
       youtube: 2,
       expired: 0,
+      hasSid: true,
       signedIn: true,
       usable: true
     })
@@ -210,5 +212,39 @@ describe("inspectCookieContent", () => {
       expired: 0,
       usable: true
     })
+  })
+})
+
+// what a signed-out jar looks like, and why it is not the same as one that was
+// never signed in
+//
+// taken from a real jar after youtube ended the session: LOGIN_INFO and most of
+// the auth cookies gone, __Secure-3PAPISID left behind. yt-dlp writes the jar
+// back after every run, so this is the shape our own stored copy takes - and
+// the two cases ask the user for different things.
+describe("hasSid", () => {
+  const live = () => String(Math.floor(Date.now() / 1000) + 3600)
+  const jar = (...names) =>
+    `${NETSCAPE}\n${names.map((n) => row({ name: n, expires: live() })).join("\n")}\n`
+
+  test("a jar youtube signed out still carries a SAPISID cookie", () => {
+    expect(
+      inspectCookieContent(jar("__Secure-3PAPISID", "PREF", "VISITOR_INFO1_LIVE"))
+    ).toMatchObject({ hasSid: true, signedIn: false })
+  })
+
+  test("a jar exported without signing in carries none", () => {
+    expect(inspectCookieContent(jar("PREF", "SOCS"))).toMatchObject({
+      hasSid: false,
+      signedIn: false
+    })
+  })
+
+  test("an expired SAPISID is not a remnant of a live session", () => {
+    const stale = String(Math.floor(Date.now() / 1000) - 3600)
+
+    expect(
+      inspectCookieContent(`${NETSCAPE}\n${row({ name: "SAPISID", expires: stale })}\n`)
+    ).toMatchObject({ hasSid: false })
   })
 })

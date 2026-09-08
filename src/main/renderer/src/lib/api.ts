@@ -95,6 +95,8 @@ export interface CookieFileInfo {
   cookieCount: number
   youtubeCookieCount?: number
   expiredCookieCount?: number
+  /** a SAPISID cookie is present - signed in, or signed out and not yet re-exported */
+  hasSid: boolean
   signedIn: boolean
   valid: boolean
 }
