@@ -1229,7 +1229,6 @@ describe("cookie file detection", () => {
     manager.cookieDir = tempDir
     manager.cookieFile = jar
     manager.statusFile = path.join(tempDir, "manager-status.json")
-    await manager.refresh()
 
     // the manager says the user has a usable login...
     expect(manager.hasValidCookies()).toBe(true)

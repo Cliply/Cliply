@@ -537,15 +537,6 @@ class CookieManager {
       }
     }
   }
-
-  /**
-   * refresh cookie validation status
-   * @returns {Promise<boolean>} new validation status
-   */
-  async refresh() {
-    this.isValid = await this.validateCookieFile()
-    return this.isValid
-  }
 }
 
 module.exports = CookieManager

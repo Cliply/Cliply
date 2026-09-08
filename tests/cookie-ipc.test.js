@@ -61,19 +61,6 @@ describe("a refused import reaches the renderer with its reason intact", () => {
     expect(response.error.message).toBe(reason)
   })
 
-  test("the text-paste route carries its reason the same way", async () => {
-    const reason = REFUSALS[1]
-    const handlers = handlersWith({
-      importCookies: jest.fn().mockRejectedValue(new Error(reason)),
-      hasValidCookies: jest.fn(() => false),
-      hasYouTubeCookies: jest.fn(() => false)
-    })
-
-    const response = await handlers.handleImportCookies(null, { cookies: "x" })
-
-    expect(response.error.message).toBe(reason)
-  })
-
   // an import that landed but is not a login is a real state, not a failure -
   // it used to come back as imported:false, which the dialog read as the button
   // having done nothing
@@ -86,8 +73,11 @@ describe("a refused import reaches the renderer with its reason intact", () => {
 
     const response = await handlers.handleImportCookieFile(null)
 
+    // success is the import landing, which the ipc envelope already says. The
+    // payload's job is only to answer whether what landed authenticates, and
+    // it says no here without that being a failure
     expect(response.success).toBe(true)
-    expect(response.data).toMatchObject({ imported: true, signedIn: false })
+    expect(response.data).toEqual({ hasValidCookies: false })
   })
 })
 

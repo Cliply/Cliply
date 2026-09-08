@@ -61,7 +61,6 @@ const IPC_CHANNELS = {
   DOWNLOAD_FOLDER_GET: "download:folder:get",
 
   // cookie management
-  COOKIES_IMPORT: "cookies:import",
   COOKIES_TEST: "cookies:test",
   COOKIES_STATUS: "cookies:status",
 

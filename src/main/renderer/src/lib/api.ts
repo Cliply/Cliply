@@ -112,10 +112,12 @@ export interface CookieStatus {
 }
 
 export interface CookieImportResult {
-  /** the file landed. a refusal throws, so this is never false in practice */
-  imported: boolean
-  /** and whether what landed turned out to be a login */
-  signedIn?: boolean
+  /**
+   * whether what landed is a jar yt-dlp would authenticate with, which is the
+   * only thing the dialog asks. `imported` and `signedIn` used to sit here too:
+   * the first was never false, since a refusal throws, and the second said the
+   * same thing as this one
+   */
   hasValidCookies: boolean
 }
 

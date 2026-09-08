@@ -64,16 +64,15 @@ function createHandlers({
   // the real manager cannot produce (a login that holds no youtube cookies)
   // was the one being tested
   hasYouTubeCookies = hasValidCookies,
-  importCookies
+  importCookieFile
 } = {}) {
   const captured = []
 
   const cookieManager = {
     hasValidCookies: jest.fn(() => hasValidCookies),
     hasYouTubeCookies: jest.fn(() => hasYouTubeCookies),
-    importCookies:
-      importCookies || jest.fn().mockResolvedValue(true),
-    importCookieFile: jest.fn().mockResolvedValue(true)
+    importCookieFile:
+      importCookieFile || jest.fn().mockResolvedValue(true)
   }
 
   const handlers = new IPCHandlers({
@@ -728,11 +727,25 @@ describe("download_cancelled", () => {
   })
 })
 
+// the text route was deleted: nothing in the renderer ever called it, and its
+// channel was exposed over ipc for no one. These now go through the picker,
+// which is the only way a user imports anything
+async function pickAndImport(handlers) {
+  const { dialog } = require("electron")
+
+  dialog.showOpenDialog.mockResolvedValue({
+    canceled: false,
+    filePaths: ["/Users/someone/cookies.txt"]
+  })
+
+  return handlers.handleImportCookieFile(null)
+}
+
 describe("cookies_imported", () => {
   it("reports a text import and whether the jar holds youtube cookies", async () => {
     const { handlers, captured } = createHandlers({ hasValidCookies: true })
 
-    await handlers.handleImportCookies(null, { cookies: "# Netscape" })
+    await pickAndImport(handlers)
 
     expect(captured).toHaveLength(1)
     expect(captured[0].event).toBe("cookies_imported")
@@ -746,7 +759,7 @@ describe("cookies_imported", () => {
   it("reports a jar that imported without any youtube cookies in it", async () => {
     const { handlers, captured } = createHandlers({ hasValidCookies: false })
 
-    await handlers.handleImportCookies(null, { cookies: "# Netscape" })
+    await pickAndImport(handlers)
 
     expect(captured[0].properties).toEqual({
       success: true,
@@ -765,7 +778,7 @@ describe("cookies_imported", () => {
       hasYouTubeCookies: true
     })
 
-    await handlers.handleImportCookies(null, { cookies: "# Netscape" })
+    await pickAndImport(handlers)
 
     expect(captured[0].properties).toEqual({
       success: true,
@@ -777,12 +790,12 @@ describe("cookies_imported", () => {
   it("reports an import that failed", async () => {
     const { handlers, captured } = createHandlers({
       hasValidCookies: false,
-      importCookies: jest.fn().mockRejectedValue(new Error("not a cookie file"))
+      importCookieFile: jest
+        .fn()
+        .mockRejectedValue(new Error("not a cookie file"))
     })
 
-    const result = await handlers.handleImportCookies(null, {
-      cookies: "nonsense"
-    })
+    const result = await pickAndImport(handlers)
 
     expect(result.success).toBe(false)
     expect(captured[0].properties.success).toBe(false)
@@ -822,7 +835,7 @@ describe("an analytics service that throws", () => {
   /**
    * the exit point guards itself, so a throw out of capture() means the
    * collaborator is not the one we think it is. it must still not reach the
-   * caller: trackCookieImport sits *inside* handleImportCookies' try, where a
+   * caller: trackCookieImport sits *inside* handleImportCookieFile's try, where a
    * throw is caught as the import failing - the user is told a jar that
    * imported did not, and the failure path then reports the opposite of what
    * happened to analytics as well.
@@ -845,7 +858,6 @@ describe("an analytics service that throws", () => {
       cookieManager: {
         hasValidCookies: jest.fn(() => true),
         hasYouTubeCookies: jest.fn(() => true),
-        importCookies: jest.fn().mockResolvedValue(true),
         importCookieFile: jest.fn().mockResolvedValue(true)
       },
       ytdlpEngine: {},
@@ -864,12 +876,10 @@ describe("an analytics service that throws", () => {
     async (_name, thrown) => {
       const handlers = throwingHandlers(thrown)
 
-      const result = await handlers.handleImportCookies(null, {
-        cookies: "# Netscape"
-      })
+      const result = await pickAndImport(handlers)
 
       expect(result.success).toBe(true)
-      expect(result.data.imported).toBe(true)
+      expect(result.data.hasValidCookies).toBe(true)
     }
   )
 
@@ -1174,7 +1184,7 @@ describe("the download payloads survive the real validator", () => {
   it("sends a cookie import whole", async () => {
     const { handlers, captured } = createHandlers({ hasValidCookies: false })
 
-    await handlers.handleImportCookies(null, { cookies: "# Netscape" })
+    await pickAndImport(handlers)
 
     const [message] = await replay(captured)
 
@@ -1272,7 +1282,6 @@ describe("used_cookies", () => {
   const jarState = (signedIn) => ({
     hasValidCookies: jest.fn(() => signedIn),
     hasYouTubeCookies: jest.fn(() => signedIn),
-    importCookies: jest.fn().mockResolvedValue(true),
     importCookieFile: jest.fn().mockResolvedValue(true)
   })
 

@@ -54,8 +54,6 @@ async function managerWith(content) {
   manager.cookieFile = cookieFile
   manager.statusFile = path.join(dir, "cookie_status.json")
 
-  await manager.refresh()
-
   return manager
 }
 
@@ -335,10 +333,13 @@ describe("validateCookieFile", () => {
     expect(await stale.validateCookieFile()).toBe(false)
   })
 
-  test("refresh notices a jar that stopped being a login", async () => {
+  // this used to call refresh() either side and was named for it, which made
+  // refresh look load-bearing. It never was: hasValidCookies re-reads the file
+  // itself, so gutting refresh entirely left the test green. What is worth
+  // pinning is the re-read, because a jar rotates out from under a running app
+  test("hasValidCookies re-reads, so a jar that stopped being a login shows it", async () => {
     const manager = await managerWith(HEADER + loginPair(nowSeconds() - HOUR))
 
-    await manager.refresh()
     expect(manager.hasValidCookies()).toBe(false)
 
     await fs.writeFile(
@@ -347,7 +348,6 @@ describe("validateCookieFile", () => {
       "utf8"
     )
 
-    await manager.refresh()
     expect(manager.hasValidCookies()).toBe(true)
   })
 })

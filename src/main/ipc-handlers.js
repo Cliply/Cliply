@@ -662,10 +662,6 @@ class IPCHandlers {
     ipcMain.handle("download:get-all", this.handleGetAllDownloads.bind(this))
 
     // cookie management
-    ipcMain.handle(
-      IPC_CHANNELS.COOKIES_IMPORT,
-      this.handleImportCookies.bind(this)
-    )
     ipcMain.handle(IPC_CHANNELS.COOKIES_TEST, this.handleTestCookies.bind(this))
     ipcMain.handle(
       IPC_CHANNELS.COOKIES_STATUS,
@@ -1171,31 +1167,6 @@ class IPCHandlers {
     }
   }
 
-  // import cookies from text
-  async handleImportCookies(event, data) {
-    try {
-      this.validateRequest(data, ["cookies"])
-      const { cookies } = data
-
-      const signedIn = await this.cookieManager.importCookies(cookies)
-      this.trackCookieImport(true)
-
-      return this.createSuccess({
-        imported: true,
-        signedIn,
-        hasValidCookies: this.cookieManager.hasValidCookies()
-      })
-    } catch (error) {
-      console.error("Cookie import failed:", error.message)
-      this.trackCookieImport(false)
-      // the reason goes in the message slot, which is the one that survives
-      // the trip to the renderer
-      return this.createError(
-        error.message || "couldn't import those cookies",
-        "export cookies.txt with a browser extension, then paste that file."
-      )
-    }
-  }
 
   // import cookies from file
   async handleImportCookieFile(_event) {
@@ -1214,16 +1185,13 @@ class IPCHandlers {
       }
 
       const filePath = result.filePaths[0]
-      const signedIn = await this.cookieManager.importCookieFile(filePath)
+      await this.cookieManager.importCookieFile(filePath)
       this.trackCookieImport(true)
 
+      // a refusal throws, so reaching here means the file landed. Whether it is
+      // a login is the separate question, and hasValidCookies is the only part
+      // the dialog reads
       return this.createSuccess({
-        // the file landed. whether it is a login is the separate question the
-        // renderer asks hasValidCookies - reporting "imported: false" for a
-        // valid signed-out jar had the ui calling a successful import a failure
-        imported: true,
-        signedIn,
-        filePath,
         hasValidCookies: this.cookieManager.hasValidCookies()
       })
     } catch (error) {
@@ -1253,8 +1221,8 @@ class IPCHandlers {
    */
   async handleTestCookies(_event) {
     try {
-      // the jar may have changed (or expired) since it was imported
-      await this.cookieManager.refresh()
+      // inspectCookieFile reads the file every time, so it already sees a jar
+      // that changed or expired since the import
       const inspection = await this.cookieManager.inspectCookieFile()
 
       if (!inspection.usable) {
@@ -1700,7 +1668,6 @@ class IPCHandlers {
       IPC_CHANNELS.VIDEO_DOWNLOAD_COMBINED,
       IPC_CHANNELS.AUDIO_DOWNLOAD,
       IPC_CHANNELS.DOWNLOAD_CANCEL,
-      IPC_CHANNELS.COOKIES_IMPORT,
       IPC_CHANNELS.COOKIES_TEST,
       IPC_CHANNELS.COOKIES_STATUS,
       IPC_CHANNELS.UPDATE_CHECK,

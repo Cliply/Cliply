@@ -187,16 +187,6 @@ function readJar(content) {
   return { error: null, cookies: [...cookies.values()] }
 }
 
-/**
- * the cookies yt-dlp would load from this file, or none if it would refuse it
- *
- * @param {string} content - file contents
- * @returns {Object[]} {domain, path, name, expires} per cookie, in file order
- */
-function parseCookieFile(content) {
-  return readJar(content).cookies
-}
-
 // only a youtube cookie can authenticate a youtube request - a jar holding
 // nothing but google.com or unrelated cookies is not a youtube login. this is
 // the loose question, "did this come from youtube", and it is what the counts
@@ -283,27 +273,15 @@ const SID_COOKIES = ["SAPISID", "__Secure-1PAPISID", "__Secure-3PAPISID"]
  * @param {Object[]} live - unexpired youtube cookies
  * @returns {boolean} true when yt-dlp would call this authenticated
  */
-function isSignedIn(live) {
-  const names = new Set(live.map((cookie) => cookie.name))
+function authNames(live) {
+  return new Set(live.map((cookie) => cookie.name))
+}
 
+function signedInFrom(names) {
   return names.has(LOGIN_MARKER) && SID_COOKIES.some((name) => names.has(name))
 }
 
-/**
- * does this jar carry a SAPISID cookie, signed in or not?
- *
- * the half of the pair youtube leaves behind. ending a session clears
- * LOGIN_INFO and most of the auth cookies but not __Secure-3PAPISID, so a jar
- * with one of these and no LOGIN_INFO is one that used to work - which is a
- * different thing to tell someone than "you were never signed in", and asks
- * for a different fix.
- *
- * @param {Object[]} live - unexpired youtube cookies
- * @returns {boolean} true when the remnant of a session is present
- */
-function hasSidCookie(live) {
-  const names = new Set(live.map((cookie) => cookie.name))
-
+function hasSidFrom(names) {
   return SID_COOKIES.some((name) => names.has(name))
 }
 
@@ -345,14 +323,14 @@ function inspectCookieContent(content, now = Date.now()) {
   const live = youtube.filter((cookie) => !isExpired(cookie, now))
   // the auth pair is looked for only among cookies that would reach the address
   // yt-dlp asks about
-  const sendable = live.filter(appliesToAuthRequest)
-  const signedIn = isSignedIn(sendable)
+  const names = authNames(live.filter(appliesToAuthRequest))
+  const signedIn = signedInFrom(names)
 
   return {
     total: cookies.length,
     youtube: youtube.length,
     expired: youtube.length - live.length,
-    hasSid: hasSidCookie(sendable),
+    hasSid: hasSidFrom(names),
     signedIn,
     usable: signedIn,
     loadError: null
@@ -386,18 +364,12 @@ function cookieFileHasEntries(filePath) {
 }
 
 module.exports = {
-  HTTP_ONLY_PREFIX,
   JAR_UNREADABLE,
   JAR_DOMAIN_FLAG,
   parseExpiry,
   readJar,
-  parseCookieFile,
   hasNetscapeHeader,
   isYouTubeDomain,
-  appliesToAuthRequest,
-  isSignedIn,
-  hasSidCookie,
-  isExpired,
   inspectCookieContent,
   cookieFileHasEntries
 }

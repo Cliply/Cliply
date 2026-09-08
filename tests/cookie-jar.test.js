@@ -13,7 +13,7 @@
 // unauthenticated.
 
 const {
-  parseCookieFile,
+  readJar,
   parseExpiry,
   hasNetscapeHeader,
   inspectCookieContent,
@@ -63,9 +63,9 @@ describe("hasNetscapeHeader", () => {
   })
 })
 
-describe("parseCookieFile", () => {
+describe("the cookies a jar yields", () => {
   test("reads a tab separated row", () => {
-    expect(parseCookieFile(`${NETSCAPE}\n${row()}\n`)).toEqual([
+    expect(readJar(`${NETSCAPE}\n${row()}\n`).cookies).toEqual([
       { domain: ".youtube.com", path: "/", expires: 1999999999, name: "SID" }
     ])
   })
@@ -73,7 +73,7 @@ describe("parseCookieFile", () => {
   test("strips the #HttpOnly_ prefix rather than reading it as a comment", () => {
     const content = `${NETSCAPE}\n#HttpOnly_${row({ name: "__Secure-1PSID" })}\n`
 
-    expect(parseCookieFile(content)).toEqual([
+    expect(readJar(content).cookies).toEqual([
       { domain: ".youtube.com", path: "/", expires: 1999999999, name: "__Secure-1PSID" }
     ])
   })
@@ -84,12 +84,12 @@ describe("parseCookieFile", () => {
   test("skips a space separated row, as yt-dlp does", () => {
     const content = `${NETSCAPE}\n${row().replace(/\t/g, " ")}\n`
 
-    expect(parseCookieFile(content)).toEqual([])
+    expect(readJar(content).cookies).toEqual([])
   })
 
   // exactly seven, not at least seven
   test("skips a row with an extra field", () => {
-    expect(parseCookieFile(`${NETSCAPE}\n${row()}\textra\n`)).toEqual([])
+    expect(readJar(`${NETSCAPE}\n${row()}\textra\n`).cookies).toEqual([])
   })
 
   // a cookie jar is a map keyed by domain/path/name, so a real export that
@@ -102,7 +102,7 @@ describe("parseCookieFile", () => {
       `${row({ name: "VISITOR_INFO1_LIVE", expires: "1797784158" })}\n` +
       `${row({ name: "VISITOR_INFO1_LIVE", expires: "1804407914" })}\n`
 
-    expect(parseCookieFile(content)).toEqual([
+    expect(readJar(content).cookies).toEqual([
       { domain: ".youtube.com", path: "/", expires: 1804407914, name: "VISITOR_INFO1_LIVE" }
     ])
   })
@@ -113,13 +113,13 @@ describe("parseCookieFile", () => {
       `.youtube.com\tTRUE\t/\tTRUE\t1999999999\tSID\tv\n` +
       `.youtube.com\tTRUE\t/watch\tTRUE\t1999999999\tSID\tv\n`
 
-    expect(parseCookieFile(content)).toHaveLength(2)
+    expect(readJar(content).cookies).toHaveLength(2)
   })
 
   test("carries on past a bad row instead of failing the file", () => {
     const content = `${NETSCAPE}\n${row({ expires: "-5" })}\n${row({ name: "HSID" })}\n`
 
-    expect(parseCookieFile(content).map((c) => c.name)).toEqual(["HSID"])
+    expect(readJar(content).cookies.map((c) => c.name)).toEqual(["HSID"])
   })
 })
 
@@ -277,7 +277,7 @@ describe("hasSid", () => {
 describe("what the real yt-dlp does with an awkward row", () => {
   const live = () => String(Math.floor(Date.now() / 1000) + 3600)
   const jar = (...rows) => `${NETSCAPE}\n${rows.join("\n")}\n`
-  const names = (content) => parseCookieFile(content).map((c) => c.name)
+  const names = (content) => readJar(content).cookies.map((c) => c.name)
 
   // this is the direction that matters: yt-dlp splits on \t with the newline
   // still attached, so an eighth column is a row it refuses. trimming the line

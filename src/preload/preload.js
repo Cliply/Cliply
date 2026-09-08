@@ -20,7 +20,6 @@ const IPC_CHANNELS = {
   DOWNLOAD_CANCEL: "download:cancel",
 
   // cookie management
-  COOKIES_IMPORT: "cookies:import",
   COOKIES_TEST: "cookies:test",
   COOKIES_STATUS: "cookies:status",
 
@@ -123,7 +122,6 @@ contextBridge.exposeInMainWorld("electronAPI", {
 
   // cookie management
   cookies: {
-    import: (cookies) => invoke(IPC_CHANNELS.COOKIES_IMPORT, { cookies }),
     importFile: () => invoke("cookies:import-file"),
     test: () => invoke(IPC_CHANNELS.COOKIES_TEST),
     getStatus: () => invoke(IPC_CHANNELS.COOKIES_STATUS),
