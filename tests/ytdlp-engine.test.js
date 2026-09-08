@@ -14,6 +14,8 @@ const {
   parseDestinationLine,
   parseStreamCountLine,
   normalizeUrl,
+  isYouTubeUrl,
+  YtdlpEngine,
   OperationGate,
   redactLogLine,
   mapError,
@@ -1319,5 +1321,103 @@ describe("locating the po token payload", () => {
     })
 
     expect(engine.getPotPaths()).toBeNull()
+  })
+})
+
+/**
+ * the youtube jar goes to youtube, and nowhere else
+ *
+ * --cookies is a save destination as well as a read source, so attaching the
+ * jar to a pinterest or tiktok download does not merely fail to help: yt-dlp
+ * writes that site's cookies back into youtube_cookies.txt on the way out.
+ * Confirmed against the bundled 2026.08.19 binary - one run against an
+ * unrelated host left its cookie sitting in the jar beside LOGIN_INFO - and
+ * every such download rewrites the file, which is a chance to lose the login
+ * for no upside.
+ *
+ * gating on the operation name would not have been enough: getInfo serves all
+ * three platforms, so the url is the only thing that actually knows.
+ */
+describe("which operations get the cookie jar", () => {
+  const JAR = "/tmp/youtube_cookies.txt"
+
+  test.each([
+    ["https://www.youtube.com/watch?v=abc", true],
+    ["https://youtu.be/abc", true],
+    ["https://music.youtube.com/watch?v=abc", true],
+    ["https://www.youtube-nocookie.com/embed/abc", true],
+    ["https://www.pinterest.com/pin/123/", false],
+    ["https://www.tiktok.com/@x/video/123", false],
+    ["https://notyoutube.com/watch?v=abc", false],
+    ["https://youtube.com.evil.example/watch", false],
+    ["not a url at all", false]
+  ])("%s -> youtube jar attached: %s", (url, expected) => {
+    expect(isYouTubeUrl(url)).toBe(expected)
+  })
+
+  // the seam run() actually calls, so this is the gate rather than a
+  // restatement of it
+  describe("resolveCookieFile", () => {
+    const engine = () => {
+      const e = Object.create(YtdlpEngine.prototype)
+      e.getCookieFile = () => JAR
+      return e
+    }
+
+    test("a youtube url gets the jar", () => {
+      expect(
+        engine().resolveCookieFile({ url: "https://www.youtube.com/watch?v=a" })
+      ).toBe(JAR)
+    })
+
+    test.each([
+      ["https://www.pinterest.com/pin/1/"],
+      ["https://www.tiktok.com/@x/video/1"]
+    ])("%s does not", (url) => {
+      expect(engine().resolveCookieFile({ url })).toBeNull()
+    })
+
+    // the cookie test forces the jar on for its probe, and clearing it has to
+    // stay possible too - so an explicit value wins, including an explicit null
+    test("an explicit path overrides the url", () => {
+      expect(
+        engine().resolveCookieFile({
+          url: "https://www.pinterest.com/pin/1/",
+          cookieFile: "/forced.txt"
+        })
+      ).toBe("/forced.txt")
+    })
+
+    test("an explicit null overrides the url too", () => {
+      expect(
+        engine().resolveCookieFile({
+          url: "https://www.youtube.com/watch?v=a",
+          cookieFile: null
+        })
+      ).toBeNull()
+    })
+  })
+
+  test("a pinterest download is built without --cookies", () => {
+    const args = buildArgs("simple", {
+      url: "https://www.pinterest.com/pin/1/",
+      output: "/tmp/o.mp4",
+      cookieFile: null
+    })
+
+    expect(args).not.toContain("--cookies")
+  })
+
+  test("a youtube download is built with them", () => {
+    const args = buildArgs("combined", {
+      url: "https://www.youtube.com/watch?v=abc",
+      videoFormat: "137",
+      audioFormat: "140",
+      output: "/tmp/o.mp4",
+      cookieFile: JAR
+    })
+
+    expect(args).toContain("--cookies")
+    expect(args[args.indexOf("--cookies") + 1]).toBe(JAR)
   })
 })

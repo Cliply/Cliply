@@ -880,6 +880,40 @@ function buildArgs(operation, params = {}) {
  * @returns {string} the trimmed url
  * @throws {Error} tagged with INVALID_URL when it is missing or not http(s)
  */
+/**
+ * hosts the youtube jar is for
+ *
+ * youtube-nocookie is in here because it is still a youtube extraction: the
+ * name is about the embed not setting third-party cookies, not about ours.
+ */
+const YOUTUBE_HOSTS =
+  /(^|\.)(youtube\.com|youtu\.be|youtube-nocookie\.com)$/i
+
+/**
+ * is this url one the youtube cookie jar has any business being sent with?
+ *
+ * --cookies is a save destination as well as a read source, so attaching the
+ * jar to a pinterest or tiktok download does not merely fail to help - yt-dlp
+ * writes that site's cookies back into youtube_cookies.txt on the way out.
+ * Verified against the bundled binary: one run against an unrelated host left
+ * its cookie sitting in the jar next to LOGIN_INFO. Every such download also
+ * rewrites the file, which is a chance to lose the login for no upside.
+ *
+ * (nothing leaks the other way - http.cookiejar only sends cookies whose
+ * domain matches the request - so this is about what we write, not what we
+ * expose.)
+ *
+ * @param {string} url - the url the operation is for
+ * @returns {boolean}
+ */
+function isYouTubeUrl(url) {
+  try {
+    return YOUTUBE_HOSTS.test(new URL(String(url)).hostname)
+  } catch {
+    return false
+  }
+}
+
 function normalizeUrl(url) {
   const trimmed = typeof url === "string" ? url.trim() : ""
 
@@ -1785,6 +1819,27 @@ class YtdlpEngine {
    * the cookie file to pass to --cookies, or null when there is nothing useful
    * @returns {string|null} cookie file path
    */
+  /**
+   * the jar for one operation, or null when it has no business being there
+   *
+   * the url decides, not the operation name: getInfo serves youtube, pinterest
+   * and tiktok alike, so there is no operation that means "this is youtube".
+   *
+   * an explicitly passed cookieFile still wins, including an explicit null.
+   * That is how the cookie test forces the jar on for its probe, and it is why
+   * the check is `!== undefined` rather than a truthiness test.
+   *
+   * @param {Object} params - the operation's parameters
+   * @returns {string|null} path to pass to --cookies
+   */
+  resolveCookieFile(params = {}) {
+    if (params.cookieFile !== undefined) {
+      return params.cookieFile
+    }
+
+    return isYouTubeUrl(params.url) ? this.getCookieFile() : null
+  }
+
   getCookieFile() {
     if (this.cookieManager) {
       const fromManager = this.cookieManager.getCookieFilePath()
@@ -1814,8 +1869,7 @@ class YtdlpEngine {
       ...params,
       ffmpegPath: params.ffmpegPath || this.getFfmpegPath(),
       denoPath: params.denoPath || this.getDenoPath(),
-      cookieFile:
-        params.cookieFile !== undefined ? params.cookieFile : this.getCookieFile(),
+      cookieFile: this.resolveCookieFile(params),
       // buildCommonArgs needs both, and needs potEnabled first - so an install
       // that was never refused, which is most of them, does not pay two stat
       // calls per operation to look for a payload it would not use anyway
@@ -2216,6 +2270,7 @@ module.exports = {
   parseDestinationLine,
   parseStreamCountLine,
   normalizeUrl,
+  isYouTubeUrl,
   killProcessTree,
   redactLogLine,
   mapError,

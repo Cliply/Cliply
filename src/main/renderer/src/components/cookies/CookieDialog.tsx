@@ -344,15 +344,12 @@ export function CookieDialog() {
                     on step 4 */}
                 <Step
                   n={4}
-                  note="the icon sits up by your address bar, sometimes tucked under the puzzle piece. it saves a .txt file to your downloads, usually named after the site."
+                  note="up by your address bar, sometimes under the puzzle piece. saves a .txt to your downloads."
                 >
                   click the extension&apos;s icon, then hit <Em>export</Em>
                 </Step>
 
-                <Step
-                  n={5}
-                  note="youtube keeps handing out fresh cookies to open youtube tabs, so the sooner you close it the longer your export stays good."
-                >
+                <Step n={5} note="youtube keeps refreshing cookies on open tabs.">
                   close that youtube tab
                 </Step>
 
