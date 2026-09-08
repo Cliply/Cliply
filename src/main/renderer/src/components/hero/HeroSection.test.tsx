@@ -24,10 +24,16 @@ vi.mock("./SearchCard", () => ({ SearchCard: () => <div /> }))
 // renders the labels rather than a blank div: a test asserting an item is
 // absent is worthless against a mock that never rendered any item at all
 vi.mock("@/components/ui/menu-vertical", () => ({
-  MenuVertical: ({ menuItems }: { menuItems: { label: string }[] }) => (
+  MenuVertical: ({
+    menuItems
+  }: {
+    menuItems: { label: string; href?: string }[]
+  }) => (
     <div>
       {menuItems.map((item) => (
-        <span key={item.label}>{item.label}</span>
+        <span key={item.label} data-testid="menu-item" data-href={item.href}>
+          {item.label}
+        </span>
       ))}
     </div>
   )
@@ -69,23 +75,45 @@ describe("the donate line", () => {
     const { HeroSection } = await import("./HeroSection")
     render(<HeroSection />)
 
-    expect(screen.getByText(/made by one person/i)).toBeTruthy()
+    expect(screen.getByText(/made by one person, free for everyone/i)).toBeTruthy()
 
     const link = screen.getByText("buy me a coffee")
     expect(link.getAttribute("href")).toBe("https://buymeacoffee.com/itssdevk")
   })
 })
 
-// two doors to the same room made the menu longer for nothing, once the line
-// in the top chrome started offering it to people who would never go looking
-test("the menu no longer carries its own cookies entry", async () => {
-  const { HeroSection } = await import("./HeroSection")
-  render(<HeroSection />)
+// navigation is one column now. github and disclaimer used to sit in a row
+// along the bottom edge, which put four links in two opposite corners
+describe("the menu", () => {
+  test("carries all four, in order", async () => {
+    const { HeroSection } = await import("./HeroSection")
+    render(<HeroSection />)
 
-  // the two that prove the mock is rendering anything at all, so the absence
-  // below means something
-  expect(screen.getByText("update")).toBeTruthy()
-  expect(screen.getByText("donate")).toBeTruthy()
+    expect(
+      screen.getAllByTestId("menu-item").map((node) => node.textContent)
+    ).toEqual(["update", "donate", "github", "disclaimer"])
+  })
 
-  expect(screen.queryByText("cookies")).toBeNull()
+  // two doors to the same room made the menu longer for nothing, once the line
+  // in the top chrome started offering it to people who would never go looking
+  test("no longer carries its own cookies entry", async () => {
+    const { HeroSection } = await import("./HeroSection")
+    render(<HeroSection />)
+
+    expect(screen.queryByText("cookies")).toBeNull()
+  })
+
+  test("github and disclaimer point where they say", async () => {
+    const { HeroSection } = await import("./HeroSection")
+    render(<HeroSection />)
+
+    const hrefs = Object.fromEntries(
+      screen
+        .getAllByTestId("menu-item")
+        .map((node) => [node.textContent, node.getAttribute("data-href")])
+    )
+
+    expect(hrefs.github).toBe("https://github.com/Cliply/Cliply/")
+    expect(hrefs.disclaimer).toBe("/disclaimer")
+  })
 })

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react"
 import { Coffee } from "lucide-react"
 import { systemApi } from "@/lib/api"
+import { track } from "@/lib/analytics"
 import {
   Dialog,
   DialogContent,
@@ -77,6 +78,9 @@ export function SupportDialog() {
           <Button
             className="text-xs"
             onClick={() => {
+              // main captures the prompt being shown; this is the other half.
+              // which button was pressed is only ever visible from here
+              track("support_prompt_clicked", { milestone: count })
               systemApi.openExternal(BUY_ME_A_COFFEE)
               close()
             }}

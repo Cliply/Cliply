@@ -3,7 +3,6 @@ import { ModeToggle } from "@/components/ui/mode-toggle"
 import { updaterApi } from "@/lib/api"
 import { cookieActions } from "@/lib/cookieStore"
 import { motion } from "framer-motion"
-import { Link } from "react-router-dom"
 import { toast } from "sonner"
 import { useAppStore } from "@/lib/store"
 import { SearchCard } from "./SearchCard"
@@ -41,6 +40,18 @@ export function HeroSection() {
               label: "donate",
               href: "https://buymeacoffee.com/itssdevk",
               external: true
+            },
+            // both of these used to sit in a row along the bottom edge. Four
+            // items in one column is a menu; two up here and two down there was
+            // the same navigation split across opposite corners for no reason
+            {
+              label: "github",
+              href: "https://github.com/Cliply/Cliply/",
+              external: true
+            },
+            {
+              label: "disclaimer",
+              href: "/disclaimer"
             }
           ]}
           color="#0891b2"
@@ -137,31 +148,30 @@ export function HeroSection() {
         </div>
       </div>
 
-      {/* Bottom disclaimer and links */}
+      {/*
+        the donate ask, sitting still rather than interrupting anything.
+
+        it states a fact and stops. No verb aimed at the reader, no reason why
+        it would help, no gratitude in advance - each of those turns a line
+        somebody might act on into one they can feel being worked. Being the
+        only thing along the bottom edge is what gives it weight, so the
+        disclaimer and github links moved up into the menu rather than sitting
+        beside it competing for the same glance.
+      */}
       <motion.div
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         transition={{ duration: 0.8, delay: 1.0 }}
-        className="absolute bottom-8 left-0 right-0 z-20"
+        className="absolute bottom-6 left-0 right-0 z-20"
       >
-        {/*
-          the donate ask, sitting still rather than interrupting anything.
-
-          it is one line above the existing row instead of a fourth item inside
-          it, because as a link among links it reads as navigation and gets
-          skipped with the rest. What makes a passive ask work is sounding like
-          a person rather than a button, so it says who is on the other end and
-          leaves the decision alone. Nothing here blocks, times out, or comes
-          back a second time.
-        */}
         <p
-          className="mb-3 text-center text-xs text-slate-400 dark:text-slate-500"
+          className="text-center text-xs text-slate-400 dark:text-slate-500"
           style={{
             fontFamily:
               'Geist Mono, ui-monospace, SFMono-Regular, "SF Mono", Consolas, "Liberation Mono", Menlo, monospace'
           }}
         >
-          cliply is free, and made by one person.{" "}
+          made by one person, free for everyone.{" "}
           <a
             href="https://buymeacoffee.com/itssdevk"
             target="_blank"
@@ -171,34 +181,6 @@ export function HeroSection() {
             buy me a coffee
           </a>
         </p>
-
-        <div className="flex justify-center items-center px-4 gap-6">
-          <Link
-            to="/disclaimer"
-            className="text-xs text-slate-500 dark:text-slate-400 hover:text-cyan-500 dark:hover:text-cyan-400 transition-colors duration-200"
-            style={{
-              fontFamily:
-                'Geist Mono, ui-monospace, SFMono-Regular, "SF Mono", Consolas, "Liberation Mono", Menlo, monospace'
-            }}
-          >
-            disclaimer
-          </Link>
-
-          <span className="text-slate-400 dark:text-slate-600">•</span>
-
-          <a
-            href="https://github.com/Cliply/Cliply/"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-xs text-slate-500 dark:text-slate-400 hover:text-cyan-500 dark:hover:text-cyan-400 transition-colors duration-200"
-            style={{
-              fontFamily:
-                'Geist Mono, ui-monospace, SFMono-Regular, "SF Mono", Consolas, "Liberation Mono", Menlo, monospace'
-            }}
-          >
-            github
-          </a>
-        </div>
       </motion.div>
 
       {/* Subtle bottom fade */}

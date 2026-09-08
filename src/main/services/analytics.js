@@ -87,7 +87,13 @@ const ALLOWED_PROPERTIES = {
   engine_seeded: ["reason", "engine_version", "elapsed_bucket"],
   engine_updated: ["from_version", "to_version"],
   engine_update_failed: ["update_reason", "error_message"],
-  cookies_imported: ["success", "has_youtube_cookies", "signed_in"]
+  cookies_imported: ["success", "has_youtube_cookies", "signed_in"],
+  // the two halves of the coffee prompt: how many were shown one, and how many
+  // acted on it. Both carry the milestone, so the answer can be read per step
+  // rather than only in total - which is what says whether the later ones are
+  // worth keeping
+  support_prompt_shown: ["milestone"],
+  support_prompt_clicked: ["milestone"]
 }
 
 // built once, so a capture is a set lookup rather than a scan
@@ -122,6 +128,8 @@ const PROPERTY_KINDS = {
   file_size_mb: "number",
   progress_at_failure: "number",
   progress_at_cancel: "number",
+  // which step of the sequence a prompt was, so 5 and 100 stay distinguishable
+  milestone: "number",
 
   // a controlled vocabulary that normalizes instead of dropping
   platform: "platform",

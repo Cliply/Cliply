@@ -50,10 +50,12 @@ const COOKIE_TEST_URLS = [
  * the downloads that earn a coffee ask, and the fact that there are only three
  *
  * front-loaded so the first one lands while the app is still new to somebody,
- * then spaced out, then done. A recurring ask is the thing that makes people
- * resent an app they otherwise like.
+ * then spaced further apart each time, then done. The widening gap is the
+ * point: a recurring ask is the thing that makes people resent an app they
+ * otherwise like, and someone on their five hundredth download has answered
+ * already.
  */
-const SUPPORT_MILESTONES = [5, 15, 40]
+const SUPPORT_MILESTONES = [5, 15, 40, 60, 100]
 
 // platforms served by the binary engine's single-video flows
 const SUPPORTED_DOWNLOAD_PLATFORMS = ["youtube", "pinterest", "tiktok"]
@@ -74,7 +76,11 @@ const RENDERER_EVENTS = new Set([
   "url_submitted",
   "media_info_loaded",
   "media_info_failed",
-  "download_started"
+  "download_started",
+  // the outcome of the coffee prompt. which button someone pressed is a
+  // renderer-side fact by definition - main sends the prompt and hears nothing
+  // more - so it belongs to the same category as the four above
+  "support_prompt_clicked"
 ])
 
 /**
@@ -423,6 +429,11 @@ class IPCHandlers {
         this.mainWindow.webContents.send(IPC_CHANNELS.SUPPORT_MILESTONE, {
           count
         })
+
+        // captured here rather than in the renderer because this is the line
+        // that decides a prompt happens. A shown event reported from the other
+        // side could only ever say the dialog mounted
+        this.capture("support_prompt_shown", { milestone: count })
       })
       .catch((error) => {
         console.error("failed to record a completed download:", error.message)
