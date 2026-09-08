@@ -395,3 +395,34 @@ describe("only cookies yt-dlp would actually send count as a login", () => {
     ).toMatchObject({ youtube: 2, signedIn: false })
   })
 })
+
+// "did this come from youtube" is the loose question behind the counts on
+// screen, and a suffix test alone answers it wrong: notyoutube.com ends in
+// "youtube.com". This lived in the manager's suite, driven through real file
+// i/o, which tested the parser at one remove and needed a temp directory to
+// do it
+describe("which domains count as youtube", () => {
+  const live = () => String(Math.floor(Date.now() / 1000) + 3600)
+  const jarFor = (...domains) =>
+    `${NETSCAPE}\n` +
+    domains
+      .map((d) => row({ domain: d, name: "LOGIN_INFO", expires: live() }))
+      .join("\n") +
+    "\n"
+
+  test("a subdomain counts, a lookalike does not", () => {
+    expect(
+      inspectCookieContent(jarFor("music.youtube.com", "notyoutube.com"))
+    ).toMatchObject({ total: 2, youtube: 1 })
+  })
+
+  test.each([
+    [".youtube.com", 1],
+    ["youtube.com", 1],
+    ["www.youtube.com", 1],
+    ["myyoutube.com", 0],
+    ["youtube.com.evil.test", 0]
+  ])("%s -> %i youtube cookies", (domain, expected) => {
+    expect(inspectCookieContent(jarFor(domain)).youtube).toBe(expected)
+  })
+})
