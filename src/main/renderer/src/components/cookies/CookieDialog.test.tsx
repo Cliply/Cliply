@@ -102,7 +102,7 @@ describe("CookieDialog", () => {
 
     await open()
 
-    await waitFor(() => expect(screen.getByText("nothing imported yet")).toBeTruthy())
+    await waitFor(() => expect(screen.getByText("here's how to import them")).toBeTruthy())
     expect(screen.getByText(/close that tab/i)).toBeTruthy()
     // the account warning moved onto the step it is about, rather than sitting
     // apart with an amber bar down its side
@@ -169,7 +169,7 @@ describe("a file that isn't a cookie jar", () => {
     getStatus.mockResolvedValue(status())
 
     await open()
-    await waitFor(() => expect(screen.getByText("nothing imported yet")).toBeTruthy())
+    await waitFor(() => expect(screen.getByText("here's how to import them")).toBeTruthy())
     screen.getByText("import cookies…").click()
 
     await waitFor(() => expect(toastError).toHaveBeenCalled())
@@ -188,7 +188,7 @@ describe("a file that isn't a cookie jar", () => {
       )
 
     await open()
-    await waitFor(() => expect(screen.getByText("nothing imported yet")).toBeTruthy())
+    await waitFor(() => expect(screen.getByText("here's how to import them")).toBeTruthy())
     screen.getByText("import cookies…").click()
 
     await waitFor(() => expect(toastWarning).toHaveBeenCalled())
@@ -284,7 +284,7 @@ describe("what the dialog promises about the file", () => {
   test.each([
     [/never to cliply/i],
     [/stays on this device/i],
-    [/remove deletes it/i]
+    [/remove deletes the file/i]
   ])("says %s whether or not cookies are imported", async (phrase) => {
     getStatus.mockResolvedValue(status())
 
@@ -355,5 +355,61 @@ describe("the robots.txt address", () => {
     screen.getByText("get cookies.txt LOCALLY").click()
 
     await waitFor(() => expect(openExternal).toHaveBeenCalled())
+  })
+})
+
+/**
+ * a fresh install is not a fault, and used to be told it was
+ *
+ * the status row reported "nothing imported yet" before showing anybody how to
+ * import anything, which is a strange way to open: here is what you are
+ * missing, and now the instructions. It reads as a heading for the steps
+ * instead. The distinction it has to get right is that a jar yt-dlp refuses
+ * whole also inspects as zero cookies, and "here's how to import them" is the
+ * wrong thing to say about a file that is already sitting on disk, broken.
+ */
+describe("the row above the steps", () => {
+  test("introduces the steps when nothing has ever been imported", async () => {
+    getStatus.mockResolvedValue(status({ problem: "nothing imported yet" }))
+
+    await open()
+
+    await waitFor(() =>
+      expect(screen.getByText("here's how to import them")).toBeTruthy()
+    )
+    expect(screen.queryByText("nothing imported yet")).toBeNull()
+  })
+
+  test("but reports the problem when a file is there and unreadable", async () => {
+    getStatus.mockResolvedValue(
+      status({
+        problem: "that file is malformed, export a fresh one instead of editing it",
+        fileInfo: {
+          ...status().fileInfo,
+          cookieCount: 0,
+          loadError: "domain-flag-mismatch"
+        }
+      })
+    )
+
+    await open()
+
+    await waitFor(() => expect(screen.getByText(/malformed/)).toBeTruthy())
+    // the one that would be actively misleading
+    expect(screen.queryByText("here's how to import them")).toBeNull()
+  })
+
+  test("and reports the count once a login is in", async () => {
+    getStatus.mockResolvedValue(
+      status({
+        hasValidCookies: true,
+        fileInfo: { ...status().fileInfo, cookieCount: 22, youtubeCookieCount: 22, signedIn: true, valid: true }
+      })
+    )
+
+    await open()
+
+    await waitFor(() => expect(screen.getByText(/signed in · 22 cookies/)).toBeTruthy())
+    expect(screen.queryByText("here's how to import them")).toBeNull()
   })
 })

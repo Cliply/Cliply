@@ -84,6 +84,10 @@ export function CookieDialog() {
 
   const signedIn = status?.hasValidCookies === true
   const imported = (status?.fileInfo.cookieCount ?? 0) > 0
+  // nothing has ever been imported here, as opposed to something having been
+  // imported and gone wrong. a file yt-dlp refuses outright inspects as zero
+  // cookies, so it has to be excluded or a malformed jar reads as a fresh start
+  const untouched = !imported && !status?.fileInfo.loadError
 
   const handleImport = async () => {
     setBusy("import")
@@ -218,30 +222,50 @@ export function CookieDialog() {
             footnote. three bullets was the reassurance arguing its case, which
             protests slightly too much - one line lands better and stays put
             whether or not there is a jar yet */}
-        <p className="flex gap-2.5 rounded-xl bg-cyan-50/70 p-3 text-sm text-slate-600 dark:bg-cyan-950/20 dark:text-slate-300">
+        <div className="flex gap-2.5 rounded-xl bg-cyan-50/70 p-3 text-sm dark:bg-cyan-950/20">
           <KeyRound className="mt-0.5 h-3.5 w-3.5 shrink-0 text-cyan-600 dark:text-cyan-400" />
-          <span>
-            you sign in to youtube in your own browser, never to cliply. the
-            file it gives you stays on this device, and remove deletes it.
-          </span>
-        </p>
+          <div className="space-y-1">
+            <p className="text-slate-600 dark:text-slate-300">
+              you sign in to youtube in your own browser, never to cliply.
+              everything stays on this device, we never upload any of it, and
+              remove deletes the file.
+            </p>
+            {/* borrowed credibility, and it belongs here rather than in a
+                footnote: "some app wants my youtube session" is a reasonable
+                thing to balk at, and the answer is that this is the documented
+                way the tool underneath asks for them */}
+            <p className="text-xs text-slate-400 dark:text-slate-500">
+              it&apos;s the standard process yt-dlp recommends.{" "}
+              <button className={linkClass} onClick={openLink(YTDLP_COOKIE_GUIDE)}>
+                read their guide
+              </button>
+            </p>
+          </div>
+        </div>
 
         <div className="space-y-3">
+          {/* a fresh install has no status, and reporting one anyway just told
+              somebody what they were missing before showing them how to fix it.
+              the row is a heading for the steps in that case, and only turns
+              back into a status once there is a file to have a status about.
+              a jar yt-dlp refuses whole counts as zero cookies, so it is asked
+              about separately - "here's how to import them" is the wrong thing
+              to say about a file that is sitting right there, malformed */}
           <div className="flex items-center gap-2.5 border-b border-slate-200 pb-3 text-sm dark:border-slate-700/60">
-            <span
-              className={cn(
-                "h-1.5 w-1.5 shrink-0 rounded-full",
-                signedIn
-                  ? "bg-cyan-500 ring-4 ring-cyan-500/15"
-                  : imported
-                    ? "bg-amber-500"
-                    : "bg-slate-400"
-              )}
-            />
+            {!untouched && (
+              <span
+                className={cn(
+                  "h-1.5 w-1.5 shrink-0 rounded-full",
+                  signedIn ? "bg-cyan-500 ring-4 ring-cyan-500/15" : "bg-amber-500"
+                )}
+              />
+            )}
             <span className="text-slate-700 dark:text-slate-200">
               {signedIn
                 ? `signed in · ${status?.fileInfo.youtubeCookieCount ?? 0} cookies`
-                : (status?.problem ?? "nothing imported yet")}
+                : untouched
+                  ? "here's how to import them"
+                  : status?.problem}
             </span>
             {imported && daysAgo(status?.status?.lastImport) && (
               <span className="ml-auto shrink-0 text-xs text-slate-400 dark:text-slate-500">
@@ -359,18 +383,16 @@ export function CookieDialog() {
             )}
           </div>
 
+          {/* the yt-dlp credit moved up into the panel, where the doubt it
+              answers actually is. saying it twice in one dialog reads as
+              insisting */}
           <p className="text-xs text-slate-400 dark:text-slate-500">
             {signedIn ? (
               "youtube rotates these out eventually. when it does, cliply will say so right here."
             ) : (
               <>
-                {/* "these steps are yt-dlp's own" stopped being true once the
-                    private window came out of step 2. based on is honest,
-                    are is not */}
-                based on yt-dlp&apos;s own guide.{" "}
-                <button className={linkClass} onClick={openLink(YTDLP_COOKIE_GUIDE)}>
-                  read theirs
-                </button>
+                nothing here is sent anywhere. the file only ever goes to
+                youtube, from your own machine.
               </>
             )}
           </p>
