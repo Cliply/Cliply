@@ -48,6 +48,40 @@ export interface DownloadProgress {
   // trimmed downloads report one sweep at the end, so there is no meaningful
   // percentage to show while ffmpeg works
   indeterminate?: boolean
+  // a failure that carries its own advice, rather than the generic retry
+  // prompt: a playlist run refuses to start when Cliply cannot write its own
+  // record of the download, which no amount of retrying fixes
+  suggestion?: string
+
+  /**
+   * the second level, sent only by a playlist download.
+   *
+   * `progress` above is still the single 0-100 bar for the whole run, so a
+   * consumer that only reads that keeps working. these say where inside it we
+   * are: `item_index` is the video's place in this run's queue and
+   * `playlist_index` its true position in the playlist, which differ for any
+   * selection with a gap in it. there is no title here - main never sees one -
+   * so the row is matched by index or by `video_id` against the listing.
+   */
+  item_progress?: number
+  item_index?: number
+  items_completed?: number
+  items_total?: number
+  playlist_index?: number | null
+  video_id?: string | null
+
+  /**
+   * what a finished playlist run actually did, on its terminal event.
+   *
+   * a partial playlist is `completed`, not a fourth status: "some items were
+   * skipped" is a property of a finished job. `items_reused` is the archive's
+   * doing - videos this destination already has, which read as "already
+   * downloaded" and are **never** a save this run made.
+   */
+  files?: string[]
+  items_saved?: number
+  items_reused?: number
+  items_skipped?: number
 }
 
 export interface DownloadStatus {
@@ -58,6 +92,11 @@ export interface DownloadStatus {
   error?: string
   startTime?: number
   endTime?: number
+  // a playlist is one row covering n videos, downloaded one after another; a
+  // single video is one row and nothing else. `type` says what is being
+  // fetched, which is the same answer for both, so this is what tells a
+  // downloads list which of the two shapes to draw
+  playlist?: boolean
 }
 
 export interface SystemHealth {
@@ -134,6 +173,75 @@ export interface TikTokDownloadResponse {
   file_path: string
   file_size: number
   download_id: string
+}
+
+/**
+ * one row of a playlist listing
+ *
+ * `index` is the video's 1-based position in the playlist and is what a
+ * download selection sends back. `duration` is null for a row that has none -
+ * a live stream, or a video that is gone - rather than a zero that would read
+ * as a video of no length.
+ *
+ * `unavailable` marks a deleted or private video. it cannot be downloaded, and
+ * each attempt spends one of yt-dlp's five allowed failures before it gives up
+ * on the rest of the playlist, so these rows must not be selectable.
+ */
+export interface PlaylistEntry {
+  index: number
+  id: string | null
+  title: string
+  duration: number | null
+  duration_string: string | null
+  thumbnail: string | null
+  unavailable: boolean
+}
+
+/**
+ * what a playlist link holds
+ *
+ * `count` is the playlist's true size and is null when the platform does not
+ * report one (a channel feed paginates lazily and never says). `listed` is how
+ * many rows came back, capped at 100, and `truncated` is the only honest way
+ * to say "there is more of this than we are showing you".
+ *
+ * there are no quality tiers and no file sizes here, and there cannot be: the
+ * listing is flat, so it carries no formats. that is why a playlist's quality
+ * menu is a fixed ceiling rather than one derived from the video.
+ */
+export interface PlaylistInfoResponse {
+  playlist_id: string | null
+  title: string
+  uploader: string
+  count: number | null
+  listed: number
+  truncated: boolean
+  entries: PlaylistEntry[]
+}
+
+/**
+ * a playlist download request
+ *
+ * `entries` are the ticked rows, sent as the {index, id} pairs the listing
+ * gave: main derives yt-dlp's selection from the indices and decides what the
+ * resume archive already holds from the ids. `height` is a ceiling ("best
+ * available up to this"), never a filter, so nothing is skipped for lacking it.
+ *
+ * `ignore_archive` is the "download everything again" affordance for a user
+ * who deleted the files: it drops the archive for one run, and only a literal
+ * true does it.
+ */
+export interface PlaylistDownloadRequest {
+  url: string
+  playlist_id: string
+  entries: { index: number; id: string }[]
+  type?: "video" | "audio"
+  height?: number
+  audio_mode?: AudioMode
+  ignore_archive?: boolean
+  // see AudioDownloadRequest.download_id - one id covers the whole playlist
+  download_id?: string
+  title?: string
 }
 
 export type Platform = "youtube" | "pinterest" | "tiktok"
@@ -285,6 +393,21 @@ declare global {
           }>
         >
       }
+      playlist: {
+        getInfo: (
+          options: { url: string; platform?: string } | string
+        ) => Promise<IPCResponse<PlaylistInfoResponse>>
+        download: (
+          options: PlaylistDownloadRequest & { platform?: string }
+        ) => Promise<
+          IPCResponse<{
+            download_id: string
+            status: string
+            type: string
+            items_total: number
+          }>
+        >
+      }
       pinterest: {
         getInfo: (url: string) => Promise<IPCResponse<PinterestVideoInfoResponse>>
         download: (
@@ -422,6 +545,60 @@ export const videoApi = {
     // Map the response to match expected format
     return {
       downloadId: response.data.download_id
+    }
+  }
+}
+
+/**
+ * playlists: list one, then download the rows the user ticked
+ *
+ * mirrors videoApi. the download resolves as soon as the process is running -
+ * everything after that arrives on `downloadApi.onProgress`, under the one id
+ * this returns, because a playlist is one download covering n files.
+ */
+export const playlistApi = {
+  /**
+   * List the videos a playlist link holds
+   * @param url Playlist URL
+   * @returns Promise<PlaylistInfoResponse>
+   */
+  async getPlaylistInfo(url: string): Promise<PlaylistInfoResponse> {
+    const electronAPI = getElectronAPI()
+    const response = await electronAPI.playlist.getInfo(url)
+
+    if (!response.success || !response.data) {
+      const errorMessage =
+        response.error?.message || "Failed to get playlist info"
+      console.error("Playlist info failed:", errorMessage)
+      throw new DownloadError(errorMessage, response.error)
+    }
+
+    return response.data
+  },
+
+  /**
+   * Download the selected videos of a playlist
+   * @param request Playlist download request
+   * @returns Promise<{downloadId: string, itemsTotal: number}>
+   */
+  async download(
+    request: PlaylistDownloadRequest
+  ): Promise<{ downloadId: string; itemsTotal: number }> {
+    const electronAPI = getElectronAPI()
+    const response = await electronAPI.playlist.download(request)
+
+    if (!response.success || !response.data) {
+      const errorMessage =
+        response.error?.message || "Failed to download playlist"
+      console.error("Playlist download failed:", errorMessage)
+      throw new DownloadError(errorMessage, response.error)
+    }
+
+    return {
+      downloadId: response.data.download_id,
+      // what main accepted, which is the selection it validated rather than
+      // the one that was sent
+      itemsTotal: response.data.items_total
     }
   }
 }

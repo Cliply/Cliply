@@ -5,6 +5,7 @@ const { EventEmitter } = require("events")
 
 const { DownloadRunner } = require("../src/main/services/download-runner")
 const { ERROR_CODES } = require("../src/main/services/ytdlp-engine")
+const { ERROR_CATEGORIES } = require("../src/main/utils/error-taxonomy")
 
 // a stand-in for an engine handle
 class FakeHandle extends EventEmitter {
@@ -663,5 +664,371 @@ describe("concurrent downloads", () => {
 
     expect((await a).cancelled).toBe(true)
     expect((await b).success).toBe(true)
+  })
+})
+
+// =============================================================================
+// playlists
+// =============================================================================
+
+// a playlist is one download id covering n files, so everything below is about
+// the runner reporting more without any of it reaching a single-video download.
+// the engine hangs the same five keys on a result and on a rejection, which is
+// what these fake handles reproduce - see tests/ytdlp-playlist-progress.test.js
+// for where that shape is pinned against the binary
+
+const PLAYLIST = {
+  downloadId: "playlist_1",
+  type: "combined",
+  platform: "youtube",
+  title: "Short talks",
+  formatId: "1080p",
+  playlist: true
+}
+
+// what YtdlpOperation resolves a playlist run with
+function playlistResult(overrides = {}) {
+  return {
+    filePath: "/downloads/PL/002 - Two [bbb] 1080p.mp4",
+    stderr: "",
+    files: [
+      "/downloads/PL/001 - One [aaa] 1080p.mp4",
+      "/downloads/PL/002 - Two [bbb] 1080p.mp4"
+    ],
+    itemsSaved: 2,
+    itemsReused: 0,
+    itemsSkipped: 0,
+    itemsTotal: 2,
+    ...overrides
+  }
+}
+
+// ...and what it rejects with: the same tally, on the error
+function playlistError(code, message, overrides = {}) {
+  const error = new Error(message)
+  error.code = code
+  error.files = []
+  error.itemsSaved = 0
+  error.itemsReused = 0
+  error.itemsSkipped = 0
+  error.itemsTotal = 0
+  return Object.assign(error, overrides)
+}
+
+describe("playlist progress", () => {
+  test("the per-item fields ride along with the run's own bar", async () => {
+    const { runner, events } = createRunner()
+    const handle = new FakeHandle()
+
+    const running = runner.run({ ...PLAYLIST, createHandle: () => handle })
+    await settle()
+
+    handle.emit("progress", {
+      progress: 41.2,
+      overallProgress: 41.2,
+      itemProgress: 62,
+      itemsCompleted: 3,
+      totalItems: 9,
+      itemIndex: 4,
+      playlistIndex: 6,
+      videoId: "aaaaaaaaaaa",
+      speed: "6.40MiB/s",
+      eta: "00:12"
+    })
+
+    handle.resolve(playlistResult())
+    await running
+
+    expect(events[0]).toEqual({
+      downloadId: "playlist_1",
+      status: "downloading",
+      // the flat bar every existing consumer reads is the *run's*, unchanged
+      progress: 41.2,
+      indeterminate: undefined,
+      speed: "6.40MiB/s",
+      eta: "00:12",
+      item_progress: 62,
+      item_index: 4,
+      items_completed: 3,
+      items_total: 9,
+      // the video's true position in the playlist, which is not its position
+      // in a selection with a gap in it
+      playlist_index: 6,
+      video_id: "aaaaaaaaaaa"
+    })
+  })
+
+  test("a single video's progress payload gains nothing at all", async () => {
+    const { runner, events } = createRunner()
+    const handle = new FakeHandle()
+
+    const running = runner.run({ ...BASE, createHandle: () => handle })
+    await settle()
+
+    // even if an update somehow carried them, this download is not a playlist
+    handle.emit("progress", {
+      progress: 42.5,
+      itemProgress: 62,
+      itemsCompleted: 3,
+      totalItems: 9
+    })
+    handle.resolve({ filePath: "/downloads/a.mp4" })
+    await running
+
+    expect(events[0]).toEqual({
+      downloadId: "combined_1",
+      status: "downloading",
+      progress: 42.5,
+      indeterminate: undefined,
+      speed: undefined,
+      eta: undefined
+    })
+  })
+})
+
+describe("playlist outcomes", () => {
+  test("a partial playlist is completed, with what it saved and what it did not", async () => {
+    const { runner, events } = createRunner()
+    const handle = new FakeHandle()
+
+    const running = runner.run({ ...PLAYLIST, createHandle: () => handle })
+    await settle()
+
+    handle.resolve(
+      playlistResult({
+        files: ["/downloads/PL/001 - One [aaa] 1080p.mp4"],
+        itemsSaved: 1,
+        itemsReused: 0,
+        itemsSkipped: 8,
+        itemsTotal: 9,
+        stderr: "ERROR: [youtube] bbb: Video unavailable"
+      })
+    )
+
+    const result = await running
+    const terminal = events[events.length - 1]
+
+    // not a fourth status: "some were skipped" is a property of a finished job
+    expect(terminal.status).toBe("completed")
+    expect(terminal.progress).toBe(100)
+    expect(terminal.items_saved).toBe(1)
+    expect(terminal.items_skipped).toBe(8)
+    expect(terminal.items_total).toBe(9)
+    expect(terminal.files).toEqual(["/downloads/PL/001 - One [aaa] 1080p.mp4"])
+    expect(result.success).toBe(true)
+    expect(result.items_saved).toBe(1)
+  })
+
+  test("archive skips are reported as reused and never counted as saved", async () => {
+    const { runner, events } = createRunner()
+    const handle = new FakeHandle()
+
+    const running = runner.run({ ...PLAYLIST, createHandle: () => handle })
+    await settle()
+
+    // an archive skip says a download once succeeded, not that a file was
+    // written now - the user may have deleted it since
+    handle.resolve(
+      playlistResult({ files: [], itemsSaved: 0, itemsReused: 2, itemsTotal: 2 })
+    )
+
+    const result = await running
+    const terminal = events[events.length - 1]
+
+    expect(terminal.items_saved).toBe(0)
+    expect(terminal.items_reused).toBe(2)
+    expect(result.items_saved).toBe(0)
+    expect(result.items_reused).toBe(2)
+  })
+
+  test("skipped items keep the reason they were skipped for", async () => {
+    // the run completed, so nothing else will ever classify this stderr - and
+    // bot detection reaching the escalation is the whole point of doing it
+    const { runner, events } = createRunner()
+    const handle = new FakeHandle()
+
+    const running = runner.run({ ...PLAYLIST, createHandle: () => handle })
+    await settle()
+
+    handle.resolve(
+      playlistResult({
+        files: ["/downloads/PL/001 - One [aaa] 1080p.mp4"],
+        itemsSaved: 1,
+        itemsSkipped: 9,
+        itemsTotal: 10,
+        stderr: "ERROR: [youtube] bbb: Sign in to confirm you're not a bot"
+      })
+    )
+
+    const result = await running
+
+    expect(events[events.length - 1].category).toBe(
+      ERROR_CATEGORIES.BOT_DETECTION
+    )
+    expect(result.category).toBe(ERROR_CATEGORIES.BOT_DETECTION)
+  })
+
+  test("a run that skipped nothing carries no failure category", async () => {
+    const { runner, events } = createRunner()
+    const handle = new FakeHandle()
+
+    const running = runner.run({ ...PLAYLIST, createHandle: () => handle })
+    await settle()
+
+    handle.resolve(playlistResult({ stderr: "WARNING: something harmless" }))
+    const result = await running
+
+    expect(events[events.length - 1].category).toBeUndefined()
+    expect(result.category).toBeUndefined()
+  })
+
+  test("a cancel reports the videos that had already landed", async () => {
+    const { runner, events } = createRunner()
+    const handle = new FakeHandle()
+
+    const running = runner.run({ ...PLAYLIST, createHandle: () => handle })
+    await settle()
+
+    runner.cancel("playlist_1")
+    handle.reject(
+      playlistError(ERROR_CODES.CANCELLED, "Download cancelled.", {
+        files: ["/downloads/PL/001 - One [aaa] 1080p.mp4"],
+        itemsSaved: 1,
+        itemsSkipped: 2,
+        itemsTotal: 3
+      })
+    )
+
+    const result = await running
+    const terminal = events[events.length - 1]
+
+    expect(terminal.status).toBe("cancelled")
+    expect(terminal.files).toEqual(["/downloads/PL/001 - One [aaa] 1080p.mp4"])
+    expect(terminal.items_saved).toBe(1)
+    expect(result.cancelled).toBe(true)
+    expect(result.items_saved).toBe(1)
+  })
+
+  test("a stall keeps them too", async () => {
+    const { runner, events } = createRunner()
+    const handle = new FakeHandle()
+
+    const running = runner.run({ ...PLAYLIST, createHandle: () => handle })
+    await settle()
+
+    handle.reject(
+      playlistError(ERROR_CODES.STALLED, "The download stopped responding.", {
+        files: ["/downloads/PL/001 - One [aaa] 1080p.mp4"],
+        itemsSaved: 1,
+        itemsSkipped: 1,
+        itemsTotal: 2
+      })
+    )
+
+    await running
+    const terminal = events[events.length - 1]
+
+    expect(terminal.status).toBe("failed")
+    expect(terminal.items_saved).toBe(1)
+    expect(terminal.files).toHaveLength(1)
+  })
+
+  test("a run that could not prepare its records file says exactly that", async () => {
+    // the engine refuses to start when it cannot write its private record of
+    // what the run saved. that has nothing to do with the network, the link or
+    // the download folder, so collapsing it into "please try again" would send
+    // the user back to a wall they can only get past through permissions
+    const { runner, events } = createRunner()
+    const handle = new FakeHandle()
+
+    const running = runner.run({ ...PLAYLIST, createHandle: () => handle })
+    await settle()
+
+    handle.reject(
+      playlistError(
+        ERROR_CODES.PERMISSION_ERROR,
+        "Cliply couldn't prepare its record of this download.",
+        {
+          suggestion:
+            "Check permissions on Cliply's app data folder and try again.",
+          itemsSkipped: 2,
+          itemsTotal: 2
+        }
+      )
+    )
+
+    await running
+    const terminal = events[events.length - 1]
+
+    expect(terminal.status).toBe("failed")
+    expect(terminal.error).toBe(
+      "Cliply couldn't prepare its record of this download."
+    )
+    expect(terminal.suggestion).toBe(
+      "Check permissions on Cliply's app data folder and try again."
+    )
+    expect(terminal.category).toBe(ERROR_CODES.PERMISSION_ERROR)
+  })
+
+  test("a downloads list can tell a playlist row from a single video", async () => {
+    // both are one row. the difference is that a playlist row expands into the
+    // n videos it is downloading one after another, and `type` cannot say so:
+    // a playlist of videos is "combined" exactly as one video is
+    const { runner } = createRunner()
+    const video = new FakeHandle()
+    const list = new FakeHandle()
+
+    const a = runner.run({ ...BASE, createHandle: () => video })
+    const b = runner.run({ ...PLAYLIST, createHandle: () => list })
+    await settle()
+
+    const rows = runner.list()
+
+    expect(rows).toHaveLength(2)
+    expect(rows.find((row) => row.downloadId === "combined_1")).toMatchObject({
+      type: "combined",
+      playlist: false
+    })
+    expect(rows.find((row) => row.downloadId === "playlist_1")).toMatchObject({
+      type: "combined",
+      playlist: true
+    })
+
+    video.resolve({ filePath: "/downloads/a.mp4" })
+    list.resolve(playlistResult())
+    await Promise.all([a, b])
+  })
+
+  test("a reservation made before the run carries it too", async () => {
+    // the ipc handlers reserve the id before they acknowledge the request, so
+    // this is the path every real playlist download actually takes
+    const { runner } = createRunner()
+
+    runner.reserve("playlist_2", { type: "audio", playlist: true })
+    runner.reserve("audio_2", { type: "audio" })
+
+    const rows = runner.list()
+
+    expect(rows.find((row) => row.downloadId === "playlist_2").playlist).toBe(true)
+    // false rather than absent: a row that never says is a row a downloads
+    // list has to guess about
+    expect(rows.find((row) => row.downloadId === "audio_2").playlist).toBe(false)
+  })
+
+  test("a single video's failed event still carries no suggestion", async () => {
+    const { runner, events } = createRunner()
+    const handle = new FakeHandle()
+
+    const running = runner.run({ ...BASE, createHandle: () => handle })
+    await settle()
+
+    const error = new Error("This video isn't available for download.")
+    error.code = ERROR_CODES.VIDEO_UNAVAILABLE
+    error.suggestion = "Try a different video"
+    handle.reject(error)
+    await running
+
+    expect(events[events.length - 1]).not.toHaveProperty("suggestion")
+    expect(events[events.length - 1]).not.toHaveProperty("items_total")
   })
 })

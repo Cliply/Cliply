@@ -2,6 +2,8 @@
 
 const { ipcMain, dialog, app } = require("electron")
 const os = require("os")
+const fs = require("fs")
+const path = require("path")
 const { IPC_CHANNELS } = require("./utils/constants")
 const {
   describeError,
@@ -18,17 +20,24 @@ const {
 const {
   mapVideoInfo,
   mapSimpleInfo,
+  mapPlaylistInfo,
   hasPlayableVideo,
   buildVideoOutputTemplate,
   buildAudioOutputTemplate,
-  buildSimpleOutputTemplate
+  buildSimpleOutputTemplate,
+  buildPlaylistOutputTemplate,
+  buildPlaylistArchivePath
 } = require("./utils/ytdlp-mappers")
 const { getSimplePlatformOptions } = require("./utils/ytdlp-formats")
 const { resolveDownloadId } = require("./utils/download-id")
 
 const { DownloadRunner } = require("./services/download-runner")
 const { SettingsStore } = require("./services/settings-store")
-const { ERROR_CODES } = require("./services/ytdlp-engine")
+const {
+  ERROR_CODES,
+  PLAYLIST_MAX_ITEMS,
+  PLAYLIST_CONTAINER
+} = require("./services/ytdlp-engine")
 
 /**
  * urls the cookie test probes, tried in order
@@ -88,6 +97,177 @@ function normalizeTimeRange(range) {
   return { start, end }
 }
 
+/**
+ * playlists are a youtube feature, and this is where that is enforced
+ *
+ * an absent platform means youtube, which is the default every single-video
+ * handler already applies to the same field. **this is not the check that
+ * matters** - see isYouTubeUrl, which reads the link rather than the label.
+ *
+ * @param {*} platform - what the request named, if anything
+ * @returns {boolean} whether a playlist request may proceed
+ */
+function isPlaylistPlatform(platform) {
+  return (platform ? String(platform).toLowerCase() : "youtube") === "youtube"
+}
+
+/**
+ * is this link actually youtube's?
+ *
+ * the `platform` field is optional and arrives from the renderer, which does
+ * not send it for a playlist at all - so a handler that only checks the label
+ * checks nothing. the engine will not save us either: `normalizeUrl` asks for
+ * an http(s) link and no more, so a vimeo url with the right shape around it
+ * reached yt-dlp. the host is the only evidence here, so the host is what is
+ * read.
+ *
+ * the test is anchored at the **end** of the hostname, for the reason the
+ * renderer's PINTEREST_URL_REGEX comment spells out: the interesting part of a
+ * hostname is where it ends, not whether our word appears somewhere in it, and
+ * `youtube.com.evil.com` is somebody else's domain. any subdomain is fine
+ * (`m.`, `music.`, `www.`), and `youtu.be` is admitted exactly, never as a
+ * suffix - `myyoutu.be` is not ours.
+ *
+ * a link with no scheme does not parse and is refused. that is not new: the
+ * engine's normalizeUrl already refuses one for every download there is, so
+ * this only says so before anything spawns.
+ *
+ * @param {*} url - the link the request carried
+ * @returns {boolean} whether it points at youtube
+ */
+function isYouTubeUrl(url) {
+  if (typeof url !== "string") return false
+
+  let parsed
+
+  try {
+    parsed = new URL(url.trim())
+  } catch {
+    return false
+  }
+
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    return false
+  }
+
+  // URL lowercases the hostname for us, so this needs no folding of its own
+  const host = parsed.hostname
+
+  return (
+    host === "youtube.com" ||
+    host.endsWith(".youtube.com") ||
+    host === "youtu.be"
+  )
+}
+
+/**
+ * the audio modes a playlist may ask for
+ *
+ * the engine falls back to mp3 for anything it does not recognise, which is
+ * the right answer for a download and the wrong one for the archive beside it:
+ * the archive filename is scoped by the mode the *request* named, so an
+ * unrecognised mode would file an mp3 run under its own name and no later run
+ * would ever find it again. refused here, where the two still agree.
+ */
+const PLAYLIST_AUDIO_MODES = ["mp3", "m4a", "original"]
+
+// a youtube video id. it becomes an archive lookup key, and an id that is not
+// an id would simply never match one - which reads as "download this again"
+// rather than as the malformed payload it is
+const VIDEO_ID_PATTERN = /^[A-Za-z0-9_-]+$/
+
+// the highest ceiling the quality menu offers, with room above it. a height is
+// not just passed through here the way the single-video flow passes one: it
+// names the archive this run resumes from, so a NaN would scope every garbled
+// request to one shared file
+const PLAYLIST_MAX_HEIGHT = 4320
+
+/**
+ * the selection, checked before anything can spawn on it
+ *
+ * this is untrusted input twice over. the indices become yt-dlp's `-I` spec,
+ * and the ids are what the engine intersects with the download archive to work
+ * out what it is allowed to skip - so both halves are checked for what they
+ * are, never coerced into it.
+ *
+ * @param {Object[]} entries - [{index, id}] as the renderer read them off the
+ *   listing it is showing
+ * @returns {Object[]} the same entries, validated
+ * @throws {Error} carrying the sentence the user is shown
+ */
+function normalizePlaylistEntries(entries) {
+  // an empty selection is not an empty spec: `-I ""` is the *absence* of a
+  // selection, which downloads the whole playlist. so "nothing was ticked" has
+  // to be refused rather than left to become the largest download available
+  if (!Array.isArray(entries) || entries.length === 0) {
+    throw new Error("Select at least one video to download.")
+  }
+
+  if (entries.length > PLAYLIST_MAX_ITEMS) {
+    throw new Error(
+      `Cliply downloads at most ${PLAYLIST_MAX_ITEMS} videos from a playlist at a time.`
+    )
+  }
+
+  const seen = new Set()
+
+  return entries.map((entry) => {
+    const index = entry ? entry.index : null
+    const id = entry ? entry.id : null
+
+    // an integer and only an integer: coercing "3" or 3.5 into a position is
+    // how a malformed payload gets laundered into something -I accepts
+    if (!Number.isInteger(index) || index < 1 || index > PLAYLIST_MAX_ITEMS) {
+      throw new Error("That selection isn't a list of playlist positions.")
+    }
+
+    if (typeof id !== "string" || !VIDEO_ID_PATTERN.test(id)) {
+      throw new Error("That selection carries a video id we can't read.")
+    }
+
+    // the same position twice downloads once and is counted twice - once as
+    // another item asked for, and again as another archive skip
+    if (seen.has(index)) {
+      throw new Error("That selection lists the same video twice.")
+    }
+
+    seen.add(index)
+    return { index, id }
+  })
+}
+
+/**
+ * the quality ceiling for a playlist, as a number the archive can be named for
+ * @param {*} height - whatever the request sent
+ * @returns {number} the ceiling
+ * @throws {Error} when it is not a height
+ */
+function normalizePlaylistHeight(height) {
+  const value = Number(height)
+
+  if (!Number.isInteger(value) || value < 1 || value > PLAYLIST_MAX_HEIGHT) {
+    throw new Error("That isn't a quality we can download a playlist at.")
+  }
+
+  return value
+}
+
+/**
+ * the audio mode for a playlist download
+ * @param {*} audioMode - whatever the request sent
+ * @returns {string} mp3 | m4a | original
+ * @throws {Error} when it is none of them
+ */
+function normalizePlaylistAudioMode(audioMode) {
+  const mode = String(audioMode || "").toLowerCase()
+
+  if (!PLAYLIST_AUDIO_MODES.includes(mode)) {
+    throw new Error("That isn't an audio format we can download a playlist as.")
+  }
+
+  return mode
+}
+
 // say which way the jar is unusable, so "not working" is actionable
 function cookieJarProblem({ total, youtube, expired }) {
   if (total === 0) {
@@ -135,6 +315,10 @@ class IPCHandlers {
 
     // audit logging
     this.auditLog = []
+
+    // the last playlist listed, so a download can be held to what its own
+    // listing said was downloadable - see rememberPlaylistListing
+    this.lastPlaylistListing = null
 
     // one source of truth for the download folder, shared with the settings ipc
     this.settings = services.settingsStore || new SettingsStore()
@@ -489,6 +673,16 @@ class IPCHandlers {
       this.handleDownloadAudio.bind(this)
     )
 
+    // playlist operations
+    ipcMain.handle(
+      IPC_CHANNELS.PLAYLIST_GET_INFO,
+      this.handleGetPlaylistInfo.bind(this)
+    )
+    ipcMain.handle(
+      IPC_CHANNELS.PLAYLIST_DOWNLOAD,
+      this.handleDownloadPlaylist.bind(this)
+    )
+
     // download management
     ipcMain.handle(
       IPC_CHANNELS.DOWNLOAD_CANCEL,
@@ -617,43 +811,55 @@ class IPCHandlers {
       return this.createSuccess(videoInfo)
     } catch (error) {
       console.error("Info extraction failed:", error.message)
-
-      const { category } = classify(error, ERROR_STAGES.FETCH_INFO)
-
-      // the metadata fetch is the first thing a blocked install fails at, so
-      // this is usually where the refusal is discovered
-      const fetching = this.noteRefusal(category)
-
-      /**
-       * the only thing the user is told about the download, and it is told
-       * here because this is the one error surface that actually reaches them:
-       * `suggestion` is carried all the way to the renderer's DownloadError and
-       * then never rendered by anything.
-       *
-       * a sentence rather than a progress bar. the work is not something they
-       * asked for or can act on, and the honest report of it is short: a fix is
-       * coming, try again shortly. saying nothing at all would leave a user
-       * retrying into the same wall with no idea it was about to stop - and a
-       * bare percentage would explain even less than silence.
-       *
-       * only when a fetch really did start. an install that already has the
-       * payload and is still being refused has nothing to wait for, and
-       * promising it would be a lie the second time.
-       */
-      const message = error.message || "Failed to get media information"
-
-      return this.createError(
-        fetching
-          ? `${message} Setting up a fix in the background - try again in a minute.`
-          : message,
-        error.suggestion || "Please check the URL and try again",
-        error.code || "GENERAL_ERROR",
-        {
-          details: error.details || undefined,
-          category
-        }
-      )
+      return this.infoFailure(error)
     }
+  }
+
+  /**
+   * turn a failed metadata request into the response the renderer reads
+   *
+   * shared by the video and the playlist listing, which fail in exactly the
+   * same ways: the same taxonomy, the same escalation, the same wording.
+   *
+   * @param {Error} error - what the engine threw
+   * @returns {Object} the ipc error response
+   */
+  infoFailure(error) {
+    const { category } = classify(error, ERROR_STAGES.FETCH_INFO)
+
+    // the metadata fetch is the first thing a blocked install fails at, so
+    // this is usually where the refusal is discovered
+    const fetching = this.noteRefusal(category)
+
+    /**
+     * the only thing the user is told about the download, and it is told
+     * here because this is the one error surface that actually reaches them:
+     * `suggestion` is carried all the way to the renderer's DownloadError and
+     * then never rendered by anything.
+     *
+     * a sentence rather than a progress bar. the work is not something they
+     * asked for or can act on, and the honest report of it is short: a fix is
+     * coming, try again shortly. saying nothing at all would leave a user
+     * retrying into the same wall with no idea it was about to stop - and a
+     * bare percentage would explain even less than silence.
+     *
+     * only when a fetch really did start. an install that already has the
+     * payload and is still being refused has nothing to wait for, and
+     * promising it would be a lie the second time.
+     */
+    const message = error.message || "Failed to get media information"
+
+    return this.createError(
+      fetching
+        ? `${message} Setting up a fix in the background - try again in a minute.`
+        : message,
+      error.suggestion || "Please check the URL and try again",
+      error.code || "GENERAL_ERROR",
+      {
+        details: error.details || undefined,
+        category
+      }
+    )
   }
 
   // combined video download - resolves as soon as the process is running,
@@ -921,6 +1127,289 @@ class IPCHandlers {
     }
   }
 
+  /**
+   * list what a playlist link holds - the rows the picker draws
+   *
+   * playlists are **youtube only**. a pinterest pin and a tiktok video are
+   * single media, and `--flat-playlist` against one answers a question nobody
+   * asked, so an unsupported platform is refused the way handleGetVideoInfo
+   * refuses one rather than left to fail obscurely in the engine.
+   */
+  async handleGetPlaylistInfo(_event, data) {
+    try {
+      this.validateRequest(data, ["url"])
+      const { url, platform } = data
+
+      // the link decides, and a label that disagrees with it loses
+      if (!isPlaylistPlatform(platform) || !isYouTubeUrl(url)) {
+        return this.unsupportedPlaylistPlatform()
+      }
+
+      // one spawn, --flat-playlist, ~1s even for a hundred items
+      const listing = mapPlaylistInfo(await this.engine.getPlaylistInfo(url))
+
+      this.rememberPlaylistListing(listing)
+
+      return this.createSuccess(listing)
+    } catch (error) {
+      console.error("Playlist listing failed:", error.message)
+      return this.infoFailure(error)
+    }
+  }
+
+  /**
+   * remember the listing a download can be checked against
+   *
+   * an entry the listing marked `unavailable` is a deleted or private video.
+   * downloading one cannot work, and each attempt spends one of yt-dlp's five
+   * `--skip-playlist-after-errors` failures - so five of them end the run for
+   * the videos that were fine. the renderer disables those rows; this is the
+   * half of that check that does not run in the window it is enforcing.
+   *
+   * one listing rather than a cache, and matched on the playlist id: the
+   * picker downloads the playlist it is looking at. a request for anything
+   * else goes through unchecked, which is the honest answer - main has no
+   * listing of it to check against, and inventing a refusal would be worse.
+   *
+   * @param {Object} listing - what mapPlaylistInfo returned
+   */
+  rememberPlaylistListing(listing) {
+    if (!listing || !listing.playlist_id) {
+      this.lastPlaylistListing = null
+      return
+    }
+
+    this.lastPlaylistListing = {
+      playlistId: listing.playlist_id,
+      unavailable: new Set(
+        listing.entries
+          .filter((entry) => entry.unavailable)
+          .map((entry) => entry.index)
+      )
+    }
+  }
+
+  /**
+   * the selected positions the last listing said were not downloadable
+   * @param {string} playlistId - the playlist the request names
+   * @param {Object[]} entries - the validated selection
+   * @returns {number[]} positions that cannot be downloaded
+   */
+  unavailableSelection(playlistId, entries) {
+    const listing = this.lastPlaylistListing
+
+    if (!listing || listing.playlistId !== playlistId) {
+      return []
+    }
+
+    return entries
+      .map((entry) => entry.index)
+      .filter((index) => listing.unavailable.has(index))
+  }
+
+  // playlists are youtube only, and the two handlers say so in one voice
+  unsupportedPlaylistPlatform() {
+    return this.createError(
+      "Playlists are only supported on YouTube",
+      "Please paste a YouTube playlist link",
+      "GENERAL_ERROR",
+      { category: ERROR_CATEGORIES.INVALID_URL }
+    )
+  }
+
+  /**
+   * start a playlist download: one id, one process, n files
+   *
+   * the same start-then-events contract the single-video flows use, so the
+   * renderer follows a playlist over `download:progress` exactly as it follows
+   * a video. what is new is on those events, not in this reply: two levels of
+   * progress on the way, and a count of what was saved, reused and skipped at
+   * the end. a playlist that saved eight of nine is **completed**, not a
+   * fourth status nothing downstream knows how to read.
+   */
+  async handleDownloadPlaylist(_event, data) {
+    // before the id is even resolved, so a link we do not serve reserves
+    // nothing and spawns nothing. the link decides, not the label beside it
+    if (
+      !isPlaylistPlatform(data && data.platform) ||
+      !isYouTubeUrl(data && data.url)
+    ) {
+      return this.unsupportedPlaylistPlatform()
+    }
+
+    // the request says which tab it came from; everything else is a video
+    const audioOnly = Boolean(data) && data.type === "audio"
+    const type = audioOnly ? "audio" : "combined"
+
+    // one id for the whole playlist. the renderer generates it so its listener
+    // is correlated before this acknowledgement even arrives
+    const downloadId = resolveDownloadId(
+      data && data.download_id,
+      `playlist-${type}`
+    )
+
+    if (!downloadId) {
+      return this.createError(
+        "Invalid download id",
+        "Please restart the app and try again",
+        "INVALID_DOWNLOAD_ID"
+      )
+    }
+
+    try {
+      // the playlist id is required rather than defaulted: it names the resume
+      // archive, and a default would put two different playlists at the same
+      // quality into one shared file
+      this.validateRequest(
+        data,
+        audioOnly
+          ? ["url", "playlist_id", "entries", "audio_mode"]
+          : ["url", "playlist_id", "entries", "height"]
+      )
+
+      const {
+        url,
+        playlist_id: playlistId,
+        entries: rawEntries,
+        height,
+        audio_mode: audioMode,
+        ignore_archive: ignoreArchive,
+        title = "playlist"
+      } = data
+
+      const entries = normalizePlaylistEntries(rawEntries)
+      const unavailable = this.unavailableSelection(playlistId, entries)
+
+      if (unavailable.length) {
+        return this.createError(
+          unavailable.length === entries.length
+            ? "None of the selected videos can be downloaded."
+            : "Some of the selected videos aren't available.",
+          "Unselect the videos marked unavailable and try again.",
+          "GENERAL_ERROR",
+          { category: ERROR_CATEGORIES.VIDEO_UNAVAILABLE }
+        )
+      }
+
+      // a playlist is one quality instruction for every video in it: a ceiling
+      // yt-dlp applies per video, or one audio preset. neither is derived from
+      // a format list, because a flat listing carries none
+      const ceiling = audioOnly ? null : normalizePlaylistHeight(height)
+      const audio = audioOnly ? normalizePlaylistAudioMode(audioMode) : null
+
+      // what the archive is scoped by. the archive is keyed on video id alone,
+      // so it is quality-blind on its own: without this, "download this
+      // playlist again in 4K" would silently do nothing at all
+      const mode = audioOnly ? audio : `${ceiling}p-${PLAYLIST_CONTAINER}`
+
+      const outputDir = await this.getDownloadDirectory()
+      const archiveFile = buildPlaylistArchivePath({
+        userDataPath: this.engine.getUserDataPath(),
+        playlistId,
+        mode,
+        outputDir
+      })
+
+      this.ensureArchiveDirectory(archiveFile)
+
+      const outputTemplate = buildPlaylistOutputTemplate({ audioOnly })
+
+      const createHandle = () =>
+        this.engine.run(audioOnly ? "playlist-audio" : "playlist-combined", {
+          url,
+          // {index, id} pairs, not bare positions: the engine derives the -I
+          // spec from the indices, and works out what the archive already
+          // holds by matching the ids against it before it spawns
+          playlistEntries: entries,
+          ...(audioOnly ? { audioMode: audio } : { height: ceiling }),
+          outputDir,
+          outputTemplate,
+          archiveFile,
+          // "download everything again", for a user who deleted the files an
+          // archive still remembers. a literal true only - this is the one
+          // flag whose accidental truthiness re-downloads a hundred videos
+          ...(ignoreArchive === true ? { ignoreArchive: true } : {})
+        })
+
+      // claim the id before acking, so a cancel arriving immediately after
+      // cannot slip through the gap
+      if (
+        !this.runner.reserve(downloadId, {
+          type,
+          platform: "youtube",
+          title,
+          // one row in a downloads list, covering n videos - see list()
+          playlist: true
+        })
+      ) {
+        return this.duplicateDownloadError(downloadId)
+      }
+
+      // fire and forget: the renderer follows the rest over progress events
+      this.startDownload({
+        downloadId,
+        type,
+        platform: "youtube",
+        title,
+        // analytics reads the quality off this, exactly as it does for one
+        // video: the audio mode for audio, the ceiling for a video
+        formatId: audioOnly ? audio : `${ceiling}p`,
+        playlist: true,
+        createHandle
+      })
+
+      return this.createSuccess({
+        download_id: downloadId,
+        status: "started",
+        type,
+        items_total: entries.length
+      })
+    } catch (error) {
+      console.error(`[${downloadId}] Playlist download failed:`, error.message)
+
+      return this.createError(
+        shortErrorMessage(error.message),
+        error.suggestion || "Please try again or check your connection",
+        error.code || "DOWNLOAD_FAILED",
+        {
+          details: error.details || error.message,
+          category: classify(error, ERROR_STAGES.DOWNLOAD).category
+        }
+      )
+    }
+  }
+
+  /**
+   * create the folder the resume archive lives in, before anything spawns
+   *
+   * `buildPlaylistArchivePath` is a pure path builder and `<userData>/playlists`
+   * does not exist on a fresh install. measured on the shipped binary, a run
+   * whose archive directory is missing **exits 1 at the end of an otherwise**
+   * **perfect download** and the archive is never written - so every later run
+   * re-downloads the lot and resume silently never works.
+   *
+   * the engine owns `<userData>/playlists/runs/` and creates that itself; this
+   * is the directory one level up, which only this caller knows it needs.
+   *
+   * @param {string} archiveFile - where the archive will be written
+   * @throws {Error} the same refusal the engine makes of an unwritable records
+   *   file, because it is the same folder and the same answer
+   */
+  ensureArchiveDirectory(archiveFile) {
+    try {
+      fs.mkdirSync(path.dirname(archiveFile), { recursive: true })
+    } catch (cause) {
+      const error = new Error(
+        "Cliply couldn't prepare its record of this download."
+      )
+      error.code = ERROR_CODES.PERMISSION_ERROR
+      error.suggestion =
+        "Check permissions on Cliply's app data folder and try again."
+      error.details = cause.message
+      throw error
+    }
+  }
+
   // refusing is the safe half of the trade: replacing a live reservation would
   // cross-wire two event streams onto one id and lose the first download's
   // bookkeeping when the second finishes
@@ -941,10 +1430,23 @@ class IPCHandlers {
       this.runner
         .run(options)
         .then((result) => {
+          if (!result) return
+
           // the download half of the refusal check. a cancel is not a refusal,
           // and it settles through here wearing the same `success: false`
-          if (result && !result.success && !result.cancelled) {
+          if (!result.success && !result.cancelled) {
             this.noteRefusal(classify(result.error, ERROR_STAGES.DOWNLOAD).category)
+            return
+          }
+
+          // a playlist that saved some and skipped the rest is a success
+          // wearing a failure's reason. the runner classified the stderr of
+          // the items that did not make it, and nine videos refused for bot
+          // detection is exactly the refusal this escalation exists for - it
+          // would otherwise be missed for having arrived on a download that
+          // worked
+          if (result.success && result.category) {
+            this.noteRefusal(result.category)
           }
         })
         .catch((error) => {
@@ -1493,6 +1995,8 @@ class IPCHandlers {
       IPC_CHANNELS.VIDEO_GET_INFO,
       IPC_CHANNELS.VIDEO_DOWNLOAD_COMBINED,
       IPC_CHANNELS.AUDIO_DOWNLOAD,
+      IPC_CHANNELS.PLAYLIST_GET_INFO,
+      IPC_CHANNELS.PLAYLIST_DOWNLOAD,
       IPC_CHANNELS.DOWNLOAD_CANCEL,
       IPC_CHANNELS.COOKIES_IMPORT,
       IPC_CHANNELS.COOKIES_TEST,

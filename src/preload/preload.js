@@ -12,6 +12,10 @@ const IPC_CHANNELS = {
   VIDEO_DOWNLOAD_COMBINED: "video:download-combined",
   AUDIO_DOWNLOAD: "audio:download",
 
+  // playlist operations
+  PLAYLIST_GET_INFO: "playlist:get-info",
+  PLAYLIST_DOWNLOAD: "playlist:download",
+
   // download management
   DOWNLOAD_PROGRESS: "download:progress",
   DOWNLOAD_COMPLETE: "download:complete",
@@ -72,6 +76,17 @@ contextBridge.exposeInMainWorld("electronAPI", {
     downloadCombined: (options) =>
       invoke(IPC_CHANNELS.VIDEO_DOWNLOAD_COMBINED, options),
     downloadAudio: (options) => invoke(IPC_CHANNELS.AUDIO_DOWNLOAD, options)
+  },
+
+  // playlist operations. a playlist is one download covering n videos, so it
+  // reports through the same download:progress channel the single-video flows
+  // use - there is nothing extra to subscribe to
+  playlist: {
+    getInfo: (options) => {
+      const payload = typeof options === "string" ? { url: options } : options
+      return invoke(IPC_CHANNELS.PLAYLIST_GET_INFO, payload)
+    },
+    download: (options) => invoke(IPC_CHANNELS.PLAYLIST_DOWNLOAD, options)
   },
 
   // pinterest operations
