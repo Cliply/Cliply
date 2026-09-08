@@ -76,7 +76,7 @@ describe("the donate line", () => {
     render(<HeroSection />)
 
     // two lines: the reason, then the ask
-    expect(screen.getByText(/it's just me back here/i)).toBeTruthy()
+    expect(screen.getByText(/cliply takes ongoing upkeep/i)).toBeTruthy()
     expect(screen.getByText(/if it's been useful/i)).toBeTruthy()
 
     const link = screen.getByText("buy me a coffee")
@@ -93,7 +93,7 @@ describe("the menu", () => {
 
     expect(
       screen.getAllByTestId("menu-item").map((node) => node.textContent)
-    ).toEqual(["update", "donate", "github", "about"])
+    ).toEqual(["about", "update", "donate", "github"])
   })
 
   // two doors to the same room made the menu longer for nothing, once the line

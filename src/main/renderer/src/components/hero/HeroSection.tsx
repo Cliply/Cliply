@@ -27,6 +27,18 @@ export function HeroSection() {
       <div className="absolute top-6 left-2 z-20 hidden sm:block">
         <MenuVertical
           menuItems={[
+            // about and github used to sit in a row along the bottom edge.
+            // Four items in one column is a menu; two up here and two down
+            // there was the same navigation split across opposite corners.
+            //
+            // about leads because it answers what this thing is, which is the
+            // one question a first-time user actually has - and the page it
+            // opens has titled itself "about" the whole time. The menu was the
+            // only place still calling it the disclaimer.
+            {
+              label: "about",
+              href: "/disclaimer"
+            },
             {
               label: "update",
               onClick: handleCheckForUpdates
@@ -41,19 +53,10 @@ export function HeroSection() {
               href: "https://buymeacoffee.com/itssdevk",
               external: true
             },
-            // both of these used to sit in a row along the bottom edge. Four
-            // items in one column is a menu; two up here and two down there was
-            // the same navigation split across opposite corners for no reason
             {
               label: "github",
               href: "https://github.com/Cliply/Cliply/",
               external: true
-            },
-            {
-              // the page this lands on has always titled itself "about" - the
-              // menu was the only place still calling it the disclaimer
-              label: "about",
-              href: "/disclaimer"
             }
           ]}
           color="#0891b2"
@@ -153,14 +156,17 @@ export function HeroSection() {
       {/*
         the donate ask, sitting still rather than interrupting anything.
 
-        it is written as one person talking, because that is the only thing
-        being offered: not a feature, not a tier, just who is back here. "Takes
-        a fair bit" is the maintenance nobody outside can see, and admitting it
-        plainly is what earns the second line the right to exist.
+        the first line is deliberately not in the first person. "It's just me
+        back here" put a person in front of the reader and then asked them for
+        money, which reads as pleading however carefully it is worded. Stating
+        the upkeep as a fact about the project does the same job - the work is
+        real, continuous, and invisible from outside - without anybody having
+        to be sympathised with. The one person is a detail of the sentence
+        rather than its subject.
 
-        two lines rather than one long one. The first is the whole reason and
-        the second is the whole ask, so the eye can stop after either and still
-        have got the point - and neither line is long enough to look like terms. Being the
+        two lines rather than one long one. The first carries the whole reason
+        and the second the whole ask, so the eye can stop after either and
+        still have the point, and neither is long enough to look like terms. Being the
         only thing along the bottom edge is what gives it weight, so the
         disclaimer and github links moved up into the menu rather than sitting
         beside it competing for the same glance.
@@ -179,8 +185,7 @@ export function HeroSection() {
           }}
         >
           <span className="block">
-            keeping this working takes a fair bit, and it&apos;s just me back
-            here.
+            cliply takes ongoing upkeep, and one person does it.
           </span>
           <span className="block">
             if it&apos;s been useful,{" "}
