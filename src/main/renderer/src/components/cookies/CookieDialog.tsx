@@ -228,7 +228,7 @@ export function CookieDialog() {
             <p className="text-slate-600 dark:text-slate-300">
               you sign in to youtube in your own browser, never to cliply.
               everything stays on this device, we never upload any of it, and
-              remove deletes the file.
+              you can delete it whenever you want.
             </p>
             {/* borrowed credibility, and it belongs here rather than in a
                 footnote: "some app wants my youtube session" is a reasonable

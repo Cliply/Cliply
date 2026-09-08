@@ -357,6 +357,13 @@ declare global {
         getAll: () => Promise<IPCResponse<DownloadStatus[]>>
         onProgress: (callback: (data: DownloadProgress) => void) => () => void
       }
+      // optional: an older preload has no support bridge, and the dialog has
+      // to be able to mount against one
+      support?: {
+        onMilestone: (
+          callback: (data: { count: number }) => void
+        ) => () => void
+      }
       system: {
         getHealth: () => Promise<IPCResponse<SystemHealth>>
         openExternal: (

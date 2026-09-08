@@ -1,4 +1,5 @@
 import { CookieDialog } from "@/components/cookies/CookieDialog"
+import { SupportDialog } from "@/components/support/SupportDialog"
 import { PinterestLayout } from "@/components/pinterest"
 import { ReportIssueDialog } from "@/components/report/ReportIssueDialog"
 import { TikTokLayout } from "@/components/tiktok"
@@ -38,6 +39,7 @@ export function HomePage() {
       </AnimatePresence>
       <ReportIssueDialog />
       <CookieDialog />
+      <SupportDialog />
     </>
   )
 }

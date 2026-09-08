@@ -52,6 +52,8 @@ const IPC_CHANNELS = {
 
   // download management
   DOWNLOAD_PROGRESS: "download:progress",
+  // fired only on the handful of downloads that hit a support milestone
+  SUPPORT_MILESTONE: "support:milestone",
   DOWNLOAD_COMPLETE: "download:complete",
   DOWNLOAD_ERROR: "download:error",
   DOWNLOAD_CANCEL: "download:cancel",

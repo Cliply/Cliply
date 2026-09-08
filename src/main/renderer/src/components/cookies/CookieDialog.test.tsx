@@ -284,7 +284,7 @@ describe("what the dialog promises about the file", () => {
   test.each([
     [/never to cliply/i],
     [/stays on this device/i],
-    [/remove deletes the file/i]
+    [/delete it whenever you want/i]
   ])("says %s whether or not cookies are imported", async (phrase) => {
     getStatus.mockResolvedValue(status())
 

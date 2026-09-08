@@ -46,6 +46,15 @@ const COOKIE_TEST_URLS = [
   "https://www.youtube.com/watch?v=9bZkp7q19f0"
 ]
 
+/**
+ * the downloads that earn a coffee ask, and the fact that there are only three
+ *
+ * front-loaded so the first one lands while the app is still new to somebody,
+ * then spaced out, then done. A recurring ask is the thing that makes people
+ * resent an app they otherwise like.
+ */
+const SUPPORT_MILESTONES = [5, 15, 40]
+
 // platforms served by the binary engine's single-video flows
 const SUPPORTED_DOWNLOAD_PLATFORMS = ["youtube", "pinterest", "tiktok"]
 
@@ -285,6 +294,11 @@ class IPCHandlers {
     }
 
     if (name === "download_completed") {
+      // every platform's completion passes through here, which is why the
+      // counter lives at this point rather than in the four places the
+      // renderer shows a success toast
+      this.noteCompletedDownload()
+
       // a size of zero is a stat that failed, not an empty file: a download
       // that resolved always wrote something. sending the zero would report
       // an empty file and drag every average through it, so all three of the
@@ -378,6 +392,41 @@ class IPCHandlers {
     // capture() above keeps the never-throw promise for every caller, so an
     // ipc reply is the only thing left to decide here
     return { success: this.capture(name, enriched) }
+  }
+
+  /**
+   * count a finished download, and speak up on the rare one that is a milestone
+   *
+   * the sequence stops. Asking again every ten downloads for as long as someone
+   * keeps using the app turns a thank-you into a toll booth, and nobody who has
+   * said no three times says yes on the fourth - so it is 5, 15, 40 and then
+   * never again, however many hundreds follow.
+   *
+   * fire and forget on purpose: this hangs off the analytics hook, which the
+   * runner calls on the path where a download reports success. A settings write
+   * that fails must not turn a finished file into a failed one.
+   */
+  noteCompletedDownload() {
+    if (!this.settings) return
+
+    Promise.resolve()
+      .then(async () => {
+        const settings = await this.settings.readAll()
+        const previous = Number(settings.downloads_completed) || 0
+        const count = previous + 1
+
+        await this.settings.writeSettings({ downloads_completed: count })
+
+        if (!SUPPORT_MILESTONES.includes(count)) return
+        if (!this.mainWindow || this.mainWindow.isDestroyed()) return
+
+        this.mainWindow.webContents.send(IPC_CHANNELS.SUPPORT_MILESTONE, {
+          count
+        })
+      })
+      .catch((error) => {
+        console.error("failed to record a completed download:", error.message)
+      })
   }
 
   /**

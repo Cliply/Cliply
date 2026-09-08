@@ -14,6 +14,7 @@ const IPC_CHANNELS = {
 
   // download management
   DOWNLOAD_PROGRESS: "download:progress",
+  SUPPORT_MILESTONE: "support:milestone",
   DOWNLOAD_COMPLETE: "download:complete",
   DOWNLOAD_ERROR: "download:error",
   DOWNLOAD_CANCEL: "download:cancel",
@@ -107,6 +108,16 @@ contextBridge.exposeInMainWorld("electronAPI", {
       ipcRenderer.on(IPC_CHANNELS.DOWNLOAD_PROGRESS, handler)
       return () =>
         ipcRenderer.removeListener(IPC_CHANNELS.DOWNLOAD_PROGRESS, handler)
+    }
+  },
+
+  // the coffee ask, on the rare download that reaches a milestone
+  support: {
+    onMilestone: (callback) => {
+      const handler = (_event, data) => callback(data)
+      ipcRenderer.on(IPC_CHANNELS.SUPPORT_MILESTONE, handler)
+      return () =>
+        ipcRenderer.removeListener(IPC_CHANNELS.SUPPORT_MILESTONE, handler)
     }
   },
 
