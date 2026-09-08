@@ -88,8 +88,21 @@ function normalizeTimeRange(range) {
   return { start, end }
 }
 
-// say which way the jar is unusable, so "not working" is actionable
-function cookieJarProblem({ total, youtube, expired }) {
+/**
+ * say which way the jar is unusable, so "not working" is actionable
+ *
+ * the two signed-in cases below are the ones worth telling apart, because they
+ * ask the user for different things and both used to report as a working
+ * login. yt-dlp calls a jar authenticated when LOGIN_INFO sits alongside a
+ * SAPISID cookie, so:
+ *
+ *   - youtube cookies, no LOGIN_INFO, no SAPISID either: the export was taken
+ *     from a browser that was never signed in
+ *   - SAPISID but no LOGIN_INFO: they *were* signed in and youtube has since
+ *     rotated the session away. yt-dlp warns about exactly this, and since
+ *     --cookies writes the jar back it is our own copy that lost the marker
+ */
+function cookieJarProblem({ total, youtube, expired, signedIn }) {
   if (total === 0) {
     return "No cookies imported"
   }
@@ -100,6 +113,10 @@ function cookieJarProblem({ total, youtube, expired }) {
 
   if (expired >= youtube) {
     return "Your YouTube cookies have expired - export them again"
+  }
+
+  if (!signedIn) {
+    return "These YouTube cookies aren't from a signed-in session - sign in first, then export"
   }
 
   return "No usable YouTube cookies"

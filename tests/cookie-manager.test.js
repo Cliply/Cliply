@@ -17,6 +17,18 @@ function cookieLine(domain, name, expires) {
   return [domain, "TRUE", "/", "TRUE", String(expires), name, "value"].join("\t")
 }
 
+// the smallest jar yt-dlp calls a signed-in one: LOGIN_INFO alongside one of
+// the SAPISID trio. any other pair of youtube cookies is what a signed-out
+// visitor already carries, so it authenticates nothing
+function loginPair(expires, domain = ".youtube.com") {
+  return (
+    cookieLine(domain, "LOGIN_INFO", expires) +
+    "\n" +
+    cookieLine(domain, "SAPISID", expires) +
+    "\n"
+  )
+}
+
 const HOUR = 3600
 const nowSeconds = () => Math.floor(Date.now() / 1000)
 
@@ -42,16 +54,52 @@ async function managerWith(content) {
 }
 
 describe("inspectCookieFile", () => {
-  test("counts a live youtube cookie as usable", async () => {
+  test("counts a live youtube login as usable", async () => {
+    const manager = await managerWith(HEADER + loginPair(nowSeconds() + HOUR))
+
+    expect(await manager.inspectCookieFile()).toEqual({
+      total: 2,
+      youtube: 2,
+      expired: 0,
+      signedIn: true,
+      usable: true
+    })
+  })
+
+  // "there is a youtube cookie in here" was never the same question as "you
+  // are signed in". PREF and SOCS are set for signed-out visitors too, so a
+  // jar exported without logging in first used to report as a working login
+  test("youtube cookies from a signed-out session are not a login", async () => {
     const manager = await managerWith(
-      HEADER + cookieLine(".youtube.com", "SID", nowSeconds() + HOUR) + "\n"
+      HEADER +
+        cookieLine(".youtube.com", "PREF", nowSeconds() + HOUR) +
+        "\n" +
+        cookieLine(".youtube.com", "SOCS", nowSeconds() + HOUR) +
+        "\n"
     )
 
     expect(await manager.inspectCookieFile()).toEqual({
-      total: 1,
+      total: 2,
+      youtube: 2,
+      expired: 0,
+      signedIn: false,
+      usable: false
+    })
+  })
+
+  // youtube clears LOGIN_INFO when it rotates a session away but leaves the
+  // SAPISID cookies behind. --cookies writes the jar back, so this is the
+  // shape our own copy takes once the cookies stop working
+  test("a rotated-out jar keeps its SAPISID and stops being a login", async () => {
+    const manager = await managerWith(
+      HEADER + cookieLine(".youtube.com", "SAPISID", nowSeconds() + HOUR) + "\n"
+    )
+
+    expect(await manager.inspectCookieFile()).toMatchObject({
       youtube: 1,
       expired: 0,
-      usable: true
+      signedIn: false,
+      usable: false
     })
   })
 
@@ -62,19 +110,18 @@ describe("inspectCookieFile", () => {
       total: 0,
       youtube: 0,
       expired: 0,
+      signedIn: false,
       usable: false
     })
   })
 
   // the old check accepted these: any non-comment line was "valid"
   test("expired youtube cookies are not usable", async () => {
-    const manager = await managerWith(
-      HEADER + cookieLine(".youtube.com", "SID", nowSeconds() - HOUR) + "\n"
-    )
+    const manager = await managerWith(HEADER + loginPair(nowSeconds() - HOUR))
 
     expect(await manager.inspectCookieFile()).toMatchObject({
-      youtube: 1,
-      expired: 1,
+      youtube: 2,
+      expired: 2,
       usable: false
     })
   })
@@ -95,17 +142,16 @@ describe("inspectCookieFile", () => {
     })
   })
 
-  test("one live cookie among expired ones is enough", async () => {
+  test("a live login among expired cookies is enough", async () => {
     const manager = await managerWith(
       HEADER +
         cookieLine(".youtube.com", "OLD", nowSeconds() - HOUR) +
         "\n" +
-        cookieLine(".youtube.com", "SID", nowSeconds() + HOUR) +
-        "\n"
+        loginPair(nowSeconds() + HOUR)
     )
 
     expect(await manager.inspectCookieFile()).toMatchObject({
-      youtube: 2,
+      youtube: 3,
       expired: 1,
       usable: true
     })
@@ -113,9 +159,7 @@ describe("inspectCookieFile", () => {
 
   // expiry 0 is a session cookie, which has not expired
   test("session cookies count as live", async () => {
-    const manager = await managerWith(
-      HEADER + cookieLine(".youtube.com", "SID", 0) + "\n"
-    )
+    const manager = await managerWith(HEADER + loginPair(0))
 
     expect(await manager.inspectCookieFile()).toMatchObject({ usable: true })
   })
@@ -123,16 +167,21 @@ describe("inspectCookieFile", () => {
   // "#HttpOnly_" looks like a comment but marks a real cookie - dropping those
   // loses exactly the youtube auth cookies that matter
   test("http-only cookies are read, not skipped as comments", async () => {
+    // youtube marks its auth cookies http-only, so this is also the check
+    // that the login test sees them at all
     const manager = await managerWith(
       HEADER +
         "#HttpOnly_" +
-        cookieLine(".youtube.com", "__Secure-1PSID", nowSeconds() + HOUR) +
+        cookieLine(".youtube.com", "LOGIN_INFO", nowSeconds() + HOUR) +
+        "\n#HttpOnly_" +
+        cookieLine(".youtube.com", "SAPISID", nowSeconds() + HOUR) +
         "\n"
     )
 
     expect(await manager.inspectCookieFile()).toMatchObject({
-      total: 1,
-      youtube: 1,
+      total: 2,
+      youtube: 2,
+      signedIn: true,
       usable: true
     })
   })
@@ -165,6 +214,7 @@ describe("inspectCookieFile", () => {
       total: 0,
       youtube: 0,
       expired: 0,
+      signedIn: false,
       usable: false
     })
   })
@@ -183,19 +233,19 @@ describe("inspectCookieFile", () => {
       total: 1,
       youtube: 1,
       expired: 1,
+      signedIn: false,
       usable: false
     })
   })
 
   test("an empty expiry is a session cookie, which has not expired", async () => {
-    const manager = await managerWith(
-      HEADER + cookieLine(".youtube.com", "SID", "") + "\n"
-    )
+    const manager = await managerWith(HEADER + loginPair(""))
 
     expect(await manager.inspectCookieFile()).toEqual({
-      total: 1,
-      youtube: 1,
+      total: 2,
+      youtube: 2,
       expired: 0,
+      signedIn: true,
       usable: true
     })
   })
@@ -205,13 +255,12 @@ describe("inspectCookieFile", () => {
       HEADER +
         cookieLine(".youtube.com", "BAD", "whenever") +
         "\n" +
-        cookieLine(".youtube.com", "SID", nowSeconds() + HOUR) +
-        "\n"
+        loginPair(nowSeconds() + HOUR)
     )
 
     expect(await manager.inspectCookieFile()).toMatchObject({
-      total: 1,
-      youtube: 1,
+      total: 2,
+      youtube: 2,
       usable: true
     })
   })
@@ -229,15 +278,13 @@ describe("inspectCookieFile", () => {
   test("subdomains of youtube.com count, lookalikes do not", async () => {
     const manager = await managerWith(
       HEADER +
-        cookieLine("music.youtube.com", "SID", nowSeconds() + HOUR) +
-        "\n" +
-        cookieLine("notyoutube.com", "SID", nowSeconds() + HOUR) +
-        "\n"
+        loginPair(nowSeconds() + HOUR, "music.youtube.com") +
+        loginPair(nowSeconds() + HOUR, "notyoutube.com")
     )
 
     expect(await manager.inspectCookieFile()).toMatchObject({
-      total: 2,
-      youtube: 1,
+      total: 4,
+      youtube: 2,
       usable: true
     })
   })
@@ -245,21 +292,15 @@ describe("inspectCookieFile", () => {
 
 describe("validateCookieFile", () => {
   test("follows the inspection", async () => {
-    const live = await managerWith(
-      HEADER + cookieLine(".youtube.com", "SID", nowSeconds() + HOUR) + "\n"
-    )
-    const stale = await managerWith(
-      HEADER + cookieLine(".youtube.com", "SID", nowSeconds() - HOUR) + "\n"
-    )
+    const live = await managerWith(HEADER + loginPair(nowSeconds() + HOUR))
+    const stale = await managerWith(HEADER + loginPair(nowSeconds() - HOUR))
 
     expect(await live.validateCookieFile()).toBe(true)
     expect(await stale.validateCookieFile()).toBe(false)
   })
 
   test("refresh updates hasValidCookies and the cookie path", async () => {
-    const manager = await managerWith(
-      HEADER + cookieLine(".youtube.com", "SID", nowSeconds() - HOUR) + "\n"
-    )
+    const manager = await managerWith(HEADER + loginPair(nowSeconds() - HOUR))
 
     await manager.refresh()
     expect(manager.hasValidCookies()).toBe(false)
@@ -267,7 +308,7 @@ describe("validateCookieFile", () => {
 
     await fs.writeFile(
       manager.cookieFile,
-      HEADER + cookieLine(".youtube.com", "SID", nowSeconds() + HOUR) + "\n",
+      HEADER + loginPair(nowSeconds() + HOUR),
       "utf8"
     )
 
@@ -342,11 +383,7 @@ describe("importing", () => {
     const manager = await emptyManager()
     const file = path.join(manager.cookieDir, "export.txt")
 
-    await fs.writeFile(
-      file,
-      `# HTTP Cookie File\n${cookieLine(".youtube.com", "SID", live())}\n`,
-      "utf8"
-    )
+    await fs.writeFile(file, `# HTTP Cookie File\n${loginPair(live())}`, "utf8")
 
     expect(await manager.importCookieFile(file)).toBe(true)
 
@@ -360,9 +397,7 @@ describe("importing", () => {
   test("adds the magic line when the export has none", async () => {
     const manager = await emptyManager()
 
-    expect(
-      await manager.importCookies(cookieLine(".youtube.com", "SID", live()) + "\n")
-    ).toBe(true)
+    expect(await manager.importCookies(loginPair(live()))).toBe(true)
 
     // without it MozillaCookieJar raises for the whole file, so this is the
     // difference between a jar and a jar yt-dlp will read
@@ -372,10 +407,7 @@ describe("importing", () => {
 
   test("writes \\n line endings, whatever came in", async () => {
     const manager = await emptyManager()
-    const crlf = (HEADER + cookieLine(".youtube.com", "SID", live()) + "\n").replace(
-      /\n/g,
-      "\r\n"
-    )
+    const crlf = (HEADER + loginPair(live())).replace(/\n/g, "\r\n")
 
     expect(await manager.importCookies(crlf)).toBe(true)
     expect(await fs.readFile(manager.cookieFile, "utf8")).not.toContain("\r")

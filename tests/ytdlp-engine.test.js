@@ -1214,10 +1214,13 @@ describe("cookie file detection", () => {
     const { YtdlpEngine } = require("../src/main/services/ytdlp-engine")
     const jar = path.join(tempDir, "manager-httponly.txt")
 
+    // http-only, and the pair yt-dlp reads as a signed-in session: LOGIN_INFO
+    // alongside a SAPISID cookie. Either one alone is not a login
     fs.writeFileSync(
       jar,
       "# Netscape HTTP Cookie File\n" +
-        "#HttpOnly_.youtube.com\tTRUE\t/\tTRUE\t0\t__Secure-1PSID\tvalue\n"
+        "#HttpOnly_.youtube.com\tTRUE\t/\tTRUE\t0\tLOGIN_INFO\tvalue\n" +
+        "#HttpOnly_.youtube.com\tTRUE\t/\tTRUE\t0\tSAPISID\tvalue\n"
     )
 
     const manager = new CookieManager()

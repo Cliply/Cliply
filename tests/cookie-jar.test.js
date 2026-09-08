@@ -103,31 +103,88 @@ describe("parseExpiry", () => {
   })
 })
 
+// what makes a jar a youtube *login*, rather than merely a jar with youtube
+// cookies in it
+//
+// yt-dlp's _has_auth_cookies is LOGIN_INFO alongside one of the SAPISID trio -
+// see yt_dlp/extractor/youtube/_base.py. Everything else is what an anonymous
+// visitor already carries, so "we found youtube cookies" was never the same
+// question as "you are signed in".
+describe("signedIn", () => {
+  const live = () => String(Math.floor(Date.now() / 1000) + 3600)
+  const jar = (...names) =>
+    `${NETSCAPE}\n${names.map((n) => row({ name: n, expires: live() })).join("\n")}\n`
+
+  test.each([
+    // LOGIN_INFO plus any one of the three
+    [["LOGIN_INFO", "SAPISID"], true],
+    [["LOGIN_INFO", "__Secure-1PAPISID"], true],
+    [["LOGIN_INFO", "__Secure-3PAPISID"], true],
+    // the trio without LOGIN_INFO: youtube clears LOGIN_INFO on sign-out but
+    // leaves 3PAPISID behind, so this is the shape of a rotated-out jar
+    [["SAPISID", "__Secure-3PAPISID"], false],
+    // LOGIN_INFO on its own
+    [["LOGIN_INFO"], false],
+    // what a signed-out visitor has, and what a careless export collects
+    [["PREF", "SOCS", "VISITOR_INFO1_LIVE"], false]
+  ])("%j -> %s", (names, expected) => {
+    expect(inspectCookieContent(jar(...names)).signedIn).toBe(expected)
+  })
+
+  test("an expired auth cookie is not a login", () => {
+    const stale = String(Math.floor(Date.now() / 1000) - 3600)
+    const content =
+      `${NETSCAPE}\n` +
+      `${row({ name: "LOGIN_INFO", expires: stale })}\n` +
+      `${row({ name: "SAPISID", expires: stale })}\n`
+
+    expect(inspectCookieContent(content).signedIn).toBe(false)
+  })
+
+  // the whole point of the field: usable has to mean "this will authenticate
+  // us", or we tell the user cookies are active while yt-dlp sends none
+  test("a jar of visitor cookies is not usable", () => {
+    expect(inspectCookieContent(jar("PREF", "SOCS"))).toMatchObject({
+      youtube: 2,
+      expired: 0,
+      signedIn: false,
+      usable: false
+    })
+  })
+})
+
 describe("inspectCookieContent", () => {
   const live = () => String(Math.floor(Date.now() / 1000) + 3600)
+  // the smallest jar yt-dlp calls a login
+  const login = (expires = live()) =>
+    `${row({ name: "LOGIN_INFO", expires })}\n${row({ name: "SAPISID", expires })}\n`
 
   test("a jar with no header is unusable, whatever it holds", () => {
     // yt-dlp raises rather than reading it, so every cookie in it is moot
-    expect(inspectCookieContent(`${row({ expires: live() })}\n`)).toEqual({
+    expect(inspectCookieContent(login())).toEqual({
       total: 0,
       youtube: 0,
       expired: 0,
+      signedIn: false,
       usable: false
     })
   })
 
   test("the short header is accepted", () => {
-    expect(inspectCookieContent(`${SHORT}\n${row({ expires: live() })}\n`)).toEqual({
-      total: 1,
-      youtube: 1,
+    expect(inspectCookieContent(`${SHORT}\n${login()}`)).toEqual({
+      total: 2,
+      youtube: 2,
       expired: 0,
+      signedIn: true,
       usable: true
     })
   })
 
-  test("a session cookie has not expired", () => {
-    expect(inspectCookieContent(`${NETSCAPE}\n${row({ expires: "" })}\n`).usable).toBe(
-      true
-    )
+  test("session cookies carry a login, and have not expired", () => {
+    // a sign-in without "remember me" ticked lives entirely in these
+    expect(inspectCookieContent(`${NETSCAPE}\n${login("")}`)).toMatchObject({
+      expired: 0,
+      usable: true
+    })
   })
 })

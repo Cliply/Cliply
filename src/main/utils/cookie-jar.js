@@ -136,27 +136,72 @@ function isExpired(cookie, now) {
 }
 
 /**
+ * youtube clears this on sign-out, which is what makes it the reliable half of
+ * the pair - the SAPISID cookies survive a rotation, LOGIN_INFO does not
+ */
+const LOGIN_MARKER = "LOGIN_INFO"
+
+/**
+ * any one of these is the other half. SAPISID is sometimes absent where
+ * __Secure-3PAPISID is present, so yt-dlp accepts whichever it finds.
+ */
+const SID_COOKIES = ["SAPISID", "__Secure-1PAPISID", "__Secure-3PAPISID"]
+
+/**
+ * is this jar a youtube login, or just cookies from youtube?
+ *
+ * yt-dlp's _has_auth_cookies, in yt_dlp/extractor/youtube/_base.py: LOGIN_INFO
+ * present alongside one of the SAPISID trio. Anything less is what an
+ * anonymous visitor already carries - PREF, SOCS, VISITOR_INFO1_LIVE - so a jar
+ * exported without signing in first passes "has youtube cookies" and
+ * authenticates nothing.
+ *
+ * this doubles as rotation detection, and gets it for free. --cookies is a
+ * write destination as well as a read source, so when youtube rotates the
+ * session away it is our stored copy that loses LOGIN_INFO. The jar answers
+ * "did these stop working" without us having to watch for the warning yt-dlp
+ * prints - which --no-warnings suppresses anyway.
+ *
+ * @param {Object[]} live - unexpired youtube cookies
+ * @returns {boolean} true when yt-dlp would call this authenticated
+ */
+function isSignedIn(live) {
+  const names = new Set(live.map((cookie) => cookie.name))
+
+  return names.has(LOGIN_MARKER) && SID_COOKIES.some((name) => names.has(name))
+}
+
+/**
  * describe what a jar holds
+ *
+ * `usable` answers the only question the app has - will passing this to
+ * --cookies make youtube treat us as signed in - so it is yt-dlp's
+ * authentication test rather than a count of rows. A jar of visitor cookies
+ * used to satisfy it, which meant reporting cookies as active while every
+ * request went out anonymous.
+ *
  * @param {string} content - file contents
  * @param {number} now - epoch millis, injectable for tests
- * @returns {Object} {total, youtube, expired, usable}
+ * @returns {Object} {total, youtube, expired, signedIn, usable}
  */
 function inspectCookieContent(content, now = Date.now()) {
   // no magic line, no cookies - yt-dlp refuses the file rather than reading
   // past it, so counting what is inside would describe a jar nothing will load
   if (!hasNetscapeHeader(content)) {
-    return { total: 0, youtube: 0, expired: 0, usable: false }
+    return { total: 0, youtube: 0, expired: 0, signedIn: false, usable: false }
   }
 
   const cookies = parseCookieFile(content)
   const youtube = cookies.filter((cookie) => isYouTubeDomain(cookie.domain))
   const live = youtube.filter((cookie) => !isExpired(cookie, now))
+  const signedIn = isSignedIn(live)
 
   return {
     total: cookies.length,
     youtube: youtube.length,
     expired: youtube.length - live.length,
-    usable: live.length > 0
+    signedIn,
+    usable: signedIn
   }
 }
 
@@ -188,6 +233,7 @@ module.exports = {
   parseCookieFile,
   hasNetscapeHeader,
   isYouTubeDomain,
+  isSignedIn,
   isExpired,
   inspectCookieContent,
   cookieFileHasEntries
