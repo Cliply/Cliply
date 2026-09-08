@@ -217,11 +217,9 @@ export function CookieDialog() {
           </DialogDescription>
         </DialogHeader>
 
-        {/* before the ask, not after it. someone uneasy about handing over a
+        {/* before the ask, not after it: someone uneasy about handing over a
             youtube session has already decided by the time they reach a
-            footnote. three bullets was the reassurance arguing its case, which
-            protests slightly too much - one line lands better and stays put
-            whether or not there is a jar yet */}
+            footnote */}
         <div className="flex gap-2.5 rounded-xl bg-cyan-50/70 p-3 text-sm dark:bg-cyan-950/20">
           <KeyRound className="mt-0.5 h-3.5 w-3.5 shrink-0 text-cyan-600 dark:text-cyan-400" />
           <div className="space-y-1">
@@ -230,10 +228,9 @@ export function CookieDialog() {
               everything stays on this device, we never upload any of it, and
               you can delete it whenever you want.
             </p>
-            {/* borrowed credibility, and it belongs here rather than in a
-                footnote: "some app wants my youtube session" is a reasonable
-                thing to balk at, and the answer is that this is the documented
-                way the tool underneath asks for them */}
+            {/* borrowed credibility. "some app wants my youtube session" is a
+                reasonable thing to balk at, and the answer is that this is the
+                documented way the tool underneath asks for them */}
             <p className="text-xs text-slate-400 dark:text-slate-500">
               it&apos;s the standard process yt-dlp recommends.{" "}
               <button className={linkClass} onClick={openLink(YTDLP_COOKIE_GUIDE)}>

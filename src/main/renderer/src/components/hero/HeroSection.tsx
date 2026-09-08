@@ -156,23 +156,14 @@ export function HeroSection() {
       {/*
         the donate ask, sitting still rather than interrupting anything.
 
-        plain words only. "Takes ongoing upkeep" was the kind of phrase that
-        sounds considered when you write it and lands as corporate filler when
-        somebody reads it - most people would not use "upkeep" out loud, and a
-        line nobody parses cannot do any work at all. "Makes it and keeps it
-        running" says the same thing in words a reader does not have to slow
-        down for.
+        two constraints, both learned the hard way. Plain words, because a line
+        nobody parses does no work. And not the first person: naming a person
+        and then asking for money reads as pleading however carefully it is
+        worded, so the one person is a detail of the sentence, never its
+        subject.
 
-        it stays out of the first person. An earlier version said "it's just me
-        back here", which put a person in front of the reader and then asked
-        them for money - that reads as pleading however carefully it is worded.
-        Here the one person is a detail of the sentence rather than its subject.
-
-        two lines rather than one long one. The first carries the whole reason
-        and the second the whole ask, so the eye can stop after either and
-        still have the point, and neither is long enough to look like terms. Being the
-        only thing along the bottom edge is what gives it weight, so the
-        disclaimer and github links moved up into the menu rather than sitting
+        being the only thing along the bottom edge is what gives it any weight,
+        which is why about and github moved up into the menu instead of sitting
         beside it competing for the same glance.
       */}
       <motion.div

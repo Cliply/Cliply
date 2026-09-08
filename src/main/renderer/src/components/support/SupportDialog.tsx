@@ -18,17 +18,17 @@ const GEIST_MONO =
 const BUY_ME_A_COFFEE = "https://buymeacoffee.com/itssdevk"
 
 /**
- * the coffee ask, on the third, fifteenth and fortieth file somebody gets out
- * of this
+ * the coffee ask, on the few downloads main decides are milestones
  *
- * it appears after a download has already succeeded, which is the one moment
- * the app has just done something for you rather than asked something of you.
- * Main owns the counting and only sends the event on those three, so this
- * component has no cadence logic of its own to get wrong.
+ * it appears only after a download has succeeded, which is the one moment the
+ * app has just done something for you rather than asked something of you. Main
+ * owns the counting and the cadence - deliberately not named here, since this
+ * comment said "three times" for a while after the sequence grew to five - so
+ * this component has no schedule of its own to get wrong.
  *
- * "no thanks" is a real button and not a greyed-out afterthought, because an
- * ask that makes the decline awkward is not a request, and the whole point of
- * only asking three times is that a no can be taken for an answer.
+ * "no thanks" is a real button rather than a greyed-out afterthought, because
+ * an ask that makes declining awkward is not a request, and a sequence that
+ * ends is one where no can be taken for an answer.
  */
 export function SupportDialog() {
   const [count, setCount] = useState<number | null>(null)
