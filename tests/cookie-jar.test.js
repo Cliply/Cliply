@@ -48,7 +48,7 @@ describe("hasNetscapeHeader", () => {
 describe("parseCookieFile", () => {
   test("reads a tab separated row", () => {
     expect(parseCookieFile(`${NETSCAPE}\n${row()}\n`)).toEqual([
-      { domain: ".youtube.com", expires: 1999999999, name: "SID" }
+      { domain: ".youtube.com", path: "/", expires: 1999999999, name: "SID" }
     ])
   })
 
@@ -56,7 +56,7 @@ describe("parseCookieFile", () => {
     const content = `${NETSCAPE}\n#HttpOnly_${row({ name: "__Secure-1PSID" })}\n`
 
     expect(parseCookieFile(content)).toEqual([
-      { domain: ".youtube.com", expires: 1999999999, name: "__Secure-1PSID" }
+      { domain: ".youtube.com", path: "/", expires: 1999999999, name: "__Secure-1PSID" }
     ])
   })
 
@@ -72,6 +72,30 @@ describe("parseCookieFile", () => {
   // exactly seven, not at least seven
   test("skips a row with an extra field", () => {
     expect(parseCookieFile(`${NETSCAPE}\n${row()}\textra\n`)).toEqual([])
+  })
+
+  // a cookie jar is a map keyed by domain/path/name, so a real export that
+  // lists a cookie twice - youtube does, for VISITOR_INFO1_LIVE among others -
+  // holds one of them, not both. counting rows reported more cookies than
+  // yt-dlp would have, and read the wrong expiry off the row that lost
+  test("keeps the last of two rows for the same cookie", () => {
+    const content =
+      `${NETSCAPE}\n` +
+      `${row({ name: "VISITOR_INFO1_LIVE", expires: "1797784158" })}\n` +
+      `${row({ name: "VISITOR_INFO1_LIVE", expires: "1804407914" })}\n`
+
+    expect(parseCookieFile(content)).toEqual([
+      { domain: ".youtube.com", path: "/", expires: 1804407914, name: "VISITOR_INFO1_LIVE" }
+    ])
+  })
+
+  test("the same name on a different path is a different cookie", () => {
+    const content =
+      `${NETSCAPE}\n` +
+      `.youtube.com\tTRUE\t/\tTRUE\t1999999999\tSID\tv\n` +
+      `.youtube.com\tTRUE\t/watch\tTRUE\t1999999999\tSID\tv\n`
+
+    expect(parseCookieFile(content)).toHaveLength(2)
   })
 
   test("carries on past a bad row instead of failing the file", () => {

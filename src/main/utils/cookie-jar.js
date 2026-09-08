@@ -87,11 +87,19 @@ function hasNetscapeHeader(content) {
 
 /**
  * parse a netscape cookie jar into its entries
+ *
+ * a jar is a map keyed by domain, path and name rather than a list of rows, so
+ * a file listing the same cookie twice holds one of them - the last, which is
+ * what MozillaCookieJar's set_cookie leaves behind. Real youtube exports do
+ * this: VISITOR_INFO1_LIVE and friends are written once per session. Counting
+ * rows claimed more cookies than yt-dlp would have, and could read an expiry
+ * off the row that lost.
+ *
  * @param {string} content - file contents
- * @returns {Object[]} {domain, name, expires} per valid cookie line
+ * @returns {Object[]} {domain, path, name, expires} per cookie, in file order
  */
 function parseCookieFile(content) {
-  const cookies = []
+  const cookies = new Map()
 
   for (const rawLine of String(content == null ? "" : content).split("\n")) {
     let line = rawLine.trim()
@@ -112,14 +120,19 @@ function parseCookieFile(content) {
     const expires = parseExpiry(parts[4])
     if (expires === null) continue
 
-    cookies.push({
+    const cookie = {
       domain: String(parts[0] || "").toLowerCase(),
+      path: parts[2],
       expires,
       name: parts[5]
-    })
+    }
+
+    // set() on an existing key overwrites the value and keeps the original
+    // insertion order, which is the jar's behaviour and the file's order
+    cookies.set(`${cookie.domain}\n${cookie.path}\n${cookie.name}`, cookie)
   }
 
-  return cookies
+  return [...cookies.values()]
 }
 
 // only a youtube cookie can authenticate a youtube request - a jar holding
