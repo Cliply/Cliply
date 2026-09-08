@@ -276,7 +276,12 @@ class IPCHandlers {
       media_type: MEDIA_TYPES[payload.type],
       quality: extractQuality(payload.formatId),
       is_trimmed: Boolean(payload.trimmed),
-      ...(format ? { audio_format: format } : {})
+      ...(format ? { audio_format: format } : {}),
+      // on both ends, so the two are comparable. without this we could see who
+      // imported cookies and never whether it did them any good, which is
+      // exactly the hole the po token rollout fell into - shipped, and then no
+      // way to answer "did that help"
+      ...this.cookieDimension(payload.platform)
     }
 
     if (name === "download_completed") {
@@ -355,9 +360,51 @@ class IPCHandlers {
         ? data.properties
         : {}
 
+    /**
+     * the renderer cannot answer this one, so main answers it on the way past.
+     *
+     * roughly three quarters of bot detection lands on a metadata lookup rather
+     * than on a download, which makes media_info_failed the event that actually
+     * measures whether cookies help. The renderer has no idea what is in the
+     * jar - it only knows what main told it the last time somebody opened the
+     * dialog - so the flag is stamped here, where the answer is a file read
+     * away.
+     */
+    const enriched =
+      name === "media_info_failed" || name === "media_info_loaded"
+        ? { ...properties, ...this.cookieDimension(properties.platform) }
+        : properties
+
     // capture() above keeps the never-throw promise for every caller, so an
     // ipc reply is the only thing left to decide here
-    return { success: this.capture(name, properties) }
+    return { success: this.capture(name, enriched) }
+  }
+
+  /**
+   * was this operation authenticated, for the events where that could matter
+   *
+   * youtube only. cookies are a youtube lever, and stamping the flag onto a
+   * pinterest download would put a column in the data that means nothing and
+   * invites a comparison that is not there.
+   *
+   * the question it exists to answer is the one the po token rollout could not:
+   * of the installs youtube is refusing, what share of the refusals happen with
+   * a signed-in jar attached. Comparing that rate against installs with no jar
+   * is the whole measurement, and it needs the flag on the failures rather than
+   * only on the import.
+   *
+   * @param {string} platform - the platform the operation was for
+   * @returns {Object} {used_cookies} for youtube, {} for anything else
+   */
+  cookieDimension(platform) {
+    if (platform !== "youtube" || !this.cookieManager) return {}
+
+    try {
+      return { used_cookies: Boolean(this.cookieManager.hasValidCookies()) }
+    } catch {
+      // a dimension is never worth failing an event over
+      return {}
+    }
   }
 
   /**

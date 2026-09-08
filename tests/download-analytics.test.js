@@ -1154,6 +1154,23 @@ describe("the download payloads survive the real validator", () => {
     expect(warn).not.toHaveBeenCalled()
   })
 
+  // the dimension the cookie measurement rests on. an undeclared property is
+  // dropped behind a warning nothing surfaces in production, so a schema that
+  // had not been told about it would have silently discarded the answer
+  it("sends a lookup failure's cookie flag whole", async () => {
+    const { handlers, captured } = createHandlers({ hasValidCookies: true })
+
+    await handlers.handleAnalyticsTrack(null, {
+      event: "media_info_failed",
+      properties: { platform: "youtube", error_category: "BOT_DETECTION" }
+    })
+
+    const [message] = await replay(captured)
+
+    expect(message.properties.used_cookies).toBe(true)
+    expect(warn).not.toHaveBeenCalled()
+  })
+
   it("sends a cookie import whole", async () => {
     const { handlers, captured } = createHandlers({ hasValidCookies: false })
 
@@ -1237,5 +1254,98 @@ describe("the download payloads survive the real validator", () => {
       expect(message.properties.error_category).toBeDefined()
     }
     expect(warn).not.toHaveBeenCalled()
+  })
+})
+
+/**
+ * whether the cookies actually helped
+ *
+ * cookies_imported alone cannot answer that. It says who imported, once, and
+ * never expires - so a jar youtube rotated out weeks ago still reads as an
+ * import. The measurement is the refusal rate on installs that are signed in
+ * versus installs that are not, which needs the flag on the *failures*.
+ *
+ * this is the hole the po token rollout fell into: shipped, and then no way to
+ * tell whether it changed anything.
+ */
+describe("used_cookies", () => {
+  const jarState = (signedIn) => ({
+    hasValidCookies: jest.fn(() => signedIn),
+    hasYouTubeCookies: jest.fn(() => signedIn),
+    importCookies: jest.fn().mockResolvedValue(true),
+    importCookieFile: jest.fn().mockResolvedValue(true)
+  })
+
+  function handlersFor(signedIn) {
+    const captured = []
+
+    const handlers = new IPCHandlers({
+      cookieManager: jarState(signedIn),
+      ytdlpEngine: {},
+      ytdlpUpdater: null,
+      settingsStore: { ensureDownloadPath: jest.fn().mockResolvedValue("/tmp") },
+      analytics: {
+        capture: (event, properties) => captured.push({ event, properties })
+      }
+    })
+
+    return { handlers, captured }
+  }
+
+  test.each([[true], [false]])(
+    "a youtube lookup failure records signed-in as %s",
+    async (signedIn) => {
+      const { handlers, captured } = handlersFor(signedIn)
+
+      await handlers.handleAnalyticsTrack(null, {
+        event: "media_info_failed",
+        properties: { platform: "youtube", error_category: "BOT_DETECTION" }
+      })
+
+      expect(captured[0].properties.used_cookies).toBe(signedIn)
+    }
+  )
+
+  // the lookup is where roughly three quarters of bot detection lands, so this
+  // is the event the whole measurement rests on
+  test("the renderer does not get to claim it", async () => {
+    const { handlers, captured } = handlersFor(false)
+
+    await handlers.handleAnalyticsTrack(null, {
+      event: "media_info_failed",
+      properties: { platform: "youtube", used_cookies: true }
+    })
+
+    expect(captured[0].properties.used_cookies).toBe(false)
+  })
+
+  // a column that means nothing invites a comparison that is not there
+  test.each([["pinterest"], ["tiktok"]])(
+    "a %s failure carries no cookie flag at all",
+    async (platform) => {
+      const { handlers, captured } = handlersFor(true)
+
+      await handlers.handleAnalyticsTrack(null, {
+        event: "media_info_failed",
+        properties: { platform, error_category: "BOT_DETECTION" }
+      })
+
+      expect(captured[0].properties).not.toHaveProperty("used_cookies")
+    }
+  )
+
+  test("a cookie manager that throws does not take the event down with it", async () => {
+    const { handlers, captured } = handlersFor(false)
+    handlers.cookieManager.hasValidCookies = jest.fn(() => {
+      throw new Error("unreadable jar")
+    })
+
+    await handlers.handleAnalyticsTrack(null, {
+      event: "media_info_failed",
+      properties: { platform: "youtube" }
+    })
+
+    expect(captured).toHaveLength(1)
+    expect(captured[0].properties).not.toHaveProperty("used_cookies")
   })
 })
