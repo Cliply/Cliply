@@ -77,9 +77,9 @@ describe("the donate line", () => {
 
     // two lines: the reason, then the ask
     expect(
-      screen.getByText(/one person makes it and keeps it running/i)
+      screen.getByText(/just one guy tries to keep it running/i)
     ).toBeTruthy()
-    expect(screen.getByText(/if it's been useful/i)).toBeTruthy()
+    expect(screen.getByText(/if it's useful/i)).toBeTruthy()
 
     const link = screen.getByText("buy me a coffee")
     expect(link.getAttribute("href")).toBe("https://buymeacoffee.com/itssdevk")

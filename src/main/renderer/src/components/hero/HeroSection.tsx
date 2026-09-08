@@ -189,10 +189,11 @@ export function HeroSection() {
           }}
         >
           <span className="block">
-            cliply is free. one person makes it and keeps it running.
+            cliply is free and open source. just one guy tries to keep it
+            running.
           </span>
           <span className="block">
-            if it&apos;s been useful,{" "}
+            if it&apos;s useful,{" "}
             <a
               href="https://buymeacoffee.com/itssdevk"
               target="_blank"
