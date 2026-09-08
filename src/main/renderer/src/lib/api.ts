@@ -80,6 +80,60 @@ export interface DownloadPathInfo {
   writable: boolean
 }
 
+/**
+ * what the cookie jar on disk holds
+ *
+ * `signedIn` is yt-dlp's own authentication test - LOGIN_INFO alongside a
+ * SAPISID cookie - not "there are youtube cookies in the file". The two differ
+ * for a jar exported without signing in, and for one youtube has since rotated
+ * out, which is why both fields are here rather than one.
+ */
+export interface CookieFileInfo {
+  exists: boolean
+  size: number
+  modified: string | null
+  cookieCount: number
+  youtubeCookieCount?: number
+  expiredCookieCount?: number
+  /** a SAPISID cookie is present - signed in, or signed out and not yet re-exported */
+  hasSid: boolean
+  signedIn: boolean
+  /** set when yt-dlp would refuse the whole file, which reads as an empty jar otherwise */
+  loadError?: string | null
+  valid: boolean
+}
+
+export interface CookieStatus {
+  fileInfo: CookieFileInfo
+  hasValidCookies: boolean
+  /** why the jar is unusable, written by main. null when it works */
+  problem: string | null
+  status: { lastImport?: string | null; lastTest?: string | null }
+}
+
+export interface CookieImportResult {
+  /**
+   * whether what landed is a jar yt-dlp would authenticate with, which is the
+   * only thing the dialog asks. `imported` and `signedIn` used to sit here too:
+   * the first was never false, since a refusal throws, and the second said the
+   * same thing as this one
+   */
+  hasValidCookies: boolean
+}
+
+/**
+ * deliberately two facts rather than a verdict: extracting a public video with
+ * the jar attached proves extraction worked, not that youtube honoured the
+ * cookies - the same probe passes with none at all.
+ */
+export interface CookieTestResult {
+  cookiesLoaded: boolean
+  extractionCheck: string
+  /** youtube turned the cookies down while they were being sent - the one strong negative */
+  rejected?: boolean
+  note: string
+}
+
 export interface VideoInfoResponse {
   title: string
   duration: number
@@ -305,6 +359,13 @@ declare global {
         getAll: () => Promise<IPCResponse<DownloadStatus[]>>
         onProgress: (callback: (data: DownloadProgress) => void) => () => void
       }
+      // optional: an older preload has no support bridge, and the dialog has
+      // to be able to mount against one
+      support?: {
+        onMilestone: (
+          callback: (data: { count: number }) => void
+        ) => () => void
+      }
       system: {
         getHealth: () => Promise<IPCResponse<SystemHealth>>
         openExternal: (
@@ -317,6 +378,12 @@ declare global {
       settings: {
         getDownloadPath: () => Promise<IPCResponse<DownloadPathInfo>>
         setDownloadPath: (path: string) => Promise<IPCResponse<DownloadPathInfo>>
+      }
+      cookies: {
+        importFile: () => Promise<IPCResponse<CookieImportResult>>
+        test: () => Promise<IPCResponse<CookieTestResult>>
+        getStatus: () => Promise<IPCResponse<CookieStatus>>
+        clear: () => Promise<IPCResponse<{ cleared: boolean }>>
       }
       // telemetry. optional because the browser dev server has no preload at
       // all, and because lib/analytics.ts must survive an older one
@@ -659,6 +726,67 @@ export const settingsApi = {
     }
 
     return response.data
+  }
+}
+
+export const cookiesApi = {
+  /**
+   * What the jar on disk holds. Read fresh on every call - main re-reads the
+   * file rather than caching, because expiry is a function of the clock and
+   * yt-dlp rewrites the jar after every download.
+   */
+  async getStatus(): Promise<CookieStatus> {
+    const electronAPI = getElectronAPI()
+    const response = await electronAPI.cookies.getStatus()
+
+    if (!response.success || !response.data) {
+      throw new Error(response.error?.message || "couldn't read the cookie status")
+    }
+
+    return response.data
+  },
+
+  /**
+   * Opens the native file picker in main and imports what comes back.
+   * Cancelling is a failed response, not a throw, so it reads as "nothing
+   * happened" rather than an error.
+   */
+  async importFile(): Promise<CookieImportResult | null> {
+    const electronAPI = getElectronAPI()
+    const response = await electronAPI.cookies.importFile()
+
+    if (!response.success) {
+      if (response.error?.message === "No file selected") return null
+      throw new Error(response.error?.message || "couldn't import those cookies")
+    }
+
+    return response.data ?? null
+  },
+
+  async test(): Promise<CookieTestResult> {
+    const electronAPI = getElectronAPI()
+    const response = await electronAPI.cookies.test()
+
+    if (!response.success || !response.data) {
+      throw new Error(response.error?.message || "Failed to test cookies")
+    }
+
+    return response.data
+  },
+
+  /**
+   * Removing a login is the one thing that must not fail quietly - a swallowed
+   * error left the credentials on disk behind a screen reporting them gone.
+   */
+  async clear(): Promise<boolean> {
+    const electronAPI = getElectronAPI()
+    const response = await electronAPI.cookies.clear()
+
+    if (!response.success) {
+      throw new Error(response.error?.message || "couldn't remove the cookies")
+    }
+
+    return true
   }
 }
 

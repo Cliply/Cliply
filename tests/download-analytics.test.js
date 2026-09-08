@@ -57,14 +57,22 @@ function engineError(code, message) {
   return error
 }
 
-function createHandlers({ hasValidCookies = true, importCookies } = {}) {
+function createHandlers({
+  hasValidCookies = true,
+  // "does the jar hold youtube cookies" is a wider question than "is it a
+  // login", and the double used to answer both with the same flag - so a state
+  // the real manager cannot produce (a login that holds no youtube cookies)
+  // was the one being tested
+  hasYouTubeCookies = hasValidCookies,
+  importCookieFile
+} = {}) {
   const captured = []
 
   const cookieManager = {
     hasValidCookies: jest.fn(() => hasValidCookies),
-    importCookies:
-      importCookies || jest.fn().mockResolvedValue(true),
-    importCookieFile: jest.fn().mockResolvedValue(true)
+    hasYouTubeCookies: jest.fn(() => hasYouTubeCookies),
+    importCookieFile:
+      importCookieFile || jest.fn().mockResolvedValue(true)
   }
 
   const handlers = new IPCHandlers({
@@ -719,40 +727,75 @@ describe("download_cancelled", () => {
   })
 })
 
+// the text route was deleted: nothing in the renderer ever called it, and its
+// channel was exposed over ipc for no one. These now go through the picker,
+// which is the only way a user imports anything
+async function pickAndImport(handlers) {
+  const { dialog } = require("electron")
+
+  dialog.showOpenDialog.mockResolvedValue({
+    canceled: false,
+    filePaths: ["/Users/someone/cookies.txt"]
+  })
+
+  return handlers.handleImportCookieFile(null)
+}
+
 describe("cookies_imported", () => {
   it("reports a text import and whether the jar holds youtube cookies", async () => {
     const { handlers, captured } = createHandlers({ hasValidCookies: true })
 
-    await handlers.handleImportCookies(null, { cookies: "# Netscape" })
+    await pickAndImport(handlers)
 
     expect(captured).toHaveLength(1)
     expect(captured[0].event).toBe("cookies_imported")
     expect(captured[0].properties).toEqual({
       success: true,
-      has_youtube_cookies: true
+      has_youtube_cookies: true,
+      signed_in: true
     })
   })
 
   it("reports a jar that imported without any youtube cookies in it", async () => {
     const { handlers, captured } = createHandlers({ hasValidCookies: false })
 
-    await handlers.handleImportCookies(null, { cookies: "# Netscape" })
+    await pickAndImport(handlers)
 
     expect(captured[0].properties).toEqual({
       success: true,
-      has_youtube_cookies: false
+      has_youtube_cookies: false,
+      signed_in: false
+    })
+  })
+
+  // the state the funnel most needs to see, and the one the old payload could
+  // not express: the file imported fine and simply was not a login. success and
+  // has_youtube_cookies were both the signed-in flag, so this looked identical
+  // to a jar that failed to import at all
+  it("tells a signed-out youtube jar from a failed import", async () => {
+    const { handlers, captured } = createHandlers({
+      hasValidCookies: false,
+      hasYouTubeCookies: true
+    })
+
+    await pickAndImport(handlers)
+
+    expect(captured[0].properties).toEqual({
+      success: true,
+      has_youtube_cookies: true,
+      signed_in: false
     })
   })
 
   it("reports an import that failed", async () => {
     const { handlers, captured } = createHandlers({
       hasValidCookies: false,
-      importCookies: jest.fn().mockRejectedValue(new Error("not a cookie file"))
+      importCookieFile: jest
+        .fn()
+        .mockRejectedValue(new Error("not a cookie file"))
     })
 
-    const result = await handlers.handleImportCookies(null, {
-      cookies: "nonsense"
-    })
+    const result = await pickAndImport(handlers)
 
     expect(result.success).toBe(false)
     expect(captured[0].properties.success).toBe(false)
@@ -792,7 +835,7 @@ describe("an analytics service that throws", () => {
   /**
    * the exit point guards itself, so a throw out of capture() means the
    * collaborator is not the one we think it is. it must still not reach the
-   * caller: trackCookieImport sits *inside* handleImportCookies' try, where a
+   * caller: trackCookieImport sits *inside* handleImportCookieFile's try, where a
    * throw is caught as the import failing - the user is told a jar that
    * imported did not, and the failure path then reports the opposite of what
    * happened to analytics as well.
@@ -814,7 +857,7 @@ describe("an analytics service that throws", () => {
     return new IPCHandlers({
       cookieManager: {
         hasValidCookies: jest.fn(() => true),
-        importCookies: jest.fn().mockResolvedValue(true),
+        hasYouTubeCookies: jest.fn(() => true),
         importCookieFile: jest.fn().mockResolvedValue(true)
       },
       ytdlpEngine: {},
@@ -833,12 +876,10 @@ describe("an analytics service that throws", () => {
     async (_name, thrown) => {
       const handlers = throwingHandlers(thrown)
 
-      const result = await handlers.handleImportCookies(null, {
-        cookies: "# Netscape"
-      })
+      const result = await pickAndImport(handlers)
 
       expect(result.success).toBe(true)
-      expect(result.data.imported).toBe(true)
+      expect(result.data.hasValidCookies).toBe(true)
     }
   )
 
@@ -1123,16 +1164,34 @@ describe("the download payloads survive the real validator", () => {
     expect(warn).not.toHaveBeenCalled()
   })
 
+  // the dimension the cookie measurement rests on. an undeclared property is
+  // dropped behind a warning nothing surfaces in production, so a schema that
+  // had not been told about it would have silently discarded the answer
+  it("sends a lookup failure's cookie flag whole", async () => {
+    const { handlers, captured } = createHandlers({ hasValidCookies: true })
+
+    await handlers.handleAnalyticsTrack(null, {
+      event: "media_info_failed",
+      properties: { platform: "youtube", error_category: "BOT_DETECTION" }
+    })
+
+    const [message] = await replay(captured)
+
+    expect(message.properties.used_cookies).toBe(true)
+    expect(warn).not.toHaveBeenCalled()
+  })
+
   it("sends a cookie import whole", async () => {
     const { handlers, captured } = createHandlers({ hasValidCookies: false })
 
-    await handlers.handleImportCookies(null, { cookies: "# Netscape" })
+    await pickAndImport(handlers)
 
     const [message] = await replay(captured)
 
     expect(message.properties).toMatchObject({
       success: true,
-      has_youtube_cookies: false
+      has_youtube_cookies: false,
+      signed_in: false
     })
     expect(warn).not.toHaveBeenCalled()
   })
@@ -1205,5 +1264,97 @@ describe("the download payloads survive the real validator", () => {
       expect(message.properties.error_category).toBeDefined()
     }
     expect(warn).not.toHaveBeenCalled()
+  })
+})
+
+/**
+ * whether the cookies actually helped
+ *
+ * cookies_imported alone cannot answer that. It says who imported, once, and
+ * never expires - so a jar youtube rotated out weeks ago still reads as an
+ * import. The measurement is the refusal rate on installs that are signed in
+ * versus installs that are not, which needs the flag on the *failures*.
+ *
+ * this is the hole the po token rollout fell into: shipped, and then no way to
+ * tell whether it changed anything.
+ */
+describe("used_cookies", () => {
+  const jarState = (signedIn) => ({
+    hasValidCookies: jest.fn(() => signedIn),
+    hasYouTubeCookies: jest.fn(() => signedIn),
+    importCookieFile: jest.fn().mockResolvedValue(true)
+  })
+
+  function handlersFor(signedIn) {
+    const captured = []
+
+    const handlers = new IPCHandlers({
+      cookieManager: jarState(signedIn),
+      ytdlpEngine: {},
+      ytdlpUpdater: null,
+      settingsStore: { ensureDownloadPath: jest.fn().mockResolvedValue("/tmp") },
+      analytics: {
+        capture: (event, properties) => captured.push({ event, properties })
+      }
+    })
+
+    return { handlers, captured }
+  }
+
+  test.each([[true], [false]])(
+    "a youtube lookup failure records signed-in as %s",
+    async (signedIn) => {
+      const { handlers, captured } = handlersFor(signedIn)
+
+      await handlers.handleAnalyticsTrack(null, {
+        event: "media_info_failed",
+        properties: { platform: "youtube", error_category: "BOT_DETECTION" }
+      })
+
+      expect(captured[0].properties.used_cookies).toBe(signedIn)
+    }
+  )
+
+  // the lookup is where roughly three quarters of bot detection lands, so this
+  // is the event the whole measurement rests on
+  test("the renderer does not get to claim it", async () => {
+    const { handlers, captured } = handlersFor(false)
+
+    await handlers.handleAnalyticsTrack(null, {
+      event: "media_info_failed",
+      properties: { platform: "youtube", used_cookies: true }
+    })
+
+    expect(captured[0].properties.used_cookies).toBe(false)
+  })
+
+  // a column that means nothing invites a comparison that is not there
+  test.each([["pinterest"], ["tiktok"]])(
+    "a %s failure carries no cookie flag at all",
+    async (platform) => {
+      const { handlers, captured } = handlersFor(true)
+
+      await handlers.handleAnalyticsTrack(null, {
+        event: "media_info_failed",
+        properties: { platform, error_category: "BOT_DETECTION" }
+      })
+
+      expect(captured[0].properties).not.toHaveProperty("used_cookies")
+    }
+  )
+
+  test("a cookie manager that throws does not take the event down with it", async () => {
+    const { handlers, captured } = handlersFor(false)
+    handlers.cookieManager.hasValidCookies = jest.fn(() => {
+      throw new Error("unreadable jar")
+    })
+
+    await handlers.handleAnalyticsTrack(null, {
+      event: "media_info_failed",
+      properties: { platform: "youtube" }
+    })
+
+    expect(captured).toHaveLength(1)
+    expect(captured[0].properties).not.toHaveProperty("used_cookies")
   })
 })

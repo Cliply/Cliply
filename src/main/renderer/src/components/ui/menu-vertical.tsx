@@ -63,13 +63,21 @@ export const MenuVertical = ({
             </motion.a>
           ) : item.href ? (
             <Link to={item.href}>
+              {/*
+                inline-block is load-bearing. The variants translate the label
+                by -20 so it sits under the arrow until hover, and a transform
+                does nothing to a non-replaced inline element. In the other two
+                branches this element is a flex item and gets blockified for
+                free; here it is wrapped in a Link, stays inline, and an
+                internal route was the only item in the menu that never moved.
+              */}
               <motion.span
                 variants={{
                   initial: { x: -20, color: "inherit" },
                   hover: { x: 0, color, skewX: skew }
                 }}
                 transition={{ duration: 0.3, ease: "easeOut" }}
-                className="font-medium text-sm no-underline"
+                className="inline-block font-medium text-sm no-underline"
                 style={{
                   fontFamily:
                     'Geist Mono, ui-monospace, SFMono-Regular, "SF Mono", Consolas, "Liberation Mono", Menlo, monospace'

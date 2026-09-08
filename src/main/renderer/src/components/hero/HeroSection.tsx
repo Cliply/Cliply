@@ -1,8 +1,8 @@
 import { MenuVertical } from "@/components/ui/menu-vertical"
 import { ModeToggle } from "@/components/ui/mode-toggle"
 import { updaterApi } from "@/lib/api"
+import { cookieActions } from "@/lib/cookieStore"
 import { motion } from "framer-motion"
-import { Link } from "react-router-dom"
 import { toast } from "sonner"
 import { useAppStore } from "@/lib/store"
 import { SearchCard } from "./SearchCard"
@@ -27,13 +27,35 @@ export function HeroSection() {
       <div className="absolute top-6 left-2 z-20 hidden sm:block">
         <MenuVertical
           menuItems={[
+            // about and github used to sit in a row along the bottom edge.
+            // Four items in one column is a menu; two up here and two down
+            // there was the same navigation split across opposite corners.
+            //
+            // about leads because it answers what this thing is, which is the
+            // one question a first-time user actually has - and the page it
+            // opens has titled itself "about" the whole time. The menu was the
+            // only place still calling it the disclaimer.
+            {
+              label: "about",
+              href: "/disclaimer"
+            },
             {
               label: "update",
               onClick: handleCheckForUpdates
             },
+            // cookies came out of here once the line in the top chrome started
+            // offering the same dialog. That one reaches people while they are
+            // wondering why downloads keep failing; this one only ever found
+            // the users who already went looking, and two doors to the same
+            // room made the menu longer for nothing
             {
               label: "donate",
               href: "https://buymeacoffee.com/itssdevk",
+              external: true
+            },
+            {
+              label: "github",
+              href: "https://github.com/Cliply/Cliply/",
               external: true
             }
           ]}
@@ -47,25 +69,32 @@ export function HeroSection() {
         <ModeToggle />
       </div>
 
-      {/* Latest announcement - top center */}
+      {/*
+        top center, where "latest announcement" used to link out to github
+        discussions.
+
+        the cookie dialog was reachable from the menu and from the toast on a
+        failure, and both of those need something to have already gone wrong.
+        This is the one place it is offered before the user hits the wall - and
+        someone whose downloads keep failing is far likelier to read a line
+        about that than a link to an announcements page.
+      */}
       <motion.div
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         transition={{ duration: 0.8, delay: 0.1 }}
         className="absolute top-6 left-1/2 -translate-x-1/2 z-20"
       >
-        <a
-          href="https://github.com/Cliply/Cliply/discussions"
-          target="_blank"
-          rel="noopener noreferrer"
+        <button
+          onClick={() => cookieActions.open()}
           className="text-xs text-slate-500 dark:text-slate-400 hover:text-cyan-500 dark:hover:text-cyan-400 transition-colors duration-200 hover:underline underline-offset-4"
           style={{
             fontFamily:
               'Geist Mono, ui-monospace, SFMono-Regular, "SF Mono", Consolas, "Liberation Mono", Menlo, monospace'
           }}
         >
-          latest announcement
-        </a>
+          having trouble with downloads? try cookies
+        </button>
       </motion.div>
 
       {/* Dark gradient background */}
@@ -124,40 +153,48 @@ export function HeroSection() {
         </div>
       </div>
 
-      {/* Bottom disclaimer and links */}
+      {/*
+        the donate ask, sitting still rather than interrupting anything.
+
+        two constraints, both learned the hard way. Plain words, because a line
+        nobody parses does no work. And not the first person: naming a person
+        and then asking for money reads as pleading however carefully it is
+        worded, so the one person is a detail of the sentence, never its
+        subject.
+
+        being the only thing along the bottom edge is what gives it any weight,
+        which is why about and github moved up into the menu instead of sitting
+        beside it competing for the same glance.
+      */}
       <motion.div
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         transition={{ duration: 0.8, delay: 1.0 }}
-        className="absolute bottom-8 left-0 right-0 z-20"
+        className="absolute bottom-6 left-0 right-0 z-20"
       >
-        <div className="flex justify-center items-center px-4 gap-6">
-          <Link
-            to="/disclaimer"
-            className="text-xs text-slate-500 dark:text-slate-400 hover:text-cyan-500 dark:hover:text-cyan-400 transition-colors duration-200"
-            style={{
-              fontFamily:
-                'Geist Mono, ui-monospace, SFMono-Regular, "SF Mono", Consolas, "Liberation Mono", Menlo, monospace'
-            }}
-          >
-            disclaimer
-          </Link>
-
-          <span className="text-slate-400 dark:text-slate-600">•</span>
-
-          <a
-            href="https://github.com/Cliply/Cliply/"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-xs text-slate-500 dark:text-slate-400 hover:text-cyan-500 dark:hover:text-cyan-400 transition-colors duration-200"
-            style={{
-              fontFamily:
-                'Geist Mono, ui-monospace, SFMono-Regular, "SF Mono", Consolas, "Liberation Mono", Menlo, monospace'
-            }}
-          >
-            github
-          </a>
-        </div>
+        <p
+          className="text-center text-xs leading-relaxed text-slate-400 dark:text-slate-500"
+          style={{
+            fontFamily:
+              'Geist Mono, ui-monospace, SFMono-Regular, "SF Mono", Consolas, "Liberation Mono", Menlo, monospace'
+          }}
+        >
+          <span className="block">
+            cliply is free and open source. just one guy tries to keep it
+            running.
+          </span>
+          <span className="block">
+            if it&apos;s useful,{" "}
+            <a
+              href="https://buymeacoffee.com/itssdevk"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-slate-500 underline underline-offset-4 transition-colors duration-200 hover:text-cyan-500 dark:text-slate-400 dark:hover:text-cyan-400"
+            >
+              buy me a coffee
+            </a>
+          </span>
+        </p>
       </motion.div>
 
       {/* Subtle bottom fade */}

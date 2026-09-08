@@ -84,7 +84,8 @@ vi.mock("@/lib/api", () => {
 vi.mock("@/lib/reportStore", () => ({ reportActions: { stage: vi.fn() } }))
 vi.mock("@/lib/toast-utils", () => ({
   showDownloadErrorToast: vi.fn(),
-  showServerOverwhelmedToast: vi.fn()
+  showServerOverwhelmedToast: vi.fn(),
+  showBotDetectionToast: vi.fn()
 }))
 vi.mock("sonner", () => ({
   toast: { success: vi.fn(), info: vi.fn(), error: vi.fn() }

@@ -25,6 +25,7 @@ const {
 } = require("./utils/ytdlp-mappers")
 const { getSimplePlatformOptions } = require("./utils/ytdlp-formats")
 const { resolveDownloadId } = require("./utils/download-id")
+const { JAR_DOMAIN_FLAG } = require("./utils/cookie-jar")
 
 const { DownloadRunner } = require("./services/download-runner")
 const { SettingsStore } = require("./services/settings-store")
@@ -45,6 +46,17 @@ const COOKIE_TEST_URLS = [
   "https://www.youtube.com/watch?v=9bZkp7q19f0"
 ]
 
+/**
+ * the downloads that earn a coffee ask, and the fact that there are only three
+ *
+ * front-loaded so the first one lands while the app is still new to somebody,
+ * then spaced further apart each time, then done. The widening gap is the
+ * point: a recurring ask is the thing that makes people resent an app they
+ * otherwise like, and someone on their five hundredth download has answered
+ * already.
+ */
+const SUPPORT_MILESTONES = [5, 15, 40, 60, 100]
+
 // platforms served by the binary engine's single-video flows
 const SUPPORTED_DOWNLOAD_PLATFORMS = ["youtube", "pinterest", "tiktok"]
 
@@ -64,7 +76,11 @@ const RENDERER_EVENTS = new Set([
   "url_submitted",
   "media_info_loaded",
   "media_info_failed",
-  "download_started"
+  "download_started",
+  // the outcome of the coffee prompt. which button someone pressed is a
+  // renderer-side fact by definition - main sends the prompt and hears nothing
+  // more - so it belongs to the same category as the four above
+  "support_prompt_clicked"
 ])
 
 /**
@@ -88,21 +104,62 @@ function normalizeTimeRange(range) {
   return { start, end }
 }
 
-// say which way the jar is unusable, so "not working" is actionable
-function cookieJarProblem({ total, youtube, expired }) {
+/**
+ * say which way the jar is unusable, so "not working" is actionable
+ *
+ * the two signed-in cases below are the ones worth telling apart, because they
+ * ask the user for different things and both used to report as a working
+ * login. yt-dlp calls a jar authenticated when LOGIN_INFO sits alongside a
+ * SAPISID cookie, so:
+ *
+ *   - youtube cookies, no LOGIN_INFO, no SAPISID either: the export was taken
+ *     from a browser that was never signed in
+ *   - SAPISID but no LOGIN_INFO: they *were* signed in and youtube has since
+ *     rotated the session away. yt-dlp warns about exactly this, and since
+ *     --cookies writes the jar back it is our own copy that lost the marker
+ */
+function cookieJarProblem({
+  total,
+  youtube,
+  expired,
+  hasSid,
+  signedIn,
+  loadError
+}) {
+  // checked first: a jar yt-dlp refuses whole inspects as zero of everything,
+  // and "no cookies imported" is the wrong thing to say about a file that is
+  // sitting there full of them and taking every download down with it
+  if (loadError === JAR_DOMAIN_FLAG) {
+    return "that file is malformed, export a fresh one instead of editing it"
+  }
+
+  if (loadError) {
+    return "that isn't a cookies.txt file, export it again"
+  }
+
   if (total === 0) {
-    return "No cookies imported"
+    return "nothing imported yet"
   }
 
   if (youtube === 0) {
-    return "This file has no YouTube cookies in it"
+    return "no youtube cookies in that file"
   }
 
-  if (expired >= youtube) {
-    return "Your YouTube cookies have expired - export them again"
+  // any expiry at all is worth saying so, rather than only a jar where every
+  // last cookie is dead. an export whose login expired alongside a still-live
+  // PREF used to fall through to "you were never signed in", which sends the
+  // user to fix something that was never wrong
+  if (!signedIn && expired > 0) {
+    return "your cookies expired, grab a fresh export"
   }
 
-  return "No usable YouTube cookies"
+  if (!signedIn) {
+    return hasSid
+      ? "youtube ended this session, export your cookies again"
+      : "these cookies aren't from a signed-in session, sign in first then export"
+  }
+
+  return "no usable youtube cookies"
 }
 
 /**
@@ -234,10 +291,20 @@ class IPCHandlers {
       media_type: MEDIA_TYPES[payload.type],
       quality: extractQuality(payload.formatId),
       is_trimmed: Boolean(payload.trimmed),
-      ...(format ? { audio_format: format } : {})
+      ...(format ? { audio_format: format } : {}),
+      // on both ends, so the two are comparable. without this we could see who
+      // imported cookies and never whether it did them any good, which is
+      // exactly the hole the po token rollout fell into - shipped, and then no
+      // way to answer "did that help"
+      ...this.cookieDimension(payload.platform)
     }
 
     if (name === "download_completed") {
+      // every platform's completion passes through here, which is why the
+      // counter lives at this point rather than in the four places the
+      // renderer shows a success toast
+      this.noteCompletedDownload()
+
       // a size of zero is a stat that failed, not an empty file: a download
       // that resolved always wrote something. sending the zero would report
       // an empty file and drag every average through it, so all three of the
@@ -313,9 +380,97 @@ class IPCHandlers {
         ? data.properties
         : {}
 
+    /**
+     * the renderer cannot answer this one, so main answers it on the way past.
+     *
+     * roughly three quarters of bot detection lands on a metadata lookup rather
+     * than on a download, which makes media_info_failed the event that actually
+     * measures whether cookies help. The renderer has no idea what is in the
+     * jar - it only knows what main told it the last time somebody opened the
+     * dialog - so the flag is stamped here, where the answer is a file read
+     * away.
+     */
+    const enriched =
+      name === "media_info_failed" || name === "media_info_loaded"
+        ? { ...properties, ...this.cookieDimension(properties.platform) }
+        : properties
+
     // capture() above keeps the never-throw promise for every caller, so an
     // ipc reply is the only thing left to decide here
-    return { success: this.capture(name, properties) }
+    return { success: this.capture(name, enriched) }
+  }
+
+  /**
+   * count a finished download, and speak up on the rare one that is a milestone
+   *
+   * the sequence stops. Asking again every ten downloads for as long as someone
+   * keeps using the app turns a thank-you into a toll booth, so the gaps widen
+   * and then it ends: 5, 15, 40, 60, 100, and never again however many hundreds
+   * follow.
+   *
+   * fire and forget on purpose: this hangs off the analytics hook, which the
+   * runner calls on the path where a download reports success. A settings write
+   * that fails must not turn a finished file into a failed one.
+   *
+   * the writes are chained because the engine allows concurrent downloads and
+   * each of these is a read, an increment and a write. Two finishing together
+   * both read 4, both write 5, and both announce milestone 5 - one file goes
+   * uncounted and the user is asked for a coffee twice in a second. The work is
+   * short and the chain never breaks, since the catch below resolves.
+   */
+  noteCompletedDownload() {
+    if (!this.settings) return
+
+    this.completionWrites = (this.completionWrites || Promise.resolve())
+      .then(async () => {
+        const settings = await this.settings.readAll()
+        const previous = Number(settings.downloads_completed) || 0
+        const count = previous + 1
+
+        await this.settings.writeSettings({ downloads_completed: count })
+
+        if (!SUPPORT_MILESTONES.includes(count)) return
+        if (!this.mainWindow || this.mainWindow.isDestroyed()) return
+
+        this.mainWindow.webContents.send(IPC_CHANNELS.SUPPORT_MILESTONE, {
+          count
+        })
+
+        // captured here rather than in the renderer because this is the line
+        // that decides a prompt happens. A shown event reported from the other
+        // side could only ever say the dialog mounted
+        this.capture("support_prompt_shown", { milestone: count })
+      })
+      .catch((error) => {
+        console.error("failed to record a completed download:", error.message)
+      })
+  }
+
+  /**
+   * was this operation authenticated, for the events where that could matter
+   *
+   * youtube only. cookies are a youtube lever, and stamping the flag onto a
+   * pinterest download would put a column in the data that means nothing and
+   * invites a comparison that is not there.
+   *
+   * the question it exists to answer is the one the po token rollout could not:
+   * of the installs youtube is refusing, what share of the refusals happen with
+   * a signed-in jar attached. Comparing that rate against installs with no jar
+   * is the whole measurement, and it needs the flag on the failures rather than
+   * only on the import.
+   *
+   * @param {string} platform - the platform the operation was for
+   * @returns {Object} {used_cookies} for youtube, {} for anything else
+   */
+  cookieDimension(platform) {
+    if (platform !== "youtube" || !this.cookieManager) return {}
+
+    try {
+      return { used_cookies: Boolean(this.cookieManager.hasValidCookies()) }
+    } catch {
+      // a dimension is never worth failing an event over
+      return {}
+    }
   }
 
   /**
@@ -331,8 +486,14 @@ class IPCHandlers {
     if (!this.analytics) return
 
     this.capture("cookies_imported", {
+      // whether the file landed, not whether it turned out to be a login. the
+      // two were the same flag, so a perfectly good signed-out import counted
+      // as a failed one and the funnel could not tell the two apart
       success: Boolean(imported),
-      has_youtube_cookies: Boolean(this.cookieManager.hasValidCookies())
+      // and this is the question its name asks. it was answering the narrower
+      // "is this a login", so a jar full of youtube cookies reported false
+      has_youtube_cookies: Boolean(this.cookieManager.hasYouTubeCookies()),
+      signed_in: Boolean(this.cookieManager.hasValidCookies())
     })
   }
 
@@ -501,10 +662,6 @@ class IPCHandlers {
     ipcMain.handle("download:get-all", this.handleGetAllDownloads.bind(this))
 
     // cookie management
-    ipcMain.handle(
-      IPC_CHANNELS.COOKIES_IMPORT,
-      this.handleImportCookies.bind(this)
-    )
     ipcMain.handle(IPC_CHANNELS.COOKIES_TEST, this.handleTestCookies.bind(this))
     ipcMain.handle(
       IPC_CHANNELS.COOKIES_STATUS,
@@ -1010,33 +1167,14 @@ class IPCHandlers {
     }
   }
 
-  // import cookies from text
-  async handleImportCookies(event, data) {
-    try {
-      this.validateRequest(data, ["cookies"])
-      const { cookies } = data
-
-      const success = await this.cookieManager.importCookies(cookies)
-      this.trackCookieImport(success)
-
-      return this.createSuccess({
-        imported: success,
-        hasValidCookies: this.cookieManager.hasValidCookies()
-      })
-    } catch (error) {
-      console.error("Cookie import failed:", error.message)
-      this.trackCookieImport(false)
-      return this.createError("Failed to import cookies", error.message)
-    }
-  }
 
   // import cookies from file
   async handleImportCookieFile(_event) {
     try {
       const result = await dialog.showOpenDialog(this.mainWindow, {
-        title: "Select Cookie File",
+        title: "select your cookies.txt",
         filters: [
-          { name: "Cookie Files", extensions: ["txt"] },
+          { name: "cookie files", extensions: ["txt"] },
           { name: "All Files", extensions: ["*"] }
         ],
         properties: ["openFile"]
@@ -1047,18 +1185,26 @@ class IPCHandlers {
       }
 
       const filePath = result.filePaths[0]
-      const success = await this.cookieManager.importCookieFile(filePath)
-      this.trackCookieImport(success)
+      await this.cookieManager.importCookieFile(filePath)
+      this.trackCookieImport(true)
 
+      // a refusal throws, so reaching here means the file landed. Whether it is
+      // a login is the separate question, and hasValidCookies is the only part
+      // the dialog reads
       return this.createSuccess({
-        imported: success,
-        filePath,
         hasValidCookies: this.cookieManager.hasValidCookies()
       })
     } catch (error) {
       console.error("Cookie file import failed:", error.message)
       this.trackCookieImport(false)
-      return this.createError("Failed to import cookie file", error.message)
+      // the manager's sentence is the message, not the suggestion. it used to
+      // go in the second slot, which api.ts drops - so every refused import,
+      // including the ones with a precise reason, reached the user as the
+      // generic "Failed to import cookie file"
+      return this.createError(
+        error.message || "couldn't import that cookie file",
+        "export cookies.txt with a browser extension, then pick that file."
+      )
     }
   }
 
@@ -1075,8 +1221,8 @@ class IPCHandlers {
    */
   async handleTestCookies(_event) {
     try {
-      // the jar may have changed (or expired) since it was imported
-      await this.cookieManager.refresh()
+      // inspectCookieFile reads the file every time, so it already sees a jar
+      // that changed or expired since the import
       const inspection = await this.cookieManager.inspectCookieFile()
 
       if (!inspection.usable) {
@@ -1092,6 +1238,7 @@ class IPCHandlers {
         return this.createSuccess({
           cookiesLoaded: false,
           extractionCheck: "skipped",
+          rejected: false,
           note,
           status: await this.cookieManager.getStatus(),
           hasValidCookies: false
@@ -1111,15 +1258,21 @@ class IPCHandlers {
       })
 
       return this.createSuccess({
+        // the jar loaded - which is all this ever meant
         cookiesLoaded: true,
         extractionCheck,
+        // and this is the verdict. the renderer titled its toast off
+        // cookiesLoaded alone, so a probe that came back rejected still
+        // announced "Cookies look fine" over a description saying youtube had
+        // turned them down
+        rejected: extractionCheck === "rejected",
         note,
         status: await this.cookieManager.getStatus(),
         hasValidCookies: this.cookieManager.hasValidCookies()
       })
     } catch (error) {
       console.error("Cookie test failed:", error.message)
-      return this.createError("Cookie test failed", error.message)
+      return this.createError("couldn't test the cookies", error.message)
     }
   }
 
@@ -1143,13 +1296,13 @@ class IPCHandlers {
         if (info && info.title) {
           return {
             extractionCheck: "passed",
-            note: "Extraction worked with your cookies attached. This does not by itself prove YouTube accepted them."
+            note: "the download path worked with your cookies attached. that alone doesn't prove youtube accepted them."
           }
         }
 
         return {
           extractionCheck: "unknown",
-          note: "The test video returned no details."
+          note: "the test video came back with nothing."
         }
       } catch (probeError) {
         console.warn(`cookie probe failed for ${url}:`, probeError.message)
@@ -1163,27 +1316,27 @@ class IPCHandlers {
         if (probeError.code === ERROR_CODES.BOT_DETECTION) {
           return {
             extractionCheck: "rejected",
-            note: "YouTube still asked us to confirm you're not a bot while sending your cookies - they are expired or not being accepted."
+            note: "youtube still asked us to prove we're not a bot while sending your cookies, so they're expired or not being accepted."
           }
         }
 
         if (probeError.code === ERROR_CODES.NETWORK_ERROR) {
           return {
             extractionCheck: "unknown",
-            note: "Couldn't reach YouTube, so the cookies weren't tested."
+            note: "couldn't reach youtube, so the cookies went untested."
           }
         }
 
         return {
           extractionCheck: "unknown",
-          note: `The test couldn't complete: ${probeError.message}`
+          note: `the test couldn't finish: ${probeError.message}`
         }
       }
     }
 
     return {
       extractionCheck: "unknown",
-      note: `All ${deadTargets} of our test videos are unavailable right now, so this test says nothing about your cookies.`
+      note: `all ${deadTargets} of our test videos are down right now, so this says nothing about your cookies.`
     }
   }
 
@@ -1192,15 +1345,31 @@ class IPCHandlers {
     try {
       const status = await this.cookieManager.getStatus()
       const fileInfo = await this.cookieManager.getFileInfo()
+      const usable = this.cookieManager.hasValidCookies()
 
       return this.createSuccess({
         status,
         fileInfo,
-        hasValidCookies: this.cookieManager.hasValidCookies()
+        hasValidCookies: usable,
+        // the sentence rather than the ingredients: cookieJarProblem already
+        // knows which way a jar is unusable, and a second copy of that in the
+        // renderer is the drift the shared parser exists to prevent. an
+        // unreadable file reports zero of everything, which is the "nothing
+        // imported" branch and the right thing to say
+        problem: usable
+          ? null
+          : cookieJarProblem({
+              total: fileInfo.cookieCount,
+              youtube: fileInfo.youtubeCookieCount || 0,
+              expired: fileInfo.expiredCookieCount || 0,
+              hasSid: fileInfo.hasSid,
+              signedIn: fileInfo.signedIn,
+              loadError: fileInfo.loadError ?? null
+            })
       })
     } catch (error) {
       console.error("Get cookie status failed:", error.message)
-      return this.createError("Failed to get cookie status")
+      return this.createError("couldn't read the cookie status")
     }
   }
 
@@ -1215,7 +1384,12 @@ class IPCHandlers {
       })
     } catch (error) {
       console.error("Clear cookies failed:", error.message)
-      return this.createError("Failed to clear cookies")
+      // the jar is still on disk, so this has to reach the user rather than
+      // resolve into a screen that says the login is gone
+      return this.createError(
+        "couldn't remove the cookies, they're still on this machine",
+        error.message
+      )
     }
   }
 
@@ -1494,7 +1668,6 @@ class IPCHandlers {
       IPC_CHANNELS.VIDEO_DOWNLOAD_COMBINED,
       IPC_CHANNELS.AUDIO_DOWNLOAD,
       IPC_CHANNELS.DOWNLOAD_CANCEL,
-      IPC_CHANNELS.COOKIES_IMPORT,
       IPC_CHANNELS.COOKIES_TEST,
       IPC_CHANNELS.COOKIES_STATUS,
       IPC_CHANNELS.UPDATE_CHECK,
@@ -1522,3 +1695,9 @@ class IPCHandlers {
 }
 
 module.exports = IPCHandlers
+// exported for tests. this function had no seam and no coverage, and shipped
+// with a comment describing a distinction the code did not make: a jar youtube
+// had signed out was told it was never signed in. the branch is one line and
+// the wrong sentence sends the user to fix the wrong thing, so it is worth a
+// test even though nothing else imports it
+module.exports.cookieJarProblem = cookieJarProblem

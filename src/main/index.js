@@ -576,6 +576,23 @@ class CliplyApp {
    * is the whole of what makes previous_version meaningful, and it is how an
    * upgrade becomes visible in the data.
    */
+  /**
+   * does this install currently hold a signed-in youtube jar?
+   *
+   * never throws: a launch report is not worth losing over a dimension, and an
+   * unreadable jar is a false rather than a missing answer - it is not signed
+   * in either way.
+   *
+   * @returns {boolean}
+   */
+  cookiesSignedIn() {
+    try {
+      return Boolean(this.services.cookieManager?.hasValidCookies())
+    } catch {
+      return false
+    }
+  }
+
   reportLaunch() {
     return this.services.settingsStore
       .readAll()
@@ -587,7 +604,19 @@ class CliplyApp {
           // spread rather than `|| null`: a first launch genuinely has no
           // previous version, and absence says that where a null pretends
           // there was a value to send
-          ...(previousVersion ? { previous_version: previousVersion } : {})
+          ...(previousVersion ? { previous_version: previousVersion } : {}),
+          /**
+           * how many installs actually have working cookies, asked once a
+           * launch.
+           *
+           * cookies_imported answers "who imported, ever" - a one-off event
+           * that never expires, so a jar youtube rotated out three weeks ago
+           * still counts as an import forever. This is the standing figure:
+           * of the installs running today, what share are signed in right now.
+           * The gap between the two is the re-import problem, and without this
+           * event there is no way to see it.
+           */
+          cookies_signed_in: this.cookiesSignedIn()
         })
 
         const version = getAppVersion()
