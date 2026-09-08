@@ -1421,3 +1421,51 @@ describe("which operations get the cookie jar", () => {
     expect(args[args.indexOf("--cookies") + 1]).toBe(JAR)
   })
 })
+
+// a cookie value in a bug report is a session token in a public github issue,
+// so this is the one redaction with a real adversary rather than a tidy-up.
+//
+// yt-dlp quotes the offending row back verbatim, that line lands in the stderr
+// tail, the tail rides along on a failure, and the report dialog puts the
+// failure in an issue url and on the clipboard.
+describe("a cookie row never survives a log line", () => {
+  // "\t" as the two characters python prints inside a repr, not a real tab
+  const T = "\\t"
+  const row = (flag, value, extra) =>
+    `.youtube.com${T}${flag}${T}/${T}${flag}${T}999${T}SAPISID${T}${value}${extra || ""}`
+  const warn = (r) =>
+    `WARNING: skipping cookie file entry due to invalid length 8: '${r}'`
+
+  // every one of these defeated some earlier version of the pattern, back when
+  // it tried to keep the structural columns by parsing python's repr
+  test.each([
+    ["an eighth column", warn(row("TRUE", "SEKRIT", T + "x"))],
+    [
+      "an apostrophe in the value, which flips python to double quotes",
+      `WARNING: skipping cookie file entry due to invalid length 8: "${row("TRUE", "SEK'RIT", T + "x")}"`
+    ],
+    ["a flag in lower case", warn(row("true", "SEKRIT", T + "x"))],
+    ["a flag that is not a flag at all", warn(row("XX", "SEKRIT", T + "x"))],
+    [
+      "the other loader's wording",
+      `ERROR: invalid Netscape format cookies file: '${row("TRUE", "SEKRIT")}'`
+    ],
+    [
+      "real tabs rather than escaped ones",
+      ".youtube.com\tTRUE\t/\tTRUE\t999\tSAPISID\tSEKRIT"
+    ]
+  ])("is redacted despite %s", (_label, line) => {
+    const out = redactLogLine(line)
+
+    expect(out).not.toContain("SEKRIT")
+    expect(out).not.toContain("SEK'RIT")
+  })
+
+  // or the redaction has traded a leak for a report nobody can act on
+  test("keeps what makes the diagnostic worth reading", () => {
+    const out = redactLogLine(warn(row("TRUE", "SEKRIT", T + "x")))
+
+    expect(out).toContain("invalid length 8")
+    expect(out).toContain("<cookie row redacted>")
+  })
+})

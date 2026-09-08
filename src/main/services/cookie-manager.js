@@ -54,11 +54,20 @@ const NETSCAPE_HEADER =
  *     it off line one and raises for the whole file without it, so a jar of
  *     perfectly good rows with no header is a jar that loads no cookies
  *
+ * only newlines are stripped from the ends, never whitespace generally. A row
+ * whose value is empty legitimately ends in a tab, and .trim() ate it on the
+ * last line of the file: a seven column row became six and the cookie vanished
+ * on import. The real binary keeps that row and writes it back with the tab
+ * intact, so trimming it was ours alone.
+ *
  * @param {string} raw - whatever the user handed us
  * @returns {string} a jar yt-dlp will load
  */
 function normalizeJar(raw) {
-  const content = String(raw).replace(/\r\n?/g, "\n").trim()
+  const content = String(raw)
+    .replace(/\r\n?/g, "\n")
+    .replace(/^\n+/, "")
+    .replace(/\n+$/, "")
 
   return hasNetscapeHeader(content)
     ? `${content}\n`

@@ -371,12 +371,27 @@ describe("only cookies yt-dlp would actually send count as a login", () => {
     })
   })
 
-  // host-only "youtube.com" does not match "www.youtube.com" - only the
-  // dotted form covers subdomains
-  test("host-only youtube.com does not cover www.youtube.com", () => {
+  // this test used to assert the opposite, on the reasoning that a missing
+  // leading dot means exact host only. That is the rule as it is usually
+  // described, but python gates it behind strict_ns_domain & DomainStrictNonDomain
+  // and defaults strict_ns_domain to DomainLiberal, so it never runs. The real
+  // binary was asked directly, through its own extractor, and answered
+  // _has_auth_cookies=True for exactly this jar.
+  //
+  // cliply was telling those users they were signed out, skipping the cookie
+  // test for them, and reporting it to analytics that way
+  test("a dotless youtube.com login is one yt-dlp calls signed in", () => {
     expect(inspectCookieContent(pair({ domain: "youtube.com" }))).toMatchObject({
       youtube: 2,
-      signedIn: false
+      signedIn: true
     })
+  })
+
+  // the suffix still has to be a domain suffix, so a sibling subdomain is not
+  // sent to www and is not a login there
+  test("music.youtube.com is not sent to www.youtube.com", () => {
+    expect(
+      inspectCookieContent(pair({ domain: "music.youtube.com" }))
+    ).toMatchObject({ youtube: 2, signedIn: false })
   })
 })

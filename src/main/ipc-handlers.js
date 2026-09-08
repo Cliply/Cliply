@@ -404,18 +404,24 @@ class IPCHandlers {
    * count a finished download, and speak up on the rare one that is a milestone
    *
    * the sequence stops. Asking again every ten downloads for as long as someone
-   * keeps using the app turns a thank-you into a toll booth, and nobody who has
-   * said no three times says yes on the fourth - so it is 5, 15, 40 and then
-   * never again, however many hundreds follow.
+   * keeps using the app turns a thank-you into a toll booth, so the gaps widen
+   * and then it ends: 5, 15, 40, 60, 100, and never again however many hundreds
+   * follow.
    *
    * fire and forget on purpose: this hangs off the analytics hook, which the
    * runner calls on the path where a download reports success. A settings write
    * that fails must not turn a finished file into a failed one.
+   *
+   * the writes are chained because the engine allows concurrent downloads and
+   * each of these is a read, an increment and a write. Two finishing together
+   * both read 4, both write 5, and both announce milestone 5 - one file goes
+   * uncounted and the user is asked for a coffee twice in a second. The work is
+   * short and the chain never breaks, since the catch below resolves.
    */
   noteCompletedDownload() {
     if (!this.settings) return
 
-    Promise.resolve()
+    this.completionWrites = (this.completionWrites || Promise.resolve())
       .then(async () => {
         const settings = await this.settings.readAll()
         const previous = Number(settings.downloads_completed) || 0

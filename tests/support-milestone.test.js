@@ -220,3 +220,51 @@ describe("what analytics can answer", () => {
     expect(captured).toEqual([])
   })
 })
+
+// two downloads can finish in the same tick - the engine allows concurrent
+// operations - and each completion is a read, an increment and a write.
+// Unserialised they both read 4, both write 5, and both announce milestone 5:
+// one file goes uncounted and the user is asked for a coffee twice at once.
+describe("two downloads finishing together", () => {
+  test("counts both, and asks only once", async () => {
+    const { handlers, sent, read } = harness(4)
+
+    handlers.noteCompletedDownload()
+    handlers.noteCompletedDownload()
+    await settle()
+
+    expect(read().downloads_completed).toBe(6)
+    expect(sent).toHaveLength(1)
+    expect(sent[0].payload).toEqual({ count: 5 })
+  })
+
+  // and the analytics half must not double count either, or the shown rate is
+  // inflated by exactly the users who download fastest
+  test("captures one shown event, not two", async () => {
+    const { handlers, captured } = harness(4)
+
+    handlers.noteCompletedDownload()
+    handlers.noteCompletedDownload()
+    await settle()
+
+    expect(captured).toEqual([
+      { event: "support_prompt_shown", props: { milestone: 5 } }
+    ])
+  })
+
+  // a failed write must not wedge every later completion behind it
+  test("a write that throws does not stop the next one counting", async () => {
+    const { handlers, settingsStore, read } = harness(0)
+    const realWrite = settingsStore.writeSettings
+    settingsStore.writeSettings = async () => {
+      settingsStore.writeSettings = realWrite
+      throw new Error("disk full")
+    }
+
+    handlers.noteCompletedDownload()
+    handlers.noteCompletedDownload()
+    await settle()
+
+    expect(read().downloads_completed).toBe(1)
+  })
+})

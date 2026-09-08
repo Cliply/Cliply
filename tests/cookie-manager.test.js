@@ -516,6 +516,45 @@ describe("importing", () => {
       /json, not a netscape/i
     )
   })
+
+  // a cookie whose value is empty legitimately ends its row with a tab.
+  // Trimming the whole file ate that tab on the last line, turning a seven
+  // column row into six and dropping the cookie without a word.
+  //
+  // the real binary was the arbiter: given this exact file it loads the row and
+  // writes it back with the tab still there, so the loss was ours, not
+  // something the format required.
+  test("keeps a trailing tab on the last row, which is an empty value", async () => {
+    const manager = await emptyManager()
+    const emptyValue = [
+      ".youtube.com",
+      "TRUE",
+      "/",
+      "TRUE",
+      live(),
+      "EMPTYVAL",
+      ""
+    ].join("\t")
+
+    expect(
+      await manager.importCookies(HEADER + loginPair(live()) + emptyValue + "\n")
+    ).toBe(true)
+
+    const written = await fs.readFile(manager.cookieFile, "utf8")
+    expect(written).toContain("EMPTYVAL\t")
+  })
+
+  test("still ends the file in exactly one newline", async () => {
+    const manager = await emptyManager()
+
+    expect(await manager.importCookies(HEADER + loginPair(live()) + "\n\n")).toBe(
+      true
+    )
+
+    const written = await fs.readFile(manager.cookieFile, "utf8")
+    expect(written.endsWith("\n")).toBe(true)
+    expect(written.endsWith("\n\n")).toBe(false)
+  })
 })
 
 describe("getFileInfo", () => {

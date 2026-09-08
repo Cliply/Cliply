@@ -221,19 +221,29 @@ const AUTH_PATH = "/"
 /**
  * would http.cookiejar attach this cookie to that request?
  *
- * the netscape rules, not a suffix test: a leading dot means the cookie covers
- * subdomains, and its absence means it covers that exact host and nothing else.
- * Path is a prefix match against the request path, which for the auth check is
- * "/" - so only a cookie at the root qualifies.
+ * this used to treat a missing leading dot as "exact host only", which is the
+ * rule as it is usually described and not the one python applies. DefaultCookiePolicy
+ * gates that restriction behind strict_ns_domain & DomainStrictNonDomain, and
+ * strict_ns_domain defaults to DomainLiberal, so the check never runs. What is
+ * left for a version 0 cookie is ("." + request host).endswith("." + domain),
+ * which ".www.youtube.com" satisfies against "youtube.com".
+ *
+ * so a jar holding LOGIN_INFO and SAPISID on a dotless youtube.com is one the
+ * real binary calls signed in - confirmed by loading its own extractor, which
+ * answered _has_auth_cookies=True - while cliply called it signed out, told the
+ * user so, skipped the cookie test and reported it that way to analytics.
+ *
+ * path stays a prefix match against "/", so a cookie scoped to /account still
+ * does not qualify, and music.youtube.com still fails the suffix test.
  */
 function appliesToAuthRequest(cookie) {
-  const domain = String(cookie.domain || "")
+  const domain = String(cookie.domain || "").replace(/^\./, "")
+  const dotted = `.${domain}`
 
-  const hostMatches = domain.startsWith(".")
-    ? AUTH_HOST === domain.slice(1) || AUTH_HOST.endsWith(domain)
-    : AUTH_HOST === domain
-
-  return hostMatches && AUTH_PATH.startsWith(cookie.path || "/")
+  return (
+    `.${AUTH_HOST}`.endsWith(dotted) &&
+    AUTH_PATH.startsWith(cookie.path || "/")
+  )
 }
 
 // expiry 0 means a session cookie, which has not expired. the comparison is
