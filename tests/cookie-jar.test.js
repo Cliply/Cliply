@@ -1,18 +1,24 @@
 // the jar parser agrees with yt-dlp about what a cookie file is
 //
-// every expectation here was taken from running yt-dlp's own loader - the
-// prepare_line() in yt_dlp/cookies.py feeding CPython's MozillaCookieJar - over
-// the same fixture. where we used to disagree we were wrong in both directions:
-// we accepted space-separated jars yt-dlp drops every line of, and we rejected
-// decimal expiries yt-dlp reads fine. a jar we call usable and yt-dlp ignores is
-// the worse half: the user is told cookies are active while every request goes
-// out unauthenticated.
+// every expectation here was taken from the bundled yt-dlp 2026.08.19 itself,
+// not from reading its source: --cookies is a write destination as well as a
+// read source, so feeding it a fixture and reading back the jar it saves gives
+// the exact set of cookies it loaded. /tmp is not a place to keep that, so the
+// answers are recorded here.
+//
+// where we used to disagree we were wrong in both directions. we accepted
+// space-separated jars yt-dlp drops every line of, and rejected session
+// cookies it keeps. a jar we call usable and yt-dlp ignores is the worse half:
+// the user is told cookies are active while every request goes out
+// unauthenticated.
 
 const {
   parseCookieFile,
   parseExpiry,
   hasNetscapeHeader,
-  inspectCookieContent
+  inspectCookieContent,
+  JAR_UNREADABLE,
+  JAR_DOMAIN_FLAG
 } = require("../src/main/utils/cookie-jar")
 
 const NETSCAPE = "# Netscape HTTP Cookie File"
@@ -21,8 +27,20 @@ const NETSCAPE = "# Netscape HTTP Cookie File"
 const SHORT = "# HTTP Cookie File"
 
 // domain \t includeSubdomains \t path \t secure \t expiry \t name \t value
-function row({ domain = ".youtube.com", expires = "1999999999", name = "SID" } = {}) {
-  return [domain, "TRUE", "/", "TRUE", String(expires), name, "value"].join("\t")
+//
+// the flag follows the leading dot rather than being fixed, because http
+// .cookiejar refuses the whole file when the two disagree - a fixture that
+// hardcoded TRUE was writing jars yt-dlp would not load
+function row({
+  domain = ".youtube.com",
+  expires = "1999999999",
+  name = "SID",
+  path = "/",
+  value = "value"
+} = {}) {
+  const flag = domain.startsWith(".") ? "TRUE" : "FALSE"
+
+  return [domain, flag, path, "TRUE", String(expires), name, value].join("\t")
 }
 
 describe("hasNetscapeHeader", () => {
@@ -191,7 +209,10 @@ describe("inspectCookieContent", () => {
       expired: 0,
       hasSid: false,
       signedIn: false,
-      usable: false
+      usable: false,
+      // and it says so, rather than reading as an empty jar - the sentence for
+      // an unreadable file is not the one for a file with nothing in it
+      loadError: JAR_UNREADABLE
     })
   })
 
@@ -202,7 +223,8 @@ describe("inspectCookieContent", () => {
       expired: 0,
       hasSid: true,
       signedIn: true,
-      usable: true
+      usable: true,
+      loadError: null
     })
   })
 
@@ -246,5 +268,115 @@ describe("hasSid", () => {
     expect(
       inspectCookieContent(`${NETSCAPE}\n${row({ name: "SAPISID", expires: stale })}\n`)
     ).toMatchObject({ hasSid: false })
+  })
+})
+
+// the cases where we and yt-dlp used to disagree, each answer taken from the
+// bundled binary. reverting any one fix turns exactly the test below it red -
+// checked by doing it.
+describe("what the real yt-dlp does with an awkward row", () => {
+  const live = () => String(Math.floor(Date.now() / 1000) + 3600)
+  const jar = (...rows) => `${NETSCAPE}\n${rows.join("\n")}\n`
+  const names = (content) => parseCookieFile(content).map((c) => c.name)
+
+  // this is the direction that matters: yt-dlp splits on \t with the newline
+  // still attached, so an eighth column is a row it refuses. trimming the line
+  // first turned it back into a valid seven, and a jar yt-dlp loads nothing
+  // from reported itself as a signed-in login
+  test("a trailing tab is an eighth column, and the row is dropped", () => {
+    const keep = row({ name: "KEEP" })
+
+    expect(names(jar(keep, `${row({ name: "TAIL" })}\t`))).toEqual(["KEEP"])
+  })
+
+  // the mirror image, which cost real cookies: an empty value ends the row in a
+  // tab too, and trimming collapsed it to six columns
+  test("a row whose value is empty is still seven columns, and is kept", () => {
+    expect(names(jar(row({ name: "EMPTY", value: "" })))).toEqual(["EMPTY"])
+  })
+
+  test.each([
+    ["0.5", "HALF"],
+    ["0.0", "ZEROFLOAT"],
+    ["00", "DBLZERO"],
+    ["0", "ZERO"],
+    ["", "BLANK"]
+  ])(
+    "expiry %j is a session cookie, not a malformed row",
+    (expires, name) => {
+      expect(names(jar(row({ name, expires })))).toEqual([name])
+    }
+  )
+
+  // yt-dlp fullmatches the column before anything strips whitespace
+  test("a padded expiry is a malformed row", () => {
+    const keep = row({ name: "KEEP" })
+
+    expect(
+      names(jar(keep, row({ name: "PADDED", expires: " 1999999999 " })))
+    ).toEqual(["KEEP"])
+  })
+
+  // the one that takes the whole download with it: http.cookiejar raises
+  // LoadError for the file, yt-dlp turns that into CookieLoadError, and the run
+  // exits before anything is fetched. so this is not a row to skip
+  test.each([
+    [".youtube.com", "FALSE"],
+    ["music.youtube.com", "TRUE"]
+  ])(
+    "a domain column disagreeing with its flag (%s / %s) refuses the whole file",
+    (domain, flag) => {
+      const bad = [domain, flag, "/", "TRUE", "1999999999", "BAD", "v"].join("\t")
+
+      expect(inspectCookieContent(jar(row({ name: "KEEP" }), bad))).toMatchObject({
+        total: 0,
+        usable: false,
+        loadError: JAR_DOMAIN_FLAG
+      })
+    }
+  )
+
+  test("a jar with no magic first line names that as the reason", () => {
+    expect(inspectCookieContent(`${row({ name: "SID" })}\n`)).toMatchObject({
+      loadError: JAR_UNREADABLE
+    })
+  })
+})
+
+// _has_auth_cookies reads _get_cookies('https://www.youtube.com'), so the
+// question is never "is this cookie from youtube" but "would it be sent there".
+// counting any *.youtube.com cookie called a login something yt-dlp would look
+// straight past.
+describe("only cookies yt-dlp would actually send count as a login", () => {
+  const live = () => String(Math.floor(Date.now() / 1000) + 3600)
+  const pair = (extra) =>
+    `${NETSCAPE}\n${row({ name: "LOGIN_INFO", expires: live(), ...extra })}\n${row({ name: "SAPISID", expires: live(), ...extra })}\n`
+
+  test("the ordinary export - .youtube.com at the root - is a login", () => {
+    expect(inspectCookieContent(pair())).toMatchObject({ signedIn: true })
+  })
+
+  test("host-only music.youtube.com is youtube's, but never reaches www", () => {
+    expect(inspectCookieContent(pair({ domain: "music.youtube.com" }))).toMatchObject({
+      youtube: 2,
+      signedIn: false
+    })
+  })
+
+  // a cookie at /account is not sent for a request to /
+  test("a path-scoped login is youtube's, and is not sent either", () => {
+    expect(inspectCookieContent(pair({ path: "/account" }))).toMatchObject({
+      youtube: 2,
+      signedIn: false
+    })
+  })
+
+  // host-only "youtube.com" does not match "www.youtube.com" - only the
+  // dotted form covers subdomains
+  test("host-only youtube.com does not cover www.youtube.com", () => {
+    expect(inspectCookieContent(pair({ domain: "youtube.com" }))).toMatchObject({
+      youtube: 2,
+      signedIn: false
+    })
   })
 })

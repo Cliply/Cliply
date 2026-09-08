@@ -44,14 +44,23 @@ const NETSCAPE_MAGIC_RE = /^#( Netscape)? HTTP Cookie File/
  * treating "abc" or a negative timestamp as a live session cookie is how an
  * unusable jar gets reported as a working login.
  *
+ * every spelling that truncates to zero is a session cookie, not a bad row.
+ * "0.5", "0.0" and "00" all pass yt-dlp's guard and land on 0 - verified
+ * against the bundled 2026.08.19 binary, which saved each of them back as 0.
+ * rejecting them dropped cookies yt-dlp keeps.
+ *
+ * the column is used exactly as written: yt-dlp fullmatches it before anything
+ * strips whitespace, so " 1999999999 " is a row it skips rather than a padded
+ * timestamp.
+ *
  * @param {string} raw - the column as written in the file
  * @returns {number|null} seconds since the epoch, 0 for session, null if invalid
  */
 function parseExpiry(raw) {
-  const text = String(raw == null ? "" : raw).trim()
+  const text = String(raw == null ? "" : raw)
 
-  // an absent expiry is a session cookie, which is what 0 means here too
-  if (text === "" || text === "0") {
+  // an absent expiry is a session cookie
+  if (text === "") {
     return 0
   }
 
@@ -62,7 +71,7 @@ function parseExpiry(raw) {
   // int(float(...)): 1999999999.5 is the same second as 1999999999
   const value = Math.trunc(Number(text))
 
-  return Number.isSafeInteger(value) && value > 0 ? value : null
+  return Number.isSafeInteger(value) ? value : null
 }
 
 /**
@@ -86,7 +95,19 @@ function hasNetscapeHeader(content) {
 }
 
 /**
- * parse a netscape cookie jar into its entries
+ * the two ways a file is refused whole rather than row by row
+ *
+ * yt-dlp's loader has two layers and they fail differently. Its prepare_line
+ * drops a bad *row* with a warning and carries on. MozillaCookieJar underneath
+ * raises LoadError for the *file*, and yt-dlp turns that into CookieLoadError -
+ * which aborts the run before a single byte is downloaded. A jar that trips the
+ * second kind is worse than no jar at all, so it has to be told apart.
+ */
+const JAR_UNREADABLE = "not-netscape"
+const JAR_DOMAIN_FLAG = "domain-flag-mismatch"
+
+/**
+ * read a jar the way yt-dlp's two layers read one
  *
  * a jar is a map keyed by domain, path and name rather than a list of rows, so
  * a file listing the same cookie twice holds one of them - the last, which is
@@ -95,57 +116,131 @@ function hasNetscapeHeader(content) {
  * rows claimed more cookies than yt-dlp would have, and could read an expiry
  * off the row that lost.
  *
+ * lines are not trimmed. yt-dlp splits on \t with the newline still attached
+ * and refuses any length but seven, so a trailing tab is an eighth column and
+ * the row is skipped - while trimming turned that same row back into a valid
+ * seven and let a jar yt-dlp loads nothing from report itself as a login. The
+ * mirror image cost real cookies: a row whose value is empty ends in a tab too,
+ * and trimming collapsed it to six columns and dropped a cookie yt-dlp keeps.
+ * Both verified against the bundled 2026.08.19 binary.
+ *
  * @param {string} content - file contents
- * @returns {Object[]} {domain, path, name, expires} per cookie, in file order
+ * @returns {{error: string|null, cookies: Object[]}} why it is unloadable, or
+ *   its cookies in file order
  */
-function parseCookieFile(content) {
+function readJar(content) {
+  const text = String(content == null ? "" : content)
+
+  // the magic is read off line one; without it yt-dlp raises for the whole file
+  if (!hasNetscapeHeader(text)) {
+    return { error: JAR_UNREADABLE, cookies: [] }
+  }
+
   const cookies = new Map()
 
-  for (const rawLine of String(content == null ? "" : content).split("\n")) {
-    let line = rawLine.trim()
+  for (const rawLine of text.split("\n")) {
+    // python reads with universal newlines, so only \r is ours to drop
+    const line = rawLine.replace(/\r$/, "")
 
-    if (!line) continue
+    if (!line.trim()) continue
 
-    if (line.startsWith(HTTP_ONLY_PREFIX)) {
-      line = line.slice(HTTP_ONLY_PREFIX.length)
-    } else if (line.startsWith("#")) {
+    let row = line
+
+    if (row.startsWith(HTTP_ONLY_PREFIX)) {
+      row = row.slice(HTTP_ONLY_PREFIX.length)
+    } else if (row.startsWith("#")) {
       continue
     }
 
     // tabs only, and exactly seven columns. yt-dlp skips the row otherwise -
     // including a space separated one, which is a single column to it
-    const parts = line.split("\t")
+    const parts = row.split("\t")
     if (parts.length !== ENTRY_LEN) continue
 
     const expires = parseExpiry(parts[4])
     if (expires === null) continue
 
-    const cookie = {
-      domain: String(parts[0] || "").toLowerCase(),
-      path: parts[2],
-      expires,
-      name: parts[5]
+    const domain = String(parts[0] || "").toLowerCase()
+
+    /**
+     * the row that kills the whole download.
+     *
+     * MozillaCookieJar requires column 2 to agree with the leading dot, and
+     * raises LoadError for the file when it does not - so one hand-edited row,
+     * or one exporter that writes "music.youtube.com TRUE", makes yt-dlp exit
+     * with CookieLoadError and nothing downloads. This is the only per-row
+     * problem that is not survivable, which is why it returns instead of
+     * skipping. Confirmed both ways against the bundled binary: ".youtube.com
+     * FALSE" and "music.youtube.com TRUE" each aborted the run.
+     */
+    if ((parts[1] === "TRUE") !== domain.startsWith(".")) {
+      return { error: JAR_DOMAIN_FLAG, cookies: [] }
     }
+
+    const cookie = { domain, path: parts[2], expires, name: parts[5] }
 
     // set() on an existing key overwrites the value and keeps the original
     // insertion order, which is the jar's behaviour and the file's order
     cookies.set(`${cookie.domain}\n${cookie.path}\n${cookie.name}`, cookie)
   }
 
-  return [...cookies.values()]
+  return { error: null, cookies: [...cookies.values()] }
+}
+
+/**
+ * the cookies yt-dlp would load from this file, or none if it would refuse it
+ *
+ * @param {string} content - file contents
+ * @returns {Object[]} {domain, path, name, expires} per cookie, in file order
+ */
+function parseCookieFile(content) {
+  return readJar(content).cookies
 }
 
 // only a youtube cookie can authenticate a youtube request - a jar holding
-// nothing but google.com or unrelated cookies is not a youtube login
+// nothing but google.com or unrelated cookies is not a youtube login. this is
+// the loose question, "did this come from youtube", and it is what the counts
+// shown to the user are about
 function isYouTubeDomain(domain) {
   const bare = String(domain || "").replace(/^\./, "")
 
   return bare === "youtube.com" || bare.endsWith(".youtube.com")
 }
 
-// expiry 0 means a session cookie, which has not expired
+/**
+ * the url yt-dlp actually asks the jar about when it decides you are signed in
+ *
+ * _has_auth_cookies reads self._get_cookies('https://www.youtube.com'), so the
+ * question is never "is this cookie from youtube" but "would this cookie be
+ * sent to that address". A host-only cookie on music.youtube.com, or one scoped
+ * to /account, is a real youtube cookie that yt-dlp will not see there.
+ */
+const AUTH_HOST = "www.youtube.com"
+const AUTH_PATH = "/"
+
+/**
+ * would http.cookiejar attach this cookie to that request?
+ *
+ * the netscape rules, not a suffix test: a leading dot means the cookie covers
+ * subdomains, and its absence means it covers that exact host and nothing else.
+ * Path is a prefix match against the request path, which for the auth check is
+ * "/" - so only a cookie at the root qualifies.
+ */
+function appliesToAuthRequest(cookie) {
+  const domain = String(cookie.domain || "")
+
+  const hostMatches = domain.startsWith(".")
+    ? AUTH_HOST === domain.slice(1) || AUTH_HOST.endsWith(domain)
+    : AUTH_HOST === domain
+
+  return hostMatches && AUTH_PATH.startsWith(cookie.path || "/")
+}
+
+// expiry 0 means a session cookie, which has not expired. the comparison is
+// <=, matching http.cookiejar's Cookie.is_expired - a cookie whose second has
+// arrived is gone, not live for one more tick
 function isExpired(cookie, now) {
-  return cookie.expires > 0 && cookie.expires * 1000 < now
+  return cookie.expires > 0 && cookie.expires * 1000 <= now
 }
 
 /**
@@ -205,42 +300,52 @@ function hasSidCookie(live) {
 /**
  * describe what a jar holds
  *
- * `usable` answers the only question the app has - will passing this to
- * --cookies make youtube treat us as signed in - so it is yt-dlp's
- * authentication test rather than a count of rows. A jar of visitor cookies
- * used to satisfy it, which meant reporting cookies as active while every
- * request went out anonymous.
+ * three separate questions, kept separate because conflating them is what put
+ * wrong sentences in front of users:
+ *
+ *   - `loadError` - would yt-dlp refuse the file outright. A jar that trips
+ *     this is worse than no jar: the run aborts before anything downloads
+ *   - `youtube` - how many cookies came from youtube, which is what the counts
+ *     on screen mean
+ *   - `signedIn` / `usable` - would yt-dlp call this authenticated, which is
+ *     narrower still: only cookies it would actually send to www.youtube.com
+ *     count, so a login exported host-only on music.youtube.com is cookies
+ *     from youtube that authenticate nothing
  *
  * @param {string} content - file contents
  * @param {number} now - epoch millis, injectable for tests
- * @returns {Object} {total, youtube, expired, hasSid, signedIn, usable}
+ * @returns {Object} {total, youtube, expired, hasSid, signedIn, usable, loadError}
  */
 function inspectCookieContent(content, now = Date.now()) {
-  // no magic line, no cookies - yt-dlp refuses the file rather than reading
-  // past it, so counting what is inside would describe a jar nothing will load
-  if (!hasNetscapeHeader(content)) {
+  const { error, cookies } = readJar(content)
+
+  if (error) {
     return {
       total: 0,
       youtube: 0,
       expired: 0,
       hasSid: false,
       signedIn: false,
-      usable: false
+      usable: false,
+      loadError: error
     }
   }
 
-  const cookies = parseCookieFile(content)
   const youtube = cookies.filter((cookie) => isYouTubeDomain(cookie.domain))
   const live = youtube.filter((cookie) => !isExpired(cookie, now))
-  const signedIn = isSignedIn(live)
+  // the auth pair is looked for only among cookies that would reach the address
+  // yt-dlp asks about
+  const sendable = live.filter(appliesToAuthRequest)
+  const signedIn = isSignedIn(sendable)
 
   return {
     total: cookies.length,
     youtube: youtube.length,
     expired: youtube.length - live.length,
-    hasSid: hasSidCookie(live),
+    hasSid: hasSidCookie(sendable),
     signedIn,
-    usable: signedIn
+    usable: signedIn,
+    loadError: null
   }
 }
 
@@ -249,18 +354,22 @@ function inspectCookieContent(content, now = Date.now()) {
  *
  * sync on purpose: the engine resolves this while building its argument list.
  *
- * the header is part of the question rather than a detail of it: handing
- * yt-dlp a jar without one makes it raise instead of downloading, so a file it
- * cannot load is worse than no --cookies at all.
+ * the bar is deliberately low - loadable, and holding something. Whether a jar
+ * is worth anything is yt-dlp's call to make, not ours, and gating this on our
+ * own authentication test meant a jar with a partial or rotating session was
+ * silently withheld from a download that might have gone through with it. The
+ * one thing we do owe yt-dlp is not handing it a file that makes it abort:
+ * a missing header or a domain-flag mismatch raises rather than downloads, so
+ * those are worse than passing nothing.
  *
  * @param {string} filePath - netscape cookie file
  * @returns {boolean} true when it holds at least one cookie yt-dlp would load
  */
 function cookieFileHasEntries(filePath) {
   try {
-    const content = fs.readFileSync(filePath, "utf8")
+    const { error, cookies } = readJar(fs.readFileSync(filePath, "utf8"))
 
-    return hasNetscapeHeader(content) && parseCookieFile(content).length > 0
+    return !error && cookies.length > 0
   } catch {
     return false
   }
@@ -268,10 +377,14 @@ function cookieFileHasEntries(filePath) {
 
 module.exports = {
   HTTP_ONLY_PREFIX,
+  JAR_UNREADABLE,
+  JAR_DOMAIN_FLAG,
   parseExpiry,
+  readJar,
   parseCookieFile,
   hasNetscapeHeader,
   isYouTubeDomain,
+  appliesToAuthRequest,
   isSignedIn,
   hasSidCookie,
   isExpired,
