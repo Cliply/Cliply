@@ -156,13 +156,17 @@ export function HeroSection() {
       {/*
         the donate ask, sitting still rather than interrupting anything.
 
-        the first line is deliberately not in the first person. "It's just me
-        back here" put a person in front of the reader and then asked them for
-        money, which reads as pleading however carefully it is worded. Stating
-        the upkeep as a fact about the project does the same job - the work is
-        real, continuous, and invisible from outside - without anybody having
-        to be sympathised with. The one person is a detail of the sentence
-        rather than its subject.
+        plain words only. "Takes ongoing upkeep" was the kind of phrase that
+        sounds considered when you write it and lands as corporate filler when
+        somebody reads it - most people would not use "upkeep" out loud, and a
+        line nobody parses cannot do any work at all. "Makes it and keeps it
+        running" says the same thing in words a reader does not have to slow
+        down for.
+
+        it stays out of the first person. An earlier version said "it's just me
+        back here", which put a person in front of the reader and then asked
+        them for money - that reads as pleading however carefully it is worded.
+        Here the one person is a detail of the sentence rather than its subject.
 
         two lines rather than one long one. The first carries the whole reason
         and the second the whole ask, so the eye can stop after either and
@@ -185,7 +189,7 @@ export function HeroSection() {
           }}
         >
           <span className="block">
-            cliply takes ongoing upkeep, and one person does it.
+            cliply is free. one person makes it and keeps it running.
           </span>
           <span className="block">
             if it&apos;s been useful,{" "}

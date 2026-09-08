@@ -76,7 +76,9 @@ describe("the donate line", () => {
     render(<HeroSection />)
 
     // two lines: the reason, then the ask
-    expect(screen.getByText(/cliply takes ongoing upkeep/i)).toBeTruthy()
+    expect(
+      screen.getByText(/one person makes it and keeps it running/i)
+    ).toBeTruthy()
     expect(screen.getByText(/if it's been useful/i)).toBeTruthy()
 
     const link = screen.getByText("buy me a coffee")
