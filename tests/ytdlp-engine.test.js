@@ -25,6 +25,7 @@ const {
   PROGRESS_TEMPLATE,
   FILE_TEMPLATE,
   STREAM_TEMPLATE,
+  PLAYLIST_MAX_ITEMS,
   STDERR_BUFFER_LINES
 } = require("../src/main/services/ytdlp-engine")
 
@@ -160,20 +161,30 @@ describe("info args", () => {
     expect(args[args.length - 1]).toBe("https://youtu.be/abc")
   })
 
-  test("playlist info stays flat and bounded", () => {
+  test("playlist info stays flat and bounded by the item cap", () => {
     const args = buildArgs("playlist-info", {
       ...PATHS,
-      url: "https://youtube.com/playlist?list=x",
-      maxVideos: 25
+      url: "https://youtube.com/playlist?list=x"
     })
 
     expect(args).toContain("--flat-playlist")
-    expect(valueAfter(args, "--playlist-items")).toBe("1:25")
+    expect(valueAfter(args, "-I")).toBe(`1:${PLAYLIST_MAX_ITEMS}`)
   })
 
-  test("playlist info defaults to 50 videos", () => {
+  /**
+   * one object with playlist_count, title, uploader and entries[] - not one
+   * line per entry, which carries the playlist's own size nowhere.
+   *
+   * the two flags are not alternatives: passing both makes yt-dlp print the
+   * per-entry lines *and* the object (14 lines for a 13-item playlist,
+   * measured against 2026.08.19), and getPlaylistInfo hands the whole of stdout
+   * to JSON.parse
+   */
+  test("playlist info asks for a single object, never per-entry lines", () => {
     const args = buildArgs("playlist-info", { ...PATHS, url: "https://x" })
-    expect(valueAfter(args, "--playlist-items")).toBe("1:50")
+
+    expect(args).toContain("--dump-single-json")
+    expect(args).not.toContain("--dump-json")
   })
 })
 
@@ -259,11 +270,14 @@ describe("nothing that downloads is run quiet", () => {
   // the other half of the pairing: --dump-json hands stdout to JSON.parse, so
   // chatter there is not noise, it is a parse error. these two print no CLIPLY
   // markers and have no ffmpeg downloader behind them, so they stay quiet
-  for (const operation of ["info", "playlist-info"]) {
+  for (const [operation, dumpFlag] of [
+    ["info", "--dump-json"],
+    ["playlist-info", "--dump-single-json"]
+  ]) {
     test(`${operation} is left quiet`, () => {
       const args = buildArgs(operation, { ...PATHS, url: "https://youtu.be/abc" })
 
-      expect(args).toContain("--dump-json")
+      expect(args).toContain(dumpFlag)
       expect(args).not.toContain("--print")
       expect(args).not.toContain("--no-quiet")
     })

@@ -14,6 +14,10 @@ const path = require("path")
 // "#HttpOnly_" lines, downloads dropped a jar the ui called loaded
 const { cookieFileHasEntries } = require("../utils/cookie-jar")
 
+// the playlist item cap is owned by the mappers, next to the output templates
+// whose index padding is derived from it - see the playlists section below
+const { PLAYLIST_MAX_ITEMS } = require("../utils/ytdlp-mappers")
+
 // stdout is machine-readable only: --print implies --quiet, so the only lines
 // yt-dlp writes are our two prefixed templates (verified against 2026.08.19)
 const PROGRESS_PREFIX = "CLIPLY|"
@@ -717,6 +721,183 @@ function audioLanguageSelector(language, audioOnly) {
     : `bv*+ba[language=${language}]/bv*+ba/b`
 }
 
+// =============================================================================
+// playlists
+// =============================================================================
+
+// PLAYLIST_MAX_ITEMS - the ceiling on any one link, for the listing and for
+// the selection built out of it - is imported at the top of this file rather
+// than declared here. it lives beside the output templates because the item
+// numbers in a filename are padded to its width, and those two must not be
+// able to drift apart
+
+// --skip-playlist-after-errors: how many items may fail before yt-dlp gives up
+// on the rest. an old playlist always carries a few deleted videos, so a
+// handful of failures is the normal shape and only a run going systematically
+// wrong should stop early. this is yt-dlp's own circuit breaker
+const PLAYLIST_ERROR_BUDGET = 5
+
+// --sleep-requests, in seconds. yt-dlp's playlist guide calls pacing "not
+// optional": one process walking 100 items at full speed is exactly what gets
+// a single ip rate-limited
+const PLAYLIST_SLEEP_REQUESTS = 1
+
+// --concurrent-fragments. this speeds up the video being downloaded *now* by
+// fetching its dash fragments in parallel; it is not several videos at once.
+// yt-dlp walks a playlist strictly one video at a time and nothing here
+// changes that
+const PLAYLIST_FRAGMENTS = 4
+
+// a playlist is mp4 at every height, unlike the per-tier container a single
+// video gets. `-t mp4` does not fall back to 1080p h264 above 1080p - measured
+// on a 4k video it takes the vp9 stream and remuxes it into mp4 - so one
+// container buys a predictable extension for the whole folder at no cost
+const PLAYLIST_CONTAINER = "mp4"
+
+// the -I spec is written straight onto the command line, so it is whitelisted
+// for the same reason TIER_CONTAINERS and AUDIO_LANGUAGE_PATTERN are: a list
+// of indices arriving over ipc does not get to write yt-dlp option syntax
+const PLAYLIST_ITEMS_PATTERN = /^[0-9,:]+$/
+
+/**
+ * validate a selection of 1-based playlist positions
+ *
+ * @param {number[]} indices - the positions the user ticked
+ * @returns {number[]} the same positions, sorted and de-duplicated
+ * @throws {Error} when the selection is empty, or holds anything that is not a
+ *   position inside the cap
+ */
+function normalizePlaylistIndices(indices) {
+  // an empty selection is not an empty spec. `-I ""` is not "download nothing",
+  // it is the absence of a selection - which downloads the entire playlist. so
+  // "nothing was ticked" has to fail here rather than quietly become the
+  // largest possible download
+  if (!Array.isArray(indices) || indices.length === 0) {
+    throw new Error("A playlist download needs at least one selected item.")
+  }
+
+  const seen = new Set()
+
+  for (const value of indices) {
+    // a position is an integer and only an integer: coercing "3" or 3.5 into
+    // one would launder a malformed payload into something the spec accepts
+    if (typeof value !== "number" || !Number.isInteger(value)) {
+      throw new Error(`Not a playlist position: ${JSON.stringify(value)}`)
+    }
+
+    if (value < 1 || value > PLAYLIST_MAX_ITEMS) {
+      throw new Error(`Playlist position out of range: ${value}`)
+    }
+
+    seen.add(value)
+  }
+
+  return [...seen].sort((a, b) => a - b)
+}
+
+/**
+ * turn a selection into yt-dlp's -I syntax, compressing runs
+ *
+ * `[1,2,4,5,6,7,8,9]` becomes `"1,2,4:9"`. yt-dlp reads `a:b` as an inclusive
+ * range, so a run of three or more is worth collapsing; a pair is left alone
+ * because "4,5" is the same length as "4:5" and reads as what it is.
+ *
+ * @param {number[]} indices - the positions the user ticked
+ * @returns {string} the -I spec
+ * @throws {Error} for anything normalizePlaylistIndices rejects
+ */
+function buildPlaylistItemsSpec(indices) {
+  const positions = normalizePlaylistIndices(indices)
+  const parts = []
+
+  let runStart = positions[0]
+  let runEnd = positions[0]
+
+  const flush = () => {
+    if (runEnd - runStart >= 2) {
+      parts.push(`${runStart}:${runEnd}`)
+      return
+    }
+
+    for (let position = runStart; position <= runEnd; position += 1) {
+      parts.push(String(position))
+    }
+  }
+
+  for (const position of positions.slice(1)) {
+    if (position === runEnd + 1) {
+      runEnd = position
+      continue
+    }
+
+    flush()
+    runStart = position
+    runEnd = position
+  }
+
+  flush()
+
+  const spec = parts.join(",")
+
+  // the loop above can only emit digits, commas and colons - this is what
+  // keeps that true the next time somebody edits it
+  if (!PLAYLIST_ITEMS_PATTERN.test(spec)) {
+    throw new Error("Refusing to hand yt-dlp a malformed playlist selection.")
+  }
+
+  return spec
+}
+
+/**
+ * the flags that turn one invocation into a playlist walk
+ *
+ * every one of these comes from yt-dlp's own playlist guide, which is worth
+ * following rather than improvising: an old playlist always holds a few
+ * deleted videos, and these are the flags that keep that from ending the run.
+ *
+ * @param {Object} params - {playlistIndices, archiveFile}
+ * @returns {string[]} args
+ */
+function buildPlaylistArgs({ playlistIndices, archiveFile } = {}) {
+  const args = [
+    // a declaration of intent rather than a correction: on a
+    // `watch?v=...&list=...` link yt-dlp's own default is already the playlist
+    // (measured against 2026.08.19 - a flat listing of one returns
+    // `_type: "playlist"` with every entry). today's single-video behaviour is
+    // ours, and comes from the explicit --no-playlist in `combined`, `audio`
+    // and `simple`. saying the opposite out loud here is what keeps the two
+    // halves of the app readable side by side
+    "--yes-playlist",
+    "-I",
+    buildPlaylistItemsSpec(playlistIndices),
+    "--skip-playlist-after-errors",
+    String(PLAYLIST_ERROR_BUDGET),
+    "--sleep-requests",
+    String(PLAYLIST_SLEEP_REQUESTS),
+    // no --max-downloads. yt-dlp's guide reaches for it as a safety cap, but
+    // -I already bounds this run to the selection and buildPlaylistItemsSpec
+    // caps that at PLAYLIST_MAX_ITEMS, so there is nothing left for it to
+    // protect against - and it is not free. yt-dlp exits **101** the moment
+    // the limit is reached rather than exceeded: measured against 2026.08.19,
+    // `--max-downloads 2` over two items exits 101 while `--max-downloads 3`
+    // over the same two exits 0. a cap that can only ever fire on a run that
+    // downloaded everything it was asked for is a trap for whoever reads the
+    // exit code
+    "-N",
+    String(PLAYLIST_FRAGMENTS)
+  ]
+
+  // resume: yt-dlp skips anything already listed in the archive, so an
+  // interrupted run picks up where it stopped instead of starting over.
+  // optional in the same way --cookies is - a caller with nowhere to keep the
+  // file still gets a working download, it just re-fetches on a retry
+  if (archiveFile) {
+    args.push("--download-archive", archiveFile)
+  }
+
+  return args
+}
+
 /**
  * read a {height, container} quality tier off the download params
  *
@@ -750,7 +931,8 @@ function normalizeAudioMode(params = {}) {
 
 /**
  * build the full arg list for one operation
- * @param {string} operation - info | playlist-info | combined | audio | simple
+ * @param {string} operation - info | playlist-info | combined | audio |
+ *   simple | playlist-combined | playlist-audio
  * @param {Object} params - operation parameters
  * @returns {string[]} yt-dlp args, url last
  */
@@ -764,12 +946,25 @@ function buildArgs(operation, params = {}) {
     }
 
     case "playlist-info": {
+      // --dump-single-json, not --dump-json. one object carrying
+      // playlist_count, title, uploader and entries[], instead of one line per
+      // entry with the playlist's own size nowhere in the output.
+      //
+      // the two are not alternatives to choose between: passing both makes
+      // yt-dlp print the per-entry lines *and* the object - 14 lines for a
+      // 13-item playlist, measured against 2026.08.19 - which is not something
+      // JSON.parse will take
       args.push(
-        "--dump-json",
         "--no-download",
         "--flat-playlist",
-        "--playlist-items",
-        `1:${params.maxVideos || 50}`
+        "--dump-single-json",
+        // the same declaration of intent the download operations make. a
+        // `watch?v=...&list=...` link would list the playlist anyway, but a
+        // listing operation that stayed silent about it reads as though it had
+        // been forgotten
+        "--yes-playlist",
+        "-I",
+        `1:${PLAYLIST_MAX_ITEMS}`
       )
       break
     }
@@ -824,6 +1019,42 @@ function buildArgs(operation, params = {}) {
       args.push("--no-playlist")
       args.push(...buildDownloadArgs(params))
       args.push(...buildTrimArgs(params))
+      break
+    }
+
+    case "playlist-combined":
+    case "playlist-audio": {
+      // structural, not cosmetic. `--download-sections` across videos of
+      // different lengths is meaningless, so the operation refuses a time range
+      // outright rather than leaving it to the ui to hide the control - a
+      // future caller cannot quietly produce a run nobody can explain
+      if (params.timeRange) {
+        throw new Error("A playlist download cannot be trimmed.")
+      }
+
+      if (operation === "playlist-combined") {
+        const { height } = normalizeQualityTier(params)
+
+        // ORDER IS LOAD-BEARING here for the reason spelled out in `combined`
+        // above. the container is *not* read off the tier: a playlist is
+        // PLAYLIST_CONTAINER at every height
+        args.push("-t", PLAYLIST_CONTAINER)
+
+        if (height) {
+          args.push("-S", `res:${height}`)
+        }
+      } else {
+        const preset = AUDIO_MODE_PRESETS[normalizeAudioMode(params)]
+
+        // the same two shapes `audio` has, minus the dub picker: the languages
+        // a video carries are read out of *its* format list, and a playlist
+        // has one list per video. so every item gets its original track, which
+        // is yt-dlp's own default anyway
+        args.push(...(preset ? ["-t", preset] : ["-f", "ba/b"]))
+      }
+
+      args.push(...buildPlaylistArgs(params))
+      args.push(...buildDownloadArgs(params))
       break
     }
 
@@ -1780,7 +2011,8 @@ class YtdlpEngine {
 
   /**
    * spawn one yt-dlp operation
-   * @param {string} operation - info | playlist-info | combined | audio | simple
+   * @param {string} operation - info | playlist-info | combined | audio |
+   *   simple | playlist-combined | playlist-audio
    * @param {Object} params - operation parameters (url, formats, output, trim)
    * @param {Object} options - {id, watchdogMs, cwd, onProgress}
    * @returns {YtdlpOperation} handle with promise / cancel() / events
@@ -1875,27 +2107,28 @@ class YtdlpEngine {
   }
 
   /**
-   * fetch playlist metadata (flat, one entry per video)
+   * fetch playlist metadata - one object, with the videos flat inside it
    * @param {string} url - playlist url
-   * @param {Object} options - {maxVideos, watchdogMs}
-   * @returns {Promise<Object[]>} one parsed json object per line
+   * @param {Object} options - {watchdogMs, cookieFile}
+   * @returns {Promise<Object>} the parsed --dump-single-json payload
    */
   async getPlaylistInfo(url, options = {}) {
     const handle = this.run("playlist-info", { url, ...options }, options)
     const result = await handle.promise
 
-    return result.stdout
-      .split("\n")
-      .map((line) => line.trim())
-      .filter(Boolean)
-      .map((line) => {
-        try {
-          return JSON.parse(line)
-        } catch {
-          return null
-        }
-      })
-      .filter(Boolean)
+    try {
+      return JSON.parse(result.stdout.trim())
+    } catch (error) {
+      // the same failure shape getInfo() throws. the line-per-entry parser this
+      // replaced swallowed a broken payload into an empty array, which reaches
+      // the user as a playlist that genuinely has no videos in it - a wrong
+      // answer where this is a reported failure
+      const parseError = new Error("Couldn't read the playlist details.")
+      parseError.code = ERROR_CODES.DOWNLOAD_FAILED
+      parseError.suggestion = "Please try again."
+      parseError.details = error.message
+      throw parseError
+    }
   }
 
   downloadCombined(params, options = {}) {
@@ -2184,6 +2417,9 @@ module.exports = {
   buildCommonArgs,
   buildDownloadArgs,
   buildTrimArgs,
+  buildPlaylistArgs,
+  buildPlaylistItemsSpec,
+  normalizePlaylistIndices,
   normalizeQualityTier,
   normalizeAudioMode,
   normalizeAudioLanguage,
@@ -2212,6 +2448,11 @@ module.exports = {
   FILE_TEMPLATE,
   STREAM_TEMPLATE,
   ENGINE_DIR_NAME,
+  PLAYLIST_MAX_ITEMS,
+  PLAYLIST_ERROR_BUDGET,
+  PLAYLIST_SLEEP_REQUESTS,
+  PLAYLIST_FRAGMENTS,
+  PLAYLIST_CONTAINER,
   STDERR_BUFFER_LINES,
   DEFAULT_WATCHDOG_MS,
   POSTPROCESS_WATCHDOG_MS,
