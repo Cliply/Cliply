@@ -52,25 +52,32 @@ export function HeroSection() {
         <ModeToggle />
       </div>
 
-      {/* Latest announcement - top center */}
+      {/*
+        top center, where "latest announcement" used to link out to github
+        discussions.
+
+        the cookie dialog was reachable from the menu and from the toast on a
+        failure, and both of those need something to have already gone wrong.
+        This is the one place it is offered before the user hits the wall - and
+        someone whose downloads keep failing is far likelier to read a line
+        about that than a link to an announcements page.
+      */}
       <motion.div
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         transition={{ duration: 0.8, delay: 0.1 }}
         className="absolute top-6 left-1/2 -translate-x-1/2 z-20"
       >
-        <a
-          href="https://github.com/Cliply/Cliply/discussions"
-          target="_blank"
-          rel="noopener noreferrer"
+        <button
+          onClick={() => cookieActions.open()}
           className="text-xs text-slate-500 dark:text-slate-400 hover:text-cyan-500 dark:hover:text-cyan-400 transition-colors duration-200 hover:underline underline-offset-4"
           style={{
             fontFamily:
               'Geist Mono, ui-monospace, SFMono-Regular, "SF Mono", Consolas, "Liberation Mono", Menlo, monospace'
           }}
         >
-          latest announcement
-        </a>
+          having trouble with downloads? try cookies
+        </button>
       </motion.div>
 
       {/* Dark gradient background */}
