@@ -349,7 +349,14 @@ export function CookieDialog() {
                   click the extension&apos;s icon, then hit <Em>export</Em>
                 </Step>
 
-                <Step n={5} note="youtube keeps refreshing cookies on open tabs.">
+                {/* the trim took the point out with the words: "youtube keeps
+                    refreshing cookies on open tabs" says what youtube does and
+                    leaves the reader to work out why they should care. the
+                    consequence is the whole reason the step exists */}
+                <Step
+                  n={5}
+                  note="youtube keeps refreshing cookies on open youtube tabs, and every refresh ages your export. closing it is what makes these last."
+                >
                   close that youtube tab
                 </Step>
 

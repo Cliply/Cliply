@@ -371,6 +371,37 @@ describe("app_launched", () => {
     expect(Object.keys(properties)).not.toContain("previous_version")
   })
 
+  /**
+   * the standing figure, and the one that reveals the re-import problem.
+   *
+   * cookies_imported says who imported, once, and never expires - so a jar
+   * youtube rotated out weeks ago still reads as an import forever. This says
+   * how many installs are signed in *right now*, and the gap between the two
+   * is the retention story.
+   *
+   * it also has to survive the cookie manager being absent or throwing: a
+   * launch report is not worth losing over a dimension.
+   */
+  it.each([[true], [false]])("reports whether cookies are live: %s", async (live) => {
+    app.services.cookieManager = { hasValidCookies: () => live }
+    await launch()
+
+    const [, properties] = mockAnalytics.capture.mock.calls[0]
+    expect(properties.cookies_signed_in).toBe(live)
+  })
+
+  it("says false rather than throwing when the jar is unreadable", async () => {
+    app.services.cookieManager = {
+      hasValidCookies: () => {
+        throw new Error("unreadable")
+      }
+    }
+    await launch()
+
+    const [, properties] = mockAnalytics.capture.mock.calls[0]
+    expect(properties.cookies_signed_in).toBe(false)
+  })
+
   it("records the running version for the next launch to read", async () => {
     mockSettingsStore.readAll.mockResolvedValue({ last_version: "1.2.2" })
     await launch()
