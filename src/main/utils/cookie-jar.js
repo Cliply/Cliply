@@ -13,7 +13,32 @@ const fs = require("fs")
 const HTTP_ONLY_PREFIX = "#HttpOnly_"
 
 /**
+ * a netscape row is seven tab separated columns - not six, not eight
+ *
+ * yt-dlp's loader does `line.split('\t')` and refuses any length but this one.
+ * we used to fall back to splitting on runs of whitespace when no tab was
+ * found, which read a space separated export as a jar full of cookies while
+ * yt-dlp skipped every line of it.
+ */
+const ENTRY_LEN = 7
+
+/**
+ * the magic first line, exactly as http.cookiejar spells it
+ *
+ * `#( Netscape)? HTTP Cookie File`, anchored - both spellings are valid, the
+ * space after the hash is part of it, and it is matched rather than fullmatched
+ * so an exporter may add its own trailing note.
+ */
+const NETSCAPE_MAGIC_RE = /^#( Netscape)? HTTP Cookie File/
+
+/**
  * expiry is column 5: a unix timestamp, or 0 for a session cookie
+ *
+ * yt-dlp guards this column with /[0-9]+(?:\.[0-9]+)?/ and then hands it to
+ * MozillaCookieJar, which does int(float(...)) - so a decimal timestamp is a
+ * real expiry it truncates, not a malformed row. An empty column is how a
+ * session cookie is written, and those matter: a login where "remember me" was
+ * never ticked lives entirely in session cookies.
  *
  * anything else is a malformed row rather than a cookie that never expires -
  * treating "abc" or a negative timestamp as a live session cookie is how an
@@ -25,17 +50,39 @@ const HTTP_ONLY_PREFIX = "#HttpOnly_"
 function parseExpiry(raw) {
   const text = String(raw == null ? "" : raw).trim()
 
-  if (text === "0") {
+  // an absent expiry is a session cookie, which is what 0 means here too
+  if (text === "" || text === "0") {
     return 0
   }
 
-  if (!/^\d+$/.test(text)) {
+  if (!/^[0-9]+(?:\.[0-9]+)?$/.test(text)) {
     return null
   }
 
-  const value = Number(text)
+  // int(float(...)): 1999999999.5 is the same second as 1999999999
+  const value = Math.trunc(Number(text))
 
   return Number.isSafeInteger(value) && value > 0 ? value : null
+}
+
+/**
+ * does this file carry the magic line yt-dlp insists on?
+ *
+ * not cosmetic and not repairable after the fact: MozillaCookieJar reads the
+ * magic off the *first* line and raises for the whole file without it. a jar
+ * missing it yields no cookies at all, so "the header is somewhere in here"
+ * is not the question - "is it line one" is.
+ *
+ * @param {string} content - file contents
+ * @returns {boolean} true when yt-dlp would agree this is a cookie file
+ */
+function hasNetscapeHeader(content) {
+  const [first = ""] = String(content == null ? "" : content).split("\n", 1)
+
+  // only the carriage return of a crlf file is dropped. python reads the jar
+  // with universal newlines, so \r never reaches its regex - but it anchors at
+  // the true start of the line, so leading whitespace really is a mismatch
+  return NETSCAPE_MAGIC_RE.test(first.replace(/\r$/, ""))
 }
 
 /**
@@ -57,12 +104,10 @@ function parseCookieFile(content) {
       continue
     }
 
-    // the format is tab separated, but some exporters use runs of spaces
-    let parts = line.split("\t")
-    if (parts.length < 7) {
-      parts = line.split(/\s+/)
-    }
-    if (parts.length < 7) continue
+    // tabs only, and exactly seven columns. yt-dlp skips the row otherwise -
+    // including a space separated one, which is a single column to it
+    const parts = line.split("\t")
+    if (parts.length !== ENTRY_LEN) continue
 
     const expires = parseExpiry(parts[4])
     if (expires === null) continue
@@ -97,6 +142,12 @@ function isExpired(cookie, now) {
  * @returns {Object} {total, youtube, expired, usable}
  */
 function inspectCookieContent(content, now = Date.now()) {
+  // no magic line, no cookies - yt-dlp refuses the file rather than reading
+  // past it, so counting what is inside would describe a jar nothing will load
+  if (!hasNetscapeHeader(content)) {
+    return { total: 0, youtube: 0, expired: 0, usable: false }
+  }
+
   const cookies = parseCookieFile(content)
   const youtube = cookies.filter((cookie) => isYouTubeDomain(cookie.domain))
   const live = youtube.filter((cookie) => !isExpired(cookie, now))
@@ -114,12 +165,18 @@ function inspectCookieContent(content, now = Date.now()) {
  *
  * sync on purpose: the engine resolves this while building its argument list.
  *
+ * the header is part of the question rather than a detail of it: handing
+ * yt-dlp a jar without one makes it raise instead of downloading, so a file it
+ * cannot load is worse than no --cookies at all.
+ *
  * @param {string} filePath - netscape cookie file
- * @returns {boolean} true when it holds at least one parseable cookie
+ * @returns {boolean} true when it holds at least one cookie yt-dlp would load
  */
 function cookieFileHasEntries(filePath) {
   try {
-    return parseCookieFile(fs.readFileSync(filePath, "utf8")).length > 0
+    const content = fs.readFileSync(filePath, "utf8")
+
+    return hasNetscapeHeader(content) && parseCookieFile(content).length > 0
   } catch {
     return false
   }
@@ -129,6 +186,7 @@ module.exports = {
   HTTP_ONLY_PREFIX,
   parseExpiry,
   parseCookieFile,
+  hasNetscapeHeader,
   isYouTubeDomain,
   isExpired,
   inspectCookieContent,

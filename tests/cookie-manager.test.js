@@ -155,9 +155,7 @@ describe("inspectCookieFile", () => {
   // never expires - reading it as a session cookie turns junk into a login
   test.each([
     ["nonnumeric", "not-a-number"],
-    ["negative", "-1"],
-    ["a float", "1.5"],
-    ["empty", ""]
+    ["negative", "-1"]
   ])("a %s expiry makes the row malformed, not live", async (_label, expiry) => {
     const manager = await managerWith(
       HEADER + cookieLine(".youtube.com", "SID", expiry) + "\n"
@@ -168,6 +166,37 @@ describe("inspectCookieFile", () => {
       youtube: 0,
       expired: 0,
       usable: false
+    })
+  })
+
+  // a float and an empty column used to be lumped in with the junk above. they
+  // are not junk to yt-dlp: its guard is /[0-9]+(?:\.[0-9]+)?/ and an absent
+  // expiry is how a session cookie is written. calling them malformed dropped
+  // rows the downloader would have used
+  test("a float expiry is a real expiry, truncated", async () => {
+    const manager = await managerWith(
+      HEADER + cookieLine(".youtube.com", "SID", "1.5") + "\n"
+    )
+
+    // 1 second past the epoch - read, and then long expired
+    expect(await manager.inspectCookieFile()).toEqual({
+      total: 1,
+      youtube: 1,
+      expired: 1,
+      usable: false
+    })
+  })
+
+  test("an empty expiry is a session cookie, which has not expired", async () => {
+    const manager = await managerWith(
+      HEADER + cookieLine(".youtube.com", "SID", "") + "\n"
+    )
+
+    expect(await manager.inspectCookieFile()).toEqual({
+      total: 1,
+      youtube: 1,
+      expired: 0,
+      usable: true
     })
   })
 
@@ -290,6 +319,76 @@ describe("the retired 'working' key", () => {
       extractionCheck: "skipped"
     })
     expect(manager.hasValidCookies()).toBe(false)
+  })
+})
+
+// what an import accepts, and what it writes
+//
+// the picker used to demand the long "# Netscape HTTP Cookie File" spelling
+// appear somewhere in the file. yt-dlp accepts the short form too and wants the
+// magic on line one, so a real export could be refused while a file that only
+// mentioned the header in a comment was let through.
+describe("importing", () => {
+  const live = () => String(nowSeconds() + HOUR)
+
+  async function emptyManager() {
+    const manager = await managerWith(HEADER)
+    await manager.clearCookies()
+
+    return manager
+  }
+
+  test("accepts the short header yt-dlp accepts", async () => {
+    const manager = await emptyManager()
+    const file = path.join(manager.cookieDir, "export.txt")
+
+    await fs.writeFile(
+      file,
+      `# HTTP Cookie File\n${cookieLine(".youtube.com", "SID", live())}\n`,
+      "utf8"
+    )
+
+    expect(await manager.importCookieFile(file)).toBe(true)
+
+    // left as it was rather than given a second header, which is the only
+    // observable difference between recognising the short form and repairing
+    // a file we failed to recognise
+    const written = await fs.readFile(manager.cookieFile, "utf8")
+    expect(written.split("\n")[0]).toBe("# HTTP Cookie File")
+  })
+
+  test("adds the magic line when the export has none", async () => {
+    const manager = await emptyManager()
+
+    expect(
+      await manager.importCookies(cookieLine(".youtube.com", "SID", live()) + "\n")
+    ).toBe(true)
+
+    // without it MozillaCookieJar raises for the whole file, so this is the
+    // difference between a jar and a jar yt-dlp will read
+    const written = await fs.readFile(manager.cookieFile, "utf8")
+    expect(written.split("\n")[0]).toBe("# Netscape HTTP Cookie File")
+  })
+
+  test("writes \\n line endings, whatever came in", async () => {
+    const manager = await emptyManager()
+    const crlf = (HEADER + cookieLine(".youtube.com", "SID", live()) + "\n").replace(
+      /\n/g,
+      "\r\n"
+    )
+
+    expect(await manager.importCookies(crlf)).toBe(true)
+    expect(await fs.readFile(manager.cookieFile, "utf8")).not.toContain("\r")
+  })
+
+  // giving json a netscape header would import "successfully" and hold nothing
+  test("refuses a json export the way yt-dlp names it", async () => {
+    const manager = await emptyManager()
+    const file = path.join(manager.cookieDir, "cookies.json")
+
+    await fs.writeFile(file, '[{"name": "SID", "domain": ".youtube.com"}]', "utf8")
+
+    await expect(manager.importCookieFile(file)).rejects.toThrow(/not JSON/)
   })
 })
 
