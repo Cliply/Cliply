@@ -11,8 +11,27 @@ const { APP_CONFIG } = require("../utils/constants")
 const {
   inspectCookieContent,
   hasNetscapeHeader,
-  parseCookieFile
+  isYouTubeDomain,
+  readJar,
+  JAR_DOMAIN_FLAG
 } = require("../utils/cookie-jar")
+
+/**
+ * a cookie jar is credentials, so it is written the way a private key is:
+ * owner only, on a directory nobody else can walk into. these were 0644 on an
+ * 0755 directory, which on a shared machine is a readable youtube login.
+ */
+const JAR_MODE = 0o600
+const JAR_DIR_MODE = 0o700
+
+/**
+ * cookie exports run to a few kilobytes; a megabyte is already absurd.
+ *
+ * the picker accepts any .txt, and the whole file is read into memory and
+ * copied several times over to normalize it. without a bound, picking a video
+ * by mistake hangs the main process rather than being told no.
+ */
+const MAX_JAR_BYTES = 1024 * 1024
 
 /**
  * the header yt-dlp writes itself, copied so an imported jar is spelled the way
@@ -91,7 +110,11 @@ class CookieManager {
   async initialize() {
     try {
       // create cookie directory if it doesn't exist
-      await fs.mkdir(this.cookieDir, { recursive: true })
+      await fs.mkdir(this.cookieDir, { recursive: true, mode: JAR_DIR_MODE })
+      // recursive mkdir leaves an existing directory's mode alone, and older
+      // builds made this one 0755 - so tighten it every start rather than only
+      // on the install that happens to create it
+      await fs.chmod(this.cookieDir, JAR_DIR_MODE).catch(() => {})
 
       // create empty cookie file if it doesn't exist
       await this.ensureCookieFile()
@@ -110,6 +133,8 @@ class CookieManager {
   async ensureCookieFile() {
     try {
       await fs.access(this.cookieFile)
+      // an existing jar from an older build is still 0644
+      await fs.chmod(this.cookieFile, JAR_MODE).catch(() => {})
     } catch (error) {
       // file doesn't exist, create empty one
       await this.createEmptyCookieFile()
@@ -118,12 +143,32 @@ class CookieManager {
 
   /**
    * create empty cookie file with proper netscape format
+   *
+   * throws rather than logging: this is how clearCookies() removes a login, and
+   * swallowing the failure let it report the credentials gone while they were
+   * still on disk.
    */
   async createEmptyCookieFile() {
+    await this.writeJar(NETSCAPE_HEADER)
+  }
+
+  /**
+   * replace the jar without ever leaving a half-written one behind
+   *
+   * a plain writeFile opens with O_TRUNC, so a failure part way through - a
+   * full disk, the process dying - destroys the old jar and leaves a truncated
+   * file in its place. Writing beside it and renaming makes the swap atomic:
+   * either the new jar is there or the old one still is.
+   */
+  async writeJar(content) {
+    const temp = `${this.cookieFile}.${process.pid}.tmp`
+
     try {
-      await fs.writeFile(this.cookieFile, NETSCAPE_HEADER, "utf8")
+      await fs.writeFile(temp, content, { encoding: "utf8", mode: JAR_MODE })
+      await fs.rename(temp, this.cookieFile)
     } catch (error) {
-      console.error("failed to create cookie file:", error)
+      await fs.unlink(temp).catch(() => {})
+      throw error
     }
   }
 
@@ -148,7 +193,8 @@ class CookieManager {
         expired: 0,
         hasSid: false,
         signedIn: false,
-        usable: false
+        usable: false,
+        loadError: null
       }
     }
   }
@@ -177,42 +223,53 @@ class CookieManager {
     const content = normalizeJar(cookieContent)
 
     /**
-     * refused before anything is written, and thrown rather than reported.
+     * everything that disqualifies a file, checked before anything is written.
      *
      * picking the wrong .txt used to overwrite the jar with it and then answer
      * "No cookies imported" - the same words an untouched install shows - so a
      * mistake that destroyed a working login was indistinguishable from one
-     * that did nothing. An import holding no cookie yt-dlp could read is not an
-     * import, so the file it would have replaced is left alone.
+     * that did nothing. Nothing below replaces the file it is refusing.
      *
-     * the bar is "is this a cookie file", not "is this a login": a jar of
-     * signed-out cookies is a real jar, imports, and says what it is.
+     * the bar is "is this a youtube cookie jar", not "is this a login": a jar
+     * of signed-out youtube cookies is a real jar, imports, and says what it
+     * is. A jar for some other site is not - it cannot help a youtube download
+     * and accepting it costs the user the login they already had.
      */
-    if (parseCookieFile(content).length === 0) {
+    const { error, cookies } = readJar(content)
+
+    if (error === JAR_DOMAIN_FLAG) {
+      throw new Error(
+        "That cookie file is malformed - a domain column disagrees with its own subdomain flag, and yt-dlp refuses the whole file. Export it again rather than editing it by hand."
+      )
+    }
+
+    if (cookies.length === 0) {
       throw new Error(
         "That file has no cookies in it. Export cookies.txt with the extension, then pick that file."
       )
     }
 
-    try {
-      // write to file
-      await fs.writeFile(this.cookieFile, content, "utf8")
-
-      // validate the imported cookies
-      this.isValid = await this.validateCookieFile()
-
-      // update status
-      await this.updateStatus({
-        lastImport: new Date().toISOString(),
-        valid: this.isValid,
-        size: content.length
-      })
-
-      return this.isValid
-    } catch (error) {
-      console.error("failed to import cookies:", error)
-      return false
+    if (!cookies.some((cookie) => isYouTubeDomain(cookie.domain))) {
+      throw new Error(
+        "That file has cookies, but none of them are YouTube's. Export cookies.txt while you're on youtube.com."
+      )
     }
+
+    // a failure past this point is real - a full disk, a permission problem -
+    // and used to be swallowed into "imported: false", which the ui showed as
+    // a successful import that merely wasn't a login. it throws now, so the
+    // user is told what actually happened
+    await this.writeJar(content)
+
+    this.isValid = await this.validateCookieFile()
+
+    await this.updateStatus({
+      lastImport: new Date().toISOString(),
+      valid: this.isValid,
+      size: content.length
+    })
+
+    return this.isValid
   }
 
   /**
@@ -222,6 +279,16 @@ class CookieManager {
    */
   async importCookieFile(filePath) {
     try {
+      // the picker accepts any .txt, so the size is checked before the file is
+      // pulled into memory rather than after
+      const { size } = await fs.stat(filePath)
+
+      if (size > MAX_JAR_BYTES) {
+        throw new Error(
+          "That file is far too big to be a cookie export. Pick the cookies.txt the extension saved."
+        )
+      }
+
       // read the cookie file
       const content = await fs.readFile(filePath, "utf8")
 
@@ -265,35 +332,71 @@ class CookieManager {
    * already re-reads it per operation, and both staleness modes need a fresh
    * read anyway (expiry is a function of the clock, not of the file).
    *
-   * @returns {boolean} whether the jar holds a live youtube cookie
+   * @returns {Object} the inspection, whatever the file turned out to be
    */
-  revalidate() {
+  inspectNow() {
     try {
-      this.isValid = inspectCookieContent(
-        readFileSync(this.cookieFile, "utf8")
-      ).usable
+      return inspectCookieContent(readFileSync(this.cookieFile, "utf8"))
     } catch {
       // missing or unreadable file - the same answer either way
-      this.isValid = false
+      return {
+        total: 0,
+        youtube: 0,
+        expired: 0,
+        hasSid: false,
+        signedIn: false,
+        usable: false,
+        loadError: null
+      }
     }
+  }
+
+  revalidate() {
+    this.isValid = this.inspectNow().usable
 
     return this.isValid
   }
 
   /**
    * get cookie file path for yt-dlp
-   * @returns {string|null} path to cookie file or null if invalid
+   *
+   * deliberately a lower bar than hasValidCookies(). Gating this on our own
+   * authentication test meant a jar yt-dlp would happily load and send - a
+   * partial export, a session mid-rotation - was silently withheld from the
+   * download, which is a decision that belongs to yt-dlp rather than to us.
+   * What we do withhold is a jar it cannot load at all, because --cookies on
+   * one of those aborts the run instead of downloading without them.
+   *
+   * @returns {string|null} path to cookie file, or null if there is no point
    */
   getCookieFilePath() {
-    return this.revalidate() ? this.cookieFile : null
+    const { loadError, youtube } = this.inspectNow()
+
+    return !loadError && youtube > 0 ? this.cookieFile : null
   }
 
   /**
-   * check if we have valid cookies
+   * is the user signed in, as yt-dlp would judge it?
+   *
+   * this is the question the ui asks, and it is narrower than the one above:
+   * cookies that authenticate, not cookies worth sending.
+   *
    * @returns {boolean} true if cookies are valid
    */
   hasValidCookies() {
     return this.revalidate()
+  }
+
+  /**
+   * does the jar hold youtube cookies at all, signed in or not?
+   *
+   * what analytics means by has_youtube_cookies, which is not the same as
+   * "is a login" and was reporting the narrower number.
+   *
+   * @returns {boolean}
+   */
+  hasYouTubeCookies() {
+    return this.inspectNow().youtube > 0
   }
 
   // testCookies() used to live here. It reported working: this.isValid with the
@@ -361,23 +464,22 @@ class CookieManager {
    * @returns {Promise<boolean>} success status
    */
   async clearCookies() {
-    try {
-      await this.createEmptyCookieFile()
-      this.isValid = false
+    // no catch: this is the one operation whose failure the user must not be
+    // told went through. it used to report the credentials removed whether or
+    // not the write landed, so a jar that could not be overwritten stayed on
+    // disk behind a ui that said it was gone
+    await this.createEmptyCookieFile()
+    this.isValid = false
 
-      await this.updateStatus({
-        lastClear: new Date().toISOString(),
-        valid: false,
-        cookiesLoaded: false,
-        extractionCheck: "skipped",
-        note: "No cookies imported"
-      })
+    await this.updateStatus({
+      lastClear: new Date().toISOString(),
+      valid: false,
+      cookiesLoaded: false,
+      extractionCheck: "skipped",
+      note: "No cookies imported"
+    })
 
-      return true
-    } catch (error) {
-      console.error("failed to clear cookies:", error)
-      return false
-    }
+    return true
   }
 
   /**
@@ -404,6 +506,10 @@ class CookieManager {
         // different things
         hasSid: inspection.hasSid,
         signedIn: inspection.signedIn,
+        // a jar yt-dlp refuses whole reads as an empty one otherwise, and
+        // "no cookies imported" is the wrong thing to say about a file that is
+        // sitting right there full of them
+        loadError: inspection.loadError ?? null,
         valid: this.isValid,
         path: this.cookieFile
       }
@@ -415,6 +521,7 @@ class CookieManager {
         cookieCount: 0,
         hasSid: false,
         signedIn: false,
+        loadError: null,
         valid: false,
         path: this.cookieFile,
         error: error.message

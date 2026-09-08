@@ -13,8 +13,14 @@ const CookieManager = require("../src/main/services/cookie-manager")
 const HEADER = "# Netscape HTTP Cookie File\n# This is a generated file! Do not edit.\n\n"
 
 // domain \t includeSubdomains \t path \t secure \t expiry \t name \t value
-function cookieLine(domain, name, expires) {
-  return [domain, "TRUE", "/", "TRUE", String(expires), name, "value"].join("\t")
+//
+// the flag follows the leading dot. hardcoding TRUE wrote fixtures that
+// http.cookiejar refuses outright - "music.youtube.com TRUE" is not a jar with
+// an odd cookie in it, it is a jar yt-dlp will not open
+function cookieLine(domain, name, expires, path = "/") {
+  const flag = domain.startsWith(".") ? "TRUE" : "FALSE"
+
+  return [domain, flag, path, "TRUE", String(expires), name, "value"].join("\t")
 }
 
 // the smallest jar yt-dlp calls a signed-in one: LOGIN_INFO alongside one of
@@ -63,7 +69,8 @@ describe("inspectCookieFile", () => {
       expired: 0,
       hasSid: true,
       signedIn: true,
-      usable: true
+      usable: true,
+      loadError: null
     })
   })
 
@@ -85,7 +92,8 @@ describe("inspectCookieFile", () => {
       expired: 0,
       hasSid: false,
       signedIn: false,
-      usable: false
+      usable: false,
+      loadError: null
     })
   })
 
@@ -116,7 +124,8 @@ describe("inspectCookieFile", () => {
       expired: 0,
       hasSid: false,
       signedIn: false,
-      usable: false
+      usable: false,
+      loadError: null
     })
   })
 
@@ -221,7 +230,8 @@ describe("inspectCookieFile", () => {
       expired: 0,
       hasSid: false,
       signedIn: false,
-      usable: false
+      usable: false,
+      loadError: null
     })
   })
 
@@ -241,7 +251,8 @@ describe("inspectCookieFile", () => {
       expired: 1,
       hasSid: false,
       signedIn: false,
-      usable: false
+      usable: false,
+      loadError: null
     })
   })
 
@@ -254,7 +265,8 @@ describe("inspectCookieFile", () => {
       expired: 0,
       hasSid: true,
       signedIn: true,
-      usable: true
+      usable: true,
+      loadError: null
     })
   })
 
@@ -283,6 +295,11 @@ describe("inspectCookieFile", () => {
     })
   })
 
+  // two separate questions, and this fixture is exactly where they part. a
+  // host-only music.youtube.com cookie is youtube's - it counts - but
+  // _has_auth_cookies asks the jar about https://www.youtube.com, and a
+  // host-only cookie for another subdomain is never sent there. Counting it as
+  // a login reported a signed-in user to whom yt-dlp would send nothing.
   test("subdomains of youtube.com count, lookalikes do not", async () => {
     const manager = await managerWith(
       HEADER +
@@ -292,6 +309,17 @@ describe("inspectCookieFile", () => {
 
     expect(await manager.inspectCookieFile()).toMatchObject({
       total: 4,
+      youtube: 2,
+      usable: false
+    })
+  })
+
+  test("the same login on .youtube.com is sent to www, and is a login", async () => {
+    const manager = await managerWith(
+      HEADER + loginPair(nowSeconds() + HOUR, ".youtube.com")
+    )
+
+    expect(await manager.inspectCookieFile()).toMatchObject({
       youtube: 2,
       usable: true
     })
@@ -307,12 +335,11 @@ describe("validateCookieFile", () => {
     expect(await stale.validateCookieFile()).toBe(false)
   })
 
-  test("refresh updates hasValidCookies and the cookie path", async () => {
+  test("refresh notices a jar that stopped being a login", async () => {
     const manager = await managerWith(HEADER + loginPair(nowSeconds() - HOUR))
 
     await manager.refresh()
     expect(manager.hasValidCookies()).toBe(false)
-    expect(manager.getCookieFilePath()).toBeNull()
 
     await fs.writeFile(
       manager.cookieFile,
@@ -322,7 +349,64 @@ describe("validateCookieFile", () => {
 
     await manager.refresh()
     expect(manager.hasValidCookies()).toBe(true)
+  })
+})
+
+/**
+ * the two questions the manager answers, which are not the same question
+ *
+ * gating --cookies on our own authentication test meant a jar yt-dlp would
+ * happily load and send - a partial export, a session part way through
+ * rotating - was silently withheld from the download. That call belongs to
+ * yt-dlp. What we do withhold is a jar it cannot open at all, because
+ * --cookies on one of those aborts the run rather than downloading without it.
+ */
+describe("what gets passed to --cookies, versus what counts as a login", () => {
+  test("a signed-in jar is both", async () => {
+    const manager = await managerWith(HEADER + loginPair(nowSeconds() + HOUR))
+
+    expect(manager.hasValidCookies()).toBe(true)
     expect(manager.getCookieFilePath()).toBe(manager.cookieFile)
+  })
+
+  test("an expired jar is still worth sending, and is not a login", async () => {
+    const manager = await managerWith(HEADER + loginPair(nowSeconds() - HOUR))
+
+    expect(manager.hasValidCookies()).toBe(false)
+    expect(manager.getCookieFilePath()).toBe(manager.cookieFile)
+  })
+
+  test("a signed-out visitor jar is sent too", async () => {
+    const manager = await managerWith(
+      HEADER + cookieLine(".youtube.com", "PREF", nowSeconds() + HOUR) + "\n"
+    )
+
+    expect(manager.hasValidCookies()).toBe(false)
+    expect(manager.getCookieFilePath()).toBe(manager.cookieFile)
+  })
+
+  test("a jar with nothing of youtube's in it is not worth sending", async () => {
+    const manager = await managerWith(
+      HEADER + cookieLine(".example.com", "session", nowSeconds() + HOUR) + "\n"
+    )
+
+    expect(manager.getCookieFilePath()).toBeNull()
+  })
+
+  test("an empty jar is not worth sending", async () => {
+    const manager = await managerWith(HEADER)
+
+    expect(manager.getCookieFilePath()).toBeNull()
+  })
+
+  // the one that would take the whole download down with it
+  test("a jar yt-dlp would refuse to open is never sent", async () => {
+    const manager = await managerWith(
+      HEADER + ".youtube.com\tFALSE\t/\tTRUE\t1999999999\tLOGIN_INFO\tv\n"
+    )
+
+    expect(manager.getCookieFilePath()).toBeNull()
+    expect(manager.hasValidCookies()).toBe(false)
   })
 })
 
@@ -496,5 +580,191 @@ describe("refusing a file that is not a cookie jar", () => {
       )
     ).resolves.toBe(false)
     expect(await manager.inspectCookieFile()).toMatchObject({ youtube: 1, usable: false })
+  })
+})
+
+/**
+ * the guard is about protecting the jar that is already there
+ *
+ * "has at least one cookie in it" was too low a bar. The likeliest wrong pick
+ * is not a shopping list - it is a perfectly valid cookies.txt exported while
+ * the user was on some other site, and that sailed through the check and
+ * replaced a working youtube login with cookies for example.com.
+ */
+describe("an import that cannot help must not replace one that can", () => {
+  const live = () => String(nowSeconds() + HOUR)
+
+  async function withLogin() {
+    const manager = await managerWith(HEADER + loginPair(live()))
+    expect(await manager.validateCookieFile()).toBe(true)
+    return manager
+  }
+
+  test("a valid jar for another site is refused by name", async () => {
+    const manager = await withLogin()
+
+    await expect(
+      manager.importCookies(
+        HEADER + cookieLine(".example.com", "session", live()) + "\n"
+      )
+    ).rejects.toThrow(/none of them are YouTube's/i)
+  })
+
+  test("and the youtube login it would have replaced is untouched", async () => {
+    const manager = await withLogin()
+    const before = await fs.readFile(manager.cookieFile, "utf8")
+
+    await expect(
+      manager.importCookies(
+        HEADER + cookieLine(".example.com", "session", live()) + "\n"
+      )
+    ).rejects.toThrow()
+
+    expect(await fs.readFile(manager.cookieFile, "utf8")).toBe(before)
+    expect(await manager.validateCookieFile()).toBe(true)
+  })
+
+  // this one would have imported "successfully" and then aborted every
+  // download, which is worse than being refused
+  test("a jar yt-dlp would refuse to open is refused here first", async () => {
+    const manager = await withLogin()
+    const before = await fs.readFile(manager.cookieFile, "utf8")
+
+    await expect(
+      manager.importCookies(
+        HEADER + ".youtube.com\tFALSE\t/\tTRUE\t1999999999\tLOGIN_INFO\tv\n"
+      )
+    ).rejects.toThrow(/malformed/i)
+
+    expect(await fs.readFile(manager.cookieFile, "utf8")).toBe(before)
+  })
+
+  test("a file too large to be a cookie export never reaches the jar", async () => {
+    const manager = await withLogin()
+    const before = await fs.readFile(manager.cookieFile, "utf8")
+    const huge = path.join(manager.cookieDir, "huge.txt")
+
+    await fs.writeFile(huge, "x".repeat(1024 * 1024 + 1), "utf8")
+
+    await expect(manager.importCookieFile(huge)).rejects.toThrow(/too big/i)
+    expect(await fs.readFile(manager.cookieFile, "utf8")).toBe(before)
+  })
+})
+
+/**
+ * a plain writeFile opens with O_TRUNC, so a failure part way through destroys
+ * the jar it was replacing. Writing beside it and renaming means the old jar
+ * survives anything that goes wrong.
+ */
+describe("replacing the jar is all-or-nothing", () => {
+  const live = () => String(nowSeconds() + HOUR)
+
+  test("a write that fails leaves the previous login in place", async () => {
+    const manager = await managerWith(HEADER + loginPair(live()))
+    const before = await fs.readFile(manager.cookieFile, "utf8")
+
+    // the rename is the moment of replacement; failing it stands in for every
+    // way the write can die after the old file would already have been truncated
+    const rename = jest
+      .spyOn(require("fs").promises, "rename")
+      .mockRejectedValueOnce(new Error("ENOSPC: no space left on device"))
+
+    await expect(
+      manager.importCookies(HEADER + loginPair(live(), ".youtube.com"))
+    ).rejects.toThrow(/ENOSPC/)
+
+    expect(await fs.readFile(manager.cookieFile, "utf8")).toBe(before)
+    expect(await manager.validateCookieFile()).toBe(true)
+
+    rename.mockRestore()
+  })
+
+  test("and it does not leave its scratch file behind", async () => {
+    const manager = await managerWith(HEADER + loginPair(live()))
+
+    const rename = jest
+      .spyOn(require("fs").promises, "rename")
+      .mockRejectedValueOnce(new Error("ENOSPC"))
+
+    await expect(manager.importCookies(HEADER + loginPair(live()))).rejects.toThrow()
+
+    const left = await fs.readdir(manager.cookieDir)
+    expect(left.filter((name) => name.endsWith(".tmp"))).toEqual([])
+
+    rename.mockRestore()
+  })
+
+  // an import that lands but cannot be written to disk used to resolve as
+  // "imported, just not a login", which is a sentence about a file that is not
+  // there
+  test("an i/o failure is not reported as a successful import", async () => {
+    const manager = await managerWith(HEADER)
+
+    const write = jest
+      .spyOn(require("fs").promises, "writeFile")
+      .mockRejectedValueOnce(new Error("EACCES: permission denied"))
+
+    await expect(manager.importCookies(HEADER + loginPair(live()))).rejects.toThrow(
+      /EACCES/
+    )
+
+    write.mockRestore()
+  })
+})
+
+// a cookie jar is a youtube login in a text file, so it is written the way a
+// private key is. these were 0644 on an 0755 directory
+describe("the jar is not readable by anyone else", () => {
+  const mode = async (target) => (await fs.stat(target)).mode & 0o777
+
+  test("an imported jar is owner-only", async () => {
+    const manager = await managerWith(HEADER)
+
+    await manager.importCookies(HEADER + loginPair(String(nowSeconds() + HOUR)))
+
+    expect(await mode(manager.cookieFile)).toBe(0o600)
+  })
+
+  test("clearing it does not loosen it again", async () => {
+    const manager = await managerWith(HEADER)
+
+    await manager.importCookies(HEADER + loginPair(String(nowSeconds() + HOUR)))
+    await manager.clearCookies()
+
+    expect(await mode(manager.cookieFile)).toBe(0o600)
+  })
+
+  test("an existing jar from an older build is tightened on startup", async () => {
+    const manager = await managerWith(HEADER + loginPair(String(nowSeconds() + HOUR)))
+
+    await fs.chmod(manager.cookieFile, 0o644)
+    await manager.ensureCookieFile()
+
+    expect(await mode(manager.cookieFile)).toBe(0o600)
+  })
+})
+
+// removing a login is the one operation whose failure must not be reported as
+// success - the credentials stay on disk behind a screen saying they are gone
+describe("clearing", () => {
+  test("empties the jar", async () => {
+    const manager = await managerWith(HEADER + loginPair(String(nowSeconds() + HOUR)))
+
+    await expect(manager.clearCookies()).resolves.toBe(true)
+    expect(await manager.validateCookieFile()).toBe(false)
+  })
+
+  test("a write that fails is raised, not swallowed", async () => {
+    const manager = await managerWith(HEADER + loginPair(String(nowSeconds() + HOUR)))
+
+    const write = jest
+      .spyOn(require("fs").promises, "writeFile")
+      .mockRejectedValueOnce(new Error("EROFS: read-only file system"))
+
+    await expect(manager.clearCookies()).rejects.toThrow(/EROFS/)
+    // and the jar really is still there, which is what the caller now hears
+    expect(await manager.validateCookieFile()).toBe(true)
+
+    write.mockRestore()
   })
 })
