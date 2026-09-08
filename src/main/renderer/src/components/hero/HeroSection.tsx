@@ -1,6 +1,7 @@
 import { MenuVertical } from "@/components/ui/menu-vertical"
 import { ModeToggle } from "@/components/ui/mode-toggle"
 import { updaterApi } from "@/lib/api"
+import { cookieActions } from "@/lib/cookieStore"
 import { motion } from "framer-motion"
 import { Link } from "react-router-dom"
 import { toast } from "sonner"
@@ -30,6 +31,10 @@ export function HeroSection() {
             {
               label: "update",
               onClick: handleCheckForUpdates
+            },
+            {
+              label: "cookies",
+              onClick: () => cookieActions.open()
             },
             {
               label: "donate",

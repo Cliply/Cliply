@@ -11,7 +11,10 @@ import {
 import { usePinterestStore } from "@/lib/pinterestStore"
 import { useAppStore, type Platform } from "@/lib/store"
 import { useTikTokStore } from "@/lib/tiktokStore"
-import { showServerOverwhelmedToast } from "@/lib/toast-utils"
+import {
+  showBotDetectionToast,
+  showServerOverwhelmedToast
+} from "@/lib/toast-utils"
 import { useYouTubeStore } from "@/lib/youtubeStore"
 
 interface MediaSearchOptions {
@@ -133,7 +136,16 @@ function handleSearchError(
   const errorMessage =
     error instanceof Error ? error.message : config.errorMessages.genericFail
 
-  if (errorMessage.includes(config.errorMessages.invalidUrl)) {
+  // checked first, and on the category rather than the wording: this is the one
+  // failure here the user can actually fix, and main already decided which it
+  // is. matching on text would put it behind whichever generic branch happened
+  // to catch the sentence first
+  if (
+    error instanceof DownloadError &&
+    error.category === "BOT_DETECTION"
+  ) {
+    showBotDetectionToast(errorMessage)
+  } else if (errorMessage.includes(config.errorMessages.invalidUrl)) {
     toast.error(config.errorMessages.invalidUrlToast)
     form.setError("url", { message: config.errorMessages.invalidUrl })
   } else if (

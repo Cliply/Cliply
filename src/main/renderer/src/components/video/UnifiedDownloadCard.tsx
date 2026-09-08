@@ -307,7 +307,11 @@ function PinterestDownloadCard({
           downloadType: "video",
           videoUrl: url
         })
-        showDownloadErrorToast("Download failed", message)
+        showDownloadErrorToast(
+          "Download failed",
+          message,
+          error instanceof DownloadError ? error.category : undefined
+        )
       }
     } finally {
       setIsDownloading(false)
@@ -361,7 +365,11 @@ function TikTokDownloadCard({
           downloadType: "video",
           videoUrl: url
         })
-        showDownloadErrorToast("Download failed", message)
+        showDownloadErrorToast(
+          "Download failed",
+          message,
+          error instanceof DownloadError ? error.category : undefined
+        )
       }
     } finally {
       setIsDownloading(false)

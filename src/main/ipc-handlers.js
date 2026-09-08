@@ -1209,11 +1209,25 @@ class IPCHandlers {
     try {
       const status = await this.cookieManager.getStatus()
       const fileInfo = await this.cookieManager.getFileInfo()
+      const usable = this.cookieManager.hasValidCookies()
 
       return this.createSuccess({
         status,
         fileInfo,
-        hasValidCookies: this.cookieManager.hasValidCookies()
+        hasValidCookies: usable,
+        // the sentence rather than the ingredients: cookieJarProblem already
+        // knows which way a jar is unusable, and a second copy of that in the
+        // renderer is the drift the shared parser exists to prevent. an
+        // unreadable file reports zero of everything, which is the "nothing
+        // imported" branch and the right thing to say
+        problem: usable
+          ? null
+          : cookieJarProblem({
+              total: fileInfo.cookieCount,
+              youtube: fileInfo.youtubeCookieCount || 0,
+              expired: fileInfo.expiredCookieCount || 0,
+              signedIn: fileInfo.signedIn
+            })
       })
     } catch (error) {
       console.error("Get cookie status failed:", error.message)

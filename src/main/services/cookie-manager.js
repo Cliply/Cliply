@@ -371,6 +371,10 @@ class CookieManager {
         cookieCount: inspection.total,
         youtubeCookieCount: inspection.youtube,
         expiredCookieCount: inspection.expired,
+        // carried through so the ui can tell "you were never signed in" from
+        // "youtube signed you out", which read the same to a user and ask for
+        // different things
+        signedIn: inspection.signedIn,
         valid: this.isValid,
         path: this.cookieFile
       }
@@ -380,6 +384,7 @@ class CookieManager {
         size: 0,
         modified: null,
         cookieCount: 0,
+        signedIn: false,
         valid: false,
         path: this.cookieFile,
         error: error.message
