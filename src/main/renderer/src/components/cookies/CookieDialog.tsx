@@ -161,12 +161,26 @@ export function CookieDialog() {
                 ? `Signed in · ${status?.fileInfo.youtubeCookieCount ?? 0} cookies`
                 : (status?.problem ?? "Not imported")}
             </span>
-            {signedIn && daysAgo(status?.status?.lastImport) && (
-              <span className="ml-auto text-xs text-slate-400 dark:text-slate-500">
+            {imported && daysAgo(status?.status?.lastImport) && (
+              <span className="ml-auto shrink-0 text-xs text-slate-400 dark:text-slate-500">
                 {daysAgo(status?.status?.lastImport)}
               </span>
             )}
           </div>
+
+          {/* a jar that stopped working is not the same as no jar, and used
+              to render identically to one - same layout, same button, no trace
+              that an import ever happened. that reads as "it deleted them" */}
+          {imported && !signedIn && (
+            <p className="text-sm text-slate-600 dark:text-slate-300">
+              The file you imported is still here
+              {status?.fileInfo.youtubeCookieCount
+                ? ` (${status.fileInfo.youtubeCookieCount} cookies)`
+                : ""}
+              , it just stopped working. Nothing was deleted — export a fresh
+              one and import it over the top.
+            </p>
+          )}
 
           {/* the instructions are the empty state, not permanent furniture -
               once the cookies work they are noise, and the dialog is better
@@ -213,7 +227,9 @@ export function CookieDialog() {
                 ? "Importing…"
                 : signedIn
                   ? "Replace…"
-                  : "Import cookies…"}
+                  : imported
+                    ? "Import again…"
+                    : "Import cookies…"}
             </Button>
 
             {imported && (

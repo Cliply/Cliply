@@ -37,6 +37,7 @@ function status(overrides = {}) {
       cookieCount: 0,
       youtubeCookieCount: 0,
       expiredCookieCount: 0,
+      hasSid: false,
       signedIn: false,
       valid: false
     },
@@ -82,7 +83,34 @@ describe("CookieDialog", () => {
     await waitFor(() => expect(screen.getByText("Not imported")).toBeTruthy())
     expect(screen.getByText(/close the private window/i)).toBeTruthy()
     expect(screen.getByText(/throwaway account/i)).toBeTruthy()
-    expect(screen.getByText(/Import cookies/)).toBeTruthy()
+    expect(screen.getByText("Import cookies…")).toBeTruthy()
+    // nothing on disk, so nothing to reassure anyone about
+    expect(screen.queryByText(/Nothing was deleted/)).toBeNull()
+  })
+
+  // a jar that stopped working used to render exactly like one that never
+  // existed: same layout, same button label, no timestamp, no count. The only
+  // reasonable reading of that is "pressing Test deleted my cookies"
+  test("a jar that stopped working still shows that it was imported", async () => {
+    getStatus.mockResolvedValue(
+      status({
+        problem: "YouTube ended this session - export your cookies again",
+        status: { lastImport: new Date(Date.now() - 2 * 86400000).toISOString() },
+        fileInfo: { ...status().fileInfo, cookieCount: 12, youtubeCookieCount: 12, hasSid: true }
+      })
+    )
+
+    await open()
+
+    await waitFor(() =>
+      expect(screen.getByText(/YouTube ended this session/)).toBeTruthy()
+    )
+    // the three things that say "your file is still there"
+    expect(screen.getByText(/Nothing was deleted/)).toBeTruthy()
+    expect(screen.getByText(/12 cookies/)).toBeTruthy()
+    expect(screen.getByText("imported 2 days ago")).toBeTruthy()
+    // and a button that reads as a redo rather than a first run
+    expect(screen.getByText("Import again…")).toBeTruthy()
   })
 
   // the two failures that look identical to a user and mean different things.
