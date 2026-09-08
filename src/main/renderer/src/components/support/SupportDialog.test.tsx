@@ -58,13 +58,17 @@ describe("SupportDialog", () => {
     )
   })
 
-  test("says it will stop asking, and means it", async () => {
+  test("makes the ask once, in one line", async () => {
     await mount()
     listener?.({ count: 5 })
 
     await waitFor(() =>
-      expect(screen.getByText(/won't keep asking/i)).toBeTruthy()
+      expect(screen.getByText(/a coffee helps/i)).toBeTruthy()
     )
+    // the ask no longer explains itself. one that does sounds like it expects
+    // to be turned down, and the cadence already keeps the promise the words
+    // were making
+    expect(screen.queryByText(/won't keep asking/i)).toBeNull()
   })
 
   test("declining is a real button, and closes it", async () => {

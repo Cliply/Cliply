@@ -57,9 +57,12 @@ export function SupportDialog() {
           </DialogDescription>
         </DialogHeader>
 
+        {/* the reassurance came out. "this won't keep asking" and "that's
+            genuinely fine" were the ask explaining itself, and an ask that
+            explains itself sounds like it expects to be turned down. one line
+            and two buttons says the same thing by not going on about it */}
         <p className="text-sm text-slate-600 dark:text-slate-300">
-          if it&apos;s saved you some time, a coffee helps. if not, that&apos;s
-          genuinely fine, and this won&apos;t keep asking.
+          if it saved you some time, a coffee helps.
         </p>
 
         <div className="flex items-center gap-2">
