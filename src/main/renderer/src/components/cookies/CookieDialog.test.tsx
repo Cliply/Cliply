@@ -18,6 +18,8 @@ const importFile = vi.fn()
 const testCookies = vi.fn()
 const clearCookies = vi.fn()
 
+const openExternal = vi.fn(async () => true)
+
 vi.mock("@/lib/api", () => ({
   cookiesApi: {
     getStatus: () => getStatus(),
@@ -25,7 +27,7 @@ vi.mock("@/lib/api", () => ({
     test: () => testCookies(),
     clear: () => clearCookies()
   },
-  systemApi: { openExternal: vi.fn(async () => true) }
+  systemApi: { openExternal: (...a: unknown[]) => openExternal(...(a as [])) }
 }))
 const toastPlain = vi.fn()
 const toastWarning = vi.fn()
@@ -73,6 +75,7 @@ beforeEach(() => {
   toastPlain.mockClear()
   toastWarning.mockClear()
   toastError.mockClear()
+  openExternal.mockClear()
 })
 
 afterEach(cleanup)
@@ -101,7 +104,9 @@ describe("CookieDialog", () => {
 
     await waitFor(() => expect(screen.getByText("nothing imported yet")).toBeTruthy())
     expect(screen.getByText(/close the private window/i)).toBeTruthy()
-    expect(screen.getByText(/throwaway account/i)).toBeTruthy()
+    // the account warning moved onto the step it is about, rather than sitting
+    // apart with an amber bar down its side
+    expect(screen.getByText(/spare account/i)).toBeTruthy()
     expect(screen.getByText("import cookies…")).toBeTruthy()
     // nothing on disk, so nothing to reassure anyone about
     expect(screen.queryByText(/nothing got deleted/)).toBeNull()
@@ -265,5 +270,91 @@ describe("removing the cookies", () => {
     await waitFor(() =>
       expect(screen.getByText("remove").closest("button")?.disabled).toBe(false)
     )
+  })
+})
+
+/**
+ * the reassurance is the feature, not decoration
+ *
+ * "sign in to a youtube downloader" is a sentence people are right to hesitate
+ * over, and the answer to it - you are signing in to youtube, in your browser,
+ * and the file never leaves the machine - has to be on screen before the ask.
+ */
+describe("what the dialog promises about the file", () => {
+  test.each([
+    [/not signing in to cliply/i],
+    [/stays on this device/i],
+    [/no server to send it to/i],
+    [/deleted off your disk/i]
+  ])("says %s whether or not cookies are imported", async (phrase) => {
+    getStatus.mockResolvedValue(status())
+
+    await open()
+
+    await waitFor(() => expect(screen.getByText(phrase)).toBeTruthy())
+  })
+
+  // it would be a strange kind of reassurance that disappeared the moment
+  // somebody acted on it
+  test("and keeps saying it once a jar is imported", async () => {
+    getStatus.mockResolvedValue(
+      status({
+        hasValidCookies: true,
+        fileInfo: { ...status().fileInfo, cookieCount: 22, youtubeCookieCount: 22, signedIn: true, valid: true }
+      })
+    )
+
+    await open()
+
+    await waitFor(() => expect(screen.getByText(/stays on this device/i)).toBeTruthy())
+    expect(screen.getByText(/not signing in to cliply/i)).toBeTruthy()
+  })
+})
+
+/**
+ * robots.txt is copied, never opened
+ *
+ * openExternal hands a url to the *default* browser, which opens a normal
+ * window - undoing step 2, which just spent a sentence explaining why the
+ * private window is the thing keeping these cookies alive. So the address goes
+ * to the clipboard, to be pasted into the window they already have open.
+ */
+describe("the robots.txt address", () => {
+  test("goes to the clipboard rather than to a browser", async () => {
+    const writeText = vi.fn(async () => undefined)
+    Object.assign(navigator, { clipboard: { writeText } })
+    getStatus.mockResolvedValue(status())
+
+    await open()
+    await waitFor(() => expect(screen.getByText("youtube.com/robots.txt")).toBeTruthy())
+    screen.getByText("youtube.com/robots.txt").click()
+
+    await waitFor(() =>
+      expect(writeText).toHaveBeenCalledWith("https://www.youtube.com/robots.txt")
+    )
+    // the whole point: no browser was opened
+    expect(openExternal).not.toHaveBeenCalled()
+  })
+
+  test("and says so, so the click does not look like it did nothing", async () => {
+    Object.assign(navigator, { clipboard: { writeText: vi.fn(async () => undefined) } })
+    getStatus.mockResolvedValue(status())
+
+    await open()
+    await waitFor(() => expect(screen.getByText("click to copy")).toBeTruthy())
+    screen.getByText("youtube.com/robots.txt").click()
+
+    await waitFor(() => expect(screen.getByText(/copied, paste it there/)).toBeTruthy())
+  })
+
+  // the extension links are the opposite case, and must still open a browser
+  test("the extension links still open a browser", async () => {
+    getStatus.mockResolvedValue(status())
+
+    await open()
+    await waitFor(() => expect(screen.getByText("get cookies.txt LOCALLY")).toBeTruthy())
+    screen.getByText("get cookies.txt LOCALLY").click()
+
+    await waitFor(() => expect(openExternal).toHaveBeenCalled())
   })
 })

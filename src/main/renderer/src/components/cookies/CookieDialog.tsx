@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { toast } from "sonner"
-import { Cookie } from "lucide-react"
+import { Check, Cookie, Copy, HardDrive, KeyRound, Trash2 } from "lucide-react"
 import { cookiesApi, systemApi, type CookieStatus } from "@/lib/api"
 import { useCookieStore } from "@/lib/cookieStore"
 import {
@@ -24,6 +24,16 @@ const FIREFOX_EXTENSION =
 const YTDLP_COOKIE_GUIDE =
   "https://github.com/yt-dlp/yt-dlp/wiki/Extractors#exporting-youtube-cookies"
 
+/**
+ * copied rather than opened, and that is not a shortcut we failed to take
+ *
+ * openExternal hands the url to the *default* browser, which opens a normal
+ * window - the exact thing step 2 just talked them out of. A copy button lands
+ * the address in the private window they already have open, which is the only
+ * place it does any good.
+ */
+const ROBOTS_URL = "https://www.youtube.com/robots.txt"
+
 function daysAgo(iso?: string | null): string | null {
   if (!iso) return null
 
@@ -41,6 +51,7 @@ export function CookieDialog() {
   const { isOpen, close } = useCookieStore()
   const [status, setStatus] = useState<CookieStatus | null>(null)
   const [busy, setBusy] = useState<"import" | "test" | "clear" | null>(null)
+  const [copied, setCopied] = useState(false)
   // radix focuses the first tabbable node, which here is the extension link in
   // step 1 - so the dialog opened with a ring around a link rather than around
   // the thing the user came to do
@@ -157,8 +168,19 @@ export function CookieDialog() {
     systemApi.openExternal(url)
   }
 
-  const cardClass =
-    "rounded-xl border border-slate-200 bg-slate-50/80 p-3 dark:border-slate-700/60 dark:bg-slate-800/50"
+  const copyRobots = async () => {
+    try {
+      await navigator.clipboard.writeText(ROBOTS_URL)
+      setCopied(true)
+      window.setTimeout(() => setCopied(false), 1600)
+    } catch {
+      // clipboard is best-effort, and the address is on screen to type
+      toast.error("couldn't copy that", {
+        description: "type youtube.com/robots.txt into the private window."
+      })
+    }
+  }
+
   const linkClass =
     "text-cyan-600 underline underline-offset-2 hover:text-cyan-500 dark:text-cyan-400"
 
@@ -185,10 +207,29 @@ export function CookieDialog() {
             </DialogTitle>
           </div>
           <DialogDescription className="text-slate-500 dark:text-slate-400">
-            only needed when youtube stops trusting this machine. signing in
-            means it judges the account, not your connection.
+            youtube sometimes decides this machine looks like a bot, usually
+            because of your network rather than anything you did. a cookie file
+            from your own browser is how you tell it otherwise.
           </DialogDescription>
         </DialogHeader>
+
+        {/* before the ask, not after it. someone who is uneasy about handing
+            over a youtube session has already decided by the time they reach a
+            footnote, so the three things that answer the worry go up here and
+            stay put whether or not there is a jar yet */}
+        <ul className="space-y-2 rounded-xl bg-cyan-50/70 p-3 text-sm text-slate-600 dark:bg-cyan-950/20 dark:text-slate-300">
+          <Assurance icon={KeyRound}>
+            you&apos;re not signing in to cliply. there&apos;s nothing here to
+            sign in to. you sign in to youtube in your own browser, and we read
+            the file it hands you.
+          </Assurance>
+          <Assurance icon={HardDrive}>
+            that file stays on this device. cliply has no server to send it to.
+          </Assurance>
+          <Assurance icon={Trash2}>
+            press remove and it&apos;s deleted off your disk.
+          </Assurance>
+        </ul>
 
         <div className="space-y-3">
           <div className="flex items-center gap-2.5 border-b border-slate-200 pb-3 text-sm dark:border-slate-700/60">
@@ -233,17 +274,11 @@ export function CookieDialog() {
               for losing them */}
           {!signedIn && (
             <>
-              {/* the amber bar down the side was the only thing on screen
-                  shouting, and a coloured edge on one side of a block reads as
-                  decoration rather than as a warning. the weight carries it */}
-              <p className="text-sm text-slate-600 dark:text-slate-300">
-                <span className="font-medium text-slate-900 dark:text-white">
-                  use a throwaway account.
-                </span>{" "}
-                youtube does ban accounts caught using downloaders.
-              </p>
-
-              <ol className={cn(cardClass, "space-y-2 text-sm")}>
+              {/* the throwaway-account warning used to sit on its own with an
+                  amber bar down the side, shouting. it belongs with the step it
+                  is actually about, which is also where someone is deciding
+                  which account to use */}
+              <ol className="space-y-3 text-sm">
                 <Step n={1}>
                   install{" "}
                   <button className={linkClass} onClick={openLink(CHROME_EXTENSION)}>
@@ -255,19 +290,43 @@ export function CookieDialog() {
                   </button>{" "}
                   (firefox)
                 </Step>
-                <Step n={2}>
-                  open a <Em>private window</Em> and sign in to youtube
+
+                <Step
+                  n={2}
+                  note="use a spare account if you have one. youtube has been known to ban accounts it catches using downloaders."
+                >
+                  open a <Em>private window</Em> and sign in to youtube there
                 </Step>
-                <Step n={3}>
-                  in that same tab, head to{" "}
-                  <code className="rounded bg-slate-200/70 px-1 py-0.5 text-xs text-cyan-700 dark:bg-slate-900/60 dark:text-cyan-400">
+
+                <Step
+                  n={3}
+                  note="parks the tab somewhere youtube isn't refreshing your session."
+                >
+                  in that same tab, go to{" "}
+                  <button
+                    onClick={copyRobots}
+                    className="inline-flex items-center gap-1.5 rounded bg-slate-200/70 px-1.5 py-0.5 align-middle text-xs text-cyan-700 transition-colors hover:bg-slate-200 dark:bg-slate-900/60 dark:text-cyan-400 dark:hover:bg-slate-900"
+                  >
                     youtube.com/robots.txt
-                  </code>
+                    {copied ? (
+                      <Check className="h-3 w-3" />
+                    ) : (
+                      <Copy className="h-3 w-3 opacity-60" />
+                    )}
+                  </button>{" "}
+                  <span className="text-xs text-slate-400 dark:text-slate-500">
+                    {copied ? "copied, paste it there" : "click to copy"}
+                  </span>
                 </Step>
-                <Step n={4}>
+
+                <Step
+                  n={4}
+                  note="this is the part that keeps them working. youtube expires cookies from tabs you leave open, so a window you close is a session it stops touching."
+                >
                   export the cookies, then <Em>close the private window</Em>
                 </Step>
-                <Step n={5}>import the file below</Step>
+
+                <Step n={5}>import that file here</Step>
               </ol>
             </>
           )}
@@ -310,10 +369,9 @@ export function CookieDialog() {
               "youtube rotates these out eventually. when it does, cliply will say so right here."
             ) : (
               <>
-                closing the private window is what keeps them working, youtube
-                expires cookies from tabs you leave open.{" "}
+                these steps are yt-dlp&apos;s own, we didn&apos;t make them up.{" "}
                 <button className={linkClass} onClick={openLink(YTDLP_COOKIE_GUIDE)}>
-                  why?
+                  read theirs
                 </button>
               </>
             )}
@@ -324,13 +382,53 @@ export function CookieDialog() {
   )
 }
 
-function Step({ n, children }: { n: number; children: React.ReactNode }) {
+/**
+ * one reassurance, sitting on the worry it answers
+ *
+ * plain rows rather than another bordered card: the steps below are already a
+ * block, and two stacked panels is the shape of a form rather than of somebody
+ * explaining something.
+ */
+function Assurance({
+  icon: Icon,
+  children
+}: {
+  icon: typeof KeyRound
+  children: React.ReactNode
+}) {
+  return (
+    <li className="flex gap-2.5">
+      <Icon className="mt-0.5 h-3.5 w-3.5 shrink-0 text-cyan-600 dark:text-cyan-400" />
+      <span>{children}</span>
+    </li>
+  )
+}
+
+function Step({
+  n,
+  note,
+  children
+}: {
+  n: number
+  note?: string
+  children: React.ReactNode
+}) {
   return (
     <li className="flex gap-2.5 text-slate-600 dark:text-slate-300">
-      <span className="w-3 shrink-0 text-xs text-slate-400 tabular-nums dark:text-slate-600">
+      <span className="mt-0.5 w-3 shrink-0 text-xs text-slate-400 tabular-nums dark:text-slate-600">
         {n}
       </span>
-      <span>{children}</span>
+      <span>
+        {children}
+        {/* the reason sits under the instruction rather than beside it, so
+            somebody following along can skip every one of them and still end up
+            with working cookies */}
+        {note && (
+          <span className="mt-0.5 block text-xs text-slate-400 dark:text-slate-500">
+            {note}
+          </span>
+        )}
+      </span>
     </li>
   )
 }
