@@ -51,9 +51,12 @@ export function CookieDialog() {
   // rotation shows up the next time someone looks - which is when it matters
   const refresh = useCallback(async () => {
     try {
-      setStatus(await cookiesApi.getStatus())
+      const next = await cookiesApi.getStatus()
+      setStatus(next)
+      return next
     } catch {
       setStatus(null)
+      return null
     }
   }, [])
 
@@ -70,10 +73,18 @@ export function CookieDialog() {
       const result = await cookiesApi.importFile()
       // null is a cancelled picker, which is not an outcome worth a toast
       if (result) {
-        await refresh()
+        const next = await refresh()
+
         if (result.hasValidCookies) {
           toast.success("Cookies imported", {
             description: "YouTube will see you as signed in from now on."
+          })
+        } else {
+          // an import that lands but is not a login used to say nothing at all,
+          // which reads as the button doing nothing. main already worked out
+          // which way it fell short
+          toast.warning("Imported, but not signed in", {
+            description: next?.problem ?? "These cookies won't authenticate you."
           })
         }
       }

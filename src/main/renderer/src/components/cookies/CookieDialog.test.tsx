@@ -14,16 +14,26 @@ import { useCookieStore } from "@/lib/cookieStore"
 
 const getStatus = vi.fn()
 
+const importFile = vi.fn()
+
 vi.mock("@/lib/api", () => ({
   cookiesApi: {
     getStatus: () => getStatus(),
-    importFile: vi.fn(),
+    importFile: () => importFile(),
     test: vi.fn(),
     clear: vi.fn()
   },
   systemApi: { openExternal: vi.fn(async () => true) }
 }))
-vi.mock("sonner", () => ({ toast: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn() }) }))
+const toastWarning = vi.fn()
+const toastError = vi.fn()
+vi.mock("sonner", () => ({
+  toast: Object.assign(vi.fn(), {
+    success: vi.fn(),
+    error: (...a: unknown[]) => toastError(...a),
+    warning: (...a: unknown[]) => toastWarning(...a)
+  })
+}))
 
 function status(overrides = {}) {
   return {
@@ -54,6 +64,9 @@ async function open() {
 beforeEach(() => {
   useCookieStore.setState({ isOpen: false })
   getStatus.mockReset()
+  importFile.mockReset()
+  toastWarning.mockClear()
+  toastError.mockClear()
 })
 
 afterEach(cleanup)
@@ -131,5 +144,43 @@ describe("CookieDialog", () => {
     await waitFor(() => expect(screen.getByText(problem)).toBeTruthy())
     // still unusable, so the instructions stay up
     expect(screen.getByText(/close the private window/i)).toBeTruthy()
+  })
+})
+
+// picking the wrong file used to do nothing visible: no toast on the way in,
+// and a status line reading "No cookies imported" - the same words as an
+// untouched install. The button looked broken and the jar was gone.
+describe("a file that isn't a cookie jar", () => {
+  test("says so, with main's reason", async () => {
+    importFile.mockRejectedValue(
+      new Error("That file has no cookies in it. Export cookies.txt with the extension, then pick that file.")
+    )
+    getStatus.mockResolvedValue(status())
+
+    await open()
+    await waitFor(() => expect(screen.getByText("Not imported")).toBeTruthy())
+    screen.getByText("Import cookies…").click()
+
+    await waitFor(() => expect(toastError).toHaveBeenCalled())
+    expect(toastError.mock.calls[0][1].description).toMatch(/no cookies in it/)
+  })
+
+  test("a jar that imports but isn't a login is not silent either", async () => {
+    importFile.mockResolvedValue({ imported: false, hasValidCookies: false })
+    getStatus
+      .mockResolvedValueOnce(status())
+      .mockResolvedValue(
+        status({
+          problem: "These YouTube cookies aren't from a signed-in session - sign in first, then export",
+          fileInfo: { ...status().fileInfo, cookieCount: 4, youtubeCookieCount: 4 }
+        })
+      )
+
+    await open()
+    await waitFor(() => expect(screen.getByText("Not imported")).toBeTruthy())
+    screen.getByText("Import cookies…").click()
+
+    await waitFor(() => expect(toastWarning).toHaveBeenCalled())
+    expect(toastWarning.mock.calls[0][1].description).toMatch(/signed-in session/)
   })
 })

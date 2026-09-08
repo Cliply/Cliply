@@ -8,7 +8,11 @@ const { readFileSync } = require("fs")
 const path = require("path")
 const { APP_CONFIG } = require("../utils/constants")
 // the engine reads the same jar with the same parser - see utils/cookie-jar
-const { inspectCookieContent, hasNetscapeHeader } = require("../utils/cookie-jar")
+const {
+  inspectCookieContent,
+  hasNetscapeHeader,
+  parseCookieFile
+} = require("../utils/cookie-jar")
 
 /**
  * the header yt-dlp writes itself, copied so an imported jar is spelled the way
@@ -165,15 +169,32 @@ class CookieManager {
    * @returns {Promise<boolean>} success status
    */
   async importCookies(cookieContent) {
+    if (!cookieContent || !cookieContent.trim()) {
+      throw new Error("That file is empty.")
+    }
+
+    // into yt-dlp's own shape: its line endings, and its magic first line
+    const content = normalizeJar(cookieContent)
+
+    /**
+     * refused before anything is written, and thrown rather than reported.
+     *
+     * picking the wrong .txt used to overwrite the jar with it and then answer
+     * "No cookies imported" - the same words an untouched install shows - so a
+     * mistake that destroyed a working login was indistinguishable from one
+     * that did nothing. An import holding no cookie yt-dlp could read is not an
+     * import, so the file it would have replaced is left alone.
+     *
+     * the bar is "is this a cookie file", not "is this a login": a jar of
+     * signed-out cookies is a real jar, imports, and says what it is.
+     */
+    if (parseCookieFile(content).length === 0) {
+      throw new Error(
+        "That file has no cookies in it. Export cookies.txt with the extension, then pick that file."
+      )
+    }
+
     try {
-      // validate content format
-      if (!cookieContent || !cookieContent.trim()) {
-        throw new Error("cookie content is empty")
-      }
-
-      // into yt-dlp's own shape: its line endings, and its magic first line
-      const content = normalizeJar(cookieContent)
-
       // write to file
       await fs.writeFile(this.cookieFile, content, "utf8")
 

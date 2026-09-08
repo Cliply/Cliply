@@ -452,3 +452,49 @@ describe("getFileInfo", () => {
     })
   })
 })
+
+// an import that holds nothing must not land
+//
+// picking the wrong .txt used to overwrite a working jar with it and then
+// report "No cookies imported" - which is what a user sees whether they
+// imported junk or never imported at all. So the failure looked like nothing
+// happening, while it had actually destroyed a working login.
+describe("refusing a file that is not a cookie jar", () => {
+  const live = () => String(nowSeconds() + HOUR)
+
+  async function withLogin() {
+    const manager = await managerWith(HEADER + loginPair(live()))
+    expect(await manager.validateCookieFile()).toBe(true)
+    return manager
+  }
+
+  test("says what is wrong instead of returning quietly", async () => {
+    const manager = await withLogin()
+
+    await expect(manager.importCookies("milk\neggs\nbread\n")).rejects.toThrow(
+      /no cookies in it/i
+    )
+  })
+
+  test("leaves the working jar exactly as it was", async () => {
+    const manager = await withLogin()
+    const before = await fs.readFile(manager.cookieFile, "utf8")
+
+    await expect(manager.importCookies("milk\neggs\nbread\n")).rejects.toThrow()
+
+    expect(await fs.readFile(manager.cookieFile, "utf8")).toBe(before)
+    expect(await manager.validateCookieFile()).toBe(true)
+  })
+
+  test("a jar with cookies but no login still imports - that is a real jar", async () => {
+    const manager = await withLogin()
+
+    // reports as "not a signed-in session", which is a state worth being in
+    await expect(
+      manager.importCookies(
+        HEADER + cookieLine(".youtube.com", "PREF", live()) + "\n"
+      )
+    ).resolves.toBe(false)
+    expect(await manager.inspectCookieFile()).toMatchObject({ youtube: 1, usable: false })
+  })
+})
