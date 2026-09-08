@@ -15,20 +15,23 @@ import { useCookieStore } from "@/lib/cookieStore"
 const getStatus = vi.fn()
 
 const importFile = vi.fn()
+const testCookies = vi.fn()
+const clearCookies = vi.fn()
 
 vi.mock("@/lib/api", () => ({
   cookiesApi: {
     getStatus: () => getStatus(),
     importFile: () => importFile(),
-    test: vi.fn(),
-    clear: vi.fn()
+    test: () => testCookies(),
+    clear: () => clearCookies()
   },
   systemApi: { openExternal: vi.fn(async () => true) }
 }))
+const toastPlain = vi.fn()
 const toastWarning = vi.fn()
 const toastError = vi.fn()
 vi.mock("sonner", () => ({
-  toast: Object.assign(vi.fn(), {
+  toast: Object.assign((...a: unknown[]) => toastPlain(...a), {
     success: vi.fn(),
     error: (...a: unknown[]) => toastError(...a),
     warning: (...a: unknown[]) => toastWarning(...a)
@@ -65,6 +68,9 @@ beforeEach(() => {
   useCookieStore.setState({ isOpen: false })
   getStatus.mockReset()
   importFile.mockReset()
+  testCookies.mockReset()
+  clearCookies.mockReset()
+  toastPlain.mockClear()
   toastWarning.mockClear()
   toastError.mockClear()
 })
@@ -182,5 +188,82 @@ describe("a file that isn't a cookie jar", () => {
 
     await waitFor(() => expect(toastWarning).toHaveBeenCalled())
     expect(toastWarning.mock.calls[0][1].description).toMatch(/signed-in session/)
+  })
+})
+
+/**
+ * Test used to title its toast off cookiesLoaded alone, which main sets to true
+ * for any jar that loaded. So a probe that came back rejected - YouTube turning
+ * the cookies down while they were being sent, the one strong negative there is
+ * - announced "Cookies look fine" above a description saying the opposite.
+ */
+describe("testing the cookies", () => {
+  const signedInStatus = () =>
+    status({
+      hasValidCookies: true,
+      fileInfo: { ...status().fileInfo, cookieCount: 22, youtubeCookieCount: 22, signedIn: true, valid: true }
+    })
+
+  test("a rejection is not called fine", async () => {
+    getStatus.mockResolvedValue(signedInStatus())
+    testCookies.mockResolvedValue({
+      cookiesLoaded: true,
+      extractionCheck: "rejected",
+      rejected: true,
+      note: "YouTube asked us to confirm we're not a bot while sending your cookies."
+    })
+
+    await open()
+    await waitFor(() => expect(screen.getByText("Test")).toBeTruthy())
+    screen.getByText("Test").click()
+
+    await waitFor(() => expect(toastWarning).toHaveBeenCalled())
+    expect(toastWarning.mock.calls[0][0]).toMatch(/turned these cookies down/i)
+    expect(toastPlain).not.toHaveBeenCalled()
+  })
+
+  test("a probe that went through still reads as fine", async () => {
+    getStatus.mockResolvedValue(signedInStatus())
+    testCookies.mockResolvedValue({
+      cookiesLoaded: true,
+      extractionCheck: "passed",
+      rejected: false,
+      note: "Extraction worked with your cookies attached."
+    })
+
+    await open()
+    await waitFor(() => expect(screen.getByText("Test")).toBeTruthy())
+    screen.getByText("Test").click()
+
+    await waitFor(() => expect(toastPlain).toHaveBeenCalled())
+    expect(toastPlain.mock.calls[0][0]).toBe("Cookies look fine")
+  })
+})
+
+// handleClear had no catch and no finally: a rejection left the button spinning
+// for the rest of the session, and said nothing about the login still being on
+// disk
+describe("removing the cookies", () => {
+  test("a failure is surfaced and the button recovers", async () => {
+    getStatus.mockResolvedValue(
+      status({
+        hasValidCookies: true,
+        fileInfo: { ...status().fileInfo, cookieCount: 22, youtubeCookieCount: 22, signedIn: true, valid: true }
+      })
+    )
+    clearCookies.mockRejectedValue(
+      new Error("Couldn't remove the cookies - they're still on this machine")
+    )
+
+    await open()
+    await waitFor(() => expect(screen.getByText("Remove")).toBeTruthy())
+    screen.getByText("Remove").click()
+
+    await waitFor(() => expect(toastError).toHaveBeenCalled())
+    expect(toastError.mock.calls[0][1].description).toMatch(/still on this machine/)
+    // and it is a button again rather than a permanent spinner
+    await waitFor(() =>
+      expect(screen.getByText("Remove").closest("button")?.disabled).toBe(false)
+    )
   })
 })

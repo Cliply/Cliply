@@ -98,6 +98,8 @@ export interface CookieFileInfo {
   /** a SAPISID cookie is present - signed in, or signed out and not yet re-exported */
   hasSid: boolean
   signedIn: boolean
+  /** set when yt-dlp would refuse the whole file, which reads as an empty jar otherwise */
+  loadError?: string | null
   valid: boolean
 }
 
@@ -110,7 +112,10 @@ export interface CookieStatus {
 }
 
 export interface CookieImportResult {
+  /** the file landed. a refusal throws, so this is never false in practice */
   imported: boolean
+  /** and whether what landed turned out to be a login */
+  signedIn?: boolean
   hasValidCookies: boolean
 }
 
@@ -122,6 +127,8 @@ export interface CookieImportResult {
 export interface CookieTestResult {
   cookiesLoaded: boolean
   extractionCheck: string
+  /** youtube turned the cookies down while they were being sent - the one strong negative */
+  rejected?: boolean
   note: string
 }
 
@@ -758,10 +765,19 @@ export const cookiesApi = {
     return response.data
   },
 
+  /**
+   * Removing a login is the one thing that must not fail quietly - a swallowed
+   * error left the credentials on disk behind a screen reporting them gone.
+   */
   async clear(): Promise<boolean> {
     const electronAPI = getElectronAPI()
     const response = await electronAPI.cookies.clear()
-    return response.success === true
+
+    if (!response.success) {
+      throw new Error(response.error?.message || "Failed to remove cookies")
+    }
+
+    return true
   }
 }
 

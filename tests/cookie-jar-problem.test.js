@@ -41,3 +41,41 @@ test("never signed in: no remnant to find", () => {
     "These YouTube cookies aren't from a signed-in session - sign in first, then export"
   )
 })
+
+// a jar yt-dlp refuses whole inspects as zero of everything, so without this it
+// falls into the "No cookies imported" branch - the words for an untouched
+// install, said about a file sitting right there full of cookies and taking
+// every download down with it
+describe("a file yt-dlp will not open at all", () => {
+  const {
+    JAR_UNREADABLE,
+    JAR_DOMAIN_FLAG
+  } = require("../src/main/utils/cookie-jar")
+
+  const refused = (loadError) =>
+    cookieJarProblem(jar({ total: 0, youtube: 0, loadError }))
+
+  test("a domain column that disagrees with its own flag", () => {
+    expect(refused(JAR_DOMAIN_FLAG)).toMatch(/malformed/)
+  })
+
+  test("a file with no netscape header", () => {
+    expect(refused(JAR_UNREADABLE)).toMatch(/isn't a Netscape/)
+  })
+})
+
+// "every last cookie expired" was too narrow a test to reach the expiry
+// sentence. a real export whose login has aged out still carries a live PREF or
+// SOCS, so expired < youtube, and it fell through to being told it was never a
+// signed-in export - which sends the user to fix something that was never wrong
+test("a login that expired beside a still-live visitor cookie", () => {
+  expect(cookieJarProblem(jar({ youtube: 3, expired: 2, hasSid: false }))).toMatch(
+    /expired/
+  )
+})
+
+test("a jar with nothing expired in it is not called expired", () => {
+  expect(cookieJarProblem(jar({ youtube: 3, expired: 0, hasSid: false }))).toMatch(
+    /aren't from a signed-in session/
+  )
+})

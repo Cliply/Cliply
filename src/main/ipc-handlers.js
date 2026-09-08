@@ -25,6 +25,7 @@ const {
 } = require("./utils/ytdlp-mappers")
 const { getSimplePlatformOptions } = require("./utils/ytdlp-formats")
 const { resolveDownloadId } = require("./utils/download-id")
+const { JAR_DOMAIN_FLAG } = require("./utils/cookie-jar")
 
 const { DownloadRunner } = require("./services/download-runner")
 const { SettingsStore } = require("./services/settings-store")
@@ -102,7 +103,25 @@ function normalizeTimeRange(range) {
  *     rotated the session away. yt-dlp warns about exactly this, and since
  *     --cookies writes the jar back it is our own copy that lost the marker
  */
-function cookieJarProblem({ total, youtube, expired, hasSid, signedIn }) {
+function cookieJarProblem({
+  total,
+  youtube,
+  expired,
+  hasSid,
+  signedIn,
+  loadError
+}) {
+  // checked first: a jar yt-dlp refuses whole inspects as zero of everything,
+  // and "no cookies imported" is the wrong thing to say about a file that is
+  // sitting there full of them and taking every download down with it
+  if (loadError === JAR_DOMAIN_FLAG) {
+    return "This cookie file is malformed - export it again rather than editing it"
+  }
+
+  if (loadError) {
+    return "This file isn't a Netscape cookies.txt - export it again"
+  }
+
   if (total === 0) {
     return "No cookies imported"
   }
@@ -111,7 +130,11 @@ function cookieJarProblem({ total, youtube, expired, hasSid, signedIn }) {
     return "This file has no YouTube cookies in it"
   }
 
-  if (expired >= youtube) {
+  // any expiry at all is worth saying so, rather than only a jar where every
+  // last cookie is dead. an export whose login expired alongside a still-live
+  // PREF used to fall through to "you were never signed in", which sends the
+  // user to fix something that was never wrong
+  if (!signedIn && expired > 0) {
     return "Your YouTube cookies have expired - export them again"
   }
 
@@ -350,8 +373,14 @@ class IPCHandlers {
     if (!this.analytics) return
 
     this.capture("cookies_imported", {
+      // whether the file landed, not whether it turned out to be a login. the
+      // two were the same flag, so a perfectly good signed-out import counted
+      // as a failed one and the funnel could not tell the two apart
       success: Boolean(imported),
-      has_youtube_cookies: Boolean(this.cookieManager.hasValidCookies())
+      // and this is the question its name asks. it was answering the narrower
+      // "is this a login", so a jar full of youtube cookies reported false
+      has_youtube_cookies: Boolean(this.cookieManager.hasYouTubeCookies()),
+      signed_in: Boolean(this.cookieManager.hasValidCookies())
     })
   }
 
@@ -1035,17 +1064,23 @@ class IPCHandlers {
       this.validateRequest(data, ["cookies"])
       const { cookies } = data
 
-      const success = await this.cookieManager.importCookies(cookies)
-      this.trackCookieImport(success)
+      const signedIn = await this.cookieManager.importCookies(cookies)
+      this.trackCookieImport(true)
 
       return this.createSuccess({
-        imported: success,
+        imported: true,
+        signedIn,
         hasValidCookies: this.cookieManager.hasValidCookies()
       })
     } catch (error) {
       console.error("Cookie import failed:", error.message)
       this.trackCookieImport(false)
-      return this.createError("Failed to import cookies", error.message)
+      // the reason goes in the message slot, which is the one that survives
+      // the trip to the renderer
+      return this.createError(
+        error.message || "Failed to import cookies",
+        "Export cookies.txt with a browser extension, then paste that file."
+      )
     }
   }
 
@@ -1066,18 +1101,29 @@ class IPCHandlers {
       }
 
       const filePath = result.filePaths[0]
-      const success = await this.cookieManager.importCookieFile(filePath)
-      this.trackCookieImport(success)
+      const signedIn = await this.cookieManager.importCookieFile(filePath)
+      this.trackCookieImport(true)
 
       return this.createSuccess({
-        imported: success,
+        // the file landed. whether it is a login is the separate question the
+        // renderer asks hasValidCookies - reporting "imported: false" for a
+        // valid signed-out jar had the ui calling a successful import a failure
+        imported: true,
+        signedIn,
         filePath,
         hasValidCookies: this.cookieManager.hasValidCookies()
       })
     } catch (error) {
       console.error("Cookie file import failed:", error.message)
       this.trackCookieImport(false)
-      return this.createError("Failed to import cookie file", error.message)
+      // the manager's sentence is the message, not the suggestion. it used to
+      // go in the second slot, which api.ts drops - so every refused import,
+      // including the ones with a precise reason, reached the user as the
+      // generic "Failed to import cookie file"
+      return this.createError(
+        error.message || "Failed to import cookie file",
+        "Export cookies.txt with a browser extension, then pick that file."
+      )
     }
   }
 
@@ -1111,6 +1157,7 @@ class IPCHandlers {
         return this.createSuccess({
           cookiesLoaded: false,
           extractionCheck: "skipped",
+          rejected: false,
           note,
           status: await this.cookieManager.getStatus(),
           hasValidCookies: false
@@ -1130,8 +1177,14 @@ class IPCHandlers {
       })
 
       return this.createSuccess({
+        // the jar loaded - which is all this ever meant
         cookiesLoaded: true,
         extractionCheck,
+        // and this is the verdict. the renderer titled its toast off
+        // cookiesLoaded alone, so a probe that came back rejected still
+        // announced "Cookies look fine" over a description saying youtube had
+        // turned them down
+        rejected: extractionCheck === "rejected",
         note,
         status: await this.cookieManager.getStatus(),
         hasValidCookies: this.cookieManager.hasValidCookies()
@@ -1229,7 +1282,8 @@ class IPCHandlers {
               youtube: fileInfo.youtubeCookieCount || 0,
               expired: fileInfo.expiredCookieCount || 0,
               hasSid: fileInfo.hasSid,
-              signedIn: fileInfo.signedIn
+              signedIn: fileInfo.signedIn,
+              loadError: fileInfo.loadError ?? null
             })
       })
     } catch (error) {
@@ -1249,7 +1303,12 @@ class IPCHandlers {
       })
     } catch (error) {
       console.error("Clear cookies failed:", error.message)
-      return this.createError("Failed to clear cookies")
+      // the jar is still on disk, so this has to reach the user rather than
+      // resolve into a screen that says the login is gone
+      return this.createError(
+        "Couldn't remove the cookies - they're still on this machine",
+        error.message
+      )
     }
   }
 

@@ -46,16 +46,23 @@ export function CookieDialog() {
   // the thing the user came to do
   const importRef = useRef<HTMLButtonElement>(null)
 
+  // reads are numbered so a slow one cannot land on top of a newer one. the
+  // open-effect and the post-import refresh race by construction, and out of
+  // order they repaint the dialog with the jar as it was before the import
+  const reads = useRef(0)
+
   // read on open and after anything that touches the jar. nothing polls: the
   // file is a few kilobytes and main re-reads it per operation anyway, so a
   // rotation shows up the next time someone looks - which is when it matters
   const refresh = useCallback(async () => {
+    const ticket = ++reads.current
+
     try {
       const next = await cookiesApi.getStatus()
-      setStatus(next)
+      if (ticket === reads.current) setStatus(next)
       return next
     } catch {
-      setStatus(null)
+      if (ticket === reads.current) setStatus(null)
       return null
     }
   }, [])
@@ -103,9 +110,19 @@ export function CookieDialog() {
     try {
       const result = await cookiesApi.test()
       await refresh()
-      toast(result.cookiesLoaded ? "Cookies look fine" : "Cookies aren't usable", {
-        description: result.note
-      })
+
+      // three outcomes, not two. titling this off cookiesLoaded alone put
+      // "Cookies look fine" above a description explaining that YouTube had
+      // just refused them
+      if (result.rejected) {
+        toast.warning("YouTube turned these cookies down", {
+          description: result.note
+        })
+      } else {
+        toast(result.cookiesLoaded ? "Cookies look fine" : "Cookies aren't usable", {
+          description: result.note
+        })
+      }
     } catch (error) {
       toast.error("Couldn't test the cookies", {
         description: error instanceof Error ? error.message : undefined
@@ -117,9 +134,23 @@ export function CookieDialog() {
 
   const handleClear = async () => {
     setBusy("clear")
-    await cookiesApi.clear()
-    await refresh()
-    setBusy(null)
+    try {
+      await cookiesApi.clear()
+      await refresh()
+    } catch (error) {
+      // a failure here means the jar is still on disk, which is the opposite
+      // of what the screen would otherwise go on to show
+      toast.error("Couldn't remove the cookies", {
+        description:
+          error instanceof Error
+            ? error.message
+            : "They're still on this machine."
+      })
+      await refresh()
+    } finally {
+      // without this the button stayed spinning for the rest of the session
+      setBusy(null)
+    }
   }
 
   const openLink = (url: string) => () => {
