@@ -75,7 +75,7 @@ describe("the donate line", () => {
     const { HeroSection } = await import("./HeroSection")
     render(<HeroSection />)
 
-    expect(screen.getByText(/made by one person, free for everyone/i)).toBeTruthy()
+    expect(screen.getByText(/one person builds this and keeps it working/i)).toBeTruthy()
 
     const link = screen.getByText("buy me a coffee")
     expect(link.getAttribute("href")).toBe("https://buymeacoffee.com/itssdevk")

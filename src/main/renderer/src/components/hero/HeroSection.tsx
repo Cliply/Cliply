@@ -151,9 +151,13 @@ export function HeroSection() {
       {/*
         the donate ask, sitting still rather than interrupting anything.
 
-        it states a fact and stops. No verb aimed at the reader, no reason why
-        it would help, no gratitude in advance - each of those turns a line
-        somebody might act on into one they can feel being worked. Being the
+        "keeps it working" is the part doing the work. Free and made by one
+        person says it was built once; this says somebody is still at it, which
+        is the thing worth supporting and the thing a user has no way to see.
+        It still states a fact and stops - no verb aimed at the reader, no
+        reason why it would help, no gratitude in advance - because each of
+        those turns a line somebody might act on into one they can feel being
+        worked. The link carries the ask on its own. Being the
         only thing along the bottom edge is what gives it weight, so the
         disclaimer and github links moved up into the menu rather than sitting
         beside it competing for the same glance.
@@ -171,7 +175,7 @@ export function HeroSection() {
               'Geist Mono, ui-monospace, SFMono-Regular, "SF Mono", Consolas, "Liberation Mono", Menlo, monospace'
           }}
         >
-          made by one person, free for everyone.{" "}
+          one person builds this and keeps it working.{" "}
           <a
             href="https://buymeacoffee.com/itssdevk"
             target="_blank"
