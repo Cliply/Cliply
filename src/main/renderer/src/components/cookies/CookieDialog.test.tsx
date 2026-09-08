@@ -93,7 +93,7 @@ describe("CookieDialog", () => {
 
     await waitFor(() => expect(screen.getByText(/signed in · 22 cookies/)).toBeTruthy())
     // the recipe is the empty state, not permanent furniture
-    expect(screen.queryByText(/close that tab/i)).toBeNull()
+    expect(screen.queryByText(/close that youtube tab/i)).toBeNull()
     expect(screen.getByText(/replace/)).toBeTruthy()
   })
 
@@ -103,7 +103,7 @@ describe("CookieDialog", () => {
     await open()
 
     await waitFor(() => expect(screen.getByText("here's how to import them")).toBeTruthy())
-    expect(screen.getByText(/close that tab/i)).toBeTruthy()
+    expect(screen.getByText(/close that youtube tab/i)).toBeTruthy()
     // the account warning moved onto the step it is about, rather than sitting
     // apart with an amber bar down its side
     expect(screen.getByText(/spare account/i)).toBeTruthy()
@@ -154,7 +154,7 @@ describe("CookieDialog", () => {
 
     await waitFor(() => expect(screen.getByText(problem)).toBeTruthy())
     // still unusable, so the instructions stay up
-    expect(screen.getByText(/close that tab/i)).toBeTruthy()
+    expect(screen.getByText(/close that youtube tab/i)).toBeTruthy()
   })
 })
 
@@ -412,4 +412,16 @@ describe("the row above the steps", () => {
     await waitFor(() => expect(screen.getByText(/signed in · 22 cookies/)).toBeTruthy())
     expect(screen.queryByText("here's how to import them")).toBeNull()
   })
+})
+
+// "export the cookies" was a gesture people were expected to already know.
+// step 4 is a toolbar icon and a button, and it has to say so
+test("the export step names the icon and the button", async () => {
+  getStatus.mockResolvedValue(status())
+
+  await open()
+
+  await waitFor(() => expect(screen.getByText(/click the extension/i)).toBeTruthy())
+  expect(screen.getByText("export")).toBeTruthy()
+  expect(screen.getByText(/up by your address bar/i)).toBeTruthy()
 })

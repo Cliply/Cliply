@@ -338,14 +338,25 @@ export function CookieDialog() {
                   </span>
                 </Step>
 
+                {/* "export the cookies" assumed people know what that means as
+                    a gesture. it is a toolbar icon and a button, and saying so
+                    is the difference between following the steps and giving up
+                    on step 4 */}
                 <Step
                   n={4}
-                  note="worth doing straight away. youtube refreshes its cookies on open youtube tabs, so the longer that one stays up the sooner your export goes stale."
+                  note="the icon sits up by your address bar, sometimes tucked under the puzzle piece. it saves a .txt file to your downloads, usually named after the site."
                 >
-                  export the cookies, then <Em>close that tab</Em>
+                  click the extension&apos;s icon, then hit <Em>export</Em>
                 </Step>
 
-                <Step n={5}>import that file here</Step>
+                <Step
+                  n={5}
+                  note="youtube keeps handing out fresh cookies to open youtube tabs, so the sooner you close it the longer your export stays good."
+                >
+                  close that youtube tab
+                </Step>
+
+                <Step n={6}>import that file here</Step>
               </ol>
             </>
           )}
