@@ -50,7 +50,9 @@ export function HeroSection() {
               external: true
             },
             {
-              label: "disclaimer",
+              // the page this lands on has always titled itself "about" - the
+              // menu was the only place still calling it the disclaimer
+              label: "about",
               href: "/disclaimer"
             }
           ]}
@@ -151,13 +153,14 @@ export function HeroSection() {
       {/*
         the donate ask, sitting still rather than interrupting anything.
 
-        "keeps it working" is the part doing the work. Free and made by one
-        person says it was built once; this says somebody is still at it, which
-        is the thing worth supporting and the thing a user has no way to see.
-        It still states a fact and stops - no verb aimed at the reader, no
-        reason why it would help, no gratitude in advance - because each of
-        those turns a line somebody might act on into one they can feel being
-        worked. The link carries the ask on its own. Being the
+        it is written as one person talking, because that is the only thing
+        being offered: not a feature, not a tier, just who is back here. "Takes
+        a fair bit" is the maintenance nobody outside can see, and admitting it
+        plainly is what earns the second line the right to exist.
+
+        two lines rather than one long one. The first is the whole reason and
+        the second is the whole ask, so the eye can stop after either and still
+        have got the point - and neither line is long enough to look like terms. Being the
         only thing along the bottom edge is what gives it weight, so the
         disclaimer and github links moved up into the menu rather than sitting
         beside it competing for the same glance.
@@ -169,21 +172,27 @@ export function HeroSection() {
         className="absolute bottom-6 left-0 right-0 z-20"
       >
         <p
-          className="text-center text-xs text-slate-400 dark:text-slate-500"
+          className="text-center text-xs leading-relaxed text-slate-400 dark:text-slate-500"
           style={{
             fontFamily:
               'Geist Mono, ui-monospace, SFMono-Regular, "SF Mono", Consolas, "Liberation Mono", Menlo, monospace'
           }}
         >
-          one person builds this and keeps it working.{" "}
-          <a
-            href="https://buymeacoffee.com/itssdevk"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-slate-500 underline underline-offset-4 transition-colors duration-200 hover:text-cyan-500 dark:text-slate-400 dark:hover:text-cyan-400"
-          >
-            buy me a coffee
-          </a>
+          <span className="block">
+            keeping this working takes a fair bit, and it&apos;s just me back
+            here.
+          </span>
+          <span className="block">
+            if it&apos;s been useful,{" "}
+            <a
+              href="https://buymeacoffee.com/itssdevk"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-slate-500 underline underline-offset-4 transition-colors duration-200 hover:text-cyan-500 dark:text-slate-400 dark:hover:text-cyan-400"
+            >
+              buy me a coffee
+            </a>
+          </span>
         </p>
       </motion.div>
 

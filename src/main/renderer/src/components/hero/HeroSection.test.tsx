@@ -75,7 +75,9 @@ describe("the donate line", () => {
     const { HeroSection } = await import("./HeroSection")
     render(<HeroSection />)
 
-    expect(screen.getByText(/one person builds this and keeps it working/i)).toBeTruthy()
+    // two lines: the reason, then the ask
+    expect(screen.getByText(/it's just me back here/i)).toBeTruthy()
+    expect(screen.getByText(/if it's been useful/i)).toBeTruthy()
 
     const link = screen.getByText("buy me a coffee")
     expect(link.getAttribute("href")).toBe("https://buymeacoffee.com/itssdevk")
@@ -91,7 +93,7 @@ describe("the menu", () => {
 
     expect(
       screen.getAllByTestId("menu-item").map((node) => node.textContent)
-    ).toEqual(["update", "donate", "github", "disclaimer"])
+    ).toEqual(["update", "donate", "github", "about"])
   })
 
   // two doors to the same room made the menu longer for nothing, once the line
@@ -103,7 +105,7 @@ describe("the menu", () => {
     expect(screen.queryByText("cookies")).toBeNull()
   })
 
-  test("github and disclaimer point where they say", async () => {
+  test("github and about point where they say", async () => {
     const { HeroSection } = await import("./HeroSection")
     render(<HeroSection />)
 
@@ -114,6 +116,7 @@ describe("the menu", () => {
     )
 
     expect(hrefs.github).toBe("https://github.com/Cliply/Cliply/")
-    expect(hrefs.disclaimer).toBe("/disclaimer")
+    // the label changed, the route did not
+    expect(hrefs.about).toBe("/disclaimer")
   })
 })
