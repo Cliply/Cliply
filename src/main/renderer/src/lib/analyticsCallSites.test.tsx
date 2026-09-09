@@ -97,6 +97,7 @@ vi.mock("sonner", () => ({
   toast: { success: vi.fn(), info: vi.fn(), error: vi.fn() }
 }))
 
+import { SearchCard } from "@/components/hero/SearchCard"
 import { UnifiedDownloadCard } from "@/components/video/UnifiedDownloadCard"
 import { DownloadError } from "@/lib/api"
 import { useAudioDownload } from "@/lib/hooks/useAudioDownload"
@@ -139,6 +140,23 @@ function wrapper({ children }: { children: ReactNode }) {
   })
 
   return <QueryClientProvider client={client}>{children}</QueryClientProvider>
+}
+
+/**
+ * click the helper line's playlist link, on the real search box
+ *
+ * driven through SearchCard rather than URLInput alone because the box's form
+ * is useMediaSearch's: the click writes a url into the same form a paste lands
+ * in, and a hand-rolled one here would report a bag no user can produce.
+ */
+async function clickPlaylistHint() {
+  const view = render(<SearchCard platform="youtube" />)
+
+  await act(async () => {
+    screen.getByRole("button", { name: "playlists" }).click()
+  })
+
+  view.unmount()
 }
 
 /** put a url through the real submit flow, whatever the api does with it */
@@ -373,6 +391,16 @@ describe("the bags the call sites build", () => {
   test("are exactly the ones the main suite validates", async () => {
     mocks.downloadVideo.mockResolvedValue({ downloadId: "ignored" })
     mocks.downloadAudio.mockResolvedValue({ downloadId: "ignored" })
+
+    /**
+     * the one thing on the hero that is not a paste.
+     *
+     * the helper line says playlists work and offers one to try, and this is
+     * how often that offer is taken. it carries the platform and nothing else:
+     * the link is ours, so there is no url_kind to report about it, and the
+     * submission it leads to reports itself like any other paste.
+     */
+    await clickPlaylistHint()
 
     // --- the front of the funnel, one link shape at a time ---
     mocks.getVideoInfo.mockResolvedValueOnce(youtubeInfo(240, 6))

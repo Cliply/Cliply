@@ -65,7 +65,9 @@ export const PLATFORM_REGISTRY: Record<Platform, PlatformConfig> = {
     label: "youtube",
     logo: "./youtube-logo.svg",
     formResolver: zodResolver(youtubeUrlSchema),
-    placeholder: "url.placeholder",
+    // the one box that takes a playlist link, so the one placeholder that says
+    // so. pinterest and tiktok keep the shared line, which is still true of them
+    placeholder: "url.youtubePlaceholder",
     helperText: "url.youtubeHelper",
     loadingText: "url.loading",
     successMessage: "url.loaded",

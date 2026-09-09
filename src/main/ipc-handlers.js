@@ -91,10 +91,13 @@ const RENDERER_EVENTS = new Set([
   "media_info_loaded",
   "media_info_failed",
   "playlist_prompt_answered",
+  // a click on the helper line's playlist link, which happens in the hero and
+  // nowhere main can see
+  "playlist_hint_clicked",
   "download_started",
   // the outcome of the coffee prompt. which button someone pressed is a
   // renderer-side fact by definition - main sends the prompt and hears nothing
-  // more - so it belongs to the same category as the five above
+  // more - so it belongs to the same category as the six above
   "support_prompt_clicked"
 ])
 

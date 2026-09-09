@@ -1,5 +1,6 @@
 {
   "callSites": [
+    { "event": "playlist_hint_clicked", "properties": { "platform": "youtube" } },
     { "event": "url_submitted", "properties": { "platform": "youtube", "url_kind": "video" } },
     {
       "event": "media_info_loaded",

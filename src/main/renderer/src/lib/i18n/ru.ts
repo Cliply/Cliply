@@ -23,13 +23,15 @@ export const ru: Record<Key, string> = {
   "menu.github": "github",
 
   "url.placeholder": "вставьте ссылку на видео...",
+  "url.youtubePlaceholder": "вставьте ссылку на видео или плейлист...",
   "url.replacePlaceholder": "вставьте другую ссылку...",
   "url.loading": "\u{1F40B} получаем информацию о видео",
   "url.loaded": "информация о видео загружена",
   "url.selectFolder": "выбрать папку",
   "url.pickerBusy": "дождитесь обработки текущей ссылки",
-  "url.youtubeHelper":
-    "поддерживаются видео, shorts и плейлисты с youtube.com и youtu.be",
+  "url.youtubeHelper": "поддерживаются видео, shorts и ",
+  "url.youtubeHelperPlaylists": "плейлисты",
+  "url.youtubeHelperRest": " с youtube.com и youtu.be",
   "url.pinterestHelper":
     "поддерживаются ссылки pin.it и pinterest.com/pin, любой домен страны",
   "url.tiktokHelper":

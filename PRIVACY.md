@@ -58,6 +58,10 @@ that's what makes the list below a complete list rather than a summary of one. a
 
 closing the question without answering sends nothing at all.
 
+**you clicked the "playlists" link under the box** (`playlist_hint_clicked`)
+
+- which site, which is always `youtube` here. the playlist that link drops in the box is one we picked and ship with the app, so there is nothing about it worth sending you back to us
+
 **a download started, finished, failed or was cancelled** (`download_started`, `download_completed`, `download_failed`, `download_cancelled`)
 
 - which site
@@ -83,7 +87,11 @@ the size of the playlist itself is the one figure that is rounded into a range r
 
 **you imported cookies** (`cookies_imported`)
 
-- whether the import worked, and whether the file turned out to have youtube cookies in it
+- whether the import worked, whether the file turned out to have youtube cookies in it, and whether those cookies sign you in
+
+**the app asked you for a coffee** (`support_prompt_shown`, `support_prompt_clicked`)
+
+- which milestone it was: the number of finished downloads that made the prompt appear, so we can tell whether the later asks are worth keeping. the second event says you pressed the button, nothing about what happened after
 
 that's the whole list of what *we* send. the posthog library adds a little of its own on top: which sdk and version delivered the event (`$lib`, `$lib_version`), a one-off random id for the event itself, the time it happened, and the location worked out from your ip described above.
 

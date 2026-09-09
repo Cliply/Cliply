@@ -9,7 +9,9 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { useForm } from "react-hook-form"
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
 
-import { useAppStore } from "@/lib/store"
+import { en } from "@/lib/i18n/en"
+import { DEMO_PLAYLIST_URL } from "@/lib/playlistView"
+import { useAppStore, type Platform } from "@/lib/store"
 import { URLInput } from "./URLInput"
 
 const mocks = vi.hoisted(() => ({
@@ -24,13 +26,17 @@ vi.mock("@/lib/hooks/useDownloadPath", () => ({
 }))
 
 vi.mock("@/lib/platform-config", () => {
+  // the real translation keys, so the assertions below read the copy a user
+  // sees rather than a label this file made up. which key each platform points
+  // at is the registry's own business, and the last test here asks the real one
   const platform = (id: string, reset: () => void) => ({
     id,
     label: id,
     logo: `./${id}-logo.svg`,
-    placeholder: `paste a ${id} url`,
-    helperText: "helper",
-    loadingText: "working",
+    placeholder:
+      id === "youtube" ? "url.youtubePlaceholder" : "url.placeholder",
+    helperText: `url.${id}Helper`,
+    loadingText: "url.loading",
     store: { reset }
   })
 
@@ -50,18 +56,30 @@ vi.mock("@/lib/platform-config", () => {
   }
 })
 
-function Harness({ isLoading }: { isLoading: boolean }) {
+// wrapped in the form SearchCard puts around it, so a control that submits when
+// it should not has something to submit
+function Harness({
+  isLoading,
+  platform = "youtube",
+  onSubmit = () => {}
+}: {
+  isLoading: boolean
+  platform?: Platform
+  onSubmit?: () => void
+}) {
   const form = useForm<{ url: string }>({
     defaultValues: { url: "https://youtu.be/aqz-KE-bpKQ" }
   })
 
   return (
-    <URLInput
-      form={form}
-      onFocusChange={() => {}}
-      isLoading={isLoading}
-      platform="youtube"
-    />
+    <form onSubmit={form.handleSubmit(onSubmit)}>
+      <URLInput
+        form={form}
+        onFocusChange={() => {}}
+        isLoading={isLoading}
+        platform={platform}
+      />
+    </form>
   )
 }
 
@@ -111,6 +129,92 @@ describe("platform picker while a url is being processed", () => {
     rerender(<Harness isLoading />)
 
     expect(pickerState()).toBe("closed")
+  })
+})
+
+/**
+ * telling somebody playlists exist is half of it. the other half is the link
+ * under the box, which hands them one to try rather than leaving them to go and
+ * find a playlist before they can see the feature at all.
+ */
+describe("the playlist link in the helper line", () => {
+  const playlistLink = () =>
+    screen.getByRole("button", { name: en["url.youtubeHelperPlaylists"] })
+
+  const box = () => screen.getByRole("textbox") as HTMLInputElement
+
+  test("sits inside youtube's sentence, whole", () => {
+    render(<Harness isLoading={false} />)
+
+    expect(screen.getByText(en["url.youtubeHelper"], { exact: false })).toBeTruthy()
+    expect(playlistLink()).toBeTruthy()
+    expect(screen.getByText(en["url.youtubeHelperRest"], { exact: false })).toBeTruthy()
+  })
+
+  // pinterest and tiktok have no playlists to offer, so their lines are the one
+  // sentence they always were
+  test.each([["pinterest"], ["tiktok"]] as const)(
+    "is absent for %s",
+    (platform) => {
+      render(<Harness isLoading={false} platform={platform} />)
+
+      expect(
+        screen.queryByRole("button", {
+          name: en["url.youtubeHelperPlaylists"]
+        })
+      ).toBeNull()
+    }
+  )
+
+  test("fills the box with the demo playlist and focuses it", () => {
+    render(<Harness isLoading={false} />)
+
+    fireEvent.click(playlistLink())
+
+    expect(box().value).toBe(DEMO_PLAYLIST_URL)
+    expect(document.activeElement).toBe(box())
+  })
+
+  // the click offers a link, it does not spend a lookup on somebody's behalf:
+  // the user reads it and presses Enter, the same as any link they pasted
+  test("does not submit the form", () => {
+    const onSubmit = vi.fn()
+    render(<Harness isLoading={false} onSubmit={onSubmit} />)
+
+    fireEvent.click(playlistLink())
+
+    expect(onSubmit).not.toHaveBeenCalled()
+  })
+})
+
+describe("the box's placeholder", () => {
+  test("says youtube takes a playlist too", () => {
+    render(<Harness isLoading={false} />)
+
+    expect(
+      screen.getByPlaceholderText(en["url.youtubePlaceholder"])
+    ).toBeTruthy()
+  })
+
+  test.each([["pinterest"], ["tiktok"]] as const)(
+    "keeps the shared line for %s",
+    (platform) => {
+      render(<Harness isLoading={false} platform={platform} />)
+
+      expect(screen.getByPlaceholderText(en["url.placeholder"])).toBeTruthy()
+    }
+  )
+
+  // the mock above says which key each platform points at, so on its own it
+  // would only ever agree with itself. this is the registry the app ships
+  test("is the registry's own choice, not this file's", async () => {
+    const { PLATFORM_REGISTRY } = await vi.importActual<
+      typeof import("@/lib/platform-config")
+    >("@/lib/platform-config")
+
+    expect(PLATFORM_REGISTRY.youtube.placeholder).toBe("url.youtubePlaceholder")
+    expect(PLATFORM_REGISTRY.pinterest.placeholder).toBe("url.placeholder")
+    expect(PLATFORM_REGISTRY.tiktok.placeholder).toBe("url.placeholder")
   })
 })
 

@@ -25,6 +25,9 @@ export const en = {
   "menu.github": "github",
 
   "url.placeholder": "paste video url here...",
+  // youtube's box is the one that takes a playlist link, and the empty box is
+  // the first place somebody looks to find out what it accepts
+  "url.youtubePlaceholder": "paste a video or playlist url...",
   // the details screen asks for a replacement link
   "url.replacePlaceholder": "Enter new video URL...",
   "url.loading": "\u{1F40B} getting video information",
@@ -32,9 +35,14 @@ export const en = {
   "url.selectFolder": "Select folder",
   "url.pickerBusy": "Wait for the current link to finish",
   // the box takes a playlist link now, and a helper line that only mentions
-  // videos and shorts is the reason somebody would never try one
-  "url.youtubeHelper":
-    "supports youtube videos, shorts & playlists from youtube.com and youtu.be",
+  // videos and shorts is the reason somebody would never try one.
+  //
+  // three keys rather than one because the middle word is a link that fills the
+  // box with a playlist: same reason cookies.stillHere is split around its
+  // count, and the halves carry their own spacing so word order can differ
+  "url.youtubeHelper": "supports youtube videos, shorts & ",
+  "url.youtubeHelperPlaylists": "playlists",
+  "url.youtubeHelperRest": " from youtube.com and youtu.be",
   "url.pinterestHelper":
     "supports pin.it and pinterest.com/pin links, any country domain",
   "url.tiktokHelper":

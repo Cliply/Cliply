@@ -10,6 +10,30 @@ import type { PlaylistItemStatus } from "@/lib/playlistStore"
  */
 
 // =============================================================================
+// the link the hint hands out
+// =============================================================================
+
+/**
+ * a real playlist, for somebody who has never pasted one
+ *
+ * the helper line under the box can say playlists work, and saying so still
+ * leaves the reader to go and find a playlist link before they can see it. this
+ * is that link, one click away: TED-Ed's "Top 10 most popular animations of the
+ * year", ten videos of about five minutes.
+ *
+ * small and famous on purpose. a channel-sized list would demonstrate the
+ * hundred-row cap rather than the feature, and a stranger's private-ish
+ * playlist is one deletion away from a new user's first try being an error.
+ * this one was public and listing without cookies on 2026-09-09.
+ *
+ * swapping it is a release rather than a config change: it is baked into the
+ * build, so a link that dies stays dead in every copy already installed until
+ * the next one ships.
+ */
+export const DEMO_PLAYLIST_URL =
+  "https://www.youtube.com/playlist?list=PLJicmE8fK0EhjQU9p9XUcJslo_hs5oBKk"
+
+// =============================================================================
 // which of the three screens
 // =============================================================================
 

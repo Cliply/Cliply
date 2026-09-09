@@ -64,6 +64,16 @@ const ALLOWED_PROPERTIES = {
    * about was.
    */
   playlist_prompt_answered: ["choice", "playlist_size"],
+  /**
+   * somebody took the helper line up on its offer of a playlist.
+   *
+   * the platform and nothing else, and the platform is a constant here: the
+   * link is ours rather than one the user pasted, so there is nothing about it
+   * to report. what it answers is whether telling people playlists exist is
+   * what makes them try one, which is a count of clicks against the
+   * url_kind: "playlist" submissions that follow.
+   */
+  playlist_hint_clicked: ["platform"],
   download_started: [
     "platform",
     "media_type",
