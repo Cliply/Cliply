@@ -151,6 +151,17 @@ describe("the playlist link in the helper line", () => {
     expect(screen.getByText(en["url.youtubeHelperRest"], { exact: false })).toBeTruthy()
   })
 
+  test("keeps a focus ring for the keyboard", () => {
+    // the mouse never sees the browser's outline and the keyboard must see
+    // something: dropping the outline without a focus-visible replacement
+    // leaves a tab stop nobody can find
+    render(<Harness isLoading={false} />)
+
+    const className = playlistLink().className
+    expect(className).toContain("focus:outline-none")
+    expect(className).toMatch(/focus-visible:ring/)
+  })
+
   // pinterest and tiktok have no playlists to offer, so their lines are the one
   // sentence they always were
   test.each([["pinterest"], ["tiktok"]] as const)(

@@ -301,22 +301,13 @@ describe("Analytics", () => {
       const analytics = await ready(client)
 
       // a typo in an event name is otherwise invisible: the event simply
-      // stops arriving, and nothing fails
-      const expected = [
-        "app_launched",
-        "url_submitted",
-        "media_info_loaded",
-        "media_info_failed",
-        "playlist_prompt_answered",
-        "download_started",
-        "download_completed",
-        "download_failed",
-        "download_cancelled",
-        "engine_seeded",
-        "engine_updated",
-        "engine_update_failed",
-        "cookies_imported"
-      ]
+      // stops arriving, and nothing fails.
+      //
+      // read off the taxonomy rather than written out: a hand-kept copy of
+      // this list had quietly fallen three events behind it, which is the
+      // one way a test named "every event" can stop meaning that
+      const expected = Object.keys(ALLOWED_PROPERTIES)
+      expect(expected.length).toBeGreaterThanOrEqual(13)
 
       for (const event of expected) {
         analytics.capture(event)

@@ -293,7 +293,11 @@ export function URLInput({ form, onFocusChange, isLoading, platform }: URLInputP
                       "text-cyan-600 dark:text-cyan-400 underline underline-offset-4",
                       "transition-colors duration-200",
                       "hover:text-cyan-500 dark:hover:text-cyan-300",
-                      "focus:outline-none"
+                      // the browser's default outline is dropped for the mouse
+                      // and replaced for the keyboard: a tab stop with no ring
+                      // is a link a keyboard user cannot find
+                      "focus:outline-none rounded-sm",
+                      "focus-visible:ring-2 focus-visible:ring-cyan-500/50"
                     )}
                   >
                     {t("url.youtubeHelperPlaylists")}
