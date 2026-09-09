@@ -18,12 +18,12 @@ const IPC_CHANNELS = {
 
   // download management
   DOWNLOAD_PROGRESS: "download:progress",
+  SUPPORT_MILESTONE: "support:milestone",
   DOWNLOAD_COMPLETE: "download:complete",
   DOWNLOAD_ERROR: "download:error",
   DOWNLOAD_CANCEL: "download:cancel",
 
   // cookie management
-  COOKIES_IMPORT: "cookies:import",
   COOKIES_TEST: "cookies:test",
   COOKIES_STATUS: "cookies:status",
 
@@ -125,9 +125,18 @@ contextBridge.exposeInMainWorld("electronAPI", {
     }
   },
 
+  // the coffee ask, on the rare download that reaches a milestone
+  support: {
+    onMilestone: (callback) => {
+      const handler = (_event, data) => callback(data)
+      ipcRenderer.on(IPC_CHANNELS.SUPPORT_MILESTONE, handler)
+      return () =>
+        ipcRenderer.removeListener(IPC_CHANNELS.SUPPORT_MILESTONE, handler)
+    }
+  },
+
   // cookie management
   cookies: {
-    import: (cookies) => invoke(IPC_CHANNELS.COOKIES_IMPORT, { cookies }),
     importFile: () => invoke("cookies:import-file"),
     test: () => invoke(IPC_CHANNELS.COOKIES_TEST),
     getStatus: () => invoke(IPC_CHANNELS.COOKIES_STATUS),

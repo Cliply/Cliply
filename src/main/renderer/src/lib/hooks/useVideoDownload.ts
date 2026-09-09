@@ -8,6 +8,7 @@ import {
   type VideoDownloadRequest
 } from "@/lib/api"
 import { isTerminalReason, terminalReason } from "@/lib/downloadOutcome"
+import { localizeError, t } from "@/lib/i18n"
 import { reportActions } from "@/lib/reportStore"
 import { showDownloadErrorToast } from "@/lib/toast-utils"
 import { useMutation } from "@tanstack/react-query"
@@ -70,7 +71,7 @@ export const useVideoDownload = () => {
       setDownloadState({
         status: "starting",
         progress: 0,
-        message: "Starting video download..."
+        message: t("download.startingVideo")
       })
 
       // Correlate on an id we generate here: the listener can then filter from
@@ -105,19 +106,21 @@ export const useVideoDownload = () => {
               indeterminate: progressData.indeterminate,
               message:
                 progressData.error ||
-                `Downloading video... ${(progressData.progress || 0).toFixed(1)}%`,
+                t("download.videoProgress", {
+                  percent: (progressData.progress || 0).toFixed(1)
+                }),
               outputFile: progressData.filename,
               error: progressData.error
             }))
 
             // Handle completion
             if (progressData.status === "completed") {
-              toast.success("Video download completed!", {
+              toast.success(t("download.videoCompleted"), {
                 description: progressData.filename
-                  ? `Saved: ${progressData.filename}`
+                  ? t("download.saved", { filename: progressData.filename })
                   : undefined,
                 action: {
-                  label: "Open Folder",
+                  label: t("toast.openFolder"),
                   onClick: () => systemApi.openDownloadFolder()
                 }
               })
@@ -136,8 +139,17 @@ export const useVideoDownload = () => {
                 videoUrl: lastUrlRef.current
               })
               showDownloadErrorToast(
-                "Video download failed",
-                progressData.error || "Something went wrong. You can send us the details."
+                t("download.videoFailed"),
+                // the report above keeps main's english; only what is read here
+                // is translated
+                progressData.error
+                  ? localizeError({
+                      message: progressData.error,
+                      category: progressData.category
+                    }).message
+                  : t("download.wentWrong"),
+                progressData.category,
+                "youtube"
               )
 
               // already surfaced here; onError must not report it twice
@@ -201,7 +213,7 @@ export const useVideoDownload = () => {
         ...prev,
         status: "failed",
         error: error.message,
-        message: `Failed to start download: ${error.message}`
+        message: t("download.startFailed", { message: error.message })
       }))
 
       reportActions.stage({
@@ -212,7 +224,15 @@ export const useVideoDownload = () => {
         downloadType: "video",
         videoUrl: lastUrlRef.current
       })
-      showDownloadErrorToast("Video download failed", error.message)
+      showDownloadErrorToast(
+        t("download.videoFailed"),
+        localizeError({
+          message: error.message,
+          category: error instanceof DownloadError ? error.category : undefined
+        }).message,
+        error instanceof DownloadError ? error.category : undefined,
+        "youtube"
+      )
     }
   })
 
@@ -234,7 +254,7 @@ export const useVideoDownload = () => {
         setDownloadState((prev) => ({
           ...prev,
           status: "cancelled",
-          message: "Download cancelled"
+          message: t("download.cancelled")
         }))
 
         // settle the pending mutation so the button never stays stuck
@@ -242,7 +262,7 @@ export const useVideoDownload = () => {
           terminalReason("cancelled", "Download cancelled")
         )
 
-        toast.info("Video download cancelled")
+        toast.info(t("download.videoCancelled"))
       } catch (error) {
         console.error("Failed to cancel download:", error)
       }

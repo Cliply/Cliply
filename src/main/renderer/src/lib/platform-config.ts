@@ -2,6 +2,7 @@ import { zodResolver } from "@hookform/resolvers/zod"
 import type { Resolver } from "react-hook-form"
 
 import { pinterestApi, tiktokApi, videoApi } from "@/lib/api"
+import type { Key } from "@/lib/i18n"
 import { usePinterestStore } from "@/lib/pinterestStore"
 import { usePlaylistStore } from "@/lib/playlistStore"
 import type { Platform } from "@/lib/store"
@@ -31,20 +32,27 @@ export interface MediaSummary {
   formatsCount: number | null
 }
 
+/**
+ * every user-facing field here is a translation key, not a sentence: the
+ * registry is built once at module load, so a string baked in here would stay
+ * in whichever language was current when the app started. the consumers call
+ * `t()` at render time instead. `logPrefix` is the exception - it only ever
+ * reaches the console.
+ */
 export interface PlatformConfig {
   id: Platform
   label: string
   logo: string
   formResolver: Resolver<{ url: string }>
-  placeholder: string
-  helperText: string
-  loadingText: string
-  successMessage: string
+  placeholder: Key
+  helperText: Key
+  loadingText: Key
+  successMessage: Key
   errorMessages: {
-    invalidUrl: string
-    invalidUrlToast: string
-    unavailable: string
-    genericFail: string
+    invalidUrl: Key
+    invalidUrlToast: Key
+    unavailable: Key
+    genericFail: Key
     logPrefix: string
   }
   fetchAndStore: (url: string) => Promise<MediaSummary>
@@ -57,18 +65,15 @@ export const PLATFORM_REGISTRY: Record<Platform, PlatformConfig> = {
     label: "youtube",
     logo: "./youtube-logo.svg",
     formResolver: zodResolver(youtubeUrlSchema),
-    placeholder: "paste video url here...",
-    // the box takes a playlist link now, and a helper line that only mentions
-    // videos and shorts is the reason somebody would never try one
-    helperText:
-      "supports youtube videos, shorts & playlists from youtube.com and youtu.be",
-    loadingText: "\u{1F40B} getting video information",
-    successMessage: "Video information loaded successfully!",
+    placeholder: "url.placeholder",
+    helperText: "url.youtubeHelper",
+    loadingText: "url.loading",
+    successMessage: "url.loaded",
     errorMessages: {
-      invalidUrl: "Invalid YouTube URL",
-      invalidUrlToast: "Please enter a valid YouTube URL",
-      unavailable: "This video is not available for download",
-      genericFail: "Failed to get video information",
+      invalidUrl: "error.youtubeUrl",
+      invalidUrlToast: "validation.youtubeInvalid",
+      unavailable: "error.unavailable",
+      genericFail: "error.infoFailed",
       logPrefix: "Video info request failed:"
     },
     fetchAndStore: async (url: string) => {
@@ -102,15 +107,15 @@ export const PLATFORM_REGISTRY: Record<Platform, PlatformConfig> = {
     label: "pinterest",
     logo: "./pinterest-logo.svg",
     formResolver: zodResolver(pinterestUrlSchema),
-    placeholder: "paste video url here...",
-    helperText: "supports pin.it and pinterest.com/pin links, any country domain",
-    loadingText: "\u{1F40B} getting video information",
-    successMessage: "Video information loaded successfully!",
+    placeholder: "url.placeholder",
+    helperText: "url.pinterestHelper",
+    loadingText: "url.loading",
+    successMessage: "url.loaded",
     errorMessages: {
-      invalidUrl: "Invalid Pinterest URL",
-      invalidUrlToast: "Please enter a valid Pinterest URL",
-      unavailable: "This video is not available for download",
-      genericFail: "Failed to get video information",
+      invalidUrl: "error.pinterestUrl",
+      invalidUrlToast: "validation.pinterestInvalid",
+      unavailable: "error.unavailable",
+      genericFail: "error.infoFailed",
       logPrefix: "Pinterest info request failed:"
     },
     fetchAndStore: async (url: string) => {
@@ -134,15 +139,15 @@ export const PLATFORM_REGISTRY: Record<Platform, PlatformConfig> = {
     label: "tiktok",
     logo: "./tiktok-logo.svg",
     formResolver: zodResolver(tiktokUrlSchema),
-    placeholder: "paste video url here...",
-    helperText: "supports tiktok.com/@user/video/ID, vm.tiktok.com, and vt.tiktok.com links",
-    loadingText: "\u{1F40B} getting video information",
-    successMessage: "Video information loaded successfully!",
+    placeholder: "url.placeholder",
+    helperText: "url.tiktokHelper",
+    loadingText: "url.loading",
+    successMessage: "url.loaded",
     errorMessages: {
-      invalidUrl: "Invalid TikTok URL",
-      invalidUrlToast: "Please enter a valid TikTok URL",
-      unavailable: "This video is not available for download",
-      genericFail: "TikTok blocked this request. Please try again in a moment",
+      invalidUrl: "error.tiktokUrl",
+      invalidUrlToast: "validation.tiktokInvalid",
+      unavailable: "error.unavailable",
+      genericFail: "error.tiktokBlocked",
       logPrefix: "TikTok info request failed:"
     },
     fetchAndStore: async (url: string) => {

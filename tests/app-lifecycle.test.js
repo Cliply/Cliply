@@ -306,6 +306,46 @@ describe("initialize", () => {
 
     jest.restoreAllMocks()
   })
+
+  it("does not build the menu before the app is ready", async () => {
+    // the labels come from app.getLocale(), which answers with an empty string
+    // until ready - and services finishing first is only a matter of how fast
+    // the machine is
+    let markReady
+    mockElectron.app.whenReady.mockReturnValueOnce(
+      new Promise((resolve) => {
+        markReady = resolve
+      })
+    )
+
+    jest
+      .spyOn(CliplyApp.prototype, "initializeServices")
+      .mockImplementation(async () => {})
+    jest
+      .spyOn(CliplyApp.prototype, "setupAppEvents")
+      .mockImplementation(() => {})
+    const menu = jest
+      .spyOn(CliplyApp.prototype, "createMenu")
+      .mockImplementation(() => {})
+    jest
+      .spyOn(CliplyApp.prototype, "setupAutoUpdater")
+      .mockImplementation(() => {})
+    jest
+      .spyOn(CliplyApp.prototype, "checkSupportedArchitecture")
+      .mockImplementation(() => {})
+
+    const initialized = new CliplyApp().initialize()
+    await settle()
+
+    expect(menu).not.toHaveBeenCalled()
+
+    markReady()
+    await initialized
+
+    expect(menu).toHaveBeenCalledTimes(1)
+
+    jest.restoreAllMocks()
+  })
 })
 
 describe("the youtube embed referer", () => {
@@ -369,6 +409,37 @@ describe("app_launched", () => {
     // null and undefined are both skipped by the service, so this is about
     // saying the true thing: a first launch has no previous version
     expect(Object.keys(properties)).not.toContain("previous_version")
+  })
+
+  /**
+   * the standing figure, and the one that reveals the re-import problem.
+   *
+   * cookies_imported says who imported, once, and never expires - so a jar
+   * youtube rotated out weeks ago still reads as an import forever. This says
+   * how many installs are signed in *right now*, and the gap between the two
+   * is the retention story.
+   *
+   * it also has to survive the cookie manager being absent or throwing: a
+   * launch report is not worth losing over a dimension.
+   */
+  it.each([[true], [false]])("reports whether cookies are live: %s", async (live) => {
+    app.services.cookieManager = { hasValidCookies: () => live }
+    await launch()
+
+    const [, properties] = mockAnalytics.capture.mock.calls[0]
+    expect(properties.cookies_signed_in).toBe(live)
+  })
+
+  it("says false rather than throwing when the jar is unreadable", async () => {
+    app.services.cookieManager = {
+      hasValidCookies: () => {
+        throw new Error("unreadable")
+      }
+    }
+    await launch()
+
+    const [, properties] = mockAnalytics.capture.mock.calls[0]
+    expect(properties.cookies_signed_in).toBe(false)
   })
 
   it("records the running version for the next launch to read", async () => {
@@ -1009,6 +1080,62 @@ describe("the analytics opt-out menu item", () => {
       expect(menuItem.checked).toBe(true)
       expect(mockElectron.dialog.showMessageBox).not.toHaveBeenCalled()
     })
+  })
+})
+
+describe("the menu's language", () => {
+  // the whole menu bar, top level only - which is where the app menu darwin
+  // unshifts in front of File also shows up
+  const menuBar = () =>
+    mockElectron.Menu.buildFromTemplate.mock.calls
+      .at(-1)[0]
+      .map((entry) => entry.label)
+
+  it("follows the OS rather than the in-app toggle", () => {
+    // the menu bar belongs to the system, and it is built before a renderer
+    // exists to ask what the in-app language toggle is set to
+    mockElectron.app.getLocale.mockReturnValueOnce("ru-RU")
+    app.createMenu()
+
+    expect(menuBar()).toContain("Файл")
+  })
+
+  it("stays english for everyone else", () => {
+    app.createMenu()
+
+    expect(menuBar()).toContain("File")
+  })
+
+  // a russian menu item that puts up an english box is the worst of both, so
+  // the boxes these items raise come from the same table as their labels
+  it("speaks russian in the boxes its own items put up", async () => {
+    mockElectron.app.getLocale.mockReturnValueOnce("ru-RU")
+    app.createMenu()
+
+    // no ipc handlers is the "this build cannot check for updates" path
+    app.ipcHandlers = null
+    await mockElectron.Menu.buildFromTemplate.mock.calls
+      .at(-1)[0]
+      .find((entry) => entry.label === "Инструменты")
+      .submenu.find((entry) => entry.label === "Проверить обновления")
+      .click()
+
+    const [, options] = mockElectron.dialog.showMessageBox.mock.calls[0]
+    expect(options.title).toBe("Проверка обновлений недоступна")
+  })
+
+  it("falls back to english rather than letting a locale it cannot read stop it", () => {
+    // the menu is the whole menu bar, so a getLocale that throws has to cost
+    // the labels their translation and nothing more
+    mockElectron.app.getLocale.mockImplementationOnce(() => {
+      throw new Error("locale unavailable")
+    })
+    const error = jest.spyOn(console, "error").mockImplementation(() => {})
+
+    expect(() => app.createMenu()).not.toThrow()
+    expect(menuBar()).toContain("File")
+
+    error.mockRestore()
   })
 })
 

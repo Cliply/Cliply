@@ -426,6 +426,9 @@ describe("the shape of the boundary is pinned, so widening it is a decision", ()
     file_size_mb: "number",
     progress_at_failure: "number",
     progress_at_cancel: "number",
+    // which step of the coffee prompt was shown. one of five constants this
+    // process picks itself, never anything the user typed or a url produced
+    milestone: "number",
 
     /**
      * a playlist run's counts, and they are the reason this pin is worth

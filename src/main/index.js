@@ -48,6 +48,169 @@ const QUIT_FLUSH_TIMEOUT_MS = 2000
  */
 const ENGINE_CURRENT_REASONS = new Set(["up-to-date", "completed"])
 
+/**
+ * what the native menu says, in the two languages the app speaks
+ *
+ * this one surface follows app.getLocale() - the OS - rather than the in-app
+ * language toggle. the menu bar is the system's, it is built before a renderer
+ * exists to ask, and the alternative is an ipc round trip on every startup.
+ *
+ * sentence case here, unlike the lowercase in-app voice: these labels sit in
+ * the OS's own menu bar next to the OS's own words. product names stay latin.
+ */
+const MENU_TEXT = {
+  en: {
+    file: "File",
+    newDownload: "New Download",
+    openDownloads: "Open Downloads Folder",
+    quit: "Quit",
+
+    edit: "Edit",
+    undo: "Undo",
+    redo: "Redo",
+    cut: "Cut",
+    copy: "Copy",
+    paste: "Paste",
+
+    tools: "Tools",
+    checkUpdates: "Check for Updates",
+    videoEngine: "Video engine",
+    versionUnknown: "version unknown",
+    sendUsageData: "Send usage data",
+
+    view: "View",
+    reload: "Reload",
+    forceReload: "Force Reload",
+    devTools: "Toggle Developer Tools",
+    actualSize: "Actual Size",
+    zoomIn: "Zoom In",
+    zoomOut: "Zoom Out",
+    fullscreen: "Toggle Fullscreen",
+
+    window: "Window",
+    minimize: "Minimize",
+    close: "Close",
+    zoom: "Zoom",
+    bringAllToFront: "Bring All to Front",
+
+    help: "Help",
+    aboutCliply: "About Cliply",
+    systemHealth: "System Health",
+    reportIssue: "Report Issue",
+
+    // the macos app menu builds two of its labels around the app's own name
+    about: "About",
+    services: "Services",
+    hide: "Hide",
+    hideOthers: "Hide Others",
+    showAll: "Show All",
+
+    version: "Version",
+    aboutBlurb:
+      "Your fave little desktop app; powered by open source tools (>ᴗ•)",
+
+    // the boxes these menu items put up when something goes wrong
+    error: "Error",
+    updateCheckFailed: "Update Check Failed",
+    updateCheckFailedMessage: "Failed to check for updates.",
+    updateCheckFailedDetail: "Please try again later.",
+    updateUnavailable: "Update Check Unavailable",
+    updateUnavailableMessage: "Update checking is not available.",
+    updateUnavailableDetail:
+      "Updates are only available in production builds.",
+    prefNotSaved: "Couldn't save that preference",
+    prefNotSavedMessage: "Your analytics preference could not be saved.",
+    prefNotSavedDetail: "Please try again.",
+    healthCheckFailed: "Failed to check system health.",
+
+    healthHealthy: "System Status: Healthy",
+    healthError: "System Status: Error",
+    healthDownloader: "Downloader",
+    healthUnknown: "Unknown",
+    healthFound: "Found",
+    healthMissing: "Missing",
+    healthValid: "Valid",
+    healthInvalid: "Invalid",
+    healthActive: "Active downloads",
+    healthUptime: "Uptime",
+    healthMinutes: "minutes"
+  },
+  ru: {
+    file: "Файл",
+    newDownload: "Новая загрузка",
+    openDownloads: "Открыть папку загрузок",
+    quit: "Выход",
+
+    edit: "Правка",
+    undo: "Отменить",
+    redo: "Повторить",
+    cut: "Вырезать",
+    copy: "Копировать",
+    paste: "Вставить",
+
+    tools: "Инструменты",
+    checkUpdates: "Проверить обновления",
+    videoEngine: "Движок видео",
+    versionUnknown: "версия неизвестна",
+    sendUsageData: "Отправлять данные об использовании",
+
+    view: "Вид",
+    reload: "Перезагрузить",
+    forceReload: "Перезагрузить принудительно",
+    devTools: "Инструменты разработчика",
+    actualSize: "Исходный размер",
+    zoomIn: "Увеличить",
+    zoomOut: "Уменьшить",
+    fullscreen: "Полноэкранный режим",
+
+    window: "Окно",
+    minimize: "Свернуть",
+    close: "Закрыть",
+    zoom: "Масштаб",
+    bringAllToFront: "Все окна на передний план",
+
+    help: "Справка",
+    aboutCliply: "О Cliply",
+    systemHealth: "Состояние системы",
+    reportIssue: "Сообщить о проблеме",
+
+    about: "О",
+    services: "Службы",
+    hide: "Скрыть",
+    hideOthers: "Скрыть остальные",
+    showAll: "Показать все",
+
+    version: "Версия",
+    aboutBlurb:
+      "Ваше любимое маленькое приложение; работает на инструментах с открытым кодом (>ᴗ•)",
+
+    error: "Ошибка",
+    updateCheckFailed: "Не удалось проверить обновления",
+    updateCheckFailedMessage: "Не удалось проверить наличие обновлений.",
+    updateCheckFailedDetail: "Попробуйте позже.",
+    updateUnavailable: "Проверка обновлений недоступна",
+    updateUnavailableMessage: "Проверка обновлений здесь не работает.",
+    updateUnavailableDetail:
+      "Обновления доступны только в установленной версии.",
+    prefNotSaved: "Не удалось сохранить настройку",
+    prefNotSavedMessage: "Настройку аналитики не удалось сохранить.",
+    prefNotSavedDetail: "Попробуйте ещё раз.",
+    healthCheckFailed: "Не удалось проверить состояние системы.",
+
+    healthHealthy: "Состояние системы: в порядке",
+    healthError: "Состояние системы: ошибка",
+    healthDownloader: "Загрузчик",
+    healthUnknown: "неизвестно",
+    healthFound: "найден",
+    healthMissing: "отсутствует",
+    healthValid: "рабочие",
+    healthInvalid: "нерабочие",
+    healthActive: "Активные загрузки",
+    healthUptime: "Время работы",
+    healthMinutes: "мин."
+  }
+}
+
 class CliplyApp {
   constructor() {
     this.mainWindow = null
@@ -86,7 +249,10 @@ class CliplyApp {
       // setup app event handlers
       this.setupAppEvents()
 
-      // create menu
+      // create menu. after ready, because the menu is labelled from
+      // app.getLocale(), which answers with an empty string before it - and
+      // services can finish first on a fast machine
+      await app.whenReady()
       this.createMenu()
 
       // setup auto-updater in production
@@ -576,6 +742,23 @@ class CliplyApp {
    * is the whole of what makes previous_version meaningful, and it is how an
    * upgrade becomes visible in the data.
    */
+  /**
+   * does this install currently hold a signed-in youtube jar?
+   *
+   * never throws: a launch report is not worth losing over a dimension, and an
+   * unreadable jar is a false rather than a missing answer - it is not signed
+   * in either way.
+   *
+   * @returns {boolean}
+   */
+  cookiesSignedIn() {
+    try {
+      return Boolean(this.services.cookieManager?.hasValidCookies())
+    } catch {
+      return false
+    }
+  }
+
   reportLaunch() {
     return this.services.settingsStore
       .readAll()
@@ -587,7 +770,19 @@ class CliplyApp {
           // spread rather than `|| null`: a first launch genuinely has no
           // previous version, and absence says that where a null pretends
           // there was a value to send
-          ...(previousVersion ? { previous_version: previousVersion } : {})
+          ...(previousVersion ? { previous_version: previousVersion } : {}),
+          /**
+           * how many installs actually have working cookies, asked once a
+           * launch.
+           *
+           * cookies_imported answers "who imported, ever" - a one-off event
+           * that never expires, so a jar youtube rotated out three weeks ago
+           * still counts as an import forever. This is the standing figure:
+           * of the installs running today, what share are signed in right now.
+           * The gap between the two is the re-import problem, and without this
+           * event there is no way to see it.
+           */
+          cookies_signed_in: this.cookiesSignedIn()
         })
 
         const version = getAppVersion()
@@ -865,12 +1060,29 @@ class CliplyApp {
     // an update lands, and neither moment can wait on a --version probe
     const engineVersion = this.services.ytdlpEngine.getKnownVersion()
 
+    // the OS's language, not the in-app toggle. both callers run after ready,
+    // where getLocale() has settled - and a locale we cannot read leaves an
+    // english menu, which is better than an initialisation that aborts here
+    let locale = ""
+    try {
+      locale = app.getLocale()
+    } catch (error) {
+      console.error("Could not read the OS locale:", error)
+    }
+
+    const T =
+      MENU_TEXT[
+        typeof locale === "string" && locale.toLowerCase().startsWith("ru")
+          ? "ru"
+          : "en"
+      ]
+
     const template = [
       {
-        label: "File",
+        label: T.file,
         submenu: [
           {
-            label: "New Download",
+            label: T.newDownload,
             accelerator: "CmdOrCtrl+N",
             click: () => {
               if (this.mainWindow) {
@@ -880,7 +1092,7 @@ class CliplyApp {
           },
           { type: "separator" },
           {
-            label: "Open Downloads Folder",
+            label: T.openDownloads,
             accelerator: "CmdOrCtrl+D",
             click: async () => {
               try {
@@ -894,7 +1106,7 @@ class CliplyApp {
           },
           { type: "separator" },
           {
-            label: "Quit",
+            label: T.quit,
             accelerator: process.platform === "darwin" ? "Cmd+Q" : "Ctrl+Q",
             click: () => {
               app.quit()
@@ -903,21 +1115,21 @@ class CliplyApp {
         ]
       },
       {
-        label: "Edit",
+        label: T.edit,
         submenu: [
-          { label: "Undo", accelerator: "CmdOrCtrl+Z", role: "undo" },
-          { label: "Redo", accelerator: "Shift+CmdOrCtrl+Z", role: "redo" },
+          { label: T.undo, accelerator: "CmdOrCtrl+Z", role: "undo" },
+          { label: T.redo, accelerator: "Shift+CmdOrCtrl+Z", role: "redo" },
           { type: "separator" },
-          { label: "Cut", accelerator: "CmdOrCtrl+X", role: "cut" },
-          { label: "Copy", accelerator: "CmdOrCtrl+C", role: "copy" },
-          { label: "Paste", accelerator: "CmdOrCtrl+V", role: "paste" }
+          { label: T.cut, accelerator: "CmdOrCtrl+X", role: "cut" },
+          { label: T.copy, accelerator: "CmdOrCtrl+C", role: "copy" },
+          { label: T.paste, accelerator: "CmdOrCtrl+V", role: "paste" }
         ]
       },
       {
-        label: "Tools",
+        label: T.tools,
         submenu: [
           {
-            label: "Check for Updates",
+            label: T.checkUpdates,
             click: async () => {
               try {
                 if (this.ipcHandlers) {
@@ -929,25 +1141,25 @@ class CliplyApp {
                     console.error("Update check failed:", result.error?.message)
                     dialog.showMessageBox(this.mainWindow, {
                       type: "error",
-                      title: "Update Check Failed",
-                      message: "Failed to check for updates.",
+                      title: T.updateCheckFailed,
+                      message: T.updateCheckFailedMessage,
                       detail:
-                        result.error?.message || "Please try again later.",
+                        result.error?.message || T.updateCheckFailedDetail,
                       buttons: ["OK"]
                     })
                   }
                 } else {
                   dialog.showMessageBox(this.mainWindow, {
                     type: "warning",
-                    title: "Update Check Unavailable",
-                    message: "Update checking is not available.",
-                    detail: "Updates are only available in production builds.",
+                    title: T.updateUnavailable,
+                    message: T.updateUnavailableMessage,
+                    detail: T.updateUnavailableDetail,
                     buttons: ["OK"]
                   })
                 }
               } catch (error) {
                 console.error("Manual update check failed:", error)
-                dialog.showErrorBox("Error", "Failed to check for updates.")
+                dialog.showErrorBox(T.error, T.updateCheckFailedMessage)
               }
             }
           },
@@ -963,8 +1175,8 @@ class CliplyApp {
             // failed probe leaves us with no version for the whole run, and
             // guessing one would be worse than admitting it
             label: engineVersion
-              ? `Video engine: yt-dlp ${engineVersion}`
-              : "Video engine: version unknown",
+              ? `${T.videoEngine}: yt-dlp ${engineVersion}`
+              : `${T.videoEngine}: ${T.versionUnknown}`,
             enabled: false
           },
           { type: "separator" },
@@ -973,7 +1185,7 @@ class CliplyApp {
             // install id and a city derived from the ip, which is pseudonymous
             // - and this label is read far more often than PRIVACY.md, so it
             // is where the word would do its damage
-            label: "Send usage data",
+            label: T.sendUsageData,
             type: "checkbox",
             checked: this.services.analytics.isEnabled(),
             click: async (menuItem) => {
@@ -1008,9 +1220,9 @@ class CliplyApp {
                 menuItem.checked = this.services.analytics.isEnabled()
                 dialog.showMessageBox(this.mainWindow, {
                   type: "error",
-                  title: "Couldn't save that preference",
-                  message: "Your analytics preference could not be saved.",
-                  detail: result.error || "Please try again.",
+                  title: T.prefNotSaved,
+                  message: T.prefNotSavedMessage,
+                  detail: result.error || T.prefNotSavedDetail,
                   buttons: ["OK"]
                 })
               }
@@ -1019,94 +1231,98 @@ class CliplyApp {
         ]
       },
       {
-        label: "View",
+        label: T.view,
         submenu: [
-          { label: "Reload", accelerator: "CmdOrCtrl+R", role: "reload" },
+          { label: T.reload, accelerator: "CmdOrCtrl+R", role: "reload" },
           {
-            label: "Force Reload",
+            label: T.forceReload,
             accelerator: "CmdOrCtrl+Shift+R",
             role: "forceReload"
           },
           {
-            label: "Toggle Developer Tools",
+            label: T.devTools,
             accelerator: "F12",
             role: "toggleDevTools"
           },
           { type: "separator" },
           {
-            label: "Actual Size",
+            label: T.actualSize,
             accelerator: "CmdOrCtrl+0",
             role: "resetZoom"
           },
-          { label: "Zoom In", accelerator: "CmdOrCtrl+Plus", role: "zoomIn" },
-          { label: "Zoom Out", accelerator: "CmdOrCtrl+-", role: "zoomOut" },
+          { label: T.zoomIn, accelerator: "CmdOrCtrl+Plus", role: "zoomIn" },
+          { label: T.zoomOut, accelerator: "CmdOrCtrl+-", role: "zoomOut" },
           { type: "separator" },
           {
-            label: "Toggle Fullscreen",
+            label: T.fullscreen,
             accelerator: "F11",
             role: "togglefullscreen"
           }
         ]
       },
       {
-        label: "Window",
+        label: T.window,
         submenu: [
-          { label: "Minimize", accelerator: "CmdOrCtrl+M", role: "minimize" },
-          { label: "Close", accelerator: "CmdOrCtrl+W", role: "close" }
+          { label: T.minimize, accelerator: "CmdOrCtrl+M", role: "minimize" },
+          { label: T.close, accelerator: "CmdOrCtrl+W", role: "close" }
         ]
       },
       {
-        label: "Help",
+        label: T.help,
         submenu: [
           {
-            label: "About Cliply",
+            label: T.aboutCliply,
             click: () => {
               dialog.showMessageBox(this.mainWindow, {
                 type: "info",
-                title: "About Cliply",
+                title: T.aboutCliply,
                 message: "Cliply Desktop",
-                detail: `Version: ${getAppVersion()}\n\nYour fave little desktop app; powered by open source tools (>ᴗ•)`,
+                detail: `${T.version}: ${getAppVersion()}\n\n${T.aboutBlurb}`,
                 buttons: ["OK"]
               })
             }
           },
           {
-            label: "System Health",
+            label: T.systemHealth,
             click: async () => {
               try {
                 if (this.ipcHandlers) {
                   const health = await this.ipcHandlers.handleSystemHealth()
 
                   const message = health.success
-                    ? `System Status: Healthy\n\nDownloader: ${
-                        health.data.engine.version || "Unknown"
+                    ? `${T.healthHealthy}\n\n${T.healthDownloader}: ${
+                        health.data.engine.version || T.healthUnknown
                       }\nFFmpeg: ${
-                        health.data.engine.ffmpeg ? "Found" : "Missing"
+                        health.data.engine.ffmpeg
+                          ? T.healthFound
+                          : T.healthMissing
                       }\nCookies: ${
-                        health.data.cookies.hasValid ? "Valid" : "Invalid"
-                      }\nActive downloads: ${
+                        health.data.cookies.hasValid
+                          ? T.healthValid
+                          : T.healthInvalid
+                      }\n${T.healthActive}: ${
                         health.data.downloads.active
-                      }\nUptime: ${Math.floor(
+                      }\n${T.healthUptime}: ${Math.floor(
                         health.data.performance.uptime / 60
-                      )} minutes`
-                    : `System Status: Error\n\n${health.error.message}`
+                      )} ${T.healthMinutes}`
+                    : `${T.healthError}\n\n${health.error.message}`
 
                   dialog.showMessageBox(this.mainWindow, {
                     type: health.success ? "info" : "error",
-                    title: "System Health",
+                    title: T.systemHealth,
                     message,
                     buttons: ["OK"]
                   })
                 }
               } catch (error) {
                 console.error("System health check failed:", error)
-                dialog.showErrorBox("Error", "Failed to check system health.")
+                dialog.showErrorBox(T.error, T.healthCheckFailed)
               }
             }
           },
           { type: "separator" },
           {
-            label: "Report Issue",
+            label: T.reportIssue,
             click: () => {
               shell.openExternal("https://github.com/Cliply/Cliply/issues")
             }
@@ -1120,33 +1336,33 @@ class CliplyApp {
       template.unshift({
         label: app.getName(),
         submenu: [
-          { label: "About " + app.getName(), role: "about" },
+          { label: T.about + " " + app.getName(), role: "about" },
           { type: "separator" },
-          { label: "Services", role: "services", submenu: [] },
+          { label: T.services, role: "services", submenu: [] },
           { type: "separator" },
           {
-            label: "Hide " + app.getName(),
+            label: T.hide + " " + app.getName(),
             accelerator: "Command+H",
             role: "hide"
           },
           {
-            label: "Hide Others",
+            label: T.hideOthers,
             accelerator: "Command+Shift+H",
             role: "hideothers"
           },
-          { label: "Show All", role: "unhide" },
+          { label: T.showAll, role: "unhide" },
           { type: "separator" },
-          { label: "Quit", accelerator: "Command+Q", click: () => app.quit() }
+          { label: T.quit, accelerator: "Command+Q", click: () => app.quit() }
         ]
       })
 
       // window menu
       template[5].submenu = [
-        { label: "Close", accelerator: "CmdOrCtrl+W", role: "close" },
-        { label: "Minimize", accelerator: "CmdOrCtrl+M", role: "minimize" },
-        { label: "Zoom", role: "zoom" },
+        { label: T.close, accelerator: "CmdOrCtrl+W", role: "close" },
+        { label: T.minimize, accelerator: "CmdOrCtrl+M", role: "minimize" },
+        { label: T.zoom, role: "zoom" },
         { type: "separator" },
-        { label: "Bring All to Front", role: "front" }
+        { label: T.bringAllToFront, role: "front" }
       ]
     }
 

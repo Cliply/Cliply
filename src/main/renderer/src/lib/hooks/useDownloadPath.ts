@@ -1,5 +1,6 @@
 import { useCallback } from "react"
 import { settingsApi, systemApi } from "@/lib/api"
+import { t } from "@/lib/i18n"
 import { useYouTubeStore } from "@/lib/youtubeStore"
 import { showFolderSelectedToast } from "@/lib/toast-utils"
 import { toast } from "sonner"
@@ -26,7 +27,7 @@ export function useDownloadPath() {
       }
     } catch (error) {
       console.error("failed to update download folder:", error)
-      toast.error("failed to update download folder")
+      toast.error(t("folder.updateFailed"))
     } finally {
       setIsLoadingDownloadPath(false)
     }

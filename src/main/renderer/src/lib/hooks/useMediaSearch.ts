@@ -13,6 +13,8 @@ import {
   playlistApi,
   type PlaylistInfoResponse
 } from "@/lib/api"
+import { en } from "@/lib/i18n/en"
+import { localizeError, t } from "@/lib/i18n"
 import { mixedLinkKey, useMixedLinkStore } from "@/lib/mixedLinkStore"
 import {
   PLATFORM_REGISTRY,
@@ -22,7 +24,10 @@ import { usePinterestStore } from "@/lib/pinterestStore"
 import { usePlaylistStore } from "@/lib/playlistStore"
 import { useAppStore, type Platform } from "@/lib/store"
 import { useTikTokStore } from "@/lib/tiktokStore"
-import { showServerOverwhelmedToast } from "@/lib/toast-utils"
+import {
+  showBotDetectionToast,
+  showServerOverwhelmedToast
+} from "@/lib/toast-utils"
 import {
   detectYouTubeTarget,
   ensureHttpScheme,
@@ -180,7 +185,7 @@ async function loadSingleVideo(
     config.store.setUrl(url)
     const summary = await config.fetchAndStore(url)
     reveal()
-    toast.success(config.successMessage)
+    toast.success(t(config.successMessage))
 
     track("media_info_loaded", {
       platform,
@@ -340,7 +345,7 @@ function commitPlaylist(
   useYouTubeStore.getState().setUrl(url)
   usePlaylistStore.getState().setLoadedPlaylist(url, info)
   reveal()
-  toast.success("Playlist loaded successfully!")
+  toast.success(t("playlist.loaded"))
 
   /**
    * the same event a loaded video sends, carrying what a playlist has instead.
@@ -400,10 +405,18 @@ async function loadPlaylist(url: string, token: number, reveal: () => void) {
       return
     }
 
+    // main's sentence, in the reader's language where a category names one -
+    // the same swap handleSearchError makes for a video lookup
     const message =
-      error instanceof Error ? error.message : "Failed to get playlist information"
+      error instanceof Error
+        ? localizeError({
+            message: error.message,
+            category:
+              error instanceof DownloadError ? error.category : undefined
+          }).message
+        : t("playlist.infoFailed")
 
-    toast.error("Failed to get playlist information", { description: message })
+    toast.error(t("playlist.infoFailed"), { description: message })
     console.error("Playlist info request failed:", error)
   } finally {
     // the spinner belongs to the newest lookup, which may still be running
@@ -444,19 +457,41 @@ function handleSearchError(
   form: UseFormReturn<{ url: string }>
 ) {
   const errorMessage =
-    error instanceof Error ? error.message : config.errorMessages.genericFail
+    error instanceof Error ? error.message : t(config.errorMessages.genericFail)
 
-  if (errorMessage.includes(config.errorMessages.invalidUrl)) {
-    toast.error(config.errorMessages.invalidUrlToast)
+  // main's sentence is matched in english below, because that is the language it
+  // is written in, and shown in the reader's - which are two different strings
+  // once the locale is russian
+  const shown = localizeError({
+    message: errorMessage,
+    category: error instanceof DownloadError ? error.category : undefined
+  }).message
+
+  // checked first, and on the category rather than the wording: this is the one
+  // failure here the user can actually fix, and main already decided which it
+  // is. matching on text would put it behind whichever generic branch happened
+  // to catch the sentence first
+  if (
+    error instanceof DownloadError &&
+    error.category === "BOT_DETECTION"
+  ) {
+    // the platform decides which action the toast offers: BOT_DETECTION also
+    // catches tiktok and pinterest, and the cookie dialog is youtube's alone
+    showBotDetectionToast(shown, config.id)
+  } else if (errorMessage.includes(en[config.errorMessages.invalidUrl])) {
+    // matched against english on purpose: this sentence came from main, which
+    // stays english so its wording keeps feeding logs and issue bodies. only
+    // what the user is shown gets translated
+    toast.error(t(config.errorMessages.invalidUrlToast))
     form.setError("url", { message: config.errorMessages.invalidUrl })
   } else if (
     errorMessage.includes("unavailable") ||
     errorMessage.includes("not found")
   ) {
-    toast.error(config.errorMessages.unavailable)
+    toast.error(t(config.errorMessages.unavailable))
   } else if (errorMessage.includes("image, not a video")) {
-    toast.error("This is an image, not a video", {
-      description: "Only videos can be downloaded"
+    toast.error(t("error.imageNotVideo"), {
+      description: t("error.imageNotVideoDesc")
     })
   } else if (
     errorMessage.includes("network") ||
@@ -464,8 +499,8 @@ function handleSearchError(
   ) {
     showServerOverwhelmedToast()
   } else {
-    toast.error(config.errorMessages.genericFail, {
-      description: errorMessage
+    toast.error(t(config.errorMessages.genericFail), {
+      description: shown
     })
   }
 

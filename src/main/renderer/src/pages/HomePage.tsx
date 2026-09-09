@@ -1,3 +1,5 @@
+import { CookieDialog } from "@/components/cookies/CookieDialog"
+import { SupportDialog } from "@/components/support/SupportDialog"
 import { PinterestLayout } from "@/components/pinterest"
 import { MixedLinkPrompt, PlaylistLayout } from "@/components/playlist"
 import { ReportIssueDialog } from "@/components/report/ReportIssueDialog"
@@ -48,6 +50,8 @@ export function HomePage() {
           is what decides which one comes next */}
       <MixedLinkPrompt />
       <ReportIssueDialog />
+      <CookieDialog />
+      <SupportDialog />
     </>
   )
 }

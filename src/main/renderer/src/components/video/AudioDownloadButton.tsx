@@ -6,6 +6,7 @@ import {
 } from "@/components/ui/tooltip"
 import { formatDuration, languageName, validateTimeRange } from "@/lib/api"
 import { useAudioDownload } from "@/lib/hooks/useAudioDownload"
+import { useT } from "@/lib/i18n"
 import { useYouTubeStore } from "@/lib/youtubeStore"
 import { isTerminalReason } from "@/lib/downloadOutcome"
 import { cn } from "@/lib/utils"
@@ -36,6 +37,7 @@ export function AudioDownloadButton({
   } = useYouTubeStore()
 
   const audioDownloadMutation = useAudioDownload()
+  const t = useT()
 
   const selectedDuration = audioTimeRange.end - audioTimeRange.start
 
@@ -108,19 +110,21 @@ export function AudioDownloadButton({
         )}
       >
         <h4 className="font-medium text-slate-900 dark:text-white mb-2">
-          Download Summary
+          {t("card.summary")}
         </h4>
         <div className="space-y-1 text-sm">
           <div className="flex justify-between">
             <span className="text-slate-600 dark:text-slate-400">
-              Duration:
+              {t("card.duration")}
             </span>
             <span className="font-medium text-slate-900 dark:text-white">
               {formatDuration(selectedDuration)}
             </span>
           </div>
           <div className="flex justify-between">
-            <span className="text-slate-600 dark:text-slate-400">Format:</span>
+            <span className="text-slate-600 dark:text-slate-400">
+              {t("card.format")}
+            </span>
             <span className="font-medium text-slate-900 dark:text-white">
               {selectedAudioMode?.toUpperCase()}
             </span>
@@ -129,7 +133,7 @@ export function AudioDownloadButton({
           {selectedAudioLanguage && (
             <div className="flex justify-between">
               <span className="text-slate-600 dark:text-slate-400">
-                Language:
+                {t("card.language")}
               </span>
               <span className="font-medium text-slate-900 dark:text-white">
                 {languageName(selectedAudioLanguage)}
@@ -138,7 +142,7 @@ export function AudioDownloadButton({
           )}
           <div className="flex justify-between">
             <span className="text-slate-600 dark:text-slate-400">
-              Time Range:
+              {t("card.timeRange")}
             </span>
             <span className="font-medium text-slate-900 dark:text-white">
               {Math.floor(audioTimeRange.start / 60)}:
@@ -154,7 +158,7 @@ export function AudioDownloadButton({
               <div className="flex items-center gap-2">
                 <Scissors className="h-4 w-4 text-slate-500 dark:text-slate-500" />
                 <span className="text-sm text-slate-600 dark:text-slate-400">
-                  Precise Cut:
+                  {t("card.preciseCut")}
                 </span>
               </div>
               <Tooltip>
@@ -170,11 +174,11 @@ export function AudioDownloadButton({
                         : "hover:bg-slate-100 dark:hover:bg-slate-700"
                     )}
                   >
-                    {audioPreciseCut ? "Enabled" : "Disabled"}
+                    {audioPreciseCut ? t("card.enabled") : t("card.disabled")}
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent side="left">
-                  <p>Turn off for faster download but less precise cuts</p>
+                  <p>{t("card.preciseCutHint")}</p>
                 </TooltipContent>
               </Tooltip>
             </div>
@@ -195,10 +199,10 @@ export function AudioDownloadButton({
       >
         {audioDownloadMutation.isPending ? (
           <>
-            <span className="animate-pulse">Downloading...</span>
+            <span className="animate-pulse">{t("download.inProgress")}</span>
           </>
         ) : (
-          "Download Audio"
+          t("download.audio")
         )}
       </Button>
 
@@ -206,7 +210,7 @@ export function AudioDownloadButton({
       {audioDownloadMutation.isPending && (
         <DownloadProgressBar
           state={audioDownloadMutation.downloadState}
-          label="audio"
+          label={t("media.audio")}
           onCancel={audioDownloadMutation.cancelDownload}
         />
       )}
@@ -214,7 +218,7 @@ export function AudioDownloadButton({
       {/* Helper Text */}
       {!audioDownloadMutation.isPending && (
         <div className="text-xs text-slate-500 dark:text-slate-500 text-center">
-          Audio will be downloaded with the selected time range and format
+          {t("download.audioHint")}
         </div>
       )}
     </motion.div>

@@ -14,6 +14,8 @@ const {
   parseDestinationLine,
   parseStreamCountLine,
   normalizeUrl,
+  isYouTubeUrl,
+  YtdlpEngine,
   OperationGate,
   redactLogLine,
   mapError,
@@ -1228,17 +1230,19 @@ describe("cookie file detection", () => {
     const { YtdlpEngine } = require("../src/main/services/ytdlp-engine")
     const jar = path.join(tempDir, "manager-httponly.txt")
 
+    // http-only, and the pair yt-dlp reads as a signed-in session: LOGIN_INFO
+    // alongside a SAPISID cookie. Either one alone is not a login
     fs.writeFileSync(
       jar,
       "# Netscape HTTP Cookie File\n" +
-        "#HttpOnly_.youtube.com\tTRUE\t/\tTRUE\t0\t__Secure-1PSID\tvalue\n"
+        "#HttpOnly_.youtube.com\tTRUE\t/\tTRUE\t0\tLOGIN_INFO\tvalue\n" +
+        "#HttpOnly_.youtube.com\tTRUE\t/\tTRUE\t0\tSAPISID\tvalue\n"
     )
 
     const manager = new CookieManager()
     manager.cookieDir = tempDir
     manager.cookieFile = jar
     manager.statusFile = path.join(tempDir, "manager-status.json")
-    await manager.refresh()
 
     // the manager says the user has a usable login...
     expect(manager.hasValidCookies()).toBe(true)
@@ -1330,5 +1334,151 @@ describe("locating the po token payload", () => {
     })
 
     expect(engine.getPotPaths()).toBeNull()
+  })
+})
+
+/**
+ * the youtube jar goes to youtube, and nowhere else
+ *
+ * --cookies is a save destination as well as a read source, so attaching the
+ * jar to a pinterest or tiktok download does not merely fail to help: yt-dlp
+ * writes that site's cookies back into youtube_cookies.txt on the way out.
+ * Confirmed against the bundled 2026.08.19 binary - one run against an
+ * unrelated host left its cookie sitting in the jar beside LOGIN_INFO - and
+ * every such download rewrites the file, which is a chance to lose the login
+ * for no upside.
+ *
+ * gating on the operation name would not have been enough: getInfo serves all
+ * three platforms, so the url is the only thing that actually knows.
+ */
+describe("which operations get the cookie jar", () => {
+  const JAR = "/tmp/youtube_cookies.txt"
+
+  test.each([
+    ["https://www.youtube.com/watch?v=abc", true],
+    ["https://youtu.be/abc", true],
+    ["https://music.youtube.com/watch?v=abc", true],
+    ["https://www.youtube-nocookie.com/embed/abc", true],
+    ["https://www.pinterest.com/pin/123/", false],
+    ["https://www.tiktok.com/@x/video/123", false],
+    ["https://notyoutube.com/watch?v=abc", false],
+    ["https://youtube.com.evil.example/watch", false],
+    ["not a url at all", false]
+  ])("%s -> youtube jar attached: %s", (url, expected) => {
+    expect(isYouTubeUrl(url)).toBe(expected)
+  })
+
+  // the seam run() actually calls, so this is the gate rather than a
+  // restatement of it
+  describe("resolveCookieFile", () => {
+    const engine = () => {
+      const e = Object.create(YtdlpEngine.prototype)
+      e.getCookieFile = () => JAR
+      return e
+    }
+
+    test("a youtube url gets the jar", () => {
+      expect(
+        engine().resolveCookieFile({ url: "https://www.youtube.com/watch?v=a" })
+      ).toBe(JAR)
+    })
+
+    test.each([
+      ["https://www.pinterest.com/pin/1/"],
+      ["https://www.tiktok.com/@x/video/1"]
+    ])("%s does not", (url) => {
+      expect(engine().resolveCookieFile({ url })).toBeNull()
+    })
+
+    // the cookie test forces the jar on for its probe, and clearing it has to
+    // stay possible too - so an explicit value wins, including an explicit null
+    test("an explicit path overrides the url", () => {
+      expect(
+        engine().resolveCookieFile({
+          url: "https://www.pinterest.com/pin/1/",
+          cookieFile: "/forced.txt"
+        })
+      ).toBe("/forced.txt")
+    })
+
+    test("an explicit null overrides the url too", () => {
+      expect(
+        engine().resolveCookieFile({
+          url: "https://www.youtube.com/watch?v=a",
+          cookieFile: null
+        })
+      ).toBeNull()
+    })
+  })
+
+  test("a pinterest download is built without --cookies", () => {
+    const args = buildArgs("simple", {
+      url: "https://www.pinterest.com/pin/1/",
+      output: "/tmp/o.mp4",
+      cookieFile: null
+    })
+
+    expect(args).not.toContain("--cookies")
+  })
+
+  test("a youtube download is built with them", () => {
+    const args = buildArgs("combined", {
+      url: "https://www.youtube.com/watch?v=abc",
+      videoFormat: "137",
+      audioFormat: "140",
+      output: "/tmp/o.mp4",
+      cookieFile: JAR
+    })
+
+    expect(args).toContain("--cookies")
+    expect(args[args.indexOf("--cookies") + 1]).toBe(JAR)
+  })
+})
+
+// a cookie value in a bug report is a session token in a public github issue,
+// so this is the one redaction with a real adversary rather than a tidy-up.
+//
+// yt-dlp quotes the offending row back verbatim, that line lands in the stderr
+// tail, the tail rides along on a failure, and the report dialog puts the
+// failure in an issue url and on the clipboard.
+describe("a cookie row never survives a log line", () => {
+  // "\t" as the two characters python prints inside a repr, not a real tab
+  const T = "\\t"
+  const row = (flag, value, extra) =>
+    `.youtube.com${T}${flag}${T}/${T}${flag}${T}999${T}SAPISID${T}${value}${extra || ""}`
+  const warn = (r) =>
+    `WARNING: skipping cookie file entry due to invalid length 8: '${r}'`
+
+  // every one of these defeated some earlier version of the pattern, back when
+  // it tried to keep the structural columns by parsing python's repr
+  test.each([
+    ["an eighth column", warn(row("TRUE", "SEKRIT", T + "x"))],
+    [
+      "an apostrophe in the value, which flips python to double quotes",
+      `WARNING: skipping cookie file entry due to invalid length 8: "${row("TRUE", "SEK'RIT", T + "x")}"`
+    ],
+    ["a flag in lower case", warn(row("true", "SEKRIT", T + "x"))],
+    ["a flag that is not a flag at all", warn(row("XX", "SEKRIT", T + "x"))],
+    [
+      "the other loader's wording",
+      `ERROR: invalid Netscape format cookies file: '${row("TRUE", "SEKRIT")}'`
+    ],
+    [
+      "real tabs rather than escaped ones",
+      ".youtube.com\tTRUE\t/\tTRUE\t999\tSAPISID\tSEKRIT"
+    ]
+  ])("is redacted despite %s", (_label, line) => {
+    const out = redactLogLine(line)
+
+    expect(out).not.toContain("SEKRIT")
+    expect(out).not.toContain("SEK'RIT")
+  })
+
+  // or the redaction has traded a leak for a report nobody can act on
+  test("keeps what makes the diagnostic worth reading", () => {
+    const out = redactLogLine(warn(row("TRUE", "SEKRIT", T + "x")))
+
+    expect(out).toContain("invalid length 8")
+    expect(out).toContain("<cookie row redacted>")
   })
 })
