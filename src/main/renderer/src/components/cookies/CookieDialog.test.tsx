@@ -11,6 +11,7 @@ import { cleanup, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
 
 import { useCookieStore } from "@/lib/cookieStore"
+import { useLocale } from "@/lib/i18n"
 
 const getStatus = vi.fn()
 
@@ -27,7 +28,15 @@ vi.mock("@/lib/api", () => ({
     test: () => testCookies(),
     clear: () => clearCookies()
   },
-  systemApi: { openExternal: (...a: unknown[]) => openExternal(...(a as [])) }
+  systemApi: { openExternal: (...a: unknown[]) => openExternal(...(a as [])) },
+  // the dialog asks whether a refusal carried one of main's codes
+  CookieError: class CookieError extends Error {
+    code?: string
+    constructor(message: string, code?: string) {
+      super(message)
+      this.code = code
+    }
+  }
 }))
 const toastPlain = vi.fn()
 const toastWarning = vi.fn()
@@ -78,7 +87,11 @@ beforeEach(() => {
   openExternal.mockClear()
 })
 
-afterEach(cleanup)
+afterEach(() => {
+  cleanup()
+  // every other test in this file asserts on english
+  useLocale.setState({ locale: "en" })
+})
 
 describe("CookieDialog", () => {
   test("a signed-in jar reports the count and drops the instructions", async () => {
@@ -412,6 +425,103 @@ describe("the row above the steps", () => {
     await waitFor(() => expect(screen.getByText(/signed in · 22 cookies/)).toBeTruthy())
     expect(screen.queryByText("here's how to import them")).toBeNull()
   })
+})
+
+/**
+ * this dialog is the reason the translation exists: a blocked russian user who
+ * cannot read the six steps has no way out of the block at all.
+ *
+ * main's own sentences are the interesting half. They stay english on the wire
+ * - the logs and issue bodies read them - and arrive with a code beside them,
+ * so the row below is translated without anyone matching english prose.
+ */
+describe("in russian", () => {
+  beforeEach(() => useLocale.setState({ locale: "ru" }))
+
+  test("the steps and the import button are readable", async () => {
+    getStatus.mockResolvedValue(status())
+
+    await open()
+
+    await waitFor(() =>
+      expect(screen.getByText("импортируйте этот файл здесь")).toBeTruthy()
+    )
+    expect(screen.getByText("импортировать cookies…")).toBeTruthy()
+    // the product names that stay latin whatever the locale
+    expect(screen.getByText("get cookies.txt LOCALLY")).toBeTruthy()
+  })
+
+  test("main's verdict is said in russian, by its code", async () => {
+    getStatus.mockResolvedValue(
+      status({
+        problem: "youtube ended this session, export your cookies again",
+        problemCode: "JAR_SESSION_ENDED",
+        fileInfo: { ...status().fileInfo, cookieCount: 12, youtubeCookieCount: 12, hasSid: true }
+      })
+    )
+
+    await open()
+
+    await waitFor(() =>
+      expect(
+        screen.getByText("YouTube завершил эту сессию, экспортируйте cookies заново")
+      ).toBeTruthy()
+    )
+  })
+
+  // a code this dictionary has not caught up with must not blank the row
+  test("a code we do not know keeps main's english", async () => {
+    getStatus.mockResolvedValue(
+      status({
+        problem: "something new main learned to say",
+        problemCode: "JAR_SOMETHING_NEW",
+        fileInfo: { ...status().fileInfo, cookieCount: 12, youtubeCookieCount: 12 }
+      })
+    )
+
+    await open()
+
+    await waitFor(() =>
+      expect(screen.getByText("something new main learned to say")).toBeTruthy()
+    )
+  })
+
+  // the word stays latin and undeclined next to any number, because what is
+  // being counted is cookies rather than the one file holding them
+  test("the signed-in row counts in russian", async () => {
+    getStatus.mockResolvedValue(
+      status({
+        hasValidCookies: true,
+        fileInfo: { ...status().fileInfo, cookieCount: 22, youtubeCookieCount: 22, signedIn: true, valid: true }
+      })
+    )
+
+    await open()
+
+    await waitFor(() =>
+      expect(screen.getByText("вы вошли · 22 cookies")).toBeTruthy()
+    )
+  })
+})
+
+// and english still gets main's sentence untouched, which is the other half of
+// the same decision
+test("under english the status row is main's own text", async () => {
+  getStatus.mockResolvedValue(
+    status({
+      problem: "youtube ended this session, export your cookies again",
+      problemCode: "JAR_SESSION_ENDED",
+      fileInfo: { ...status().fileInfo, cookieCount: 12, youtubeCookieCount: 12, hasSid: true }
+    })
+  )
+
+  await open()
+
+  await waitFor(() =>
+    expect(
+      screen.getByText("youtube ended this session, export your cookies again")
+    ).toBeTruthy()
+  )
 })
 
 // "export the cookies" was a gesture people were expected to already know.

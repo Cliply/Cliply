@@ -4,6 +4,8 @@ import { toast } from "sonner"
 
 import { durationBucket, track, urlKind } from "@/lib/analytics"
 import { DownloadError } from "@/lib/api"
+import { en } from "@/lib/i18n/en"
+import { localizeError, t } from "@/lib/i18n"
 import {
   PLATFORM_REGISTRY,
   type PlatformConfig
@@ -80,7 +82,7 @@ export function useMediaSearch(
       config.store.setUrl(data.url)
       const summary = await config.fetchAndStore(data.url)
       setShowMediaDetails(true)
-      toast.success(config.successMessage)
+      toast.success(t(config.successMessage))
 
       track("media_info_loaded", {
         platform,
@@ -134,7 +136,15 @@ function handleSearchError(
   form: UseFormReturn<{ url: string }>
 ) {
   const errorMessage =
-    error instanceof Error ? error.message : config.errorMessages.genericFail
+    error instanceof Error ? error.message : t(config.errorMessages.genericFail)
+
+  // main's sentence is matched in english below, because that is the language it
+  // is written in, and shown in the reader's - which are two different strings
+  // once the locale is russian
+  const shown = localizeError({
+    message: errorMessage,
+    category: error instanceof DownloadError ? error.category : undefined
+  }).message
 
   // checked first, and on the category rather than the wording: this is the one
   // failure here the user can actually fix, and main already decided which it
@@ -146,18 +156,21 @@ function handleSearchError(
   ) {
     // the platform decides which action the toast offers: BOT_DETECTION also
     // catches tiktok and pinterest, and the cookie dialog is youtube's alone
-    showBotDetectionToast(errorMessage, config.id)
-  } else if (errorMessage.includes(config.errorMessages.invalidUrl)) {
-    toast.error(config.errorMessages.invalidUrlToast)
+    showBotDetectionToast(shown, config.id)
+  } else if (errorMessage.includes(en[config.errorMessages.invalidUrl])) {
+    // matched against english on purpose: this sentence came from main, which
+    // stays english so its wording keeps feeding logs and issue bodies. only
+    // what the user is shown gets translated
+    toast.error(t(config.errorMessages.invalidUrlToast))
     form.setError("url", { message: config.errorMessages.invalidUrl })
   } else if (
     errorMessage.includes("unavailable") ||
     errorMessage.includes("not found")
   ) {
-    toast.error(config.errorMessages.unavailable)
+    toast.error(t(config.errorMessages.unavailable))
   } else if (errorMessage.includes("image, not a video")) {
-    toast.error("This is an image, not a video", {
-      description: "Only videos can be downloaded"
+    toast.error(t("error.imageNotVideo"), {
+      description: t("error.imageNotVideoDesc")
     })
   } else if (
     errorMessage.includes("network") ||
@@ -165,8 +178,8 @@ function handleSearchError(
   ) {
     showServerOverwhelmedToast()
   } else {
-    toast.error(config.errorMessages.genericFail, {
-      description: errorMessage
+    toast.error(t(config.errorMessages.genericFail), {
+      description: shown
     })
   }
 

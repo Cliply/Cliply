@@ -79,3 +79,46 @@ test("a jar with nothing expired in it is not called expired", () => {
     /aren't from a signed-in session/
   )
 })
+
+/**
+ * the same verdict as a code, which is what actually crosses to the renderer
+ *
+ * the sentence above is english and stays english. A russian install says the
+ * same thing by looking the code up, so a reworded sentence must never change
+ * one of these - which is exactly what this pins.
+ */
+describe("the code beside the sentence", () => {
+  const { cookieJarProblemCode } = require("../src/main/ipc-handlers")
+  const { JAR_DOMAIN_FLAG, JAR_UNREADABLE } = require("../src/main/utils/cookie-jar")
+
+  test.each([
+    [jar({ total: 0, youtube: 0, loadError: JAR_DOMAIN_FLAG }), "JAR_MALFORMED"],
+    [jar({ total: 0, youtube: 0, loadError: JAR_UNREADABLE }), "JAR_NOT_COOKIE_FILE"],
+    [jar({ total: 0, youtube: 0 }), "JAR_NOTHING_IMPORTED"],
+    [jar({ youtube: 0 }), "JAR_NO_YOUTUBE"],
+    [jar({ expired: 12 }), "JAR_EXPIRED"],
+    [jar({ hasSid: true }), "JAR_SESSION_ENDED"],
+    [jar({ hasSid: false }), "JAR_NEVER_SIGNED_IN"],
+    [jar({ signedIn: true }), "JAR_UNUSABLE"]
+  ])("%o is %s", (inspection, code) => {
+    expect(cookieJarProblemCode(inspection)).toBe(code)
+  })
+
+  // and the two answers never disagree: every code has a sentence
+  test("every code the function can return has wording", () => {
+    const inspections = [
+      jar({ total: 0, youtube: 0, loadError: JAR_DOMAIN_FLAG }),
+      jar({ total: 0, youtube: 0, loadError: JAR_UNREADABLE }),
+      jar({ total: 0, youtube: 0 }),
+      jar({ youtube: 0 }),
+      jar({ expired: 12 }),
+      jar({ hasSid: true }),
+      jar({ hasSid: false }),
+      jar({ signedIn: true })
+    ]
+
+    for (const inspection of inspections) {
+      expect(typeof cookieJarProblem(inspection)).toBe("string")
+    }
+  })
+})

@@ -1,5 +1,6 @@
 import type { QualityTier } from "@/lib/api"
 import { formatFileSize } from "@/lib/api"
+import { useT } from "@/lib/i18n"
 import { useYouTubeStore } from "@/lib/youtubeStore"
 import { cn } from "@/lib/utils"
 import { motion } from "framer-motion"
@@ -49,6 +50,7 @@ export function VideoQualityDropdown({
   onOpenChange
 }: VideoQualityDropdownProps) {
   const { selectedTier, setSelectedTier } = useYouTubeStore()
+  const t = useT()
 
   // the selection has to be a row of *this* menu, by identity and not by a
   // matching height: a tier object from the last video would otherwise keep
@@ -66,8 +68,8 @@ export function VideoQualityDropdown({
   return (
     <SelectionDropdown
       icon={Video}
-      heading="Video Quality"
-      placeholder="Select video quality..."
+      heading={t("dropdown.videoQuality")}
+      placeholder={t("dropdown.videoQualityPlaceholder")}
       options={tiers}
       selected={selectedTier}
       onSelect={setSelectedTier}
@@ -85,8 +87,7 @@ export function VideoQualityDropdown({
           )}
         >
           <p className="text-sm text-slate-600 dark:text-slate-400">
-            This link has no video streams to download — only audio. The Audio
-            Only tab still works.
+            {t("dropdown.noVideoStreams")}
           </p>
         </div>
       }
@@ -97,13 +98,13 @@ export function VideoQualityDropdown({
             animate={{ opacity: 1 }}
             className="text-sm text-slate-600 dark:text-slate-400"
           >
-            Selected:{" "}
+            {t("dropdown.selected")}{" "}
             <span className="font-medium text-slate-900 dark:text-white">
               {tierLabel(selectedTier)} {selectedTier.container.toUpperCase()}
             </span>
             <span className="text-slate-500 dark:text-slate-500">
               {" "}
-              + best audio
+              {t("dropdown.plusBestAudio")}
             </span>
           </motion.div>
         )

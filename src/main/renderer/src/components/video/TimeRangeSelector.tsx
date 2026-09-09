@@ -4,6 +4,7 @@ import {
   timeToSeconds,
   validateTimeRange
 } from "@/lib/api"
+import { useT, type Key } from "@/lib/i18n"
 import { useYouTubeStore } from "@/lib/youtubeStore"
 import { cn } from "@/lib/utils"
 import { motion } from "framer-motion"
@@ -20,9 +21,10 @@ export function TimeRangeSelector({
   className
 }: TimeRangeSelectorProps) {
   const { audioTimeRange, setAudioTimeRange } = useYouTubeStore()
+  const t = useT()
   const [startTimeInput, setStartTimeInput] = useState("00:00")
   const [endTimeInput, setEndTimeInput] = useState(secondsToTime(maxDuration))
-  const [validationError, setValidationError] = useState<string | null>(null)
+  const [validationError, setValidationError] = useState<Key | null>(null)
 
   // Initialize end time when component mounts
   useEffect(() => {
@@ -41,7 +43,7 @@ export function TimeRangeSelector({
       setValidationError(null)
       return true
     } else {
-      setValidationError(validation.error || "Invalid time range")
+      setValidationError(validation.error ?? "time.invalid")
       return false
     }
   }
@@ -73,7 +75,7 @@ export function TimeRangeSelector({
       <div className="flex items-center gap-2">
         <Clock className="h-5 w-5 text-slate-600 dark:text-slate-400" />
         <h3 className="font-medium text-slate-900 dark:text-white">
-          Time Range Selection
+          {t("time.selection")}
         </h3>
       </div>
 
@@ -82,7 +84,7 @@ export function TimeRangeSelector({
         {/* Start Time */}
         <div className="space-y-2">
           <label className="text-sm font-medium text-slate-600 dark:text-slate-400">
-            Start Time
+            {t("time.start")}
           </label>
           <input
             type="text"
@@ -108,7 +110,7 @@ export function TimeRangeSelector({
         {/* End Time */}
         <div className="space-y-2">
           <label className="text-sm font-medium text-slate-600 dark:text-slate-400">
-            End Time
+            {t("time.end")}
           </label>
           <input
             type="text"
@@ -139,7 +141,7 @@ export function TimeRangeSelector({
           animate={{ opacity: 1, y: 0 }}
           className="text-sm text-red-600 dark:text-red-400"
         >
-          {validationError}
+          {t(validationError)}
         </motion.div>
       )}
 
@@ -150,7 +152,7 @@ export function TimeRangeSelector({
           animate={{ opacity: 1 }}
           className="text-sm text-slate-600 dark:text-slate-400"
         >
-          Selected duration:{" "}
+          {t("time.selectedDuration")}{" "}
           <span className="font-medium text-slate-900 dark:text-white">
             {formatDuration(selectedDuration)}
           </span>
@@ -159,7 +161,7 @@ export function TimeRangeSelector({
 
       {/* Helper Text */}
       <div className="text-xs text-slate-500 dark:text-slate-500">
-        Use MM:SS or HH:MM:SS format. Max duration: {secondsToTime(maxDuration)}
+        {t("time.helper", { max: secondsToTime(maxDuration) })}
       </div>
     </motion.div>
   )

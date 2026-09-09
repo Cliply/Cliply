@@ -5,12 +5,14 @@ import {
   VideoDetailsCard,
   VideoPlayerFrame
 } from "@/components/video"
+import { useT } from "@/lib/i18n"
 import { useYouTubeStore } from "@/lib/youtubeStore"
 import { motion } from "framer-motion"
 import { CompactSearch } from "./CompactSearch"
 
 export function VideoLayout() {
   const { videoInfo, url } = useYouTubeStore()
+  const t = useT()
 
   if (!videoInfo) return null
 
@@ -101,12 +103,11 @@ export function VideoLayout() {
               className="flex-shrink-0 px-1 mb-3"
             >
               <div className="text-xs text-slate-500 dark:text-slate-400 font-space-grotesk">
-                Downloads stored at{" "}
+                {t("layout.downloadsAt")}{" "}
                 <span className="font-mono text-slate-600 dark:text-slate-300">
                   ~/Downloads/Cliply
                 </span>{" "}
-                &nbsp;•&nbsp; Multiple downloads supported, performance may vary
-                with concurrent downlaods.
+                &nbsp;•&nbsp; {t("layout.concurrentNote")}
               </div>
             </motion.div>
 

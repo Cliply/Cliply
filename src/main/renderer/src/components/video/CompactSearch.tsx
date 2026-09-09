@@ -1,5 +1,6 @@
 import { Button } from "@/components/ui/button"
 import { useMediaSearch } from "@/lib/hooks/useMediaSearch"
+import { useT, type Key } from "@/lib/i18n"
 import type { Platform } from "@/lib/store"
 import { cn } from "@/lib/utils"
 import { motion } from "framer-motion"
@@ -22,9 +23,9 @@ export function CompactSearch({
     form,
     isLoading: storeLoading,
     onSubmit,
-    handleClear,
-    config
+    handleClear
   } = useMediaSearch(platform, { onSearch })
+  const t = useT()
 
   const isLoading = externalLoading || storeLoading
 
@@ -42,7 +43,7 @@ export function CompactSearch({
           <input
             {...form.register("url")}
             type="text"
-            placeholder={config.placeholder.replace("paste", "Enter new").replace("here...", "URL...")}
+            placeholder={t("url.replacePlaceholder")}
             disabled={isLoading}
             className={cn(
               "w-full h-12 pl-12 pr-16 rounded-xl border transition-all duration-200",
@@ -89,13 +90,13 @@ export function CompactSearch({
           </div>
         </div>
 
-        {form.formState.errors.url && (
+        {form.formState.errors.url?.message && (
           <motion.p
             initial={{ opacity: 0, y: -5 }}
             animate={{ opacity: 1, y: 0 }}
             className="mt-2 text-sm text-red-600 dark:text-red-400"
           >
-            {form.formState.errors.url.message}
+            {t(form.formState.errors.url.message as Key)}
           </motion.p>
         )}
       </form>

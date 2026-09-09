@@ -2,6 +2,7 @@ import { useEffect, useState } from "react"
 import { toast } from "sonner"
 import { Bug } from "lucide-react"
 import { systemApi } from "@/lib/api"
+import { useT } from "@/lib/i18n"
 import {
   buildIssueBody,
   buildIssueUrl,
@@ -22,6 +23,7 @@ import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 
 export function ReportIssueDialog() {
+  const t = useT()
   const { context, isOpen, close } = useReportStore()
   const [environment, setEnvironment] = useState<ReportEnvironment | null>(null)
   const [notes, setNotes] = useState("")
@@ -60,16 +62,13 @@ export function ReportIssueDialog() {
 
     const opened = await systemApi.openExternal(url)
     if (opened) {
-      toast.success("Opening GitHub", {
-        description: truncated
-          ? "We trimmed the logs to fit. The full report is on your clipboard."
-          : "Review the pre-filled issue and hit submit."
+      toast.success(t("report.opening"), {
+        description: truncated ? t("report.trimmed") : t("report.reviewIt")
       })
       close()
     } else {
-      toast.error("Couldn't open your browser", {
-        description:
-          "The full report is on your clipboard. Paste it at github.com/Cliply/Cliply/issues/new"
+      toast.error(t("report.browserFailed"), {
+        description: t("report.browserFailedDesc")
       })
     }
   }
@@ -94,25 +93,24 @@ export function ReportIssueDialog() {
               <Bug className="h-4 w-4" />
             </span>
             <DialogTitle className="text-slate-900 dark:text-white">
-              Report an issue
+              {t("report.title")}
             </DialogTitle>
           </div>
           <DialogDescription className="text-slate-500 dark:text-slate-400">
-            This opens a pre-filled draft issue on GitHub in your browser. Look
-            it over there, then publish it when you're ready.
+            {t("report.description")}
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-3">
           <div className={cardClass}>
-            <p className={labelClass}>What went wrong</p>
+            <p className={labelClass}>{t("report.whatWentWrong")}</p>
             <p className="mt-1 text-sm text-slate-700 dark:text-slate-200">
               {context.shortMessage}
             </p>
           </div>
 
           <div className={cardClass}>
-            <p className={labelClass}>Your setup, attached as-is</p>
+            <p className={labelClass}>{t("report.yourSetup")}</p>
             <dl className="mt-1.5 space-y-1">
               {setupFields.map((field) => (
                 <div
@@ -133,9 +131,9 @@ export function ReportIssueDialog() {
           {logTail && (
             <details className={cn(cardClass, "group")}>
               <summary className="flex cursor-pointer items-center justify-between text-sm text-slate-600 select-none dark:text-slate-300">
-                <span>Technical details we&apos;ll attach</span>
+                <span>{t("report.technicalDetails")}</span>
                 <span className="text-xs text-slate-400 group-open:hidden">
-                  show
+                  {t("report.show")}
                 </span>
               </summary>
               <pre className="mt-2 max-h-32 overflow-auto rounded-lg bg-slate-100 p-2 text-xs whitespace-pre-wrap text-slate-500 dark:bg-slate-900/60 dark:text-slate-400">
@@ -149,14 +147,14 @@ export function ReportIssueDialog() {
               htmlFor="report-notes"
               className="text-sm font-medium text-slate-700 dark:text-slate-200"
             >
-              Anything you were doing when it broke?
+              {t("report.notes")}
             </label>
             <textarea
               id="report-notes"
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
               rows={3}
-              placeholder="Optional, but it helps us track it down faster."
+              placeholder={t("report.notesPlaceholder")}
               className="w-full resize-none rounded-xl border border-slate-300 bg-white/70 p-3 text-sm text-slate-800 outline-none transition-colors placeholder:text-slate-400 focus:border-cyan-500 focus:ring-2 focus:ring-cyan-500/20 dark:border-slate-700 dark:bg-slate-800/40 dark:text-slate-100"
             />
           </div>
@@ -169,7 +167,7 @@ export function ReportIssueDialog() {
                 onChange={(e) => setIncludeVideoUrl(e.target.checked)}
                 className="h-4 w-4 rounded border-slate-300 accent-cyan-600 dark:border-slate-600"
               />
-              Include the link I was downloading
+              {t("report.includeLink")}
             </label>
           )}
         </div>
@@ -180,13 +178,13 @@ export function ReportIssueDialog() {
             onClick={close}
             className="text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white"
           >
-            Not now
+            {t("report.notNow")}
           </Button>
           <Button
             onClick={handleSubmit}
             className="bg-cyan-600 text-white hover:bg-cyan-700"
           >
-            Open on GitHub
+            {t("report.openOnGithub")}
           </Button>
         </DialogFooter>
       </DialogContent>

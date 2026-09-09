@@ -88,6 +88,20 @@ function looksLikeJson(content) {
   return first === "[" || first === "{" || first === '"'
 }
 
+/**
+ * a refusal the renderer can say in the user's own language
+ *
+ * the sentence stays english - it is what the logs, the issue bodies and the
+ * maintainers read - and a stable code travels beside it, so the ui translates
+ * by code rather than by matching english prose that is free to be reworded.
+ *
+ * the codes: COOKIES_FILE_EMPTY, COOKIES_MALFORMED, COOKIES_EMPTY,
+ * COOKIES_NOT_YOUTUBE, COOKIES_TOO_BIG, COOKIES_JSON.
+ */
+function refuse(code, message) {
+  return Object.assign(new Error(message), { code })
+}
+
 // written by older builds; it claimed the cookies worked when all it knew was
 // that the file existed, so it is stripped wherever status is read or written
 const LEGACY_STATUS_KEYS = ["working"]
@@ -225,7 +239,7 @@ class CookieManager {
    */
   async importCookies(cookieContent) {
     if (!cookieContent || !cookieContent.trim()) {
-      throw new Error("that file is empty.")
+      throw refuse("COOKIES_FILE_EMPTY", "that file is empty.")
     }
 
     // into yt-dlp's own shape: its line endings, and its magic first line
@@ -247,19 +261,22 @@ class CookieManager {
     const { error, cookies } = readJar(content)
 
     if (error === JAR_DOMAIN_FLAG) {
-      throw new Error(
+      throw refuse(
+        "COOKIES_MALFORMED",
         "that cookie file is malformed. a domain column disagrees with its own subdomain flag, so yt-dlp refuses the whole thing. export a fresh one instead of editing it by hand."
       )
     }
 
     if (cookies.length === 0) {
-      throw new Error(
+      throw refuse(
+        "COOKIES_EMPTY",
         "there are no cookies in that file. export cookies.txt with the extension, then pick that one."
       )
     }
 
     if (!cookies.some((cookie) => isYouTubeDomain(cookie.domain))) {
-      throw new Error(
+      throw refuse(
+        "COOKIES_NOT_YOUTUBE",
         "that file has cookies, but none of them are youtube's. export cookies.txt while you're on youtube.com."
       )
     }
@@ -293,7 +310,8 @@ class CookieManager {
       const { size } = await fs.stat(filePath)
 
       if (size > MAX_JAR_BYTES) {
-        throw new Error(
+        throw refuse(
+          "COOKIES_TOO_BIG",
           "that file is way too big to be a cookie export. pick the cookies.txt the extension saved."
         )
       }
@@ -317,7 +335,8 @@ class CookieManager {
        * says exactly this, so we say the same thing.
        */
       if (looksLikeJson(content)) {
-        throw new Error(
+        throw refuse(
+          "COOKIES_JSON",
           "that's json, not a netscape cookies.txt. export it as cookies.txt instead."
         )
       }

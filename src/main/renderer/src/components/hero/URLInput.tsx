@@ -4,6 +4,7 @@ import { useEffect, useState } from "react"
 import type { UseFormReturn } from "react-hook-form"
 
 import { useDownloadPath } from "@/lib/hooks/useDownloadPath"
+import { useT, type Key } from "@/lib/i18n"
 import {
   PLATFORM_LIST,
   PLATFORM_REGISTRY
@@ -22,6 +23,7 @@ interface URLInputProps {
 
 export function URLInput({ form, onFocusChange, isLoading, platform }: URLInputProps) {
   const { register, formState: { errors }, watch } = form
+  const t = useT()
   const { selectFolder, isLoading: folderLoading } = useDownloadPath()
   const { selectedPlatform, setSelectedPlatform, setShowMediaDetails } = useAppStore()
   const [isOpen, setIsOpen] = useState(false)
@@ -74,7 +76,7 @@ export function URLInput({ form, onFocusChange, isLoading, platform }: URLInputP
           <input
             {...register("url")}
             type="text"
-            placeholder={config.placeholder}
+            placeholder={t(config.placeholder)}
             disabled={isLoading}
             onFocus={() => onFocusChange(true)}
             onBlur={() => onFocusChange(false)}
@@ -95,7 +97,7 @@ export function URLInput({ form, onFocusChange, isLoading, platform }: URLInputP
             type="button"
             onClick={selectFolder}
             disabled={folderLoading || isLoading}
-            title="Select folder"
+            title={t("url.selectFolder")}
             className={cn(
               "w-7 h-7 rounded-lg border transition-all duration-200 ease-out",
               "flex items-center justify-center flex-shrink-0 bg-transparent",
@@ -129,7 +131,7 @@ export function URLInput({ form, onFocusChange, isLoading, platform }: URLInputP
               <div
                 data-testid="platform-picker-trigger"
                 aria-disabled={isLoading}
-                title={isLoading ? "Wait for the current link to finish" : undefined}
+                title={isLoading ? t("url.pickerBusy") : undefined}
                 className="flex items-center gap-2 px-2.5 py-1.5"
               >
                 <img
@@ -222,7 +224,9 @@ export function URLInput({ form, onFocusChange, isLoading, platform }: URLInputP
           className="px-4"
         >
           <p className="text-sm text-red-600 dark:text-red-400 font-medium" style={{ fontFamily: MONO }}>
-            {errors.url?.message}
+            {/* the form carries a translation key, put there by zod's schema
+                or by the search hook */}
+            {errors.url?.message && t(errors.url.message as Key)}
           </p>
         </motion.div>
       )}
@@ -237,7 +241,7 @@ export function URLInput({ form, onFocusChange, isLoading, platform }: URLInputP
               className="text-sm text-slate-700 dark:text-slate-300 text-center tracking-wide"
               style={{ fontFamily: MONO }}
             >
-              {config.loadingText}
+              {t(config.loadingText)}
               <motion.span
                 animate={{ opacity: [0, 1, 0] }}
                 transition={{ duration: 1, repeat: Infinity, ease: "easeInOut" }}
@@ -248,7 +252,7 @@ export function URLInput({ form, onFocusChange, isLoading, platform }: URLInputP
             </motion.p>
           ) : (
             <p className="text-sm text-slate-600 dark:text-slate-500 text-center" style={{ fontFamily: MONO }}>
-              {config.helperText}
+              {t(config.helperText)}
             </p>
           )}
         </div>

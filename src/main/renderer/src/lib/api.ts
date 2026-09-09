@@ -1,5 +1,6 @@
 // api client using electron ipc instead of http
 
+import type { Key } from "@/lib/i18n"
 import type { ReportEnvironment } from "@/lib/report"
 
 /**
@@ -108,6 +109,8 @@ export interface CookieStatus {
   hasValidCookies: boolean
   /** why the jar is unusable, written by main. null when it works */
   problem: string | null
+  /** the same verdict as a stable `JAR_*` code, so it can be said in russian */
+  problemCode?: string | null
   status: { lastImport?: string | null; lastTest?: string | null }
 }
 
@@ -132,6 +135,8 @@ export interface CookieTestResult {
   /** youtube turned the cookies down while they were being sent - the one strong negative */
   rejected?: boolean
   note: string
+  /** the note as a stable `JAR_*` or `PROBE_*` code, for the same reason */
+  noteCode?: string | null
 }
 
 export interface VideoInfoResponse {
@@ -248,6 +253,8 @@ export interface ApiError {
   suggestion?: string
   details?: string
   category?: string
+  /** main's own code for the failure, "GENERAL_ERROR" when it has none */
+  code?: string
 }
 
 /**
@@ -271,6 +278,22 @@ export class DownloadError extends Error {
     this.name = "DownloadError"
     this.details = error?.details
     this.category = error?.category
+  }
+}
+
+/**
+ * an import main refused, carrying the code it refused it under
+ *
+ * a bare Error threw the code away, and the dialog would have had to match
+ * main's english sentence to know which refusal it was holding.
+ */
+export class CookieError extends Error {
+  code?: string
+
+  constructor(message: string, code?: string) {
+    super(message)
+    this.name = "CookieError"
+    this.code = code
   }
 }
 
@@ -757,7 +780,10 @@ export const cookiesApi = {
 
     if (!response.success) {
       if (response.error?.message === "No file selected") return null
-      throw new Error(response.error?.message || "couldn't import those cookies")
+      throw new CookieError(
+        response.error?.message || "couldn't import those cookies",
+        response.error?.code
+      )
     }
 
     return response.data ?? null
@@ -856,21 +882,23 @@ export const timeToSeconds = (time: string): number => {
   return parts[0] || 0
 }
 
+// the reason is a translation key rather than a sentence: whoever renders it
+// calls `t()` there, the same way the zod schemas carry their messages
 export const validateTimeRange = (
   start: number,
   end: number,
   duration: number
-): { isValid: boolean; error?: string } => {
+): { isValid: boolean; error?: Key } => {
   if (start < 0) {
-    return { isValid: false, error: "Start time cannot be negative" }
+    return { isValid: false, error: "time.startNegative" }
   }
 
   if (end > duration) {
-    return { isValid: false, error: "End time exceeds video duration" }
+    return { isValid: false, error: "time.endExceeds" }
   }
 
   if (start >= end) {
-    return { isValid: false, error: "End time must be greater than start time" }
+    return { isValid: false, error: "time.endBeforeStart" }
   }
 
   return { isValid: true }

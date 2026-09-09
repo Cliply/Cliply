@@ -1,5 +1,6 @@
 import { createContext, useContext, useId, type ReactNode } from "react"
 
+import { useT } from "@/lib/i18n"
 import { cn } from "@/lib/utils"
 
 /**
@@ -138,6 +139,7 @@ export function ProgressBarTrack({
 }: React.ComponentProps<"div">) {
   const { value, isIndeterminate, valueText, labelId } =
     useProgressBar("ProgressBarTrack")
+  const t = useT()
 
   return (
     <div
@@ -147,7 +149,7 @@ export function ProgressBarTrack({
       aria-valuemax={100}
       // an indeterminate bar must not report a position
       aria-valuenow={isIndeterminate ? undefined : Math.round(value)}
-      aria-valuetext={isIndeterminate ? "Working" : valueText}
+      aria-valuetext={isIndeterminate ? t("progress.working") : valueText}
       data-slot="progress-bar-track"
       className={cn(
         "relative h-1.5 w-full overflow-hidden rounded-full",

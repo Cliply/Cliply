@@ -2,6 +2,7 @@ import { useEffect, useState } from "react"
 import { Coffee } from "lucide-react"
 import { systemApi } from "@/lib/api"
 import { track } from "@/lib/analytics"
+import { useT } from "@/lib/i18n"
 import {
   Dialog,
   DialogContent,
@@ -31,6 +32,7 @@ const BUY_ME_A_COFFEE = "https://buymeacoffee.com/itssdevk"
  * ends is one where no can be taken for an answer.
  */
 export function SupportDialog() {
+  const t = useT()
   const [count, setCount] = useState<number | null>(null)
 
   useEffect(() => {
@@ -56,13 +58,11 @@ export function SupportDialog() {
               <Coffee className="h-4 w-4" />
             </span>
             <DialogTitle className="text-base font-medium text-slate-900 dark:text-white">
-              that&apos;s {count} downloads
+              {t("support.title", { n: count ?? 0 })}
             </DialogTitle>
           </div>
           <DialogDescription className="text-xs leading-relaxed text-slate-500 dark:text-slate-400">
-            cliply is free, has no ads, and doesn&apos;t track you. it&apos;s
-            built and kept working by one person in their spare time, mostly
-            against youtube changing things on purpose.
+            {t("support.description")}
           </DialogDescription>
         </DialogHeader>
 
@@ -71,7 +71,7 @@ export function SupportDialog() {
             explains itself sounds like it expects to be turned down. one line
             and two buttons says the same thing by not going on about it */}
         <p className="text-xs leading-relaxed text-slate-600 dark:text-slate-300">
-          if it saved you some time, a coffee helps.
+          {t("support.ask")}
         </p>
 
         <div className="flex items-center gap-2">
@@ -85,14 +85,15 @@ export function SupportDialog() {
               close()
             }}
           >
-            buy me a coffee
+            {/* the same ask the hero footer makes, in the same words */}
+            {t("hero.donate")}
           </Button>
           <Button
             variant="ghost"
             className="text-xs text-slate-500 dark:text-slate-400"
             onClick={close}
           >
-            no thanks
+            {t("support.decline")}
           </Button>
         </div>
       </DialogContent>
