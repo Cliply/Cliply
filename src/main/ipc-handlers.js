@@ -1203,9 +1203,12 @@ class IPCHandlers {
         error.message || "couldn't import that cookie file",
         "export cookies.txt with a browser extension, then pick that file.",
         // the manager's refusal code, so the renderer can say the same thing in
-        // russian. anything else - a full disk, a permission error - has none,
-        // and falls back to createError's placeholder
-        error.code || "GENERAL_ERROR"
+        // russian. only those cross: a full disk or a permission error carries a
+        // node code of its own (ENOSPC, EACCES), and forwarding that would make
+        // the field mean two things
+        typeof error.code === "string" && error.code.startsWith("COOKIES_")
+          ? error.code
+          : "GENERAL_ERROR"
       )
     }
   }

@@ -219,6 +219,30 @@ describe("the codes reach the renderer beside the sentences", () => {
     expect(response.error.code).toBe("GENERAL_ERROR")
   })
 
+  // node puts its own code on filesystem errors. that is not a refusal and
+  // must not cross as one, or the field means two things
+  test("a node error code is not forwarded as a refusal code", async () => {
+    dialog.showOpenDialog.mockResolvedValue({
+      canceled: false,
+      filePaths: [path.join("/tmp", "picked.txt")]
+    })
+
+    const full = Object.assign(new Error("ENOSPC: no space left on device"), {
+      code: "ENOSPC"
+    })
+
+    const handlers = handlersWith({
+      importCookieFile: jest.fn().mockRejectedValue(full),
+      hasValidCookies: jest.fn(() => false),
+      hasYouTubeCookies: jest.fn(() => false)
+    })
+
+    const response = await handlers.handleImportCookieFile(null)
+
+    expect(response.error.code).toBe("GENERAL_ERROR")
+    expect(response.error.message).toMatch(/no space left/)
+  })
+
   test("the status reports a problem as both a sentence and a code", async () => {
     const handlers = handlersWith({
       getStatus: jest.fn().mockResolvedValue({}),
