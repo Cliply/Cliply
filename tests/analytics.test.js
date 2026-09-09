@@ -307,6 +307,7 @@ describe("Analytics", () => {
         "url_submitted",
         "media_info_loaded",
         "media_info_failed",
+        "playlist_prompt_answered",
         "download_started",
         "download_completed",
         "download_failed",
@@ -1558,6 +1559,271 @@ describe("Analytics", () => {
             file_size_mb: value
           })
           expect(properties).not.toHaveProperty("file_size_mb")
+        }
+      })
+    })
+
+    /**
+     * what a playlist adds to the download events, and the one event the
+     * mixed-link question needed.
+     *
+     * a playlist is one download of n videos, so it extends the events that
+     * already exist rather than running beside them: the same platform, the same
+     * media type, the same requested quality, plus how many videos there were
+     * and what became of them. the counts are the whole answer to "did this
+     * work", and every one of them is a small integer - there is no title, no
+     * url and no path anywhere in here, and the census in
+     * analytics-pii-guard.test.js is what holds that for every value.
+     */
+    describe("the playlist properties", () => {
+      it("keeps the flag and every count a completion carries", async () => {
+        const properties = await captureOne("download_completed", {
+          platform: "youtube",
+          media_type: "video",
+          quality: "1080p",
+          is_trimmed: false,
+          is_playlist: true,
+          items_saved: 8,
+          items_reused: 2,
+          items_skipped: 1,
+          items_total: 11
+        })
+
+        expect(properties).toMatchObject({
+          is_playlist: true,
+          items_saved: 8,
+          // never folded into items_saved: an archive skip records that some
+          // earlier run wrote the file, not that this one did
+          items_reused: 2,
+          items_skipped: 1,
+          items_total: 11
+        })
+      })
+
+      it("keeps how many videos a start was asked for", async () => {
+        const properties = await captureOne("download_started", {
+          platform: "youtube",
+          media_type: "video",
+          quality: "1080p",
+          is_trimmed: false,
+          is_playlist: true,
+          item_count: 9
+        })
+
+        expect(properties.is_playlist).toBe(true)
+        expect(properties.item_count).toBe(9)
+      })
+
+      it("keeps the two counts a failure and a cancel can honestly report", async () => {
+        for (const event of ["download_failed", "download_cancelled"]) {
+          const properties = await captureOne(event, {
+            platform: "youtube",
+            media_type: "video",
+            is_playlist: true,
+            items_saved: 3,
+            items_total: 9
+          })
+
+          expect(properties).toMatchObject({
+            is_playlist: true,
+            items_saved: 3,
+            items_total: 9
+          })
+        }
+      })
+
+      /**
+       * the per-event half of the allowlist, which is the trap this whole
+       * ticket exists to avoid: a count sent to an event that did not declare
+       * it is dropped behind a warning production never surfaces.
+       *
+       * a failure knows what it saved and what it was asked for. it does not
+       * know how many were skipped, because a run that broke halfway never
+       * reached the rest of them - so the number would be a guess, and it is
+       * not declared there.
+       */
+      it("drops a count on an event that did not declare it", async () => {
+        const failed = await captureOne("download_failed", {
+          platform: "youtube",
+          is_playlist: true,
+          items_saved: 3,
+          items_skipped: 6,
+          items_reused: 1
+        })
+
+        expect(failed.items_saved).toBe(3)
+        expect(failed).not.toHaveProperty("items_skipped")
+        expect(failed).not.toHaveProperty("items_reused")
+
+        const cancelled = await captureOne("download_cancelled", {
+          platform: "youtube",
+          is_playlist: true,
+          items_skipped: 6
+        })
+
+        expect(cancelled).not.toHaveProperty("items_skipped")
+      })
+
+      it("drops a count nobody registered at all", async () => {
+        // the negative case the ticket asks for: a name that reads exactly like
+        // the ones above and is registered nowhere. it leaves no data and no
+        // error, which is why the fixture and the allowlist have to move
+        // together
+        const properties = await captureOne("download_completed", {
+          platform: "youtube",
+          items_saved: 8,
+          items_failed: 1,
+          playlist_title: "Short talks to watch during your coffee break"
+        })
+
+        expect(properties.items_saved).toBe(8)
+        expect(properties).not.toHaveProperty("items_failed")
+        expect(properties).not.toHaveProperty("playlist_title")
+        expect(JSON.stringify(properties)).not.toContain("Short talks")
+      })
+
+      it("rejects a count that is not one", async () => {
+        for (const value of ["8", NaN, -1, Infinity, null, true]) {
+          const properties = await captureOne("download_completed", {
+            items_saved: value
+          })
+          expect(properties).not.toHaveProperty("items_saved")
+        }
+      })
+
+      it("rejects a flag that is not a boolean", async () => {
+        for (const value of ["true", 1, 0]) {
+          const properties = await captureOne("download_started", {
+            is_playlist: value
+          })
+          expect(properties).not.toHaveProperty("is_playlist")
+        }
+      })
+
+      it("keeps the two answers the mixed-link question has", async () => {
+        for (const choice of ["video", "playlist"]) {
+          const properties = await captureOne("playlist_prompt_answered", {
+            choice,
+            playlist_size: "6-25 vids"
+          })
+
+          expect(properties.choice).toBe(choice)
+          expect(properties.playlist_size).toBe("6-25 vids")
+        }
+      })
+
+      it("refuses an answer outside the two, and a title dressed as one", async () => {
+        for (const value of [
+          "both",
+          "Short talks to watch during your coffee break",
+          "PLLojVvWCZ5N4",
+          ""
+        ]) {
+          const properties = await captureOne("playlist_prompt_answered", {
+            choice: value
+          })
+          expect(properties).not.toHaveProperty("choice")
+        }
+      })
+
+      it("keeps every playlist_size label the renderer can produce", async () => {
+        // PLAYLIST_SIZE_BUCKET_LABELS in renderer/src/lib/analytics.ts, and
+        // PROPERTY_VOCABULARIES.playlist_size is the same four values: a label
+        // the renderer adds without adding it there is a silent drop
+        for (const label of [
+          "1-5 vids",
+          "6-25 vids",
+          "26-100 vids",
+          ">100 vids"
+        ]) {
+          const loaded = await captureOne("media_info_loaded", {
+            platform: "youtube",
+            playlist_size: label
+          })
+          expect(loaded.playlist_size).toBe(label)
+
+          const answered = await captureOne("playlist_prompt_answered", {
+            choice: "playlist",
+            playlist_size: label
+          })
+          expect(answered.playlist_size).toBe(label)
+        }
+      })
+
+      /**
+       * playlist_size is one of four values, and the boundary is where that is
+       * true rather than where it is intended.
+       *
+       * it was first declared with the generic bucket grammar - a digit or a
+       * comparison and up to four letters - on the strength of the renderer
+       * helper only ever producing safe labels. that is the one argument this
+       * module does not accept: the renderer is the least-trusted caller by
+       * construction, and the grammar forwarded "1984 film", a video-id-shaped
+       * "123456789abC" and the exact list length "5283 vids" unchanged. the
+       * values are ours and there are four of them, which is the module's own
+       * definition of when a vocabulary is the right kind.
+       */
+      it("refuses anything but the four labels", async () => {
+        for (const value of [
+          // the three the generic grammar let through: a title, an id, and the
+          // exact size of somebody's playlist
+          "1984 film",
+          "123456789abC",
+          "5283 vids",
+          // a raw count, with and without its quotes
+          11,
+          "11",
+          // a title and an id that never fitted the grammar either
+          "Short talks",
+          "PL123",
+          // and the near-misses of the real labels
+          "1-5 videos",
+          "1-5 VIDS",
+          "0 vids",
+          ""
+        ]) {
+          const loaded = await captureOne("media_info_loaded", {
+            platform: "youtube",
+            playlist_size: value
+          })
+          expect(loaded).not.toHaveProperty("playlist_size")
+
+          const answered = await captureOne("playlist_prompt_answered", {
+            choice: "playlist",
+            playlist_size: value
+          })
+          expect(answered).not.toHaveProperty("playlist_size")
+          expect(JSON.stringify(answered)).not.toContain("1984")
+          expect(JSON.stringify(answered)).not.toContain("5283")
+        }
+      })
+
+      /**
+       * ...and the counts are bounded by the cap the feature actually has.
+       *
+       * the generic number kind takes anything finite from 0 to 1e9, which for
+       * a run of at most PLAYLIST_MAX_ITEMS videos is nine orders of magnitude
+       * of slack and admits fractions besides. the bound is read off the
+       * constant rather than written out, so raising the cap raises this with
+       * it instead of silently dropping every count above the old one.
+       */
+      it("keeps a count the item cap allows, including its edges", async () => {
+        for (const value of [0, 1, 100]) {
+          const properties = await captureOne("download_completed", {
+            items_saved: value
+          })
+          expect(properties.items_saved).toBe(value)
+        }
+      })
+
+      it("rejects a count the item cap makes impossible", async () => {
+        // the non-numbers are covered by "rejects a count that is not one"
+        // above; these are the ones the generic 0-to-1e9 bound admitted
+        for (const value of [101, 5283, 1e9, 2.5]) {
+          const properties = await captureOne("download_completed", {
+            items_saved: value
+          })
+          expect(properties).not.toHaveProperty("items_saved")
         }
       })
     })

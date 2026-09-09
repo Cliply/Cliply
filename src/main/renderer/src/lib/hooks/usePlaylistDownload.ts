@@ -1,3 +1,4 @@
+import { audioQuality, track, videoQuality } from "@/lib/analytics"
 import {
   DownloadError,
   downloadApi,
@@ -484,6 +485,41 @@ export const usePlaylistDownload = () => {
       })
 
       progressCleanupRef.current = cleanup
+
+      /**
+       * one download of n videos, reported as the event a single video already
+       * sends.
+       *
+       * the same properties mean the same things, so the two funnels compare:
+       * `quality` is what was asked for, which for a playlist is the ceiling
+       * yt-dlp applies per video - a 480p video under a 1080p ceiling comes down
+       * at 480p, and reporting that would be several answers to a question with
+       * one. what a playlist adds is that it is one and how many videos were
+       * ticked; what the run made of them is main's to report, because only main
+       * sees the end of it.
+       *
+       * `is_trimmed` is false by construction rather than by choice: the
+       * playlist operation does not accept a time range at all, and there is no
+       * control to hide.
+       *
+       * playlists are youtube's, and this hook only ever serves them.
+       */
+      track("download_started", {
+        platform: "youtube",
+        is_playlist: true,
+        item_count: request.entries.length,
+        is_trimmed: false,
+        ...(request.type === "audio" && request.audio_mode
+          ? {
+              media_type: "audio",
+              quality: audioQuality(request.audio_mode),
+              audio_format: request.audio_mode
+            }
+          : {
+              media_type: "video",
+              quality: videoQuality(request.height)
+            })
+      })
 
       try {
         // resolves once the process is running; the run itself is followed

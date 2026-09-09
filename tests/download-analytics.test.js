@@ -719,6 +719,295 @@ describe("download_cancelled", () => {
   })
 })
 
+/**
+ * a playlist is one download of n videos, so it is the same four events with
+ * the run's own arithmetic added.
+ *
+ * two things make it its own block. a playlist that saved most of its videos
+ * **exits 1** and is still a completion, so the interesting case is a success
+ * carrying a non-zero skip count rather than a failure; and the counts arrive on
+ * the engine's result or on the error it rejected with, which is a different
+ * source from every other property here.
+ *
+ * `quality` is the ceiling the user picked for the whole playlist and stays
+ * exactly that: yt-dlp applies it per video and a 480p video under a 1080p
+ * ceiling comes down at 480p, so a per-video outcome here would be several
+ * answers to a question with one.
+ */
+describe("a playlist's terminal events", () => {
+  const PLAYLIST = { ...VIDEO, playlist: true }
+  const PLAYLIST_AUDIO = { ...AUDIO, formatId: "m4a", playlist: true }
+
+  /** an engine result or rejection carrying what the run managed */
+  const withItems = (counts = {}) => ({
+    filePath: "/downloads/list/001 - a.mp4",
+    files: ["/downloads/list/001 - a.mp4"],
+    itemsSaved: 8,
+    itemsReused: 2,
+    itemsSkipped: 1,
+    itemsTotal: 11,
+    ...counts
+  })
+
+  /** the same counts hung on a rejection, the way the engine attaches them */
+  function failure(code, message, counts = {}) {
+    const error = engineError(code, message)
+    return Object.assign(error, withItems(counts))
+  }
+
+  it("reports a completion as one download of n videos", async () => {
+    const { handlers, captured } = createHandlers()
+
+    await runDownload(handlers, PLAYLIST, (handle) =>
+      handle.resolve(withItems({ itemsSaved: 11, itemsReused: 0, itemsSkipped: 0 }))
+    )
+
+    expect(captured).toHaveLength(1)
+    const [{ event, properties }] = captured
+
+    expect(event).toBe("download_completed")
+    expect(properties).toMatchObject({
+      platform: "youtube",
+      media_type: "video",
+      // the ceiling that was asked for, not what any one video came down at
+      quality: "1080p",
+      is_trimmed: false,
+      is_playlist: true,
+      items_saved: 11,
+      items_reused: 0,
+      items_skipped: 0,
+      items_total: 11
+    })
+  })
+
+  it("keeps a partial run a completion, and says what it skipped", async () => {
+    // the design's own case: eight of nine saved is a success that exits 1, and
+    // reporting it as download_failed would put every partial playlist in the
+    // failure funnel
+    const { handlers, captured } = createHandlers()
+
+    await runDownload(handlers, PLAYLIST, (handle) =>
+      handle.resolve(
+        withItems({ itemsSaved: 8, itemsReused: 0, itemsSkipped: 1, itemsTotal: 9 })
+      )
+    )
+
+    expect(captured.map((entry) => entry.event)).toEqual(["download_completed"])
+    expect(captured[0].properties.items_skipped).toBe(1)
+    expect(captured[0].properties.items_saved).toBe(8)
+  })
+
+  it("counts an archive reuse as itself and never as a save", async () => {
+    // "3 saved, 2 already downloaded" is what the user is told, and adding the
+    // two together here would claim saves this run did not make
+    const { handlers, captured } = createHandlers()
+
+    await runDownload(handlers, PLAYLIST, (handle) =>
+      handle.resolve(
+        withItems({ itemsSaved: 3, itemsReused: 2, itemsSkipped: 0, itemsTotal: 5 })
+      )
+    )
+
+    expect(captured[0].properties.items_saved).toBe(3)
+    expect(captured[0].properties.items_reused).toBe(2)
+  })
+
+  it("reports what a failed run had already saved", async () => {
+    const { handlers, captured } = createHandlers()
+
+    await runDownload(handlers, { ...PLAYLIST, progress: 42.4 }, (handle) =>
+      handle.reject(
+        failure(ERROR_CODES.NETWORK_ERROR, "Network lost.", {
+          itemsSaved: 3,
+          itemsTotal: 9
+        })
+      )
+    )
+
+    expect(captured[0].event).toBe("download_failed")
+    expect(captured[0].properties).toMatchObject({
+      is_playlist: true,
+      items_saved: 3,
+      items_total: 9,
+      progress_at_failure: 42
+    })
+  })
+
+  /**
+   * a failure knows what it saved and what it was asked for, and nothing else.
+   *
+   * the engine hangs its whole tally on the rejection, so the skip count is
+   * right there to be forwarded - and it would be a guess: a run that broke
+   * halfway never reached the videos behind the break, and calling those
+   * "skipped" is a different claim from "we did not get to them". so the event
+   * does not declare it, and the boundary is what makes that stick.
+   */
+  it("does not report a skip count a failure cannot know", async () => {
+    const { handlers, captured } = createHandlers()
+
+    await runDownload(handlers, PLAYLIST, (handle) =>
+      handle.reject(failure(ERROR_CODES.NETWORK_ERROR, "Network lost."))
+    )
+
+    expect(captured[0].properties).not.toHaveProperty("items_skipped")
+    expect(captured[0].properties).not.toHaveProperty("items_reused")
+  })
+
+  it("reports what a cancelled run left on disk", async () => {
+    // a cancel is a kill, and the videos it had already finished are still
+    // there. reporting nothing saved would be untrue of the files
+    const { handlers, captured } = createHandlers()
+
+    await runDownload(handlers, { ...PLAYLIST, progress: 55.5 }, (handle) => {
+      handlers.runner.cancel("download_1")
+      handle.reject(
+        failure(ERROR_CODES.CANCELLED, "Download cancelled.", {
+          itemsSaved: 6,
+          itemsTotal: 9
+        })
+      )
+    })
+
+    expect(captured.map((entry) => entry.event)).toEqual(["download_cancelled"])
+    expect(captured[0].properties).toMatchObject({
+      is_playlist: true,
+      items_saved: 6,
+      items_total: 9,
+      progress_at_cancel: 56
+    })
+  })
+
+  it("says it was a playlist even when nothing ever counted one", async () => {
+    // the reservation is what knows: a run refused before the engine wrote its
+    // record rejects with no tally at all, and it is a playlist all the same
+    const { handlers, captured } = createHandlers()
+
+    await runDownload(handlers, PLAYLIST, (handle) =>
+      handle.reject(engineError(ERROR_CODES.PERMISSION_ERROR, "Cannot write."))
+    )
+
+    expect(captured[0].properties.is_playlist).toBe(true)
+    expect(captured[0].properties).not.toHaveProperty("items_saved")
+    expect(captured[0].properties).not.toHaveProperty("items_total")
+  })
+
+  it("leaves a single video's events exactly as they were", async () => {
+    // is_playlist is absent rather than false: every existing event keeps the
+    // properties it has always had, and a schema change on the single-video
+    // funnel is not what this ticket asked for
+    const { handlers, captured } = createHandlers()
+
+    await runDownload(handlers, VIDEO, (handle) =>
+      handle.resolve({ filePath: "/downloads/a.mp4" })
+    )
+    await runDownload(handlers, VIDEO, (handle) =>
+      handle.reject(engineError(ERROR_CODES.NETWORK_ERROR, "Network lost."))
+    )
+    await runDownload(handlers, VIDEO, (handle) => {
+      handlers.runner.cancel("download_1")
+      handle.reject(engineError(ERROR_CODES.CANCELLED, "Download cancelled."))
+    })
+
+    for (const { properties } of captured) {
+      expect(properties).not.toHaveProperty("is_playlist")
+      for (const key of [
+        "item_count",
+        "items_saved",
+        "items_reused",
+        "items_skipped",
+        "items_total"
+      ]) {
+        expect(properties).not.toHaveProperty(key)
+      }
+    }
+  })
+
+  it("says nothing about the folder it wrote or the videos in it", async () => {
+    const { handlers, captured } = createHandlers()
+
+    await runDownload(handlers, PLAYLIST, (handle) =>
+      handle.resolve({
+        filePath: "/Users/someone/Movies/Short talks [PL123]/001 - My Holiday Video.mp4",
+        files: [
+          "/Users/someone/Movies/Short talks [PL123]/001 - My Holiday Video.mp4"
+        ],
+        itemsSaved: 1,
+        itemsReused: 0,
+        itemsSkipped: 0,
+        itemsTotal: 1
+      })
+    )
+
+    const serialised = JSON.stringify(captured[0].properties)
+    expect(serialised).not.toContain("My Holiday Video")
+    expect(serialised).not.toContain("Short talks")
+    expect(serialised).not.toContain("/Users/someone")
+    expect(serialised).not.toContain("PL123")
+  })
+
+  /**
+   * the one existing property a playlist could not honestly keep.
+   *
+   * `fileSize` is read off the file the result named, and for a playlist that is
+   * whichever video landed LAST (ytdlp-engine.js:2218). so file_size_mb would
+   * report one video out of eleven, and speed_bucket would divide that one
+   * file's bytes by the time all eleven took - a speed nothing experienced.
+   * both are the properties the single-video funnel is measured by, so sending
+   * them would not just be unreadable, it would move the existing averages.
+   *
+   * elapsed_bucket stays, because how long the run took is the same question
+   * whether the run held one video or eleven.
+   */
+  it("reports no file size or speed for a run of many files", async () => {
+    const { handlers, captured } = createHandlers()
+
+    /**
+     * the clock is controlled for the same reason the measurement tests above
+     * control it: `elapsed_bucket` is the difference between the reservation
+     * and the completion, and elapsedBucket() deliberately returns nothing for
+     * a negative one. a machine that stepped its clock backwards mid-test would
+     * otherwise fail the one assertion here that is about a property being
+     * PRESENT, which is the assertion a wall clock cannot support.
+     */
+    let now = 1_600_000_000_000
+    jest.spyOn(Date, "now").mockImplementation(() => now)
+    jest.spyOn(fs, "statSync").mockReturnValue({ size: 4 * 1024 * 1024 })
+
+    await runDownload(handlers, PLAYLIST, (handle) => {
+      now += 30_000
+      handle.resolve(withItems({ itemsSaved: 11, itemsReused: 0, itemsSkipped: 0 }))
+    })
+
+    const { properties } = captured[0]
+
+    expect(properties).not.toHaveProperty("file_size_mb")
+    expect(properties).not.toHaveProperty("speed_bucket")
+    // ...and a real label rather than merely "defined", since the clock now
+    // says exactly how long the run took
+    expect(properties.elapsed_bucket).toBe("15-60s")
+    expect(properties.items_saved).toBe(11)
+  })
+
+  // the other half of that decision is already pinned above: "reports both
+  // against a real download" drives a single video against a controlled clock
+  // and asserts both properties, and nothing here changed that path
+
+  it("carries the audio mode an audio playlist ran with", async () => {
+    const { handlers, captured } = createHandlers()
+
+    await runDownload(handlers, PLAYLIST_AUDIO, (handle) =>
+      handle.resolve(withItems({ itemsSaved: 11, itemsReused: 0, itemsSkipped: 0 }))
+    )
+
+    expect(captured[0].properties).toMatchObject({
+      media_type: "audio",
+      quality: "m4a",
+      audio_format: "m4a",
+      is_playlist: true
+    })
+  })
+})
+
 describe("cookies_imported", () => {
   it("reports a text import and whether the jar holds youtube cookies", async () => {
     const { handlers, captured } = createHandlers({ hasValidCookies: true })
@@ -1119,6 +1408,115 @@ describe("the download payloads survive the real validator", () => {
       platform: "youtube",
       media_type: "video",
       progress_at_cancel: 61
+    })
+    expect(warn).not.toHaveBeenCalled()
+  })
+
+  it("sends a playlist's four terminal states whole", async () => {
+    // the half the allowlist decides. every count here is registered for the
+    // event that carries it, so silence on console.warn is the assertion: a
+    // property added at the runner and forgotten in ALLOWED_PROPERTIES leaves
+    // no data and no error, only this warning nobody in production ever reads
+    const { handlers, captured } = createHandlers()
+    const PLAYLIST = { ...VIDEO, playlist: true }
+
+    const items = {
+      files: ["/downloads/list/001 - a.mp4"],
+      itemsSaved: 8,
+      itemsReused: 2,
+      itemsSkipped: 1,
+      itemsTotal: 11
+    }
+
+    // completed, including the partial run that exits 1 and is still a success
+    await runDownload(handlers, PLAYLIST, (handle) =>
+      handle.resolve({ filePath: "/downloads/list/001 - a.mp4", ...items })
+    )
+
+    // completed with nothing skipped, which is the ordinary case
+    await runDownload(handlers, PLAYLIST, (handle) =>
+      handle.resolve({
+        filePath: "/downloads/list/001 - a.mp4",
+        ...items,
+        itemsSaved: 11,
+        itemsReused: 0,
+        itemsSkipped: 0
+      })
+    )
+
+    // failed with files already on disk
+    await runDownload(handlers, { ...PLAYLIST, progress: 42.4 }, (handle) =>
+      handle.reject(
+        Object.assign(engineError(ERROR_CODES.NETWORK_ERROR, "Network lost."), items)
+      )
+    )
+
+    // cancelled, same
+    await runDownload(handlers, { ...PLAYLIST, progress: 55.5 }, (handle) => {
+      handlers.runner.cancel("download_1")
+      handle.reject(
+        Object.assign(
+          engineError(ERROR_CODES.CANCELLED, "Download cancelled."),
+          items
+        )
+      )
+    })
+
+    // and an audio playlist, whose quality is the mode rather than a height
+    await runDownload(
+      handlers,
+      { ...AUDIO, formatId: "original", playlist: true },
+      (handle) =>
+        handle.resolve({ filePath: "/downloads/list/001 - a.m4a", ...items })
+    )
+
+    const sent = await replay(captured)
+
+    expect(sent.map((message) => message.event)).toEqual([
+      "download_completed",
+      "download_completed",
+      "download_failed",
+      "download_cancelled",
+      "download_completed"
+    ])
+
+    for (const message of sent) {
+      expect(message.properties.is_playlist).toBe(true)
+      expect(message.properties.items_saved).toBeDefined()
+      expect(message.properties.items_total).toBe(11)
+    }
+
+    // the two the completion declares and the terminal pair does not
+    expect(sent[0].properties.items_skipped).toBe(1)
+    expect(sent[0].properties.items_reused).toBe(2)
+    expect(sent[2].properties).not.toHaveProperty("items_skipped")
+    expect(sent[3].properties).not.toHaveProperty("items_skipped")
+
+    expect(warn).not.toHaveBeenCalled()
+  })
+
+  it("sends a playlist start whole, the way the renderer builds it", async () => {
+    // the one playlist event the renderer owns. it is recorded off the real hook
+    // in analyticsCallSites.test.tsx and replayed from the fixture by
+    // renderer-analytics.test.js; this is the same bag against this suite's
+    // validator, so a start that stops being sendable fails here too
+    const { handlers, captured } = createHandlers()
+
+    handlers.capture("download_started", {
+      platform: "youtube",
+      media_type: "video",
+      quality: "1080p",
+      is_trimmed: false,
+      is_playlist: true,
+      item_count: 9
+    })
+
+    const [message] = await replay(captured)
+
+    expect(message.properties).toMatchObject({
+      is_playlist: true,
+      item_count: 9,
+      quality: "1080p"
     })
     expect(warn).not.toHaveBeenCalled()
   })

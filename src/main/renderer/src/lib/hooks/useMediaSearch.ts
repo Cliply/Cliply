@@ -2,7 +2,12 @@ import { useEffect } from "react"
 import { useForm, type UseFormReturn } from "react-hook-form"
 import { toast } from "sonner"
 
-import { durationBucket, track, urlKind } from "@/lib/analytics"
+import {
+  durationBucket,
+  playlistSizeBucket,
+  track,
+  urlKind
+} from "@/lib/analytics"
 import {
   DownloadError,
   playlistApi,
@@ -282,6 +287,26 @@ async function resolveMixedLink(
         return
       }
 
+      /**
+       * the answer, which is the question url_kind's "playlist" value could
+       * only ever half ask.
+       *
+       * reported here rather than in the dialog, and after the guard rather
+       * than before it, for the reason the remembering below is: an answer that
+       * was not applied is not an answer. a question that was closed rather than
+       * answered sends nothing at all - an abandoned paste teaches nothing, and
+       * a third value for a two-button question would be one the vocabulary
+       * would drop anyway.
+       *
+       * the size is the list they were choosing about, bucketed. the link, the
+       * video id and the playlist's title stay in the renderer, where they
+       * already are.
+       */
+      track("playlist_prompt_answered", {
+        choice,
+        playlist_size: playlistSizeBucket(listing)
+      })
+
       useMixedLinkStore.getState().remember(key, choice)
 
       if (choice === "playlist") {
@@ -316,6 +341,25 @@ function commitPlaylist(
   usePlaylistStore.getState().setLoadedPlaylist(url, info)
   reveal()
   toast.success("Playlist loaded successfully!")
+
+  /**
+   * the same event a loaded video sends, carrying what a playlist has instead.
+   *
+   * there is no duration and no format count here, and there cannot be: the
+   * listing is flat, so it holds no formats, and one duration for a list of
+   * videos is not a number. how long the list is takes their place, bucketed -
+   * the title, the playlist id and the link are the answer to "which playlist",
+   * which is not a question telemetry asks.
+   *
+   * both routes to a loaded playlist come through here, so the pure playlist
+   * link and the ambiguous one answered "the playlist" report the same thing.
+   * playlists are a youtube feature and this is the only platform that reaches
+   * it (isPlaylistPlatform, ipc-handlers.js).
+   */
+  track("media_info_loaded", {
+    platform: "youtube",
+    playlist_size: playlistSizeBucket(info)
+  })
 }
 
 /**

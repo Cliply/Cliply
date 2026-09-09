@@ -264,7 +264,8 @@ class DownloadRunner {
       formatId,
       trimmed,
       fileSize,
-      elapsedMs
+      elapsedMs,
+      ...playlistTelemetry(entry, result)
     })
 
     return {
@@ -300,7 +301,8 @@ class DownloadRunner {
     this.track("download_cancelled", {
       type: entry && entry.type,
       platform: entry && entry.platform,
-      progress: entry ? entry.progress : 0
+      progress: entry ? entry.progress : 0,
+      ...playlistTelemetry(entry, error)
     })
 
     return { success: false, cancelled: true, download_id: downloadId, ...tally }
@@ -355,7 +357,8 @@ class DownloadRunner {
       trimmed,
       progress,
       errorCode: error && error.code,
-      errorMessage: message
+      errorMessage: message,
+      ...playlistTelemetry(entry, error)
     })
 
     return { success: false, error, message, details, download_id: downloadId, ...tally }
@@ -466,6 +469,40 @@ function itemTally(source) {
     ...(Array.isArray(source.reusedIndices)
       ? { reused_indices: source.reusedIndices }
       : null)
+  }
+}
+
+/**
+ * the playlist half of a terminal analytics payload
+ *
+ * two separate sources, because they answer two questions that come apart. the
+ * **reservation** is what knows this download is a playlist at all: a run
+ * refused before the engine could write its own record rejects carrying no
+ * tally, and it was a playlist all the same - so `is_playlist` never depends on
+ * anything having been counted. the **engine's** result or rejection is what
+ * knows the counts, and a payload with none of them is honest about a run that
+ * never got as far as counting.
+ *
+ * camelCase, like every other key in a track payload. the ipc payloads use the
+ * snake_case spelling (see itemTally above) and trackDownloadEvent in
+ * ipc-handlers.js is the one place the two meet - it decides which counts each
+ * event may carry, because the allowlist there does.
+ *
+ * @param {Object|null} entry - the reservation, before it was deleted
+ * @param {Object|null} source - an engine result, or the error it rejected with
+ * @returns {Object|null} the playlist properties, or null for a single video
+ */
+function playlistTelemetry(entry, source) {
+  if (!entry || !entry.playlist) return null
+
+  const counts = source || {}
+
+  return {
+    playlist: true,
+    itemsSaved: counts.itemsSaved,
+    itemsReused: counts.itemsReused,
+    itemsSkipped: counts.itemsSkipped,
+    itemsTotal: counts.itemsTotal
   }
 }
 

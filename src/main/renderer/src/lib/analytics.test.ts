@@ -13,10 +13,12 @@ import { afterEach, describe, expect, test, vi } from "vitest"
 import {
   AUDIO_QUALITIES,
   DURATION_BUCKET_LABELS,
+  PLAYLIST_SIZE_BUCKET_LABELS,
   URL_KINDS,
   audioQuality,
   durationBucket,
   isTrimmedRange,
+  playlistSizeBucket,
   track,
   urlKind,
   videoQuality
@@ -81,6 +83,63 @@ describe("durationBucket", () => {
       "5-20 min",
       "20-60 min",
       ">60 min"
+    ])
+  })
+})
+
+describe("playlistSizeBucket", () => {
+  const listing = (count: number | null, listed = 0) => ({
+    playlist_id: "PL123",
+    title: "a playlist",
+    uploader: "someone",
+    count,
+    listed,
+    truncated: false,
+    entries: []
+  })
+
+  test("buckets instead of leaking how big somebody's playlist is", () => {
+    const cases: [number, string][] = [
+      [1, "1-5 vids"],
+      [5, "1-5 vids"],
+      [6, "6-25 vids"],
+      [25, "6-25 vids"],
+      [26, "26-100 vids"],
+      [100, "26-100 vids"],
+      [101, ">100 vids"],
+      [5283, ">100 vids"]
+    ]
+
+    for (const [count, label] of cases) {
+      expect(playlistSizeBucket(listing(count))).toBe(label)
+    }
+  })
+
+  test("falls back to what was listed when the platform reports no count", () => {
+    // a channel feed paginates lazily and never says how long it is, so `count`
+    // is null and the rows we did get are the only honest answer
+    expect(playlistSizeBucket(listing(null, 30))).toBe("26-100 vids")
+    expect(playlistSizeBucket(listing(null, 2))).toBe("1-5 vids")
+  })
+
+  test("says nothing about a listing with nothing in it", () => {
+    // an empty listing is never put on screen and never asked about, so this is
+    // the absent case rather than a "0 vids" bucket nobody could read
+    for (const count of [0, -1, NaN, Infinity]) {
+      expect(playlistSizeBucket(listing(count))).toBeNull()
+    }
+
+    expect(playlistSizeBucket(listing(null, 0))).toBeNull()
+  })
+
+  test("every label it can return is one the call sites can send", () => {
+    // the same guard the duration buckets carry: a label added above has to be
+    // sendable, and the main suite is where that is proved
+    expect(PLAYLIST_SIZE_BUCKET_LABELS).toEqual([
+      "1-5 vids",
+      "6-25 vids",
+      "26-100 vids",
+      ">100 vids"
     ])
   })
 })

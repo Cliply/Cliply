@@ -48,7 +48,15 @@ that's what makes the list below a complete list rather than a summary of one. a
 - which site
 - roughly how long the video is, as a range (`1-5 min`)
 - how many formats were on offer, as a count
+- for a playlist: roughly how many videos are in it, as a range (`6-25 vids`). never its title, never its id, never a single one of its videos
 - if it failed: what kind of error it was, which step it happened at, and the error text — see [the one free-text field](#the-one-free-text-field)
+
+**you answered the question about an ambiguous link** (`playlist_prompt_answered`)
+
+- which you picked, the literal word `video` or `playlist`, when a link named a video *and* the playlist it sits in
+- roughly how many videos were in that playlist, as the same range as above
+
+closing the question without answering sends nothing at all.
 
 **a download started, finished, failed or was cancelled** (`download_started`, `download_completed`, `download_failed`, `download_cancelled`)
 
@@ -59,6 +67,13 @@ that's what makes the list below a complete list rather than a summary of one. a
 - on finish: the file size in mb, roughly how long it took and roughly how fast it ran — the last two as ranges, never exact times
 - on failure or cancel: how far it had got, as a percentage
 - on failure: what kind of error, which step, and the error text — see below
+- for a playlist, on every one of those four: that it was a playlist. plus, at the start, how many videos you ticked; on finish, how many were saved, how many were already on disk from a previous run, how many were skipped and how many there were in total; and on failure or cancellation, how many had been saved by then and how many there were in total. counts and nothing else: no playlist title, no video titles, no folder name
+
+**a note on the playlist counts.** a playlist is one download of many videos, so these are counts of *this run*, not a list of what is in your library: `8 saved, 2 already downloaded, 1 skipped of 11`.
+
+a cancelled or failed playlist reports two of those numbers rather than none, and it is worth being exact about why: cancelling after six of nine videos leaves those six on your disk, so `6 saved of 9` is what happened, and reporting nothing would be reporting something untrue. those two events say nothing about reuse or skips, because a run that was killed or that broke halfway never reached the videos behind the break, and counting them as skipped would be a guess.
+
+the size of the playlist itself is the one figure that is rounded into a range rather than sent exactly, because an exact length sits closer to naming which playlist it was. a playlist download reports neither a file size nor a speed, because the only file it could point at is whichever video happened to finish last.
 
 **the download engine looked after itself** (`engine_seeded`, `engine_updated`, `engine_update_failed`)
 
