@@ -1,5 +1,5 @@
 import { PinterestLayout } from "@/components/pinterest"
-import { PlaylistLayout } from "@/components/playlist"
+import { MixedLinkPrompt, PlaylistLayout } from "@/components/playlist"
 import { ReportIssueDialog } from "@/components/report/ReportIssueDialog"
 import { TikTokLayout } from "@/components/tiktok"
 import { AnimatePresence } from "framer-motion"
@@ -44,6 +44,9 @@ export function HomePage() {
           <HeroSection key="hero-section" />
         )}
       </AnimatePresence>
+      {/* the link can be submitted from any of the views above, and the answer
+          is what decides which one comes next */}
+      <MixedLinkPrompt />
       <ReportIssueDialog />
     </>
   )

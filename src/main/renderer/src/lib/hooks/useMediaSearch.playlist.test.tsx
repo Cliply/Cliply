@@ -2,10 +2,10 @@
 //
 // which of the two youtube things a submitted link is sent to.
 //
-// the case that matters most is the one that must NOT change: `watch?v=…&list=…`
-// is a link to a video that happens to sit in a playlist, and Cliply has always
-// downloaded the video. classifying it as `both` is this ticket's job; acting
-// on it is a later one, so the video path has to keep taking it.
+// a link that names both is the third case, and it is asked about rather than
+// routed: `useMediaSearch.mixed.test.tsx` owns it. what is left here is the two
+// unambiguous shapes, and the rule that a lookup in flight never writes over a
+// newer one.
 
 import { act, renderHook } from "@testing-library/react"
 import { beforeEach, describe, expect, test, vi } from "vitest"
@@ -45,6 +45,7 @@ vi.mock("sonner", () => ({
 }))
 
 import { useMediaSearch } from "./useMediaSearch"
+import { useMixedLinkStore } from "@/lib/mixedLinkStore"
 import { usePlaylistStore } from "@/lib/playlistStore"
 import { useAppStore } from "@/lib/store"
 import { useYouTubeStore } from "@/lib/youtubeStore"
@@ -134,6 +135,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   vi.spyOn(console, "error").mockImplementation(() => {})
   usePlaylistStore.getState().reset()
+  useMixedLinkStore.getState().reset()
   useYouTubeStore.getState().reset()
   useAppStore.getState().setShowMediaDetails(false)
   mocks.getVideoInfo.mockResolvedValue(videoInfo)
@@ -165,12 +167,21 @@ describe("what the youtube box does with a link", () => {
     )
   })
 
-  test("a link carrying both still downloads the single video", async () => {
+  /**
+   * this used to assert that a link carrying both silently downloaded the
+   * single video, which is what Cliply had always done with one. it does not
+   * any more: the listing is fetched so the user can be asked which of the two
+   * they meant, and neither view opens until they answer. the flow itself is
+   * covered in `useMediaSearch.mixed.test.tsx`; what is pinned here is that the
+   * two unambiguous shapes on either side of it were left alone.
+   */
+  test("a link carrying both is asked about rather than routed", async () => {
     await submit("https://www.youtube.com/watch?v=dQw4w9WgXcQ&list=PL123")
 
-    expect(mocks.getVideoInfo).toHaveBeenCalledTimes(1)
-    expect(mocks.getPlaylistInfo).not.toHaveBeenCalled()
+    expect(mocks.getVideoInfo).not.toHaveBeenCalled()
     expect(usePlaylistStore.getState().playlistInfo).toBeNull()
+    expect(useYouTubeStore.getState().videoInfo).toBeNull()
+    expect(useAppStore.getState().showMediaDetails).toBe(false)
   })
 
   test("a plain video link is untouched", async () => {

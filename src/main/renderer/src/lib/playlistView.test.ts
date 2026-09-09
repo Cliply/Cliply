@@ -5,7 +5,13 @@
 import { describe, expect, test } from "vitest"
 
 import type { PlaylistEntry, PlaylistInfoResponse } from "@/lib/api"
-import { countLine, nameList, phaseOf, totalDuration } from "@/lib/playlistView"
+import {
+  countLine,
+  mixedLinkPlaylistChoice,
+  nameList,
+  phaseOf,
+  totalDuration
+} from "@/lib/playlistView"
 
 const entry = (index: number, overrides: Partial<PlaylistEntry> = {}): PlaylistEntry => ({
   index,
@@ -73,6 +79,23 @@ describe("how many videos this is", () => {
     expect(countLine(info({ listed: 100, count: null, truncated: true }))).toBe(
       "100 videos"
     )
+  })
+})
+
+describe("the other thing an ambiguous link could mean", () => {
+  test("is the playlist, by the number of videos in it", () => {
+    expect(mixedLinkPlaylistChoice(info({ listed: 11 }))).toBe("All 11 videos")
+    expect(mixedLinkPlaylistChoice(info({ listed: 1 }))).toBe("All 1 video")
+  })
+
+  /**
+   * "All 100 videos" out of a link holding five thousand is a promise the
+   * download will not keep, and this button is the download's own wording
+   */
+  test("never says all of a listing that is not all of it", () => {
+    expect(
+      mixedLinkPlaylistChoice(info({ listed: 100, count: 5283, truncated: true }))
+    ).toBe("The first 100 videos")
   })
 })
 

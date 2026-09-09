@@ -91,9 +91,10 @@ export function durationBucket(
  * the kinds of link people paste.
  *
  * these are ours to invent, and they are the shape of the link and never the
- * link. "playlist" is the one that pays for the rest: we take the single video
- * out of a playlist url, and how often somebody expects otherwise is a question
- * nothing else here answers.
+ * link. "playlist" is the one that paid for the rest: it is how often a link
+ * carrying a video *and* a list gets pasted, which is the whole reason such a
+ * link is now asked about instead of quietly taken as the video. what people
+ * answer is a separate measurement, and not one this property can make.
  *
  * every value must also appear in PROPERTY_VOCABULARIES.url_kind
  * (services/analytics.js) or it is dropped on arrival.

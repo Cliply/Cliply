@@ -1,4 +1,5 @@
 import type { AudioMode, PlaylistEntry, PlaylistInfoResponse } from "@/lib/api"
+import { useMixedLinkStore } from "@/lib/mixedLinkStore"
 
 import { create } from "zustand"
 
@@ -323,13 +324,22 @@ export const usePlaylistStore = create<PlaylistState>((set, get) => ({
   /**
    * clearing the view also abandons whatever lookup was in flight: the token
    * moves on, so a listing that arrives after Clear cannot repopulate the
-   * screen the user just emptied
+   * screen the user just emptied.
+   *
+   * a question still on screen goes with it, for the same reason and one more.
+   * it is about a link that is no longer in the box, so it has nothing left to
+   * ask about; and while its answer could not write over the emptied screen
+   * either way, it would still be remembered, and the next paste of that link
+   * would silently follow a decision this reset threw away.
    */
-  reset: () =>
+  reset: () => {
+    useMixedLinkStore.getState().dismiss()
+
     set({
       ...initialState,
       lookupToken: get().lookupToken + 1,
       selectedIndices: new Set<number>(),
       itemStatus: new Map<number, PlaylistItemStatus>()
     })
+  }
 }))

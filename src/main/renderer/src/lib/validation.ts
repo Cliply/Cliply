@@ -103,9 +103,10 @@ export interface YouTubeTarget {
  * three answers, because a link can carry both: `watch?v=…&list=…` is what
  * youtube hands out from inside a playlist, and `youtu.be/ID?list=…` is the
  * same thing off the share sheet. **`both` is classified here and nothing
- * more.** every caller sends it down the single-video path, which is what
- * Cliply has always done with it; the prompt that asks the user which one they
- * meant is a later ticket, and it needs this answer to exist before it can ask.
+ * more.** what it means is not this function's to decide: Cliply used to take
+ * the video out of such a link without asking, and now lists the playlist and
+ * puts the two choices to the user, but either way the routing lives in
+ * `useMediaSearch` and this only ever says what the link holds.
  *
  * a link that is not youtube's gets `video` with two nulls rather than an
  * answer about a `list=` parameter on somebody else's domain: the caller is

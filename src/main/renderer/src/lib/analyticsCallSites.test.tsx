@@ -25,6 +25,7 @@ type ProgressListener = (payload: Record<string, unknown>) => void
 
 const mocks = vi.hoisted(() => ({
   getVideoInfo: vi.fn(),
+  getPlaylistInfo: vi.fn(),
   getPinInfo: vi.fn(),
   getTikTokInfo: vi.fn(),
   downloadVideo: vi.fn(),
@@ -56,6 +57,9 @@ vi.mock("@/lib/api", () => {
       getVideoInfo: (url: string) => mocks.getVideoInfo(url),
       downloadVideo: (request: unknown) => mocks.downloadVideo(request),
       downloadAudio: (request: unknown) => mocks.downloadAudio(request)
+    },
+    playlistApi: {
+      getPlaylistInfo: (url: string) => mocks.getPlaylistInfo(url)
     },
     pinterestApi: {
       getInfo: (url: string) => mocks.getPinInfo(url),
@@ -95,6 +99,7 @@ import { DownloadError } from "@/lib/api"
 import { useAudioDownload } from "@/lib/hooks/useAudioDownload"
 import { useMediaSearch } from "@/lib/hooks/useMediaSearch"
 import { useVideoDownload } from "@/lib/hooks/useVideoDownload"
+import { useMixedLinkStore } from "@/lib/mixedLinkStore"
 import { usePinterestStore } from "@/lib/pinterestStore"
 import { useTikTokStore } from "@/lib/tiktokStore"
 
@@ -104,6 +109,9 @@ beforeEach(() => {
   recorded = []
   mocks.listeners.length = 0
   vi.clearAllMocks()
+  // an ambiguous link is asked about once per session, so the answer one case
+  // gives must not carry into the next
+  useMixedLinkStore.getState().reset()
 
   // handleSearchError logs every failure, and the failures below are the point
   vi.spyOn(console, "error").mockImplementation(() => {})
@@ -149,6 +157,27 @@ const youtubeInfo = (duration: number | null, tiers: number) => ({
   })),
   audio_tracks: []
 })
+
+// enough of a listing for the mixed-link prompt to have something to ask about
+const playlistListing = {
+  playlist_id: "PL123",
+  title: "Short talks",
+  uploader: "Someone",
+  count: 2,
+  listed: 2,
+  truncated: false,
+  entries: []
+}
+
+/** press one of the prompt's two buttons, the way the dialog does */
+async function answerMixedLink(choice: "video" | "playlist") {
+  await act(async () => {
+    useMixedLinkStore.getState().answer(choice)
+    // the video branch is a lookup the answer itself does not wait for
+    await Promise.resolve()
+    await Promise.resolve()
+  })
+}
 
 const simpleInfo = (duration: number | null) => ({
   title: "My Holiday Video",
@@ -271,8 +300,23 @@ describe("the bags the call sites build", () => {
     mocks.getVideoInfo.mockResolvedValueOnce(youtubeInfo(30, 2))
     await search("youtube", "https://www.youtube.com/shorts/abc123")
 
+    /**
+     * a link naming a video *and* the playlist it sits in.
+     *
+     * this used to be one more search: the link went straight to the single
+     * video, so `url_submitted` and `media_info_loaded` came out of the one
+     * call. it is now asked about first, and the video's own bags arrive only
+     * once "Just this video" is answered - so the answer is driven here, and
+     * the pair of bags is unchanged.
+     *
+     * the listing in between sends nothing at all, deliberately: what the
+     * prompt is worth measuring is its own ticket, and an event added here
+     * ahead of that one would be an event nobody has decided the shape of.
+     */
+    mocks.getPlaylistInfo.mockResolvedValueOnce(playlistListing)
     mocks.getVideoInfo.mockResolvedValueOnce(youtubeInfo(900, 4))
     await search("youtube", "https://www.youtube.com/watch?v=abc&list=PL123")
+    await answerMixedLink("video")
 
     mocks.getVideoInfo.mockResolvedValueOnce(youtubeInfo(2400, 1))
     await search("youtube", "https://youtu.be/dQw4w9WgXcQ")

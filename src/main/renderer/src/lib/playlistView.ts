@@ -210,6 +210,37 @@ export function countLine(info: PlaylistInfoResponse): string {
 }
 
 // =============================================================================
+// the ambiguous link
+// =============================================================================
+
+/**
+ * the two things a `watch?v=…&list=…` link can mean, as the user reads them
+ *
+ * the video side is fixed, because it is one video however big the playlist is.
+ * the playlist side has to carry the number: "All videos in the playlist" is
+ * not something anybody can decide about, which is the only reason the listing
+ * is fetched before the question rather than after it.
+ *
+ * a truncated listing says "the first 100" rather than "all 100". we list a
+ * hundred rows out of a link that may hold five thousand, and "all" over that
+ * is a promise the download will not keep.
+ */
+export const MIXED_LINK_TITLE = "This link is part of a playlist"
+export const MIXED_LINK_VIDEO_CHOICE = "Just this video"
+export const MIXED_LINK_VIDEO_HINT = "The one the link opens"
+export const MIXED_LINK_PLAYLIST_HINT = "Open the playlist"
+
+export function mixedLinkPlaylistChoice(info: PlaylistInfoResponse): string {
+  const listed = info.listed.toLocaleString()
+
+  if (info.truncated) {
+    return `The first ${listed} videos`
+  }
+
+  return `All ${listed} ${info.listed === 1 ? "video" : "videos"}`
+}
+
+// =============================================================================
 // the finish
 // =============================================================================
 
