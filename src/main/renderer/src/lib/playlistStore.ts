@@ -19,15 +19,37 @@ export type PlaylistTab = "video" | "audio"
  * `saved` is claimed only when the run reported the item's file landing - the
  * engine's rule is that it may undercount a save and never overcount one, and
  * this follows it. `skipped` is a row the run started and left without a file.
- * a row the run never announced stays `pending`, which is also where an
- * archive-resumed video sits: those are never announced at all, and the run's
- * own "already downloaded" count is what reports them.
+ * `reused` is a video this destination already has: yt-dlp never announces one
+ * at all, so the positions come from the run's own terminal event, which is
+ * where the "already downloaded" count comes from too. a row the run never
+ * reached stays `pending`.
  */
-export type PlaylistItemState = "pending" | "downloading" | "saved" | "skipped"
+export type PlaylistItemState =
+  | "pending"
+  | "downloading"
+  | "saved"
+  | "reused"
+  | "skipped"
 
 export interface PlaylistItemStatus {
   state: PlaylistItemState
   progress: number
+  /**
+   * the height this row's file really came down at, once there is a file.
+   *
+   * absent until the run ends, and absent afterwards for a row whose name
+   * carried none - an audio download has no resolution to report. a ceiling is
+   * resolved per video, so this is the only place the answer ever appears.
+   */
+  height?: number
+}
+
+/** what a finished run says about the rows, beyond its counts */
+export interface PlaylistRunOutcome {
+  /** position -> delivered height, or null when the file named none */
+  delivered?: Map<number, number | null>
+  /** the positions the resume archive already held */
+  reusedIndices?: number[]
 }
 
 /**
@@ -96,6 +118,7 @@ interface PlaylistState {
   // keyed by playlist position, which is what the progress events name
   itemStatus: Map<number, PlaylistItemStatus>
   setItemStatus: (index: number, status: PlaylistItemStatus) => void
+  applyRunOutcome: (outcome: PlaylistRunOutcome) => void
   settleInFlightItems: (state: PlaylistItemState) => void
   clearItemStatus: () => void
 
@@ -145,13 +168,50 @@ export const usePlaylistStore = create<PlaylistState>((set, get) => ({
    * order - would send one playlist's positions against another playlist's
    * link and file the result under the wrong resume archive.
    */
-  setLoadedPlaylist: (url, info) =>
+  setLoadedPlaylist: (url, info) => {
+    const state = get()
+
+    /**
+     * ...and re-pasting the link already on screen is a refresh, not that.
+     *
+     * every lookup returns a fresh response object, so comparing objects says
+     * "new playlist" for the same link every single time. the same url and the
+     * same playlist id is the same playlist: position 3 is the same video it
+     * was a moment ago, the ticks describe it, and a run may still be walking
+     * it. both halves have to match, because main takes the link and the id as
+     * two separate fields and cross-checks neither.
+     *
+     * the listing itself is still replaced - that is what a refresh is for -
+     * and a row it now reports as unavailable drops out of the selection,
+     * because the rule that a selection never holds one of those is absolute.
+     * a row that was not there before is left unticked: what is preserved is
+     * the choice the user made, not a new default applied behind them.
+     */
+    if (
+      state.playlistInfo !== null &&
+      state.url === url &&
+      state.playlistInfo.playlist_id === info.playlist_id
+    ) {
+      const selectable = selectableIndices(info)
+
+      set({
+        url,
+        playlistInfo: info,
+        selectedIndices: new Set(
+          [...state.selectedIndices].filter((index) => selectable.has(index))
+        )
+      })
+
+      return
+    }
+
     set({
       url,
       playlistInfo: info,
       selectedIndices: selectableIndices(info),
       itemStatus: new Map()
-    }),
+    })
+  },
 
   setIsLoadingPlaylistInfo: (loading) => set({ isLoadingPlaylistInfo: loading }),
 
@@ -194,6 +254,42 @@ export const usePlaylistStore = create<PlaylistState>((set, get) => ({
     const next = new Map(get().itemStatus)
     next.set(index, status)
     set({ itemStatus: next })
+  },
+
+  /**
+   * what the terminal event knows that no progress event could.
+   *
+   * two facts arrive only at the end, and both of them describe rows rather
+   * than the run. the files it wrote name the video and the height it really
+   * came down at, which is the answer to "up to 1080p" for that one video; and
+   * the positions the archive already held are the only way to tell a video
+   * the user already has from one the run never got to.
+   *
+   * a file wins over an archive record wherever they disagree: a file this run
+   * put on disk is the stronger claim, and the archive only ever says that a
+   * download once succeeded.
+   */
+  applyRunOutcome: ({ delivered, reusedIndices }) => {
+    const next = new Map(get().itemStatus)
+    let changed = false
+
+    for (const index of reusedIndices ?? []) {
+      next.set(index, { state: "reused", progress: 100 })
+      changed = true
+    }
+
+    for (const [index, height] of delivered ?? []) {
+      next.set(index, {
+        state: "saved",
+        progress: 100,
+        ...(typeof height === "number" ? { height } : {})
+      })
+      changed = true
+    }
+
+    if (changed) {
+      set({ itemStatus: next })
+    }
   },
 
   /**

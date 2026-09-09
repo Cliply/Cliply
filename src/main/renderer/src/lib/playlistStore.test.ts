@@ -121,6 +121,77 @@ describe("setLoadedPlaylist", () => {
 })
 
 /**
+ * re-pasting the link that is already on screen is a refresh, not a new
+ * playlist.
+ *
+ * every lookup returns a fresh response object, so object identity says
+ * "different playlist" every single time. the same link and the same playlist
+ * id is the same playlist, and clearing the ticks and the badges for it throws
+ * away a selection the user made and a run that may still be going.
+ */
+describe("re-loading the playlist already on screen", () => {
+  test("keeps the selection the user made", () => {
+    const store = usePlaylistStore.getState()
+
+    load([entry(1), entry(2), entry(3)])
+    store.selectNone()
+    store.toggleIndex(2)
+
+    load([entry(1), entry(2), entry(3)])
+
+    expect(selected()).toEqual([2])
+  })
+
+  test("keeps the badges of a run that is still going", () => {
+    load([entry(1), entry(2)])
+    usePlaylistStore
+      .getState()
+      .setItemStatus(1, { state: "saved", progress: 100, height: 720 })
+
+    load([entry(1), entry(2)])
+
+    expect(usePlaylistStore.getState().itemStatus.get(1)).toEqual({
+      state: "saved",
+      progress: 100,
+      height: 720
+    })
+  })
+
+  test("takes the newer listing, so a refresh is still a refresh", () => {
+    load([entry(1), entry(2)])
+    load([entry(1), entry(2), entry(3)], PLAYLIST_URL, { count: 3, listed: 3 })
+
+    expect(usePlaylistStore.getState().playlistInfo?.listed).toBe(3)
+    // a row that was not there before is not ticked behind the user's back:
+    // what is preserved is the selection they made, not a new default
+    expect(selected()).toEqual([1, 2])
+  })
+
+  test("drops a row the refresh says can no longer be downloaded", () => {
+    load([entry(1), entry(2), entry(3)])
+    expect(selected()).toEqual([1, 2, 3])
+
+    // position 2 went private between the two lookups
+    load([entry(1), gone(2), entry(3)])
+
+    expect(selected()).toEqual([1, 3])
+  })
+
+  test("the same id under a different link is still a different playlist", () => {
+    const store = usePlaylistStore.getState()
+
+    load([entry(1), entry(2)])
+    store.selectNone()
+
+    // main takes the link and the id as two separate fields and cross-checks
+    // neither, so both halves have to match for this to be the same view
+    load([entry(1), entry(2)], "https://www.youtube.com/playlist?list=PL123&x=1")
+
+    expect(selected()).toEqual([1, 2])
+  })
+})
+
+/**
  * a listing takes a second or two to arrive, and the user can submit another
  * link or clear the box inside that window. the token is what lets the loader
  * tell an answer it still wants from one it has moved on from.

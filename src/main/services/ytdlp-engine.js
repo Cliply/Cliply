@@ -1151,23 +1151,41 @@ function readArchivedIds(archiveFile) {
 }
 
 /**
- * how many of the selected positions this archive will make yt-dlp skip
+ * which of the selected positions this archive will make yt-dlp skip
  *
  * counted per **position**, not per id: a playlist can hold one video three
  * times, and the denominator counts positions. no entries means the caller
  * sent positions without ids, so there is nothing to match on and the honest
- * answer is zero - which undercounts rather than inventing reuse
+ * answer is none - which undercounts rather than inventing reuse.
+ *
+ * the positions themselves, and not only how many there are, because an
+ * archive-skipped video is never announced on stdout at all: without this the
+ * ui has no way to tell those rows from the ones the run never reached, and
+ * would settle a video the user already has as skipped.
+ *
+ * @param {Array|null} entries - [{index, id}] for the selected positions
+ * @param {Set<string>} archivedIds - what the archive already holds
+ * @returns {number[]} the positions already recorded, in the order given
+ */
+function archivedSelectionIndices(entries, archivedIds) {
+  if (!Array.isArray(entries) || archivedIds.size === 0) {
+    return []
+  }
+
+  return entries
+    .filter((entry) => entry && archivedIds.has(entry.id))
+    .map((entry) => entry.index)
+}
+
+/**
+ * how many of the selected positions this archive will make yt-dlp skip
  *
  * @param {Array|null} entries - [{index, id}] for the selected positions
  * @param {Set<string>} archivedIds - what the archive already holds
  * @returns {number} how many selected positions are already recorded
  */
 function countArchivedSelections(entries, archivedIds) {
-  if (!Array.isArray(entries) || archivedIds.size === 0) {
-    return 0
-  }
-
-  return entries.filter((entry) => entry && archivedIds.has(entry.id)).length
+  return archivedSelectionIndices(entries, archivedIds).length
 }
 
 // there is deliberately no parser for `[download] <path> has already been
@@ -1965,7 +1983,7 @@ class YtdlpOperation extends EventEmitter {
     outputDir = null,
     recordsFile = null,
     startupError = null,
-    reusedItems = 0,
+    reusedIndices = [],
     trackStreamMarker = true,
     gate = null,
     killGraceMs = KILL_GRACE_MS,
@@ -2007,15 +2025,20 @@ class YtdlpOperation extends EventEmitter {
     this.savedItems = new Map()
     this.recordsRead = false
 
-    // ...and, separately, how many of the selected positions yt-dlp will skip
+    // ...and, separately, which of the selected positions yt-dlp will skip
     // because the archive already holds them. computed **before the run**, by
     // intersecting the selection's ids with the archive file, because reading
     // it afterwards would find everything this run had just added to it.
     //
     // it is a different claim from "saved" in any case: the archive records
     // that a download once succeeded, not that the file is there now - a new
-    // download folder, or a file the user has deleted since, skips the same
-    this.reusedItems = reusedItems
+    // download folder, or a file the user has deleted since, skips the same.
+    //
+    // the positions travel alongside the count because yt-dlp never announces
+    // an archive-skipped item: they are the only handle the ui has on which
+    // rows to draw as already downloaded rather than as never reached
+    this.reusedIndices = Array.isArray(reusedIndices) ? [...reusedIndices] : []
+    this.reusedItems = this.reusedIndices.length
     this.phase = "starting"
     this.cancelled = false
     this.stalled = false
@@ -2439,7 +2462,7 @@ class YtdlpOperation extends EventEmitter {
 
   /**
    * what a playlist run did, for a result or for a failure
-   * @returns {Object} {files, itemsSaved, itemsReused, itemsSkipped, itemsTotal}
+   * @returns {Object} {files, itemsSaved, itemsReused, reusedIndices, itemsSkipped, itemsTotal}
    */
   itemTally() {
     const files = [...this.savedItems.values()]
@@ -2455,6 +2478,9 @@ class YtdlpOperation extends EventEmitter {
       files,
       itemsSaved,
       itemsReused,
+      // the same fact as itemsReused, said per row. a copy, so nothing a
+      // consumer does to the array reaches back into the operation
+      reusedIndices: [...this.reusedIndices],
       itemsSkipped: Math.max(0, itemsTotal - this.accountedItems()),
       itemsTotal
     }
@@ -3020,7 +3046,7 @@ class YtdlpEngine {
     // the archive read, because yt-dlp writes to the archive as it goes -
     // reading it afterwards would report everything this run just added as
     // something it had skipped
-    let reusedItems = 0
+    let reusedIndices = []
     let recordsError = null
 
     if (isPlaylistDownload) {
@@ -3053,10 +3079,10 @@ class YtdlpEngine {
         resolved.recordsFile = null
       }
 
-      reusedItems =
+      reusedIndices =
         resolved.ignoreArchive === true
-          ? 0
-          : countArchivedSelections(
+          ? []
+          : archivedSelectionIndices(
               resolved.playlistEntries,
               readArchivedIds(resolved.archiveFile)
             )
@@ -3083,7 +3109,7 @@ class YtdlpEngine {
       recordsFile: resolved.recordsFile || null,
       // a records channel we could not prepare stops the run before it starts
       startupError: recordsError,
-      reusedItems,
+      reusedIndices,
       // a trimmed download is muxed by ffmpeg in a single pass, so the format
       // marker would over-count the sweeps
       trackStreamMarker: !resolved.timeRange,
@@ -3468,6 +3494,7 @@ module.exports = {
   parseArchiveSkipLine,
   verifySavedFile,
   readArchivedIds,
+  archivedSelectionIndices,
   countArchivedSelections,
   playlistSelection,
   buildPlaylistRecordsPath,

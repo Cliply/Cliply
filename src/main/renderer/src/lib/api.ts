@@ -82,6 +82,16 @@ export interface DownloadProgress {
   items_saved?: number
   items_reused?: number
   items_skipped?: number
+
+  /**
+   * which positions the archive accounted for.
+   *
+   * yt-dlp never announces an archive-skipped item: no stream marker, no
+   * progress line, no file. so these rows are indistinguishable from rows the
+   * run never reached unless the run says which they were, and the engine
+   * knows because it works reuse out from the archive before spawning.
+   */
+  reused_indices?: number[]
 }
 
 export interface DownloadStatus {

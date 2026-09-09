@@ -9,6 +9,7 @@ import {
   type PlaylistInfoResponse
 } from "@/lib/api"
 import { isTerminalReason, terminalReason } from "@/lib/downloadOutcome"
+import { deliveredByIndex } from "@/lib/playlistFiles"
 import {
   isSelectableEntry,
   usePlaylistStore,
@@ -175,13 +176,20 @@ export interface PlaylistItemCounts {
 export function summarizePlaylistItems(
   counts: PlaylistItemCounts
 ): string | undefined {
-  const { total } = counts
+  const { saved, total } = counts
 
-  if (typeof total !== "number") {
+  /**
+   * both numbers, or no sentence at all.
+   *
+   * the denominator is known from the moment the run starts, and only a
+   * terminal event carries what was saved. defaulting the missing half to zero
+   * put "0 of 3 videos saved" in front of a user the instant they pressed
+   * Cancel, before the run had said a word about what it had written.
+   */
+  if (typeof total !== "number" || typeof saved !== "number") {
     return undefined
   }
 
-  const saved = counts.saved ?? 0
   const parts = [`${saved} of ${total} ${total === 1 ? "video" : "videos"} saved`]
 
   if (counts.reused) {
@@ -248,6 +256,24 @@ export const usePlaylistDownload = () => {
   // whether this run already reached a terminal state, whatever it was
   const outcomeSettledRef = useRef(false)
 
+  /**
+   * which view the hook is answering to, and which one a run belongs to.
+   *
+   * `reset` detaches this screen from whatever it was following - a different
+   * playlist has been loaded over it, and the run it was watching is left to
+   * the engine. but a mutation already in flight keeps its own callbacks: an
+   * ipc start that rejects a moment later still runs `onError`, and that wrote
+   * the abandoned run's failure over the playlist now on screen.
+   *
+   * so the generation counts resets, a run records the one it started under,
+   * and every asynchronous write checks the two still agree. the alternative,
+   * one hook instance per playlist, would need the layout to remount it, which
+   * would also throw away a run the user can still see.
+   */
+  const generationRef = useRef(0)
+  const runGenerationRef = useRef(0)
+  const isCurrentRun = () => runGenerationRef.current === generationRef.current
+
   // on unmount we stop listening but the engine keeps downloading, which is
   // what people expect when a view is swapped out. the pending mutation is
   // settled so nothing awaits forever
@@ -265,7 +291,19 @@ export const usePlaylistDownload = () => {
   }, [])
 
   /**
-   * ask main to stop the run, and record it if it took
+   * ask main to stop the run, and show it if the ask took
+   *
+   * **the acknowledgement is not the outcome.** all a `true` here means is that
+   * main found the id and asked the process to stop; the run's own terminal
+   * event follows, and it is the only thing carrying what was saved, what the
+   * archive had already accounted for and the heights each file came down at.
+   * settling the mutation here would drop the progress listener in the
+   * mutation's `finally` before any of that arrived, leaving a video the user
+   * already has drawn as "not saved" and the summary with nothing to count.
+   *
+   * so this moves the screen to cancelled for the user, who asked for it and
+   * should see it immediately, and leaves the bookkeeping to the terminal
+   * handler. the rows in flight are settled there too, for the same reason.
    *
    * @returns whether main had something to cancel
    */
@@ -274,6 +312,8 @@ export const usePlaylistDownload = () => {
 
     if (!cancelled) return false
 
+    // no more cancels against this run, and no queued intent to issue: it is
+    // stopping. the mutation stays open until the run says how it ended
     outcomeSettledRef.current = true
 
     setDownloadState((prev) => ({
@@ -281,13 +321,6 @@ export const usePlaylistDownload = () => {
       status: "cancelled",
       message: "Playlist download cancelled"
     }))
-
-    usePlaylistStore.getState().settleInFlightItems("pending")
-
-    // settle the pending mutation so the button never stays stuck
-    settleRef.current?.reject(
-      terminalReason("cancelled", "Playlist download cancelled")
-    )
 
     toast.info("Playlist download cancelled", {
       description: "Videos already saved are kept. Re-running skips them."
@@ -316,6 +349,9 @@ export const usePlaylistDownload = () => {
       ackedRef.current = false
       cancelIntentRef.current = false
       outcomeSettledRef.current = false
+      // the view this run belongs to. everything below that lands after an
+      // await checks it is still the one on screen
+      runGenerationRef.current = generationRef.current
 
       lastUrlRef.current = request.url
       lastTypeRef.current = request.type === "audio" ? "audio" : "video"
@@ -348,6 +384,11 @@ export const usePlaylistDownload = () => {
 
       const cleanup = downloadApi.onProgress((data: DownloadProgress) => {
         if (data.downloadId !== downloadId) return
+
+        // `reset` already unsubscribed this listener, so reaching here would
+        // take an event delivered in the same batch as the reset. it is still
+        // this run's event and this screen is no longer following this run
+        if (!isCurrentRun()) return
 
         setDownloadState((prev) => ({
           ...prev,
@@ -382,8 +423,14 @@ export const usePlaylistDownload = () => {
         // cancel still waiting on the start ack must not be issued against it
         outcomeSettledRef.current = true
 
-        // a terminal event never names a row, so whatever was in flight when it
-        // arrived is settled here
+        // the two things only the end of a run knows: which rows the archive
+        // had already accounted for, and the height each saved file really
+        // came down at. both are read before the settle below, so a row a file
+        // vouches for is never settled as skipped
+        applyRunOutcome(data)
+
+        // ...and a terminal event never names the row that was in flight, so
+        // whatever is still running when it arrives is settled here
         usePlaylistStore
           .getState()
           .settleInFlightItems(data.status === "cancelled" ? "pending" : "skipped")
@@ -448,7 +495,11 @@ export const usePlaylistDownload = () => {
         // which is the window the retry below exists for
         ackedRef.current = true
 
-        if (cancelIntentRef.current && !outcomeSettledRef.current) {
+        if (
+          isCurrentRun() &&
+          cancelIntentRef.current &&
+          !outcomeSettledRef.current
+        ) {
           cancelIntentRef.current = false
           await requestCancel(downloadId)
         }
@@ -456,18 +507,29 @@ export const usePlaylistDownload = () => {
         return await finished
       } catch (error) {
         // a start failure means no terminal event is ever coming
-        outcomeSettledRef.current = true
-        settleRef.current?.reject(error as Error)
+        if (isCurrentRun()) {
+          outcomeSettledRef.current = true
+          settleRef.current?.reject(error as Error)
+        }
+
         throw error
       } finally {
-        settleRef.current = null
+        // the admission guard comes off however this ended, or the hook is
+        // busy for the rest of its life. everything else here is this run's
+        // share of state the next one also uses, so an abandoned run must not
+        // touch it: that is the cross-settle the guard exists to prevent,
+        // arriving one reset later
         runningRef.current = false
-        cancelIntentRef.current = false
-        usePlaylistStore.getState().setIsDownloading(false)
 
-        if (progressCleanupRef.current) {
-          progressCleanupRef.current()
-          progressCleanupRef.current = null
+        if (isCurrentRun()) {
+          settleRef.current = null
+          cancelIntentRef.current = false
+          usePlaylistStore.getState().setIsDownloading(false)
+
+          if (progressCleanupRef.current) {
+            progressCleanupRef.current()
+            progressCleanupRef.current = null
+          }
         }
       }
     },
@@ -476,6 +538,17 @@ export const usePlaylistDownload = () => {
       // already going. neither is a failure anyone should be asked to report
       if (error instanceof PlaylistStartRefused) {
         toast.error(error.message)
+        return
+      }
+
+      /**
+       * the run this failure belongs to is no longer the one on screen.
+       *
+       * a start ipc that rejects after the view moved on still gets its
+       * callbacks, and writing "Playlist download failed" here would put the
+       * abandoned playlist's failure over the picker of the one now loaded.
+       */
+      if (!isCurrentRun()) {
         return
       }
 
@@ -549,6 +622,15 @@ export const usePlaylistDownload = () => {
   }
 
   const reset = () => {
+    /**
+     * the generation moves first, so nothing below can be undone by a callback
+     * that was already in flight. from here on, the run this view was watching
+     * cannot write to it again: not through its listener, which goes below,
+     * and not through its mutation's own `onError`, `catch` or `finally`,
+     * which the mutation keeps whatever we do here.
+     */
+    generationRef.current += 1
+
     settleRef.current?.reject(terminalReason("abandoned", "Download reset"))
     settleRef.current = null
     // the engine is not cancelled by a reset, so an intent left over from one
@@ -561,6 +643,10 @@ export const usePlaylistDownload = () => {
       progressCleanupRef.current()
       progressCleanupRef.current = null
     }
+
+    // the abandoned run's `finally` will not do this now, and this screen has
+    // no run of its own any more
+    usePlaylistStore.getState().setIsDownloading(false)
 
     setDownloadState({ status: "idle", progress: 0 })
   }
@@ -592,6 +678,22 @@ export const usePlaylistDownload = () => {
  * top once it has. anything less is a row still downloading. this follows the
  * engine's own rule of undercounting a save rather than overcounting one.
  */
+/**
+ * write the rows a finished run accounts for
+ *
+ * a cancelled run gets this too: the videos it had already saved are on disk
+ * and are just as real as a completed run's, and the archive rows it skipped
+ * were never this run's to lose.
+ */
+function applyRunOutcome(data: DownloadProgress): void {
+  const store = usePlaylistStore.getState()
+
+  store.applyRunOutcome({
+    delivered: deliveredByIndex(data.files, store.playlistInfo?.entries),
+    reusedIndices: data.reused_indices
+  })
+}
+
 function applyItemStatus(data: DownloadProgress): void {
   const index = data.playlist_index
 

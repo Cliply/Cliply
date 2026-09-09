@@ -165,8 +165,8 @@ const emit = async (payload: Record<string, unknown>) => {
   })
 }
 
-const sentRequest = () => downloadPlaylist.mock.calls[0][0]
-const sentDownloadId = () => sentRequest().download_id as string
+const sentRequest = (call = 0) => downloadPlaylist.mock.calls[call][0]
+const sentDownloadId = (call = 0) => sentRequest(call).download_id as string
 
 const flush = () => act(async () => {})
 
@@ -697,12 +697,16 @@ describe("cancel inside the start window", () => {
     await flush()
 
     expect(cancelDownload).toHaveBeenCalledTimes(2)
+    expect(result.current.downloadState.status).toBe("cancelled")
+    expect(infoToast).toHaveBeenCalledTimes(1)
+
+    // the ask took, and the run's own terminal event is what ends it
+    await emit({ downloadId: sentDownloadId(), status: "cancelled" })
+
     expect(await settled).toMatchObject({
       ok: false,
       value: { outcome: "cancelled" }
     })
-    expect(result.current.downloadState.status).toBe("cancelled")
-    expect(infoToast).toHaveBeenCalledTimes(1)
   })
 
   test("a run that finished before the retry is left completed", async () => {
@@ -790,7 +794,15 @@ describe("unmount, reset and cancellation", () => {
     expect((await settled).ok).toBe(true)
   })
 
-  test("an accepted cancel settles the mutation as cancelled", async () => {
+  /**
+   * an acknowledgement is not an outcome.
+   *
+   * all a `true` from main means is that it found the id and asked the process
+   * to stop. what the run actually saved, what the archive had already
+   * accounted for and the height of every file only arrive on the run's own
+   * terminal event, so the listener has to survive the acknowledgement.
+   */
+  test("an accepted cancel shows itself at once and settles on the run's own event", async () => {
     const { result } = renderHook(() => usePlaylistDownload(), { wrapper })
 
     const { settled } = await startDownload(result)
@@ -800,13 +812,38 @@ describe("unmount, reset and cancellation", () => {
       await result.current.cancelDownload()
     })
 
+    // the user asked for this and sees it immediately...
+    expect(result.current.downloadState.status).toBe("cancelled")
+    expect(infoToast).toHaveBeenCalledTimes(1)
+    // ...and nothing is claimed about what it saved yet
+    expect(result.current.downloadState.itemsSaved).toBeUndefined()
+    expect(listeners).toHaveLength(1)
+
+    await emit({
+      downloadId: sentDownloadId(),
+      status: "cancelled",
+      files: ["/dl/PL/001 - One [video1] 720p.mp4"],
+      items_saved: 1,
+      items_reused: 1,
+      items_skipped: 1,
+      items_total: 3,
+      reused_indices: [3]
+    })
+
     expect(await settled).toMatchObject({
       ok: false,
       value: { outcome: "cancelled" }
     })
-    expect(infoToast).toHaveBeenCalledTimes(1)
     expect(showDownloadErrorToast).not.toHaveBeenCalled()
     expect(usePlaylistStore.getState().isDownloading).toBe(false)
+
+    // the evidence the acknowledgement would have thrown away
+    const status = usePlaylistStore.getState().itemStatus
+    expect(status.get(1)).toEqual({ state: "saved", progress: 100, height: 720 })
+    expect(status.get(3)).toEqual({ state: "reused", progress: 100 })
+    expect(result.current.downloadState.itemsSaved).toBe(1)
+    expect(result.current.downloadState.itemsReused).toBe(1)
+    expect(result.current.downloadState.itemsTotal).toBe(3)
   })
 
   test("reset settles the mutation and clears the download state", async () => {
@@ -870,5 +907,323 @@ describe("summarizePlaylistItems", () => {
     })
 
     expect(sentence).not.toContain("—")
+  })
+})
+
+/**
+ * the two things about a row that only the end of the run knows.
+ *
+ * a ceiling is resolved per video, so "up to 1080p" is a different height for
+ * each of them and no progress event carries which. and an archive-skipped
+ * video is never announced at all, so without the positions the run reports,
+ * a video the user already has looks exactly like one the run never reached.
+ */
+describe("what the terminal event adds to the rows", () => {
+  test("each saved row shows the height its own file came down at", async () => {
+    const { result } = renderHook(() => usePlaylistDownload(), { wrapper })
+
+    const { settled } = await startDownload(result)
+    await waitFor(() => expect(downloadPlaylist).toHaveBeenCalled())
+
+    await emit({
+      downloadId: sentDownloadId(),
+      status: "completed",
+      progress: 100,
+      files: [
+        "/dl/PL/001 - One [video1] 1080p.mp4",
+        "/dl/PL/003 - Three [video3] 720p.mp4"
+      ],
+      items_saved: 2,
+      items_reused: 0,
+      items_skipped: 0,
+      items_total: 2
+    })
+
+    const status = usePlaylistStore.getState().itemStatus
+
+    // the same run, the same ceiling, two different heights: this is what
+    // "best available up to the limit" actually looks like
+    expect(status.get(1)).toEqual({ state: "saved", progress: 100, height: 1080 })
+    expect(status.get(3)).toEqual({ state: "saved", progress: 100, height: 720 })
+
+    expect((await settled).ok).toBe(true)
+  })
+
+  test("a row the archive already held reads as reused, not as skipped", async () => {
+    const { result } = renderHook(() => usePlaylistDownload(), { wrapper })
+
+    const { settled } = await startDownload(result)
+    await waitFor(() => expect(downloadPlaylist).toHaveBeenCalled())
+
+    // nothing was ever announced for either row: an archive-resumed run is
+    // silent, which is exactly why the positions have to travel
+    await emit({
+      downloadId: sentDownloadId(),
+      status: "completed",
+      progress: 100,
+      files: [],
+      items_saved: 0,
+      items_reused: 2,
+      items_skipped: 0,
+      items_total: 2,
+      reused_indices: [1, 3]
+    })
+
+    const status = usePlaylistStore.getState().itemStatus
+    expect(status.get(1)).toEqual({ state: "reused", progress: 100 })
+    expect(status.get(3)).toEqual({ state: "reused", progress: 100 })
+
+    expect((await settled).ok).toBe(true)
+  })
+
+  test("a run that saved some and reused others marks each row as its own", async () => {
+    const { result } = renderHook(() => usePlaylistDownload(), { wrapper })
+
+    const { settled } = await startDownload(result)
+    await waitFor(() => expect(downloadPlaylist).toHaveBeenCalled())
+
+    await emit({
+      downloadId: sentDownloadId(),
+      status: "completed",
+      progress: 100,
+      files: ["/dl/PL/003 - Three [video3] 480p.mp4"],
+      items_saved: 1,
+      items_reused: 1,
+      items_skipped: 0,
+      items_total: 2,
+      reused_indices: [1]
+    })
+
+    const status = usePlaylistStore.getState().itemStatus
+    expect(status.get(1)?.state).toBe("reused")
+    expect(status.get(3)).toEqual({ state: "saved", progress: 100, height: 480 })
+
+    expect((await settled).ok).toBe(true)
+  })
+
+  test("a row a file vouches for is never settled as skipped", async () => {
+    // the last item was still in flight when the terminal event landed, and
+    // its file is in the run's own record: the file is the stronger claim
+    const { result } = renderHook(() => usePlaylistDownload(), { wrapper })
+
+    const { settled } = await startDownload(result)
+    await waitFor(() => expect(downloadPlaylist).toHaveBeenCalled())
+
+    await emit({
+      downloadId: sentDownloadId(),
+      status: "downloading",
+      item_index: 2,
+      items_completed: 1,
+      items_total: 2,
+      item_progress: 97,
+      playlist_index: 3
+    })
+
+    await emit({
+      downloadId: sentDownloadId(),
+      status: "completed",
+      progress: 100,
+      files: ["/dl/PL/003 - Three [video3] 1080p.mp4"],
+      items_saved: 1,
+      items_reused: 0,
+      items_skipped: 1,
+      items_total: 2
+    })
+
+    expect(usePlaylistStore.getState().itemStatus.get(3)).toEqual({
+      state: "saved",
+      progress: 100,
+      height: 1080
+    })
+
+    expect((await settled).ok).toBe(true)
+  })
+
+  test("a cancelled run keeps the rows it did save, heights and all", async () => {
+    const { result } = renderHook(() => usePlaylistDownload(), { wrapper })
+
+    const { settled } = await startDownload(result)
+    await waitFor(() => expect(downloadPlaylist).toHaveBeenCalled())
+
+    await emit({
+      downloadId: sentDownloadId(),
+      status: "downloading",
+      item_index: 2,
+      items_completed: 1,
+      items_total: 2,
+      item_progress: 30,
+      playlist_index: 3
+    })
+
+    await emit({
+      downloadId: sentDownloadId(),
+      status: "cancelled",
+      files: ["/dl/PL/001 - One [video1] 720p.mp4"],
+      items_saved: 1,
+      items_reused: 0,
+      items_skipped: 1,
+      items_total: 2
+    })
+
+    const status = usePlaylistStore.getState().itemStatus
+    expect(status.get(1)).toEqual({ state: "saved", progress: 100, height: 720 })
+    // the row the kill interrupted goes back to queued: its .part is what the
+    // next run resumes from
+    expect(status.get(3)?.state).toBe("pending")
+
+    expect(await settled).toMatchObject({ ok: false, value: { outcome: "cancelled" } })
+  })
+
+  test("an audio row is saved without a height rather than not saved", async () => {
+    usePlaylistStore.getState().setActiveTab("audio")
+
+    const { result } = renderHook(() => usePlaylistDownload(), { wrapper })
+
+    const { settled } = await startDownload(result)
+    await waitFor(() => expect(downloadPlaylist).toHaveBeenCalled())
+
+    await emit({
+      downloadId: sentDownloadId(),
+      status: "completed",
+      progress: 100,
+      files: ["/dl/PL/001 - One [video1].mp3"],
+      items_saved: 1,
+      items_reused: 0,
+      items_skipped: 1,
+      items_total: 2
+    })
+
+    expect(usePlaylistStore.getState().itemStatus.get(1)).toEqual({
+      state: "saved",
+      progress: 100
+    })
+
+    expect((await settled).ok).toBe(true)
+  })
+
+  test("a terminal event with neither files nor positions leaves the rows alone", async () => {
+    const { result } = renderHook(() => usePlaylistDownload(), { wrapper })
+
+    const { settled } = await startDownload(result)
+    await waitFor(() => expect(downloadPlaylist).toHaveBeenCalled())
+
+    await emit({
+      downloadId: sentDownloadId(),
+      status: "failed",
+      error: "Download failed"
+    })
+
+    expect(usePlaylistStore.getState().itemStatus.size).toBe(0)
+
+    expect(await settled).toMatchObject({ ok: false })
+  })
+})
+
+/**
+ * this screen can be pointed at a different playlist without ever unmounting,
+ * and a run it was following keeps its own callbacks: the start ipc it is
+ * waiting on still resolves or rejects, and react-query still runs `onError`.
+ * a generation counter, bumped by `reset`, is what stops that run writing over
+ * the playlist now on screen.
+ */
+describe("a run the view has moved on from", () => {
+  test("a start that fails after a reset does not report itself", async () => {
+    const ack = deferredAck()
+
+    const { result } = renderHook(() => usePlaylistDownload(), { wrapper })
+    const { settled } = await startDownload(result)
+
+    // the user pasted another playlist; the layout detaches this view
+    await act(async () => {
+      result.current.reset()
+    })
+    expect(result.current.downloadState.status).toBe("idle")
+
+    await act(async () => {
+      ack.reject(new Error("A cannot start"))
+    })
+    await flush()
+
+    // the picker stays a picker
+    expect(result.current.downloadState.status).toBe("idle")
+    expect(result.current.downloadState.error).toBeUndefined()
+    expect(showDownloadErrorToast).not.toHaveBeenCalled()
+    expect(stage).not.toHaveBeenCalled()
+
+    expect(await settled).toMatchObject({ ok: false })
+  })
+
+  test("a start that succeeds after a reset does not re-arm the view", async () => {
+    const ack = deferredAck()
+
+    const { result } = renderHook(() => usePlaylistDownload(), { wrapper })
+    const { settled } = await startDownload(result)
+
+    await act(async () => {
+      result.current.reset()
+    })
+
+    await act(async () => {
+      ack.resolve({})
+    })
+    await flush()
+
+    expect(result.current.downloadState.status).toBe("idle")
+    expect(usePlaylistStore.getState().isDownloading).toBe(false)
+    expect(await settled).toMatchObject({ ok: false, value: { outcome: "abandoned" } })
+  })
+
+  test("its events are dropped rather than written to the new view's rows", async () => {
+    const { result } = renderHook(() => usePlaylistDownload(), { wrapper })
+    const { settled } = await startDownload(result)
+    await waitFor(() => expect(downloadPlaylist).toHaveBeenCalled())
+
+    const abandoned = sentDownloadId()
+
+    await act(async () => {
+      result.current.reset()
+    })
+
+    // reset unsubscribed, so nothing should be listening at all
+    expect(listeners).toHaveLength(0)
+
+    await emit({
+      downloadId: abandoned,
+      status: "completed",
+      files: ["/dl/PL/001 - One [video1] 1080p.mp4"],
+      items_saved: 1,
+      items_total: 1
+    })
+
+    expect(usePlaylistStore.getState().itemStatus.size).toBe(0)
+    expect(result.current.downloadState.status).toBe("idle")
+    expect(successToast).not.toHaveBeenCalled()
+
+    expect(await settled).toMatchObject({ ok: false, value: { outcome: "abandoned" } })
+  })
+
+  test("the admission guard still comes off, so the next run can start", async () => {
+    const ack = deferredAck()
+
+    const { result } = renderHook(() => usePlaylistDownload(), { wrapper })
+    const first = await startDownload(result)
+
+    await act(async () => {
+      result.current.reset()
+    })
+    await act(async () => {
+      ack.reject(new Error("A cannot start"))
+    })
+    await flush()
+    expect(await first.settled).toMatchObject({ ok: false })
+
+    downloadPlaylist.mockResolvedValue({ downloadId: "ignored" })
+    const second = await startDownload(result)
+    await waitFor(() => expect(downloadPlaylist).toHaveBeenCalledTimes(2))
+
+    expect(result.current.downloadState.status).not.toBe("failed")
+
+    await emit({ downloadId: sentDownloadId(1), status: "completed" })
+    expect((await second.settled).ok).toBe(true)
   })
 })

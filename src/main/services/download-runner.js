@@ -453,7 +453,19 @@ function itemTally(source) {
     items_saved: source.itemsSaved,
     items_reused: source.itemsReused,
     items_skipped: source.itemsSkipped,
-    items_total: source.itemsTotal
+    items_total: source.itemsTotal,
+    /**
+     * which positions the archive accounted for, when the engine said.
+     *
+     * yt-dlp never announces an archive-skipped item, so without these the
+     * renderer's rows for videos the user already has sit at "never reached"
+     * and settle as skipped. spread conditionally rather than passed through
+     * as undefined: an engine result from before this key existed produces
+     * exactly the payload it always did.
+     */
+    ...(Array.isArray(source.reusedIndices)
+      ? { reused_indices: source.reusedIndices }
+      : null)
   }
 }
 

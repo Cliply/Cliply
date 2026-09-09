@@ -58,8 +58,10 @@ export const PLATFORM_REGISTRY: Record<Platform, PlatformConfig> = {
     logo: "./youtube-logo.svg",
     formResolver: zodResolver(youtubeUrlSchema),
     placeholder: "paste video url here...",
+    // the box takes a playlist link now, and a helper line that only mentions
+    // videos and shorts is the reason somebody would never try one
     helperText:
-      "supports youtube videos & shorts from youtube.com and youtu.be",
+      "supports youtube videos, shorts & playlists from youtube.com and youtu.be",
     loadingText: "\u{1F40B} getting video information",
     successMessage: "Video information loaded successfully!",
     errorMessages: {
