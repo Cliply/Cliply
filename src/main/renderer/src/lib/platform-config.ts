@@ -3,6 +3,7 @@ import type { Resolver } from "react-hook-form"
 
 import { pinterestApi, tiktokApi, videoApi } from "@/lib/api"
 import { usePinterestStore } from "@/lib/pinterestStore"
+import { usePlaylistStore } from "@/lib/playlistStore"
 import type { Platform } from "@/lib/store"
 import { useTikTokStore } from "@/lib/tiktokStore"
 import { pinterestUrlSchema, tiktokUrlSchema, youtubeUrlSchema } from "@/lib/validation"
@@ -71,6 +72,9 @@ export const PLATFORM_REGISTRY: Record<Platform, PlatformConfig> = {
     fetchAndStore: async (url: string) => {
       const info = await videoApi.getVideoInfo(url)
       useYouTubeStore.getState().setVideoInfo(info)
+      // the youtube box holds either a video or a playlist, never both at once:
+      // whichever was loaded last is what the page shows
+      usePlaylistStore.getState().reset()
 
       return {
         durationSeconds: info.duration ?? null,
@@ -84,7 +88,11 @@ export const PLATFORM_REGISTRY: Record<Platform, PlatformConfig> = {
       setIsLoading: (loading) =>
         useYouTubeStore.getState().setIsLoadingVideoInfo(loading),
       hasInfo: () => useYouTubeStore.getState().videoInfo !== null,
-      reset: () => useYouTubeStore.getState().reset()
+      // clearing the box clears both of the things it can be holding
+      reset: () => {
+        useYouTubeStore.getState().reset()
+        usePlaylistStore.getState().reset()
+      }
     }
   },
   pinterest: {
@@ -132,7 +140,7 @@ export const PLATFORM_REGISTRY: Record<Platform, PlatformConfig> = {
       invalidUrl: "Invalid TikTok URL",
       invalidUrlToast: "Please enter a valid TikTok URL",
       unavailable: "This video is not available for download",
-      genericFail: "TikTok blocked this request — please try again in a moment",
+      genericFail: "TikTok blocked this request. Please try again in a moment",
       logPrefix: "TikTok info request failed:"
     },
     fetchAndStore: async (url: string) => {

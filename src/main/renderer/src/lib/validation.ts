@@ -18,18 +18,113 @@ const YOUTUBE_URL_REGEX = /^(https?:\/\/)?(www\.)?(youtube\.com\/(watch\?v=|embe
 const PINTEREST_URL_REGEX =
   /^(?:https?:\/\/)?(?:(?:[a-z0-9-]+\.)*pinterest\.[a-z]{2,3}(?:\.[a-z]{2})?\/pin\/[\w-]+|pin\.it\/[\w-]+)/i
 const TIKTOK_URL_REGEX = /^https?:\/\/(?:(?:www\.)?tiktok\.com\/@[\w.-]+\/video\/\d+|vm\.tiktok\.com\/[\w-]+|vt\.tiktok\.com\/[\w-]+|(?:www\.)?tiktok\.com\/t\/[\w-]+|(?:www\.)?tiktok\.com\/embed\/\d+)/
+/**
+ * a link to a playlist rather than to a video in one.
+ *
+ * `youtube.com/playlist?list=…` is none of the five shapes YOUTUBE_URL_REGEX
+ * accepts, so until now the input refused it before anything could ask what it
+ * held. the host is anchored for the reason PINTEREST_URL_REGEX spells out
+ * above - the interesting part of a hostname is where it ends - so any
+ * subdomain is fine (`m.`, `music.`, `www.`) and `youtube.com.evil.com` is
+ * somebody else's domain: the literal `/playlist?` has to follow immediately.
+ *
+ * `list` is not required to be the first parameter, because the share sheet
+ * puts its own `si=` in front of it.
+ */
+const PLAYLIST_URL_REGEX =
+  /^(?:https?:\/\/)?(?:[a-z0-9-]+\.)*youtube\.com\/playlist\?(?:[^#]*&)?list=[\w-]+/i
+
+/**
+ * the video id inside a youtube link, with the host read as strictly as the
+ * validators above read it. `extractVideoId` below is the older, laxer reader
+ * that predates this and is left alone.
+ */
+const YOUTUBE_VIDEO_ID_REGEX =
+  /^(?:https?:\/\/)?(?:[a-z0-9-]+\.)*(?:youtube\.com\/(?:watch\?(?:[^#]*&)?v=|embed\/|v\/|shorts\/)|youtu\.be\/)([\w-]+)/i
+
+// the playlist a link names, wherever it sits in the query string
+const YOUTUBE_LIST_ID_REGEX = /[?&]list=([\w-]+)/i
 
 export const youtubeUrlSchema = z.object({
   url: z
     .string()
     .min(1, "Please enter a YouTube URL")
-    .refine((url: string) => YOUTUBE_URL_REGEX.test(url), "Please enter a valid YouTube URL")
+    .refine(
+      (url: string) => YOUTUBE_URL_REGEX.test(url) || PLAYLIST_URL_REGEX.test(url),
+      "Please enter a valid YouTube URL"
+    )
 })
 
 export type YouTubeUrlFormData = z.infer<typeof youtubeUrlSchema>
 
+// a youtube link of either kind: one video, or a playlist of them
 export const isValidYouTubeUrl = (url: string): boolean => {
-  return YOUTUBE_URL_REGEX.test(url)
+  return YOUTUBE_URL_REGEX.test(url) || PLAYLIST_URL_REGEX.test(url)
+}
+
+/**
+ * is this link *only* a playlist?
+ *
+ * there is deliberately no `playlistUrlSchema` beside this. a schema in here
+ * exists to be a form resolver, and a playlist has no form of its own: it is
+ * pasted into the one youtube box, whose resolver is `youtubeUrlSchema` above -
+ * widened to take both shapes, because which of the two a link is cannot be
+ * known until it has been read. `detectYouTubeTarget` is what reads it.
+ */
+export const isValidYouTubePlaylistUrl = (url: string): boolean => {
+  return PLAYLIST_URL_REGEX.test(url)
+}
+
+/**
+ * a link main will accept, out of one the paste box accepted
+ *
+ * every validator above makes the protocol optional, because a link out of a
+ * chat window often arrives without one. main does not: the engine's
+ * `normalizeUrl` has always asked for an http(s) link, and the playlist
+ * handlers refuse anything that does not parse as one. so it is put back on the
+ * way out, which is what the single-video flow has always relied on happening.
+ */
+export const ensureHttpScheme = (url: string): string => {
+  const trimmed = url.trim()
+  return /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`
+}
+
+export type YouTubeTargetKind = "video" | "playlist" | "both"
+
+export interface YouTubeTarget {
+  kind: YouTubeTargetKind
+  videoId: string | null
+  listId: string | null
+}
+
+/**
+ * what a youtube link actually points at
+ *
+ * three answers, because a link can carry both: `watch?v=…&list=…` is what
+ * youtube hands out from inside a playlist, and `youtu.be/ID?list=…` is the
+ * same thing off the share sheet. **`both` is classified here and nothing
+ * more.** every caller sends it down the single-video path, which is what
+ * Cliply has always done with it; the prompt that asks the user which one they
+ * meant is a later ticket, and it needs this answer to exist before it can ask.
+ *
+ * a link that is not youtube's gets `video` with two nulls rather than an
+ * answer about a `list=` parameter on somebody else's domain: the caller is
+ * routing on this, and the video path is the one that has always taken it.
+ */
+export const detectYouTubeTarget = (url: string): YouTubeTarget => {
+  const videoId = url.match(YOUTUBE_VIDEO_ID_REGEX)?.[1] ?? null
+  const isYouTube = videoId !== null || PLAYLIST_URL_REGEX.test(url)
+  const listId = isYouTube ? (url.match(YOUTUBE_LIST_ID_REGEX)?.[1] ?? null) : null
+
+  if (videoId && listId) {
+    return { kind: "both", videoId, listId }
+  }
+
+  if (listId) {
+    return { kind: "playlist", videoId: null, listId }
+  }
+
+  return { kind: "video", videoId, listId: null }
 }
 
 export const pinterestUrlSchema = z.object({
@@ -67,7 +162,7 @@ export const isValidTikTokUrl = (url: string): boolean => {
 export const detectPlatform = (
   url: string
 ): "youtube" | "pinterest" | "tiktok" | null => {
-  if (YOUTUBE_URL_REGEX.test(url)) {
+  if (YOUTUBE_URL_REGEX.test(url) || PLAYLIST_URL_REGEX.test(url)) {
     return "youtube"
   }
   if (PINTEREST_URL_REGEX.test(url)) {

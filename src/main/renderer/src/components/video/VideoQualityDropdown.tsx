@@ -85,7 +85,7 @@ export function VideoQualityDropdown({
           )}
         >
           <p className="text-sm text-slate-600 dark:text-slate-400">
-            This link has no video streams to download — only audio. The Audio
+            This link has no video streams to download, only audio. The Audio
             Only tab still works.
           </p>
         </div>
