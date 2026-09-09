@@ -459,7 +459,10 @@ export const usePlaylistDownload = () => {
           })
 
           // the suggestion travels with the failure that carried it: a run that
-          // could not write its own record is not fixed by trying again
+          // could not write its own record is not fixed by trying again.
+          // the category and the platform go with it too, because they are
+          // what decides which action the toast offers: a youtube refusal gets
+          // "fix with cookies", everything else gets "report"
           showDownloadErrorToast(
             "Playlist download failed",
             [
@@ -467,7 +470,9 @@ export const usePlaylistDownload = () => {
               data.suggestion
             ]
               .filter(Boolean)
-              .join(" ")
+              .join(" "),
+            data.category,
+            "youtube"
           )
 
           // already surfaced here; onError must not report it twice
@@ -609,7 +614,12 @@ export const usePlaylistDownload = () => {
         downloadType: lastTypeRef.current,
         videoUrl: lastUrlRef.current
       })
-      showDownloadErrorToast("Playlist download failed", error.message)
+      showDownloadErrorToast(
+        "Playlist download failed",
+        error.message,
+        error instanceof DownloadError ? error.category : undefined,
+        "youtube"
+      )
     }
   })
 

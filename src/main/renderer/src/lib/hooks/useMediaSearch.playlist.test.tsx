@@ -45,6 +45,7 @@ vi.mock("sonner", () => ({
 }))
 
 import { useMediaSearch } from "./useMediaSearch"
+import { DownloadError } from "@/lib/api"
 import { useMixedLinkStore } from "@/lib/mixedLinkStore"
 import { usePlaylistStore } from "@/lib/playlistStore"
 import { useAppStore } from "@/lib/store"
@@ -223,6 +224,25 @@ describe("what the youtube box does with a link", () => {
     expect(usePlaylistStore.getState().playlistInfo).toBeNull()
     expect(usePlaylistStore.getState().isLoadingPlaylistInfo).toBe(false)
     expect(useAppStore.getState().showMediaDetails).toBe(false)
+  })
+
+  test("a listing youtube refused offers the cookie fix, like a refused video", async () => {
+    // main classifies a refused listing exactly as it classifies a refused
+    // video lookup, and the cookies dialog is the one thing that fixes either
+    mocks.getPlaylistInfo.mockRejectedValueOnce(
+      Object.assign(new DownloadError("YouTube asked us to confirm you're not a bot."), {
+        category: "BOT_DETECTION"
+      })
+    )
+
+    await submit("https://www.youtube.com/playlist?list=PL123")
+
+    expect(mocks.errorToast).toHaveBeenCalledTimes(1)
+    const [message, options] = mocks.errorToast.mock.calls[0]
+    expect(message).toBe("YouTube asked us to confirm you're not a bot.")
+    expect(options).toMatchObject({ id: "bot-detected" })
+    expect(options.action.label).toBe("fix with cookies")
+    expect(usePlaylistStore.getState().playlistInfo).toBeNull()
   })
 
   test("a listing that fails does not take the video on screen with it", async () => {

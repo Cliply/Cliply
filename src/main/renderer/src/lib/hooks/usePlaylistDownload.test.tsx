@@ -10,7 +10,7 @@ import { act, renderHook, waitFor } from "@testing-library/react"
 import type { ReactNode } from "react"
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
 
-import type { PlaylistEntry, PlaylistInfoResponse } from "@/lib/api"
+import { DownloadError, type PlaylistEntry, type PlaylistInfoResponse } from "@/lib/api"
 
 type ProgressListener = (payload: Record<string, unknown>) => void
 
@@ -385,6 +385,11 @@ describe("what a finished run says it did", () => {
     expect(showDownloadErrorToast.mock.calls[0][1]).toContain(
       "Check that Cliply can write to its app data folder."
     )
+    // the category and the platform decide which action the toast offers, so
+    // both travel with it: a youtube refusal gets "fix with cookies" only if
+    // the helper is told it was youtube that refused
+    expect(showDownloadErrorToast.mock.calls[0][2]).toBe("PERMISSION_ERROR")
+    expect(showDownloadErrorToast.mock.calls[0][3]).toBe("youtube")
     expect(stage).toHaveBeenCalledTimes(1)
     expect(stage.mock.calls[0][0]).toMatchObject({
       shortMessage: "Cliply couldn't prepare its record of this download.",
@@ -445,8 +450,31 @@ describe("what a finished run says it did", () => {
     await flush()
 
     expect(showDownloadErrorToast).toHaveBeenCalledTimes(1)
+    expect(showDownloadErrorToast.mock.calls[0][2]).toBeUndefined()
+    expect(showDownloadErrorToast.mock.calls[0][3]).toBe("youtube")
     expect(stage).toHaveBeenCalledTimes(1)
     expect(result.current.downloadState.status).toBe("failed")
+  })
+
+  test("a refusal at the start still offers the cookie fix", async () => {
+    // main classifies a refused start the same way it classifies a refused
+    // download, and the toast only offers cookies when it is handed the category
+    const ack = deferredAck()
+    const { result } = renderHook(() => usePlaylistDownload(), { wrapper })
+
+    const { settled } = await startDownload(result)
+    ack.reject(
+      Object.assign(new DownloadError("YouTube asked us to confirm you're not a bot."), {
+        category: "BOT_DETECTION"
+      })
+    )
+
+    expect((await settled).ok).toBe(false)
+    await flush()
+
+    expect(showDownloadErrorToast).toHaveBeenCalledTimes(1)
+    expect(showDownloadErrorToast.mock.calls[0][2]).toBe("BOT_DETECTION")
+    expect(showDownloadErrorToast.mock.calls[0][3]).toBe("youtube")
   })
 })
 

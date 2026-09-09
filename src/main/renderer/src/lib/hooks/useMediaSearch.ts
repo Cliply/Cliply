@@ -405,18 +405,24 @@ async function loadPlaylist(url: string, token: number, reveal: () => void) {
       return
     }
 
+    const category = error instanceof DownloadError ? error.category : undefined
+
     // main's sentence, in the reader's language where a category names one -
     // the same swap handleSearchError makes for a video lookup
     const message =
       error instanceof Error
-        ? localizeError({
-            message: error.message,
-            category:
-              error instanceof DownloadError ? error.category : undefined
-          }).message
+        ? localizeError({ message: error.message, category }).message
         : t("playlist.infoFailed")
 
-    toast.error(t("playlist.infoFailed"), { description: message })
+    // the one failure here the user can fix, and main has already said which
+    // it is. a listing is a youtube lookup like any other, so it gets the same
+    // toast a refused video lookup does, cookie action included
+    if (category === "BOT_DETECTION") {
+      showBotDetectionToast(message, "youtube")
+    } else {
+      toast.error(t("playlist.infoFailed"), { description: message })
+    }
+
     console.error("Playlist info request failed:", error)
   } finally {
     // the spinner belongs to the newest lookup, which may still be running
