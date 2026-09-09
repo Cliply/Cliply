@@ -65,30 +65,26 @@ export const ceilingFor = (height: number): PlaylistCeiling | null =>
   PLAYLIST_CEILINGS.find((option) => option.height === height) || null
 
 /**
- * what "up to N" really promises, and what it does not
+ * one line under the picker, saying what a run does
  *
- * `-S res:N` is a preference rather than a hard ceiling: it takes the largest
- * stream at or below N, and the smallest one there is when the video has
- * nothing that small. nothing is ever skipped for lacking the height, which is
- * the property that matters, but "never above N" would be a promise it does
- * not keep. so the copy says what happens instead, and points at the filename,
- * which carries the height each video really came down at.
+ * "up to N" rather than "never above N", because `-S res:N` is a preference
+ * rather than a hard ceiling: it takes the largest stream at or below N, and
+ * the smallest one there is when the video has nothing that small. nothing is
+ * ever skipped for lacking the height, which is the property that matters, and
+ * the filename carries the height each video really came down at for anyone
+ * who goes looking.
  */
 export const ceilingHelperText = (limit: string) =>
-  `Each video is saved at its best quality, up to ${limit}. A video with nothing that small is saved at its smallest. The filename shows the height each one really came down at.`
+  `Each video is saved as MP4 at its best quality up to ${limit}, with its original audio.`
 
 /**
- * three controls a playlist does not get, each said out loud
+ * the same line for the audio tab
  *
- * a control that is simply missing reads as a bug, or as something the user
- * failed to find. these are not omissions, they are consequences of what a
- * playlist is, so each one says which.
+ * "whole" is the trim answer and "the format picked above" is the one-format
+ * answer, both said as what happens rather than as controls that are missing.
  */
-export const PLAYLIST_ABSENT = {
-  trim: "No trimming. One time range cannot describe videos of different lengths, so the whole of each video is saved.",
-  dub: "No language picker. The dubs on offer differ from video to video, so each one is saved with its own original audio.",
-  container: "Every video is saved as MP4, whatever height it comes down at."
-}
+export const PLAYLIST_AUDIO_NOTE =
+  "Each video is saved whole, in the format picked above."
 
 // =============================================================================
 // one row's badge
@@ -106,20 +102,26 @@ export interface PlaylistRowBadge {
  * archive records that a download once succeeded, not that a file is on disk
  * now, and calling it saved would claim a file this run did not write.
  *
- * a row the run never reached reads as queued while the run is going and as
- * "not saved" once it has ended, because after the end there is nothing left
- * for it to be waiting for.
+ * only the rows the run was asked for get a badge at all. a row nobody ticked
+ * is not in the run and never was, so it keeps its duration the way it does
+ * while picking: eight untouched rows reading "not saved" under a two-video
+ * run is eight failures that never happened.
+ *
+ * a *selected* row the run never reached reads as queued while the run is
+ * going and as "not saved" once it has ended, because after the end there is
+ * nothing left for it to be waiting for.
  */
 export function rowBadge(
   entry: PlaylistEntry,
   phase: PlaylistPhase,
+  selected: boolean,
   status?: PlaylistItemStatus
 ): PlaylistRowBadge | null {
   if (entry.unavailable) {
     return { text: "unavailable", tone: "gone" }
   }
 
-  if (phase === "picking") return null
+  if (phase === "picking" || !selected) return null
 
   switch (status?.state) {
     case "downloading":

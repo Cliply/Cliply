@@ -6,10 +6,13 @@ import { describe, expect, test } from "vitest"
 
 import type { PlaylistEntry, PlaylistInfoResponse } from "@/lib/api"
 import {
+  ceilingHelperText,
   countLine,
   mixedLinkPlaylistChoice,
   nameList,
   phaseOf,
+  PLAYLIST_AUDIO_NOTE,
+  rowBadge,
   totalDuration
 } from "@/lib/playlistView"
 
@@ -139,5 +142,108 @@ describe("naming the ones that did not make it", () => {
 
   test("uses no em-dash", () => {
     expect(nameList([entry(1), entry(2), entry(3), entry(4)])).not.toContain("—")
+  })
+})
+
+/**
+ * the rule the user found the hard way: ticking two of ten and running left
+ * the other eight reading "not saved", which is eight failures that never
+ * happened. a badge belongs to the run, so a row the run was never asked for
+ * has none.
+ */
+describe("which rows get a badge at all", () => {
+  test("a row nobody ticked gets none once the run has ended", () => {
+    expect(rowBadge(entry(5), "finished", false)).toBeNull()
+  })
+
+  test("but a ticked row the run never reached says it was not saved", () => {
+    expect(rowBadge(entry(5), "finished", true)).toEqual({
+      text: "not saved",
+      tone: "gone"
+    })
+  })
+
+  test("an unticked row is just as absent while the run is going", () => {
+    // "queued" over a row that is not in the queue is the same lie, earlier
+    expect(rowBadge(entry(5), "running", false)).toBeNull()
+    expect(rowBadge(entry(5), "running", true)).toEqual({
+      text: "queued",
+      tone: "neutral"
+    })
+  })
+
+  /**
+   * a deleted or private video is a fact about the listing rather than about
+   * the run, so it is said whether or not the row was ever ticked, and in
+   * every phase
+   */
+  test("an unavailable row says so regardless", () => {
+    const missing = entry(3, { unavailable: true, id: null })
+
+    for (const phase of ["picking", "running", "finished"] as const) {
+      expect(rowBadge(missing, phase, false)).toEqual({
+        text: "unavailable",
+        tone: "gone"
+      })
+    }
+  })
+
+  test("nothing is badged while the user is still picking", () => {
+    expect(rowBadge(entry(1), "picking", true)).toBeNull()
+    expect(
+      rowBadge(entry(1), "picking", true, { state: "saved", progress: 100 })
+    ).toBeNull()
+  })
+
+  /**
+   * red is what the rest of the app uses for a validation error and the cancel
+   * hover. a video the run did not write is neither, and nothing in the app is
+   * green, so the two outcomes a row can end on are the muted chip and the
+   * accent one.
+   */
+  test("an outcome is muted or accented, never an alarm", () => {
+    expect(rowBadge(entry(1), "finished", true, { state: "skipped", progress: 0 }))
+      .toEqual({ text: "not saved", tone: "gone" })
+
+    expect(
+      rowBadge(entry(1), "finished", true, {
+        state: "saved",
+        progress: 100,
+        height: 1080
+      })
+    ).toEqual({ text: "saved · 1080p", tone: "done" })
+
+    expect(rowBadge(entry(1), "finished", true, { state: "reused", progress: 100 }))
+      .toEqual({ text: "already downloaded", tone: "done" })
+  })
+})
+
+/**
+ * the user's words: "there is no need of irrelevant information that what we
+ * cannot do". one short sentence per tab saying how it works, and no sentence
+ * anywhere naming a control that is not there.
+ */
+describe("what the card says about a run", () => {
+  test("the video line is one sentence, and follows the ceiling", () => {
+    expect(ceilingHelperText("1080p")).toBe(
+      "Each video is saved as MP4 at its best quality up to 1080p, with its original audio."
+    )
+    expect(ceilingHelperText("4K")).toContain("up to 4K")
+  })
+
+  test("the audio line is one sentence", () => {
+    expect(PLAYLIST_AUDIO_NOTE).toBe(
+      "Each video is saved whole, in the format picked above."
+    )
+  })
+
+  test("neither of them says what a playlist cannot do", () => {
+    for (const line of [ceilingHelperText("1080p"), PLAYLIST_AUDIO_NOTE]) {
+      expect(line).not.toMatch(/^No /)
+      expect(line).not.toMatch(/\bcannot\b/)
+      expect(line).not.toContain("—")
+      // one sentence, so one full stop, and it is the last character
+      expect(line.indexOf(".")).toBe(line.length - 1)
+    }
   })
 })

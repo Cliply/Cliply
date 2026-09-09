@@ -2,8 +2,8 @@
 //
 // the right-hand column, in all three of the states it has to be: pick,
 // download, finish. the thing it must never grow is a control a playlist
-// cannot honour, and the thing it must never lose is the explanation of why
-// those controls are not there.
+// cannot honour, and the thing it must never say is that those controls are
+// missing: each tab carries one sentence on how a run works instead.
 
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
@@ -136,54 +136,100 @@ describe("picking", () => {
 })
 
 /**
- * the three controls a playlist cannot honour. a control that is simply
- * missing reads as a bug or as something the user failed to find, so each
- * absence says which, and none of them is reachable on either tab.
+ * the three controls a playlist cannot honour are still absent from both tabs.
+ * what changed is that the card no longer lists them: the user's words were
+ * "we do not need to tell what we cannot do", so each tab carries one short
+ * sentence saying how a run works and nothing about what it is missing.
  */
 describe("what a playlist does not offer", () => {
-  test("no trim control, and a line saying why", () => {
+  test("no trim control on either tab", () => {
     const { playlist } = fakePlaylist()
     render(<PlaylistDownloadCard playlist={playlist} phase="picking" />)
 
-    expect(screen.getByText(/No trimming\./)).toBeDefined()
     // the two headings the video screens use for their trim controls
     expect(screen.queryByRole("heading", { name: "Time Range" })).toBeNull()
     expect(
       screen.queryByRole("heading", { name: "Time Range Selection" })
     ).toBeNull()
     expect(screen.queryByText(/Precise Cut/i)).toBeNull()
+
+    selectAudioTab()
+
+    expect(screen.queryByRole("heading", { name: "Time Range" })).toBeNull()
+    expect(
+      screen.queryByRole("heading", { name: "Time Range Selection" })
+    ).toBeNull()
   })
 
-  test("no dub picker, and a line saying why", () => {
+  test("no dub picker on either tab", () => {
     const { playlist } = fakePlaylist()
     render(<PlaylistDownloadCard playlist={playlist} phase="picking" />)
 
-    expect(screen.getByText(/No language picker\./)).toBeDefined()
+    expect(screen.queryByRole("heading", { name: "Audio Language" })).toBeNull()
+
+    selectAudioTab()
+
     expect(screen.queryByRole("heading", { name: "Audio Language" })).toBeNull()
   })
 
-  test("no container choice, and a line saying what it will be", () => {
+  test("no container choice", () => {
     const { playlist } = fakePlaylist()
     render(<PlaylistDownloadCard playlist={playlist} phase="picking" />)
 
-    expect(screen.getByText(/Every video is saved as MP4/)).toBeDefined()
     expect(screen.queryByText(/MKV/)).toBeNull()
   })
+})
 
-  test("and the audio tab offers none of them either", () => {
+describe("what each tab says about a run", () => {
+  test("the video tab says it in one sentence, under the picker", () => {
+    const { playlist } = fakePlaylist()
+    render(<PlaylistDownloadCard playlist={playlist} phase="picking" />)
+
+    expect(
+      screen.getByText(
+        "Each video is saved as MP4 at its best quality up to 1080p, with its original audio."
+      )
+    ).toBeDefined()
+  })
+
+  test("and the audio tab in one of its own", () => {
     const { playlist } = fakePlaylist()
     render(<PlaylistDownloadCard playlist={playlist} phase="picking" />)
 
     selectAudioTab()
 
-    expect(screen.getByText(/No trimming\./)).toBeDefined()
-    expect(screen.getByText(/No language picker\./)).toBeDefined()
-    // the two headings the video screens use for their trim controls
-    expect(screen.queryByRole("heading", { name: "Time Range" })).toBeNull()
     expect(
-      screen.queryByRole("heading", { name: "Time Range Selection" })
-    ).toBeNull()
-    expect(screen.queryByRole("heading", { name: "Audio Language" })).toBeNull()
+      screen.getByText("Each video is saved whole, in the format picked above.")
+    ).toBeDefined()
+  })
+
+  /**
+   * the line the user actually objected to. a card that spends three bullets
+   * on controls it does not have reads as a list of apologies, and none of it
+   * is anything they can act on
+   */
+  test("no screen tells the user what a playlist cannot do", () => {
+    for (const phase of ["picking", "running", "finished"] as const) {
+      for (const audio of [false, true]) {
+        cleanup()
+
+        const { playlist } = fakePlaylist({
+          status: phase === "finished" ? "completed" : "downloading",
+          itemsSaved: 1,
+          itemsSkipped: 1,
+          itemsTotal: 2
+        })
+        render(<PlaylistDownloadCard playlist={playlist} phase={phase} />)
+
+        if (audio && phase === "picking") selectAudioTab()
+
+        const text = document.body.textContent ?? ""
+
+        expect(text).not.toContain("No trimming")
+        expect(text).not.toContain("No language picker")
+        expect(text).not.toMatch(/\bcannot\b/)
+      }
+    }
   })
 })
 

@@ -111,14 +111,14 @@ describe("the default", () => {
  * and land with 1080p in its name.
  */
 describe("the helper copy", () => {
-  test("says what happens rather than promising a hard limit", () => {
+  test("is one sentence, and promises no hard limit", () => {
     render(<PlaylistCeilingDropdown />)
 
-    const helper = screen.getByText(/Each video is saved at its best quality/)
+    const helper = screen.getByText(/^Each video is saved as MP4/)
 
-    expect(helper.textContent).toContain("up to 1080p")
-    expect(helper.textContent).toContain("nothing that small is saved at its smallest")
-    expect(helper.textContent).toContain("filename shows the height")
+    expect(helper.textContent).toBe(
+      "Each video is saved as MP4 at its best quality up to 1080p, with its original audio."
+    )
     expect(helper.textContent).not.toMatch(/never above/i)
   })
 
@@ -128,7 +128,7 @@ describe("the helper copy", () => {
     fireEvent.click(screen.getByRole("button", { name: /Up to 4K/ }))
 
     expect(
-      screen.getByText(/Each video is saved at its best quality/).textContent
+      screen.getByText(/^Each video is saved as MP4/).textContent
     ).toContain("up to 4K")
   })
 

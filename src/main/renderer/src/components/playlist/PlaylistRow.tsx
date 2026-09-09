@@ -12,11 +12,21 @@ interface PlaylistRowProps {
   onToggle: (index: number) => void
 }
 
+/**
+ * four chips, drawn from the app's own two colours and nothing else
+ *
+ * cyan is the accent everything positive is already in - the ticked checkbox,
+ * the download button - so a saved row is the soft cyan chip and the one row
+ * in flight is the solid one. red is kept for what the rest of the app keeps
+ * it for: a validation error and the cancel hover. a video the run did not
+ * write is not an error, so it is slate, dimmer than a queued row rather than
+ * a different colour from it.
+ */
 const BADGE_TONES: Record<PlaylistRowBadge["tone"], string> = {
   neutral: "bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400",
-  running: "bg-sky-100 text-sky-700 dark:bg-sky-950/60 dark:text-sky-300",
-  done: "bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300",
-  gone: "bg-red-100 text-red-700 dark:bg-red-950/50 dark:text-red-300"
+  running: "bg-cyan-600 text-white",
+  done: "bg-cyan-100 text-cyan-700 dark:bg-cyan-950/60 dark:text-cyan-300",
+  gone: "bg-slate-100/70 text-slate-400 dark:bg-slate-800/60 dark:text-slate-500"
 }
 
 /**
@@ -35,7 +45,7 @@ export function PlaylistRow({
   onToggle
 }: PlaylistRowProps) {
   const selectable = isSelectableEntry(entry)
-  const badge = rowBadge(entry, phase, status)
+  const badge = rowBadge(entry, phase, selected, status)
   const picking = phase === "picking"
 
   return (
@@ -43,7 +53,7 @@ export function PlaylistRow({
       className={cn(
         "flex items-center gap-3 border-b border-slate-200/60 px-2 py-2 last:border-b-0",
         "dark:border-slate-700/50 transition-colors duration-200",
-        status?.state === "downloading" && "bg-sky-50/60 dark:bg-sky-950/20",
+        status?.state === "downloading" && "bg-cyan-50/60 dark:bg-cyan-950/20",
         !selectable && "opacity-60"
       )}
       data-index={entry.index}

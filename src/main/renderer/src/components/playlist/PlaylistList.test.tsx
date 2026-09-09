@@ -237,6 +237,68 @@ describe("once the run starts", () => {
   })
 })
 
+/**
+ * picking two of eleven and running left the other nine reading "not saved",
+ * which is nine failures that never happened. a badge describes the run, so a
+ * row the run was never asked for keeps its duration instead.
+ */
+describe("the rows the run was never asked for", () => {
+  /** tick exactly these, the way pressing Download freezes the selection */
+  const pick = (indices: number[]) => {
+    const store = usePlaylistStore.getState()
+
+    store.selectNone()
+    for (const index of indices) store.toggleIndex(index)
+  }
+
+  test("say nothing at all once the run has ended", () => {
+    pick([1, 2])
+    usePlaylistStore.getState().setItemStatus(1, {
+      state: "saved",
+      progress: 100,
+      height: 1080
+    })
+
+    render(<PlaylistList phase="finished" />)
+
+    expect(within(rowFor(1)).getByText("saved · 1080p")).toBeDefined()
+    // ticked but never reached: this one is a real miss and still says so
+    expect(within(rowFor(2)).getByText("not saved")).toBeDefined()
+
+    for (const index of [4, 5, 6, 7, 9, 10, 11]) {
+      expect(within(rowFor(index)).queryByText("not saved")).toBeNull()
+      // and fall back to the duration, exactly as they do while picking
+      expect(within(rowFor(index)).getByText("1:00")).toBeDefined()
+    }
+
+    // one row missed out of two picked, not nine out of eleven
+    expect(screen.getAllByText("not saved")).toHaveLength(1)
+  })
+
+  test("and are not queued while it runs either", () => {
+    pick([1, 2])
+
+    render(<PlaylistList phase="running" />)
+
+    expect(within(rowFor(1)).getByText("queued")).toBeDefined()
+    expect(screen.getAllByText("queued")).toHaveLength(2)
+    expect(within(rowFor(5)).queryByText("queued")).toBeNull()
+  })
+
+  /**
+   * a deleted or private video is a fact about the listing rather than about
+   * the run, and it can never be ticked, so it stays marked either way
+   */
+  test("an unavailable row is still marked, ticked or not", () => {
+    pick([1])
+
+    render(<PlaylistList phase="finished" />)
+
+    expect(within(rowFor(3)).getByText("unavailable")).toBeDefined()
+    expect(within(rowFor(8)).getByText("unavailable")).toBeDefined()
+  })
+})
+
 describe("the copy", () => {
   test("uses no em-dash, in any phase", () => {
     for (const phase of ["picking", "running", "finished"] as const) {
@@ -244,5 +306,49 @@ describe("the copy", () => {
       render(<PlaylistList phase={phase} />)
       expect(document.body.textContent).not.toContain("—")
     }
+  })
+})
+
+/**
+ * the app is slate with a cyan accent, and that is the whole palette. red
+ * belongs to validation and to the cancel hover, nothing is ever green, and a
+ * badge is not a verdict on the user: a video the run did not write is a fact,
+ * not an alarm, and one it did write is not a trophy.
+ *
+ * this reads the rendered classes rather than the tone names, because a tone
+ * name says nothing about what colour it resolves to: the emerald "done" and
+ * red "gone" chips this replaced would still have answered to `done` and
+ * `gone`.
+ */
+const OFF_PALETTE = /\b(bg|text|border)-(red|green|emerald|rose|sky)-\d+/
+
+describe("the palette a badge is allowed to use", () => {
+  /** every tone at once: two done, one running, one gone, one neutral */
+  const everyTone = () => {
+    const store = usePlaylistStore.getState()
+
+    store.setItemStatus(1, { state: "saved", progress: 100, height: 1080 })
+    store.setItemStatus(2, { state: "reused", progress: 100 })
+    store.setItemStatus(4, { state: "downloading", progress: 62 })
+    store.setItemStatus(6, { state: "skipped", progress: 0 })
+  }
+
+  test("is slate and cyan, in every phase and on every tone", () => {
+    for (const phase of ["picking", "running", "finished"] as const) {
+      cleanup()
+      everyTone()
+      render(<PlaylistList phase={phase} />)
+
+      expect(document.body.innerHTML).not.toMatch(OFF_PALETTE)
+    }
+  })
+
+  test("including the row the run is on", () => {
+    everyTone()
+    render(<PlaylistList phase="running" />)
+
+    // the tint under the in-flight row, which was sky when the rest was
+    expect(rowFor(4).className).not.toMatch(OFF_PALETTE)
+    expect(rowFor(4).className).toContain("cyan")
   })
 })

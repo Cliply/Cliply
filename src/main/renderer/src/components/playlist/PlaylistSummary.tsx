@@ -27,6 +27,11 @@ interface PlaylistSummaryProps {
  * saved is eight videos the user now has, and an error card over it would hide
  * that. so the headline is always what the run did, and what it did not do is
  * named underneath with something to do about it.
+ *
+ * which is why every outcome lands on the same card the picker and the
+ * progress screen are drawn on. a coloured card is a verdict, and there is no
+ * one verdict to give: nine of nine is not a banner, eight of nine is not an
+ * error, and the run that failed outright says so in the headline.
  */
 export function PlaylistSummary({
   state,
@@ -63,22 +68,13 @@ export function PlaylistSummary({
       transition={{ duration: 0.4 }}
       className={cn(
         "rounded-2xl border-2 p-5 space-y-4 font-space-grotesk",
-        "backdrop-blur-sm shadow-xl",
-        failed
-          ? "bg-red-50/80 border-red-200 dark:bg-red-950/20 dark:border-red-900/50"
-          : "bg-emerald-50/70 border-emerald-200 dark:bg-emerald-950/20 dark:border-emerald-900/50",
+        "dark:bg-slate-800/40 dark:border-slate-700/50 dark:backdrop-blur-sm",
+        "bg-white/60 border-slate-300/50 backdrop-blur-sm shadow-xl",
         className
       )}
     >
       <div className="space-y-1.5">
-        <p
-          className={cn(
-            "text-base font-semibold",
-            failed
-              ? "text-red-700 dark:text-red-300"
-              : "text-emerald-700 dark:text-emerald-300"
-          )}
-        >
+        <p className="text-base font-semibold text-slate-900 dark:text-white">
           {headline}
         </p>
 

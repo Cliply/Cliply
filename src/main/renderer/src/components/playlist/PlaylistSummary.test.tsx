@@ -292,3 +292,59 @@ describe("getting back to the list", () => {
     expect(document.body.textContent).not.toContain("—")
   })
 })
+
+/**
+ * the same reasoning that makes a partial run a normal outcome makes it a
+ * plain card: the app is slate with a cyan accent, red is for validation and
+ * for the cancel hover, and nothing in it is ever green. a green card over
+ * eight of nine and a red one under a failure are both verdicts this card has
+ * no business handing down, so every ending lands on the card the picker and
+ * the progress screen already use.
+ *
+ * asserted on the rendered classes rather than on a prop, because the emerald
+ * and red cards this replaced were a ternary the card still would have had.
+ */
+describe("the palette an ending is allowed to use", () => {
+  const OFF_PALETTE = /\b(bg|text|border)-(red|green|emerald|rose|sky)-\d+/
+
+  test("is slate and cyan, however the run ended", () => {
+    const endings: Partial<PlaylistDownloadState>[] = [
+      { status: "completed", itemsSaved: 9 },
+      { status: "completed", itemsSaved: 8, itemsSkipped: 1 },
+      {
+        status: "failed",
+        itemsSaved: undefined,
+        itemsTotal: undefined,
+        error: "Cliply couldn't prepare its record of this download.",
+        suggestion: "Check that Cliply can write to its app data folder."
+      },
+      { status: "cancelled", itemsSaved: 3, itemsSkipped: 6 }
+    ]
+
+    for (const ending of endings) {
+      cleanup()
+      markSaved([1, 2, 3])
+      render(<PlaylistSummary state={finished(ending)} {...handlers()} />)
+
+      expect(document.body.innerHTML).not.toMatch(OFF_PALETTE)
+    }
+  })
+
+  test("and a failure is not drawn as a different card from a success", () => {
+    const card = () =>
+      (document.querySelector(".rounded-2xl") as HTMLElement).className
+
+    render(<PlaylistSummary state={finished()} {...handlers()} />)
+    const completed = card()
+
+    cleanup()
+    render(
+      <PlaylistSummary
+        state={finished({ status: "failed", error: "It fell over." })}
+        {...handlers()}
+      />
+    )
+
+    expect(card()).toBe(completed)
+  })
+})

@@ -11,7 +11,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { AudioFormatDropdown } from "@/components/video/AudioFormatDropdown"
 import type { usePlaylistDownload } from "@/lib/hooks/usePlaylistDownload"
 import { usePlaylistStore } from "@/lib/playlistStore"
-import { PLAYLIST_ABSENT, type PlaylistPhase } from "@/lib/playlistView"
+import { PLAYLIST_AUDIO_NOTE, type PlaylistPhase } from "@/lib/playlistView"
 import { cn } from "@/lib/utils"
 import { motion } from "framer-motion"
 import { useState } from "react"
@@ -125,15 +125,9 @@ export function PlaylistDownloadCard({
               automatically.
             </p>
 
+            {/* the one line about what a run does is the picker's own footer,
+                where it can follow the ceiling that is actually selected */}
             <PlaylistCeilingDropdown onOpenChange={setIsQualityOpen} />
-
-            <Notes
-              items={[
-                PLAYLIST_ABSENT.container,
-                PLAYLIST_ABSENT.dub,
-                PLAYLIST_ABSENT.trim
-              ]}
-            />
 
             <DownloadButton
               count={count}
@@ -156,7 +150,9 @@ export function PlaylistDownloadCard({
               onChange={setSelectedAudioMode}
             />
 
-            <Notes items={[PLAYLIST_ABSENT.dub, PLAYLIST_ABSENT.trim]} />
+            <p className="text-xs leading-relaxed text-slate-500 dark:text-slate-500">
+              {PLAYLIST_AUDIO_NOTE}
+            </p>
 
             <DownloadButton
               count={count}
@@ -168,16 +164,6 @@ export function PlaylistDownloadCard({
         </TabsContent>
       </Tabs>
     </motion.div>
-  )
-}
-
-function Notes({ items }: { items: string[] }) {
-  return (
-    <ul className="space-y-1.5 text-xs leading-relaxed text-slate-500 dark:text-slate-500">
-      {items.map((note) => (
-        <li key={note}>{note}</li>
-      ))}
-    </ul>
   )
 }
 
