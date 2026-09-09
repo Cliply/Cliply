@@ -4,10 +4,19 @@
 // never be selected, by any route including select-all, and once a run starts
 // the checkboxes give way to badges that say what each row actually did.
 
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react"
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  within
+} from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, test } from "vitest"
 
 import type { PlaylistEntry, PlaylistInfoResponse } from "@/lib/api"
+import { useLocale } from "@/lib/i18n"
+import { en } from "@/lib/i18n/en"
 import { usePlaylistStore } from "@/lib/playlistStore"
 import { PlaylistList } from "./PlaylistList"
 
@@ -109,7 +118,7 @@ describe("the row that cannot be downloaded", () => {
     render(<PlaylistList phase="picking" />)
 
     const row = rowFor(3)
-    expect(within(row).getByText("unavailable")).toBeDefined()
+    expect(within(row).getByText(en["playlist.rowUnavailable"])).toBeDefined()
     expect(row.className).toContain("opacity-60")
   })
 
@@ -133,10 +142,10 @@ describe("the row that cannot be downloaded", () => {
   test("select all does not reach it", () => {
     render(<PlaylistList phase="picking" />)
 
-    fireEvent.click(screen.getByText("Select none"))
+    fireEvent.click(screen.getByText(en["playlist.selectNone"]))
     expect(screen.getByText("0 of 9 selected")).toBeDefined()
 
-    fireEvent.click(screen.getByText("Select all"))
+    fireEvent.click(screen.getByText(en["playlist.selectAll"]))
 
     const selected = usePlaylistStore.getState().selectedIndices
     expect(selected.size).toBe(9)
@@ -150,7 +159,7 @@ describe("the row that cannot be downloaded", () => {
     load(listing([entry(1), entry(2, { id: null })]))
     render(<PlaylistList phase="picking" />)
 
-    fireEvent.click(screen.getByText("Select all"))
+    fireEvent.click(screen.getByText(en["playlist.selectAll"]))
 
     expect([...usePlaylistStore.getState().selectedIndices]).toEqual([1])
     expect(screen.getByText("1 of 1 selected")).toBeDefined()
@@ -162,8 +171,8 @@ describe("once the run starts", () => {
     render(<PlaylistList phase="running" />)
 
     expect(screen.queryAllByRole("checkbox")).toHaveLength(0)
-    expect(screen.queryByText("Select all")).toBeNull()
-    expect(screen.getByText("Per video status")).toBeDefined()
+    expect(screen.queryByText(en["playlist.selectAll"])).toBeNull()
+    expect(screen.getByText(en["playlist.perVideoStatus"])).toBeDefined()
   })
 
   test("each row shows what it is doing", () => {
@@ -180,9 +189,9 @@ describe("once the run starts", () => {
     expect(within(rowFor(2)).getByText("saved · 720p")).toBeDefined()
     expect(within(rowFor(4)).getByText("62%")).toBeDefined()
     // never announced yet
-    expect(within(rowFor(5)).getByText("queued")).toBeDefined()
+    expect(within(rowFor(5)).getByText(en["playlist.rowQueued"])).toBeDefined()
     // and the one that never could be
-    expect(within(rowFor(3)).getByText("unavailable")).toBeDefined()
+    expect(within(rowFor(3)).getByText(en["playlist.rowUnavailable"])).toBeDefined()
   })
 
   test("a video the archive already had is not called saved", () => {
@@ -192,7 +201,7 @@ describe("once the run starts", () => {
 
     // an archive skip records that a download once succeeded, not that this
     // run wrote a file
-    expect(within(rowFor(1)).getByText("already downloaded")).toBeDefined()
+    expect(within(rowFor(1)).getByText(en["playlist.rowReused"])).toBeDefined()
     expect(within(rowFor(1)).queryByText(/^saved/)).toBeNull()
   })
 
@@ -218,7 +227,7 @@ describe("once the run starts", () => {
 
     render(<PlaylistList phase="finished" />)
 
-    expect(within(rowFor(4)).getByText("stopping")).toBeDefined()
+    expect(within(rowFor(4)).getByText(en["playlist.rowStopping"])).toBeDefined()
     expect(within(rowFor(4)).queryByText("62%")).toBeNull()
   })
 
@@ -230,10 +239,10 @@ describe("once the run starts", () => {
     render(<PlaylistList phase="finished" />)
 
     expect(within(rowFor(1)).getByText("saved · 480p")).toBeDefined()
-    expect(within(rowFor(2)).getByText("not saved")).toBeDefined()
+    expect(within(rowFor(2)).getByText(en["playlist.rowNotSaved"])).toBeDefined()
     // nothing is queued once there is nothing left to wait for
-    expect(within(rowFor(5)).getByText("not saved")).toBeDefined()
-    expect(screen.queryByText("queued")).toBeNull()
+    expect(within(rowFor(5)).getByText(en["playlist.rowNotSaved"])).toBeDefined()
+    expect(screen.queryByText(en["playlist.rowQueued"])).toBeNull()
   })
 })
 
@@ -263,16 +272,16 @@ describe("the rows the run was never asked for", () => {
 
     expect(within(rowFor(1)).getByText("saved · 1080p")).toBeDefined()
     // ticked but never reached: this one is a real miss and still says so
-    expect(within(rowFor(2)).getByText("not saved")).toBeDefined()
+    expect(within(rowFor(2)).getByText(en["playlist.rowNotSaved"])).toBeDefined()
 
     for (const index of [4, 5, 6, 7, 9, 10, 11]) {
-      expect(within(rowFor(index)).queryByText("not saved")).toBeNull()
+      expect(within(rowFor(index)).queryByText(en["playlist.rowNotSaved"])).toBeNull()
       // and fall back to the duration, exactly as they do while picking
       expect(within(rowFor(index)).getByText("1:00")).toBeDefined()
     }
 
     // one row missed out of two picked, not nine out of eleven
-    expect(screen.getAllByText("not saved")).toHaveLength(1)
+    expect(screen.getAllByText(en["playlist.rowNotSaved"])).toHaveLength(1)
   })
 
   test("and are not queued while it runs either", () => {
@@ -280,9 +289,9 @@ describe("the rows the run was never asked for", () => {
 
     render(<PlaylistList phase="running" />)
 
-    expect(within(rowFor(1)).getByText("queued")).toBeDefined()
-    expect(screen.getAllByText("queued")).toHaveLength(2)
-    expect(within(rowFor(5)).queryByText("queued")).toBeNull()
+    expect(within(rowFor(1)).getByText(en["playlist.rowQueued"])).toBeDefined()
+    expect(screen.getAllByText(en["playlist.rowQueued"])).toHaveLength(2)
+    expect(within(rowFor(5)).queryByText(en["playlist.rowQueued"])).toBeNull()
   })
 
   /**
@@ -294,8 +303,55 @@ describe("the rows the run was never asked for", () => {
 
     render(<PlaylistList phase="finished" />)
 
-    expect(within(rowFor(3)).getByText("unavailable")).toBeDefined()
-    expect(within(rowFor(8)).getByText("unavailable")).toBeDefined()
+    expect(within(rowFor(3)).getByText(en["playlist.rowUnavailable"])).toBeDefined()
+    expect(within(rowFor(8)).getByText(en["playlist.rowUnavailable"])).toBeDefined()
+  })
+})
+
+/**
+ * the toggle beside the theme switch flips the locale under a screen that is
+ * already on it, which is the whole reason these components read the
+ * dictionary through `useT` rather than at module load. a listing that kept
+ * its english until the next paste would be the failure this catches.
+ */
+describe("the language toggle", () => {
+  afterEach(() => act(() => useLocale.getState().setLocale("en")))
+
+  test("re-renders the rows and the toolbar where they stand", () => {
+    const store = usePlaylistStore.getState()
+    store.setItemStatus(1, { state: "saved", progress: 100, height: 1080 })
+    store.setItemStatus(2, { state: "reused", progress: 100 })
+    store.setItemStatus(4, { state: "downloading", progress: 62 })
+
+    render(<PlaylistList phase="running" />)
+
+    expect(screen.getByText(en["playlist.perVideoStatus"])).toBeDefined()
+    expect(within(rowFor(1)).getByText("saved · 1080p")).toBeDefined()
+    const row = rowFor(1)
+
+    act(() => useLocale.getState().setLocale("ru"))
+
+    expect(screen.getByText("статус по видео")).toBeDefined()
+    expect(within(rowFor(1)).getByText("сохранено · 1080p")).toBeDefined()
+    expect(within(rowFor(2)).getByText("уже скачано")).toBeDefined()
+    expect(screen.getByText("готово 2 · скачивается 1")).toBeDefined()
+    expect(screen.queryByText(en["playlist.perVideoStatus"])).toBeNull()
+
+    // the same nodes, saying it in the other language: nothing was remounted,
+    // so a scroll position or a run in flight survives the toggle
+    expect(rowFor(1)).toBe(row)
+  })
+
+  test("and the picker's own controls follow it", () => {
+    render(<PlaylistList phase="picking" />)
+
+    act(() => useLocale.getState().setLocale("ru"))
+
+    expect(screen.getByText("выбрать все")).toBeDefined()
+    expect(screen.getByText("снять все")).toBeDefined()
+    // russian puts the verb first, which the english order could not have
+    expect(screen.getByText("выбрано 9 из 9")).toBeDefined()
+    expect(within(rowFor(3)).getByText("недоступно")).toBeDefined()
   })
 })
 

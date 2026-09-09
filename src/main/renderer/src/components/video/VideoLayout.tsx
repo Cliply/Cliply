@@ -5,6 +5,7 @@ import {
   VideoDetailsCard,
   VideoPlayerFrame
 } from "@/components/video"
+import { useDownloadPath } from "@/lib/hooks/useDownloadPath"
 import { useT } from "@/lib/i18n"
 import { useYouTubeStore } from "@/lib/youtubeStore"
 import { motion } from "framer-motion"
@@ -13,6 +14,9 @@ import { CompactSearch } from "./CompactSearch"
 export function VideoLayout() {
   const { videoInfo, url } = useYouTubeStore()
   const t = useT()
+  // the folder the user actually chose, rather than the default this line
+  // named whether or not it was still true
+  const { downloadPath } = useDownloadPath()
 
   if (!videoInfo) return null
 
@@ -103,11 +107,20 @@ export function VideoLayout() {
               className="flex-shrink-0 px-1 mb-3"
             >
               <div className="text-xs text-slate-500 dark:text-slate-400 font-space-grotesk">
-                {t("layout.downloadsAt")}{" "}
-                <span className="font-mono text-slate-600 dark:text-slate-300">
-                  ~/Downloads/Cliply
-                </span>{" "}
-                &nbsp;•&nbsp; {t("layout.concurrentNote")}
+                {/*
+                  no folder, no folder line: naming the wrong one is worse than
+                  naming none. the note beside it is true either way and stays
+                */}
+                {downloadPath && (
+                  <>
+                    {t("layout.downloadsAt")}{" "}
+                    <span className="font-mono text-slate-600 dark:text-slate-300">
+                      {downloadPath.path}
+                    </span>{" "}
+                    &nbsp;•&nbsp;{" "}
+                  </>
+                )}
+                {t("layout.concurrentNote")}
               </div>
             </motion.div>
 

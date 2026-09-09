@@ -9,6 +9,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
 
 import type { PlaylistEntry, PlaylistInfoResponse } from "@/lib/api"
+import { en } from "@/lib/i18n/en"
 import type {
   PlaylistDownloadState,
   usePlaylistDownload
@@ -104,7 +105,7 @@ describe("picking", () => {
     const { playlist } = fakePlaylist()
     render(<PlaylistDownloadCard playlist={playlist} phase="picking" />)
 
-    const button = screen.getByRole("button", { name: /Pick some videos first/ })
+    const button = screen.getByRole("button", { name: en["playlist.pickVideosFirst"] })
     expect((button as HTMLButtonElement).disabled).toBe(true)
   })
 
@@ -199,7 +200,7 @@ describe("what each tab says about a run", () => {
     selectAudioTab()
 
     expect(
-      screen.getByText("Each video is saved whole, in the format picked above.")
+      screen.getByText(en["playlist.audioNote"])
     ).toBeDefined()
   })
 
@@ -258,7 +259,7 @@ describe("downloading", () => {
     expect(screen.getByText("Video 4 of 9")).toBeDefined()
     expect(bars[0].getAttribute("aria-valuenow")).toBe("41")
 
-    expect(screen.getByText("This video")).toBeDefined()
+    expect(screen.getByText(en["playlist.thisVideo"])).toBeDefined()
     expect(bars[1].getAttribute("aria-valuenow")).toBe("62")
   })
 
@@ -275,7 +276,7 @@ describe("downloading", () => {
     const { playlist, calls } = running()
     render(<PlaylistDownloadCard playlist={playlist} phase="running" />)
 
-    fireEvent.click(screen.getByRole("button", { name: "Cancel remaining" }))
+    fireEvent.click(screen.getByRole("button", { name: en["playlist.cancelRemaining"] }))
 
     expect(calls.cancelDownload).toHaveBeenCalled()
     expect(screen.getByText(/Videos already saved are kept/)).toBeDefined()
@@ -285,16 +286,16 @@ describe("downloading", () => {
     const { playlist } = fakePlaylist({ status: "starting", progress: 0 })
     render(<PlaylistDownloadCard playlist={playlist} phase="running" />)
 
-    const button = screen.getByRole("button", { name: "Cancel remaining" })
+    const button = screen.getByRole("button", { name: en["playlist.cancelRemaining"] })
     expect((button as HTMLButtonElement).disabled).toBe(true)
-    expect(screen.getByText("Starting up")).toBeDefined()
+    expect(screen.getByText(en["progress.startingUp"])).toBeDefined()
   })
 
   test("no quality menu while it runs: the run is already going at one", () => {
     const { playlist } = running()
     render(<PlaylistDownloadCard playlist={playlist} phase="running" />)
 
-    expect(screen.queryByText("Quality")).toBeNull()
+    expect(screen.queryByText(en["playlist.qualityHeading"])).toBeNull()
     expect(screen.queryByRole("tab")).toBeNull()
   })
 })
@@ -326,7 +327,7 @@ describe("finished", () => {
     const { playlist, calls } = fakePlaylist({ status: "completed", progress: 100 })
     render(<PlaylistDownloadCard playlist={playlist} phase="finished" />)
 
-    fireEvent.click(screen.getByRole("button", { name: "Pick videos again" }))
+    fireEvent.click(screen.getByRole("button", { name: en["playlist.pickAgain"] }))
 
     expect(usePlaylistStore.getState().itemStatus.size).toBe(0)
     expect(calls.reset).toHaveBeenCalled()

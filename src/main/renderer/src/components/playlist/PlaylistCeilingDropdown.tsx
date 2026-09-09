@@ -1,8 +1,10 @@
 import { SelectionDropdown } from "@/components/video/SelectionDropdown"
+import { useT } from "@/lib/i18n"
 import { usePlaylistStore } from "@/lib/playlistStore"
 import {
   ceilingFor,
   ceilingHelperText,
+  ceilingLabel,
   PLAYLIST_CEILINGS
 } from "@/lib/playlistView"
 import { motion } from "framer-motion"
@@ -25,6 +27,7 @@ export function PlaylistCeilingDropdown({
   onOpenChange
 }: PlaylistCeilingDropdownProps) {
   const { selectedCeiling, setSelectedCeiling } = usePlaylistStore()
+  const t = useT()
 
   // no defaulting effect, unlike the video menu: these six rows are the same
   // for every playlist, so there is never a selection this menu cannot offer
@@ -33,13 +36,14 @@ export function PlaylistCeilingDropdown({
   return (
     <SelectionDropdown
       icon={Video}
-      heading="Quality"
-      placeholder="Select a quality limit..."
+      heading={t("playlist.qualityHeading")}
+      placeholder={t("playlist.qualityPlaceholder")}
       options={PLAYLIST_CEILINGS}
       selected={selected}
       onSelect={(option) => setSelectedCeiling(option.height)}
       optionKey={(option) => `res-${option.height}`}
-      renderLabel={(option) => option.label}
+      renderLabel={(option) => ceilingLabel(option.limit)}
+      // the container is the same word in both languages
       renderDetail={() => "MP4"}
       onOpenChange={onOpenChange}
       className={className}
@@ -51,9 +55,9 @@ export function PlaylistCeilingDropdown({
             className="space-y-2 text-sm text-slate-600 dark:text-slate-400"
           >
             <p>
-              Selected:{" "}
+              {t("dropdown.selected")}{" "}
               <span className="font-medium text-slate-900 dark:text-white">
-                {selected.label} MP4
+                {ceilingLabel(selected.limit)} MP4
               </span>
             </p>
             <p className="text-xs text-slate-500 dark:text-slate-500">

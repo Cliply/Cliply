@@ -343,6 +343,12 @@ class DownloadRunner {
        */
       ...(tally && error && error.suggestion
         ? { suggestion: error.suggestion }
+        : null),
+      // and the name of that wording, when it has one. the category says
+      // PERMISSION_ERROR either way, so this is the only thing separating a
+      // records folder we cannot write from a download folder we cannot write
+      ...(tally && error && error.wordingCode
+        ? { wordingCode: error.wordingCode }
         : null)
     })
 

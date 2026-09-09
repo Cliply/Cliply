@@ -12,6 +12,8 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
 
 import type { PlaylistInfoResponse } from "@/lib/api"
+import { useLocale } from "@/lib/i18n"
+import { en } from "@/lib/i18n/en"
 import { useMixedLinkStore } from "@/lib/mixedLinkStore"
 import { MixedLinkPrompt } from "./MixedLinkPrompt"
 
@@ -45,7 +47,7 @@ describe("what it asks", () => {
     ask(listing())
     render(<MixedLinkPrompt />)
 
-    expect(screen.getByText("This link is part of a playlist")).toBeTruthy()
+    expect(screen.getByText(en["mixedLink.title"])).toBeTruthy()
     expect(
       screen.getByText("Short talks to watch during your coffee break")
     ).toBeTruthy()
@@ -92,6 +94,64 @@ describe("what it asks", () => {
     render(<MixedLinkPrompt />)
 
     expect(screen.queryByRole("dialog")).toBeNull()
+  })
+})
+
+/**
+ * the question is the first thing a russian user meets after pasting a link
+ * off youtube, and the number on the button is the whole reason it is asked.
+ * so it has to be a number their language agrees with, and the button over a
+ * truncated listing must not promise all of it in russian either.
+ */
+describe("in russian", () => {
+  afterEach(() => useLocale.getState().setLocale("en"))
+
+  const inRussian = () => useLocale.getState().setLocale("ru")
+
+  test("asks it in russian, with the count", () => {
+    inRussian()
+    ask(listing())
+    render(<MixedLinkPrompt />)
+
+    expect(screen.getByText("это видео из плейлиста")).toBeTruthy()
+    expect(
+      screen.getByRole("button", { name: /только это видео/ }).textContent
+    ).toContain("то, которое открывает ссылка")
+    // "все 11 видео" would have been "все 1 видео" at one, so the button
+    // names the scope and then counts, which reads the same at every number
+    expect(
+      screen.getByRole("button", { name: /весь плейлист: 11 видео/ }).textContent
+    ).toContain("открыть плейлист")
+    expect(screen.getByRole("dialog").textContent).toContain("11 видео")
+  })
+
+  test("does not say all of a listing that is not all of it", () => {
+    inRussian()
+    ask(listing({ count: 5283, listed: 100, truncated: true }))
+    render(<MixedLinkPrompt />)
+
+    const dialog = screen.getByRole("dialog").textContent
+
+    expect(screen.getByRole("button", { name: /первые 100 видео/ })).toBeTruthy()
+    expect(dialog).not.toContain("весь плейлист")
+    /*
+      and the count is grouped the way russian groups it, on a machine whose
+      own locale is english: the sentence's language decides, not the host's.
+      the separator itself comes from Intl rather than being typed here, since
+      the one russian uses is a space you cannot see in a diff
+    */
+    const grouped = (5283).toLocaleString("ru")
+    expect(grouped).not.toBe((5283).toLocaleString("en"))
+    expect(dialog).toContain(`показаны первые 100 из ${grouped} видео`)
+    expect(dialog).not.toContain("5,283")
+  })
+
+  test("says nothing in an em-dash there either", () => {
+    inRussian()
+    ask(listing({ count: 5283, listed: 100, truncated: true }))
+    const { container } = render(<MixedLinkPrompt />)
+
+    expect(container.ownerDocument.body.textContent).not.toContain("—")
   })
 })
 

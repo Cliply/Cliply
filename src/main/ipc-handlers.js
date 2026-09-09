@@ -37,7 +37,8 @@ const { SettingsStore } = require("./services/settings-store")
 const {
   ERROR_CODES,
   PLAYLIST_MAX_ITEMS,
-  PLAYLIST_CONTAINER
+  PLAYLIST_CONTAINER,
+  RECORDS_UNWRITABLE
 } = require("./services/ytdlp-engine")
 
 /**
@@ -1626,7 +1627,11 @@ class IPCHandlers {
         error.code || "DOWNLOAD_FAILED",
         {
           details: error.details || error.message,
-          category: classify(error, ERROR_STAGES.DOWNLOAD).category
+          category: classify(error, ERROR_STAGES.DOWNLOAD).category,
+          // a refusal that named itself travels as itself: the archive folder
+          // and the download folder are both PERMISSION_ERROR, and only this
+          // says which one the renderer is looking at
+          ...(error.wordingCode ? { wordingCode: error.wordingCode } : null)
         }
       )
     }
@@ -1652,12 +1657,13 @@ class IPCHandlers {
     try {
       fs.mkdirSync(path.dirname(archiveFile), { recursive: true })
     } catch (cause) {
-      const error = new Error(
-        "Cliply couldn't prepare its record of this download."
-      )
+      // the engine's own wording for this, imported rather than repeated: it
+      // is the same refusal about the same folder, and it carries the code
+      // that keeps it apart from a download folder we cannot write to
+      const error = new Error(RECORDS_UNWRITABLE.message)
       error.code = ERROR_CODES.PERMISSION_ERROR
-      error.suggestion =
-        "Check permissions on Cliply's app data folder and try again."
+      error.wordingCode = RECORDS_UNWRITABLE.code
+      error.suggestion = RECORDS_UNWRITABLE.suggestion
       error.details = cause.message
       throw error
     }

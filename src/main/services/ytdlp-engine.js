@@ -99,6 +99,17 @@ const PLAYLIST_ARCHIVE_EXTRACTOR = "youtube"
 // wording, because the taxonomy's permission entry is about the folder the
 // user picked and this one is about ours
 const RECORDS_UNWRITABLE = {
+  /**
+   * the stable name of this exact refusal, alongside its category.
+   *
+   * it is a PERMISSION_ERROR, but the taxonomy's permission entry is about
+   * the folder the user picked and tells them to choose another one, which
+   * does nothing for this. anything reading the category alone would hand out
+   * that advice, so the specific wording travels with a code of its own - the
+   * same shape main's cookie verdicts use to carry a `JAR_*` beside a
+   * sentence, and what lets the renderer say this one in russian.
+   */
+  code: "RECORDS_UNWRITABLE",
   message: "Cliply couldn't prepare its record of this download.",
   suggestion: "Check permissions on Cliply's app data folder and try again."
 }
@@ -2742,6 +2753,9 @@ class YtdlpOperation extends EventEmitter {
     const error = new Error(wording ? wording.message : mapped.message)
     error.code = mapped.code
     error.suggestion = wording ? wording.suggestion : mapped.suggestion
+    // ...and a wording that knows itself by name says so, so a reader of the
+    // category alone cannot mistake it for the generic entry it overrode
+    error.wordingCode = (wording && wording.code) || null
     // the empty-run wording replaces the technical detail *after* the taxonomy
     // has had the untouched stderr, and only when the taxonomy found nothing.
     // pushing it into the ring buffer instead would evict a line: 200 lines
@@ -3592,6 +3606,7 @@ module.exports = {
   killProcessTree,
   redactLogLine,
   mapError,
+  RECORDS_UNWRITABLE,
   cookieFileHasEntries,
   executableCandidates,
   resolveExecutableIn,

@@ -10,8 +10,9 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { AudioFormatDropdown } from "@/components/video/AudioFormatDropdown"
 import type { usePlaylistDownload } from "@/lib/hooks/usePlaylistDownload"
+import { useT } from "@/lib/i18n"
 import { usePlaylistStore } from "@/lib/playlistStore"
-import { PLAYLIST_AUDIO_NOTE, type PlaylistPhase } from "@/lib/playlistView"
+import { playlistAudioNote, type PlaylistPhase } from "@/lib/playlistView"
 import { cn } from "@/lib/utils"
 import { motion } from "framer-motion"
 import { useState } from "react"
@@ -36,6 +37,7 @@ export function PlaylistDownloadCard({
     selectedAudioMode,
     setSelectedAudioMode
   } = usePlaylistStore()
+  const t = useT()
   const [isQualityOpen, setIsQualityOpen] = useState(false)
 
   /**
@@ -107,13 +109,13 @@ export function PlaylistDownloadCard({
               value="video"
               className="flex items-center gap-2 data-[state=active]:bg-white data-[state=active]:shadow-sm dark:data-[state=active]:bg-slate-700 dark:data-[state=active]:border-slate-600 transition-all duration-200"
             >
-              🎬 Video
+              🎬 {t("playlist.tabVideo")}
             </TabsTrigger>
             <TabsTrigger
               value="audio"
               className="flex items-center gap-2 data-[state=active]:bg-white data-[state=active]:shadow-sm dark:data-[state=active]:bg-slate-700 dark:data-[state=active]:border-slate-600 transition-all duration-200"
             >
-              🎵 Audio Only
+              🎵 {t("card.tabAudio")}
             </TabsTrigger>
           </TabsList>
         </div>
@@ -121,8 +123,7 @@ export function PlaylistDownloadCard({
         <TabsContent value="video" className="p-6 pt-4 m-0">
           <div className="space-y-6">
             <p className="text-sm text-slate-600 dark:text-slate-400">
-              One quality for the whole playlist. Video and audio are merged
-              automatically.
+              {t("playlist.videoIntro")}
             </p>
 
             {/* the one line about what a run does is the picker's own footer,
@@ -131,7 +132,7 @@ export function PlaylistDownloadCard({
 
             <DownloadButton
               count={count}
-              label="videos"
+              kind="videos"
               pending={playlist.isPending}
               onClick={() => run()}
             />
@@ -141,7 +142,7 @@ export function PlaylistDownloadCard({
         <TabsContent value="audio" className="p-6 pt-4 m-0">
           <div className="space-y-6">
             <p className="text-sm text-slate-600 dark:text-slate-400">
-              Take the audio from every video you picked, in one format.
+              {t("playlist.audioIntro")}
             </p>
 
             <AudioFormatDropdown
@@ -151,12 +152,12 @@ export function PlaylistDownloadCard({
             />
 
             <p className="text-xs leading-relaxed text-slate-500 dark:text-slate-500">
-              {PLAYLIST_AUDIO_NOTE}
+              {playlistAudioNote()}
             </p>
 
             <DownloadButton
               count={count}
-              label="tracks"
+              kind="tracks"
               pending={playlist.isPending}
               onClick={() => run()}
             />
@@ -167,18 +168,25 @@ export function PlaylistDownloadCard({
   )
 }
 
+/**
+ * the tab decides which noun is counted, and the dictionary declines it
+ *
+ * `kind` is what the tab downloads rather than the word for it: english takes
+ * the plural off by dropping an s, and no other language does
+ */
 function DownloadButton({
   count,
-  label,
+  kind,
   pending,
   onClick
 }: {
   count: number
-  label: "videos" | "tracks"
+  kind: "videos" | "tracks"
   pending: boolean
   onClick: () => void
 }) {
-  const noun = count === 1 ? label.slice(0, -1) : label
+  const t = useT()
+  const videos = kind === "videos"
 
   return (
     <div className="space-y-2">
@@ -191,7 +199,11 @@ function DownloadButton({
           "disabled:opacity-50 disabled:cursor-not-allowed shadow-lg hover:shadow-xl"
         )}
       >
-        {count === 0 ? `Pick some ${label} first` : `Download ${count} ${noun}`}
+        {count === 0
+          ? t(videos ? "playlist.pickVideosFirst" : "playlist.pickTracksFirst")
+          : t(videos ? "playlist.downloadVideos" : "playlist.downloadTracks", {
+              n: count
+            })}
       </Button>
     </div>
   )
@@ -212,6 +224,7 @@ function PlaylistProgress({
   className?: string
 }) {
   const { playlistInfo } = usePlaylistStore()
+  const t = useT()
   const state = playlist.downloadState
 
   const total = state.itemsTotal ?? 0
@@ -238,8 +251,11 @@ function PlaylistProgress({
         <ProgressBarHeader>
           <ProgressBarLabel>
             {starting || total === 0
-              ? "Starting up"
-              : `Video ${Math.min(current, total)} of ${total}`}
+              ? t("progress.startingUp")
+              : t("playlist.videoOf", {
+                  current: Math.min(current, total),
+                  total
+                })}
           </ProgressBarLabel>
           <ProgressBarValue />
         </ProgressBarHeader>
@@ -249,7 +265,7 @@ function PlaylistProgress({
 
       <ProgressBar value={state.itemProgress ?? 0} isIndeterminate={starting}>
         <ProgressBarHeader>
-          <ProgressBarLabel>This video</ProgressBarLabel>
+          <ProgressBarLabel>{t("playlist.thisVideo")}</ProgressBarLabel>
           <ProgressBarValue />
         </ProgressBarHeader>
         <ProgressBarTrack />
@@ -267,10 +283,10 @@ function PlaylistProgress({
           disabled={!state.downloadId}
           className="w-full"
         >
-          Cancel remaining
+          {t("playlist.cancelRemaining")}
         </Button>
         <p className="text-xs text-slate-500 dark:text-slate-500">
-          Videos already saved are kept. Running it again skips them.
+          {t("playlist.cancelKeepsHint")}
         </p>
       </div>
     </motion.div>

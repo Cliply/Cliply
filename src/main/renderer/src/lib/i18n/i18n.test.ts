@@ -213,6 +213,128 @@ describe("t", () => {
 })
 
 /**
+ * the playlist screens count things in almost every sentence they say, which
+ * makes them the heaviest user of the plural machinery in the app.
+ *
+ * russian agrees on the last digit rather than on the magnitude, so the cases
+ * that matter are 1 and 21 (`one`), 2 (`few`) and 5, 11, 100 (`many`) - 11 in
+ * particular, because it ends in a 1 and still takes the third form.
+ */
+describe("the playlist plurals", () => {
+  const inEnglish = async () => (await freshStore()).t
+
+  const inRussian = async () => {
+    const { t, useLocale } = await freshStore()
+    useLocale.getState().setLocale("ru")
+
+    return t
+  }
+
+  test.each([
+    [1, "1 video"],
+    [2, "2 videos"],
+    [5, "5 videos"],
+    [11, "11 videos"],
+    [21, "21 videos"],
+    [100, "100 videos"]
+  ])("english counts %i videos", async (n, expected) => {
+    expect((await inEnglish())("playlist.videoCount", { n })).toBe(expected)
+  })
+
+  // «видео» does not decline, so every form is the same word. the point of
+  // asserting it is that it stays that way rather than being "corrected" into
+  // a declined noun by someone reading the forms beside it
+  test.each([[1], [2], [5], [11], [21], [100]])(
+    "russian counts %i видео without declining it",
+    async (n) => {
+      expect((await inRussian())("playlist.videoCount", { n })).toBe(`${n} видео`)
+    }
+  )
+
+  test.each([
+    [1, "Download 1 track"],
+    [2, "Download 2 tracks"],
+    [100, "Download 100 tracks"]
+  ])("english offers to download %i", async (n, expected) => {
+    expect((await inEnglish())("playlist.downloadTracks", { n })).toBe(expected)
+  })
+
+  // the one russian noun on these screens that really does decline
+  test.each([
+    [1, "скачать 1 дорожку"],
+    [2, "скачать 2 дорожки"],
+    [5, "скачать 5 дорожек"],
+    [11, "скачать 11 дорожек"],
+    [21, "скачать 21 дорожку"],
+    [100, "скачать 100 дорожек"]
+  ])("russian declines the track count for %i", async (n, expected) => {
+    expect((await inRussian())("playlist.downloadTracks", { n })).toBe(expected)
+  })
+
+  /**
+   * english says the same thing about one failure and about five, so it has
+   * no plural set at all here. russian still picks a form, which is the shape
+   * `support.title` already has and the one `t` has to keep handling.
+   */
+  test.each([
+    [1, "повторить 1 загрузку"],
+    [2, "повторить 2 загрузки"],
+    [5, "повторить 5 загрузок"],
+    [11, "повторить 11 загрузок"],
+    [21, "повторить 21 загрузку"],
+    [100, "повторить 100 загрузок"]
+  ])("russian declines the retry count for %i", async (n, expected) => {
+    expect((await inRussian())("playlist.retryFailed", { n })).toBe(expected)
+  })
+
+  test("and english leaves that one alone", async () => {
+    expect((await inEnglish())("playlist.retryFailed", { n: 3 })).toBe(
+      "Retry the 3 that failed"
+    )
+  })
+
+  /**
+   * the one sentence here that agreement would have got wrong: "все 1 видео"
+   * at 1, and again at 21. naming the scope first and the count second makes
+   * the phrase invariant, so every number reads the same way.
+   */
+  test.each([
+    [1, "весь плейлист: 1 видео"],
+    [2, "весь плейлист: 2 видео"],
+    [5, "весь плейлист: 5 видео"],
+    [11, "весь плейлист: 11 видео"],
+    [21, "весь плейлист: 21 видео"],
+    [100, "весь плейлист: 100 видео"]
+  ])("the mixed link offers %i videos in russian", async (n, expected) => {
+    expect((await inRussian())("mixedLink.playlistChoice", { n })).toBe(expected)
+  })
+
+  // the capped choice is a different sentence and keeps its own wording: a
+  // hundred rows out of five thousand is not "the whole playlist"
+  test("and says only the first hundred when that is all it holds", async () => {
+    expect((await inRussian())("mixedLink.playlistFirst", { n: 100 })).toBe(
+      "первые 100 видео"
+    )
+  })
+
+  // the count in this one is not the number the sentence agrees on: the total
+  // decides "video" or "videos", and the saves are just a number in front
+  test.each([
+    [{ saved: 1, n: 1 }, "1 of 1 video saved"],
+    [{ saved: 8, n: 9 }, "8 of 9 videos saved"],
+    [{ saved: 0, n: 21 }, "0 of 21 videos saved"]
+  ])("the summary agrees with the total, not the saves", async (params, expected) => {
+    expect((await inEnglish())("playlist.summarySaved", params)).toBe(expected)
+  })
+
+  test("and russian says it the other way round", async () => {
+    expect((await inRussian())("playlist.summarySaved", { saved: 8, n: 9 })).toBe(
+      "сохранено 8 из 9 видео"
+    )
+  })
+})
+
+/**
  * main keeps its english - it is what the logs, the analytics and the issue
  * bodies carry, and maintainers read those - so the translation is an overlay
  * applied at the one point the text becomes a toast. Which means the failure

@@ -1,4 +1,6 @@
 import type { PlaylistInfoResponse } from "@/lib/api"
+import { useDownloadPath } from "@/lib/hooks/useDownloadPath"
+import { useT } from "@/lib/i18n"
 import { countLine, totalDuration, type PlaylistPhase } from "@/lib/playlistView"
 import { cn } from "@/lib/utils"
 import { motion } from "framer-motion"
@@ -11,6 +13,13 @@ interface PlaylistHeaderProps {
 
 /** what was pasted: the playlist, its channel, its size and its length */
 export function PlaylistHeader({ info, phase, className }: PlaylistHeaderProps) {
+  // the two lines below are built by `playlistView`, which reads the same
+  // dictionary; this is what re-runs them when the locale flips
+  const t = useT()
+  // the folder the user actually chose, rather than the default this line used
+  // to name whether or not it was still true
+  const { downloadPath } = useDownloadPath()
+
   const meta = [info.uploader, countLine(info), totalDuration(info.entries)].filter(
     Boolean
   )
@@ -46,9 +55,16 @@ export function PlaylistHeader({ info, phase, className }: PlaylistHeaderProps) 
           <p className="mt-1 text-xs text-slate-600 dark:text-slate-400">
             {meta.join("  ·  ")}
           </p>
-          {phase !== "picking" && (
+          {/*
+            nothing at all until the path is known: a folder line that names
+            the wrong folder is worse than no folder line
+          */}
+          {phase !== "picking" && downloadPath && (
             <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-500">
-              Saved to ~/Downloads/Cliply
+              {t("layout.downloadsAt")}{" "}
+              <span className="font-mono text-slate-600 dark:text-slate-400">
+                {downloadPath.path}
+              </span>
             </p>
           )}
         </div>

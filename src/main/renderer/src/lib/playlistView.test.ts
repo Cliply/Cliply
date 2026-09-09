@@ -1,17 +1,24 @@
 // the rules the playlist screens are drawn from, checked without rendering
 // anything: which of the three screens a status means, and the header lines
 // that have to be honest about a listing we only hold the first hundred of.
+//
+// the locale is english here, as it is in every renderer test. a badge is
+// asserted as the key it should have reached for, so the words themselves live
+// in one place; a whole sentence is still spelled out, because the sentence is
+// what those tests are about.
 
 import { describe, expect, test } from "vitest"
 
 import type { PlaylistEntry, PlaylistInfoResponse } from "@/lib/api"
+import { useLocale } from "@/lib/i18n"
+import { en } from "@/lib/i18n/en"
 import {
   ceilingHelperText,
   countLine,
   mixedLinkPlaylistChoice,
   nameList,
   phaseOf,
-  PLAYLIST_AUDIO_NOTE,
+  playlistAudioNote,
   rowBadge,
   totalDuration
 } from "@/lib/playlistView"
@@ -82,6 +89,33 @@ describe("how many videos this is", () => {
     expect(countLine(info({ listed: 100, count: null, truncated: true }))).toBe(
       "100 videos"
     )
+  })
+
+  /**
+   * the host locale here is english and stays english: what changes is the
+   * language the app was told to speak. a bare `toLocaleString()` follows the
+   * machine, which put "5,283" in the middle of a russian sentence for every
+   * russian reader on an english install.
+   */
+  test("groups its digits the way the app's language does, not the machine's", () => {
+    const truncated = info({ listed: 100, count: 5283, truncated: true })
+
+    expect(countLine(truncated)).toContain((5283).toLocaleString("en"))
+
+    useLocale.getState().setLocale("ru")
+
+    try {
+      const grouped = (5283).toLocaleString("ru")
+
+      // the separator comes from Intl rather than being typed here: russian
+      // uses a space you cannot tell apart in a diff
+      expect(grouped).not.toBe((5283).toLocaleString("en"))
+      expect(countLine(truncated)).toBe(
+        `показаны первые 100 из ${grouped} видео`
+      )
+    } finally {
+      useLocale.getState().setLocale("en")
+    }
   })
 })
 
@@ -158,7 +192,7 @@ describe("which rows get a badge at all", () => {
 
   test("but a ticked row the run never reached says it was not saved", () => {
     expect(rowBadge(entry(5), "finished", true)).toEqual({
-      text: "not saved",
+      text: en["playlist.rowNotSaved"],
       tone: "gone"
     })
   })
@@ -167,7 +201,7 @@ describe("which rows get a badge at all", () => {
     // "queued" over a row that is not in the queue is the same lie, earlier
     expect(rowBadge(entry(5), "running", false)).toBeNull()
     expect(rowBadge(entry(5), "running", true)).toEqual({
-      text: "queued",
+      text: en["playlist.rowQueued"],
       tone: "neutral"
     })
   })
@@ -182,7 +216,7 @@ describe("which rows get a badge at all", () => {
 
     for (const phase of ["picking", "running", "finished"] as const) {
       expect(rowBadge(missing, phase, false)).toEqual({
-        text: "unavailable",
+        text: en["playlist.rowUnavailable"],
         tone: "gone"
       })
     }
@@ -203,7 +237,7 @@ describe("which rows get a badge at all", () => {
    */
   test("an outcome is muted or accented, never an alarm", () => {
     expect(rowBadge(entry(1), "finished", true, { state: "skipped", progress: 0 }))
-      .toEqual({ text: "not saved", tone: "gone" })
+      .toEqual({ text: en["playlist.rowNotSaved"], tone: "gone" })
 
     expect(
       rowBadge(entry(1), "finished", true, {
@@ -214,7 +248,7 @@ describe("which rows get a badge at all", () => {
     ).toEqual({ text: "saved · 1080p", tone: "done" })
 
     expect(rowBadge(entry(1), "finished", true, { state: "reused", progress: 100 }))
-      .toEqual({ text: "already downloaded", tone: "done" })
+      .toEqual({ text: en["playlist.rowReused"], tone: "done" })
   })
 })
 
@@ -232,13 +266,11 @@ describe("what the card says about a run", () => {
   })
 
   test("the audio line is one sentence", () => {
-    expect(PLAYLIST_AUDIO_NOTE).toBe(
-      "Each video is saved whole, in the format picked above."
-    )
+    expect(playlistAudioNote()).toBe(en["playlist.audioNote"])
   })
 
   test("neither of them says what a playlist cannot do", () => {
-    for (const line of [ceilingHelperText("1080p"), PLAYLIST_AUDIO_NOTE]) {
+    for (const line of [ceilingHelperText("1080p"), playlistAudioNote()]) {
       expect(line).not.toMatch(/^No /)
       expect(line).not.toMatch(/\bcannot\b/)
       expect(line).not.toContain("—")

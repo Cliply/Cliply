@@ -951,6 +951,7 @@ describe("playlist outcomes", () => {
         {
           suggestion:
             "Check permissions on Cliply's app data folder and try again.",
+          wordingCode: "RECORDS_UNWRITABLE",
           itemsSkipped: 2,
           itemsTotal: 2
         }
@@ -968,6 +969,36 @@ describe("playlist outcomes", () => {
       "Check permissions on Cliply's app data folder and try again."
     )
     expect(terminal.category).toBe(ERROR_CODES.PERMISSION_ERROR)
+    /**
+     * ...and the name of that wording travels with it. the category is the
+     * same PERMISSION_ERROR a download folder we cannot write to reports, and
+     * the renderer translates the two into opposite advice: only this tells
+     * them apart once the sentence has been swapped for a russian one.
+     */
+    expect(terminal.wordingCode).toBe("RECORDS_UNWRITABLE")
+  })
+
+  test("and an ordinary failure names no wording of its own", async () => {
+    const { runner, events } = createRunner()
+    const handle = new FakeHandle()
+
+    const running = runner.run({ ...PLAYLIST, createHandle: () => handle })
+    await settle()
+
+    handle.reject(
+      playlistError(
+        ERROR_CODES.PERMISSION_ERROR,
+        "Cliply cannot write to the download folder.",
+        { itemsSkipped: 2, itemsTotal: 2 }
+      )
+    )
+
+    await running
+    const terminal = events[events.length - 1]
+
+    // the taxonomy's own entry, which is what its category should translate to
+    expect(terminal.category).toBe(ERROR_CODES.PERMISSION_ERROR)
+    expect(terminal).not.toHaveProperty("wordingCode")
   })
 
   test("a downloads list can tell a playlist row from a single video", async () => {

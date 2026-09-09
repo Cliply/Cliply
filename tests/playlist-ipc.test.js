@@ -434,6 +434,10 @@ describe("an app data folder we cannot write to", () => {
           "Check permissions on Cliply's app data folder and try again."
         )
         expect(response.error.category).toBe(ERROR_CATEGORIES.PERMISSION_ERROR)
+        // the category alone would have the renderer telling a russian reader
+        // to pick a different download folder, which is not the folder this
+        // is about. the wording names itself so it can be translated as itself
+        expect(response.error.wordingCode).toBe("RECORDS_UNWRITABLE")
         expect(engine.run).not.toHaveBeenCalled()
       } finally {
         fs.chmodSync(userDataPath, 0o755)

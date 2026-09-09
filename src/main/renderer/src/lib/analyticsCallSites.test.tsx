@@ -18,6 +18,7 @@ import { beforeEach, describe, expect, test, vi } from "vitest"
 
 import payloads from "./analytics-payloads.fixture.json"
 import type { AudioDownloadRequest, VideoDownloadRequest } from "@/lib/api"
+import { en } from "@/lib/i18n/en"
 import type { Platform } from "@/lib/store"
 
 type Bag = { event: string; properties: Record<string, unknown> }
@@ -62,6 +63,11 @@ vi.mock("@/lib/api", () => {
     playlistApi: {
       getPlaylistInfo: (url: string) => mocks.getPlaylistInfo(url),
       download: (request: unknown) => mocks.downloadPlaylist(request)
+    },
+    // the header reads the download folder over ipc; no screen driven here
+    // shows it, and a rejection is what the hook already expects to swallow
+    settingsApi: {
+      getDownloadPath: () => Promise.reject(new Error("no path here"))
     },
     pinterestApi: {
       getInfo: (url: string) => mocks.getPinInfo(url),
@@ -153,7 +159,7 @@ async function clickPlaylistHint() {
   const view = render(<SearchCard platform="youtube" />)
 
   await act(async () => {
-    screen.getByRole("button", { name: "playlists" }).click()
+    screen.getByRole("button", { name: en["url.youtubeHelperPlaylists"] }).click()
   })
 
   view.unmount()

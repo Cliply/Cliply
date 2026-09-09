@@ -11,6 +11,7 @@ import type { ReactNode } from "react"
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
 
 import type { PlaylistEntry, PlaylistInfoResponse } from "@/lib/api"
+import { en } from "@/lib/i18n/en"
 
 const mocks = vi.hoisted(() => ({
   listeners: [] as ((payload: Record<string, unknown>) => void)[],
@@ -39,7 +40,16 @@ vi.mock("@/lib/api", () => {
       cancelDownload: (id: string) => mocks.cancelDownload(id)
     },
     playlistApi: { download: (request: unknown) => mocks.downloadPlaylist(request) },
-    systemApi: { openDownloadFolder: mocks.openDownloadFolder }
+    systemApi: { openDownloadFolder: mocks.openDownloadFolder },
+    // the header names the folder files land in, which it reads over ipc
+    settingsApi: {
+      getDownloadPath: () =>
+        Promise.resolve({
+          path: "/Volumes/Media/Talks",
+          exists: true,
+          writable: true
+        })
+    }
   }
 })
 
@@ -158,10 +168,17 @@ describe("the whole screen, end to end", () => {
 
     expect(screen.queryAllByRole("checkbox")).toHaveLength(0)
     expect(screen.getByText("Video 1 of 3")).toBeDefined()
-    expect(screen.getByText("This video")).toBeDefined()
+    expect(screen.getByText(en["playlist.thisVideo"])).toBeDefined()
     expect(within(rowFor(1)).getByText("62%")).toBeDefined()
-    expect(within(rowFor(2)).getByText("queued")).toBeDefined()
-    expect(screen.getByRole("button", { name: "Cancel remaining" })).toBeDefined()
+    expect(within(rowFor(2)).getByText(en["playlist.rowQueued"])).toBeDefined()
+    expect(screen.getByRole("button", { name: en["playlist.cancelRemaining"] })).toBeDefined()
+
+    // and the header names the folder the run is really writing into, which
+    // it read over ipc rather than assuming the default
+    await waitFor(() =>
+      expect(screen.getByText("/Volumes/Media/Talks")).toBeDefined()
+    )
+    expect(document.body.textContent).not.toContain("~/Downloads/Cliply")
 
     await emit({ downloadId: sentDownloadId(), status: "completed", progress: 100 })
   })
@@ -194,13 +211,13 @@ describe("the whole screen, end to end", () => {
 
     // the height this one really came down at, under a 1080p ceiling
     expect(within(rowFor(1)).getByText("saved · 720p")).toBeDefined()
-    expect(within(rowFor(2)).getByText("already downloaded")).toBeDefined()
-    expect(within(rowFor(3)).getByText("not saved")).toBeDefined()
+    expect(within(rowFor(2)).getByText(en["playlist.rowReused"])).toBeDefined()
+    expect(within(rowFor(3)).getByText(en["playlist.rowNotSaved"])).toBeDefined()
 
-    expect(screen.getByRole("button", { name: "Open folder" })).toBeDefined()
+    expect(screen.getByRole("button", { name: en["toast.openFolder"] })).toBeDefined()
     expect(screen.getByRole("button", { name: "Retry the 1 that failed" })).toBeDefined()
     expect(
-      screen.getByRole("button", { name: "Download everything again" })
+      screen.getByRole("button", { name: en["playlist.downloadAgain"] })
     ).toBeDefined()
   })
 
@@ -231,7 +248,7 @@ describe("the whole screen, end to end", () => {
     })
 
     await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: "Cancel remaining" }))
+      fireEvent.click(screen.getByRole("button", { name: en["playlist.cancelRemaining"] }))
     })
 
     await waitFor(() =>
@@ -256,14 +273,14 @@ describe("the whole screen, end to end", () => {
 
     // a cancel is a kill, and the videos it had already finished are on disk
     expect(within(rowFor(1)).getByText("saved · 720p")).toBeDefined()
-    expect(within(rowFor(3)).getByText("already downloaded")).toBeDefined()
-    expect(within(rowFor(2)).getByText("not saved")).toBeDefined()
+    expect(within(rowFor(3)).getByText(en["playlist.rowReused"])).toBeDefined()
+    expect(within(rowFor(2)).getByText(en["playlist.rowNotSaved"])).toBeDefined()
 
     expect(
       screen.getByText("1 of 3 videos saved, 1 already downloaded, 1 skipped.")
     ).toBeDefined()
     expect(
-      screen.getByRole("button", { name: "Download everything again" })
+      screen.getByRole("button", { name: en["playlist.downloadAgain"] })
     ).toBeDefined()
   })
 
@@ -277,11 +294,11 @@ describe("the whole screen, end to end", () => {
     await start()
 
     await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: "Cancel remaining" }))
+      fireEvent.click(screen.getByRole("button", { name: en["playlist.cancelRemaining"] }))
     })
 
     expect(mocks.listeners).toHaveLength(1)
-    expect(screen.getByText("Playlist download cancelled")).toBeDefined()
+    expect(screen.getByText(en["playlist.cancelled"])).toBeDefined()
     // and never "0 of 3 videos saved" over a run that had not reported yet
     expect(screen.queryByText(/0 of 3/)).toBeNull()
 
@@ -299,7 +316,7 @@ describe("the whole screen, end to end", () => {
     expect(
       screen.getByText("0 of 3 videos saved, 3 already downloaded.")
     ).toBeDefined()
-    expect(within(rowFor(2)).getByText("already downloaded")).toBeDefined()
+    expect(within(rowFor(2)).getByText(en["playlist.rowReused"])).toBeDefined()
     // three rows the user already has, and nothing to retry
     expect(screen.queryByRole("button", { name: /Retry/ })).toBeNull()
   })
@@ -328,7 +345,7 @@ describe("the whole screen, end to end", () => {
 
     expect(usePlaylistStore.getState().itemStatus.get(2)?.state).not.toBe("saved")
     expect(within(rowFor(1)).getByText("saved · 720p")).toBeDefined()
-    expect(within(rowFor(2)).getByText("not saved")).toBeDefined()
+    expect(within(rowFor(2)).getByText(en["playlist.rowNotSaved"])).toBeDefined()
     expect(screen.getByRole("button", { name: "Retry the 2 that failed" })).toBeDefined()
   })
 
@@ -396,7 +413,7 @@ describe("the whole screen, end to end", () => {
     load(listing())
 
     expect(mocks.listeners).toHaveLength(1)
-    expect(screen.getByRole("button", { name: "Cancel remaining" })).toBeDefined()
+    expect(screen.getByRole("button", { name: en["playlist.cancelRemaining"] })).toBeDefined()
     expect(screen.getByText("Video 1 of 3")).toBeDefined()
     expect(within(rowFor(1)).getByText("60%")).toBeDefined()
 
@@ -439,7 +456,7 @@ describe("the whole screen, end to end", () => {
     })
 
     expect(screen.getByText("Another list")).toBeDefined()
-    expect(screen.queryByText("Playlist download failed")).toBeNull()
+    expect(screen.queryByText(en["playlist.failed"])).toBeNull()
     expect(screen.getByRole("button", { name: "Download 3 videos" })).toBeDefined()
   })
 

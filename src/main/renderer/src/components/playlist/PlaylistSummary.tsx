@@ -1,9 +1,11 @@
 import { Button } from "@/components/ui/button"
 import { systemApi } from "@/lib/api"
 import {
+  failureSentence,
   summarizePlaylistItems,
   type PlaylistDownloadState
 } from "@/lib/hooks/usePlaylistDownload"
+import { useT } from "@/lib/i18n"
 import { usePlaylistStore } from "@/lib/playlistStore"
 import { nameList, unsavedEntries } from "@/lib/playlistView"
 import { cn } from "@/lib/utils"
@@ -41,6 +43,7 @@ export function PlaylistSummary({
   className
 }: PlaylistSummaryProps) {
   const { playlistInfo, selectedIndices, itemStatus } = usePlaylistStore()
+  const t = useT()
 
   const unsaved = unsavedEntries(
     playlistInfo?.entries ?? [],
@@ -52,14 +55,14 @@ export function PlaylistSummary({
   const cancelled = state.status === "cancelled"
 
   const headline = failed
-    ? "Playlist download failed"
+    ? t("playlist.failed")
     : summarizePlaylistItems({
         saved: state.itemsSaved,
         reused: state.itemsReused,
         skipped: state.itemsSkipped,
         total: state.itemsTotal
       }) ||
-      (cancelled ? "Playlist download cancelled" : "Playlist download finished")
+      t(cancelled ? "playlist.cancelled" : "playlist.finished")
 
   return (
     <motion.div
@@ -79,23 +82,32 @@ export function PlaylistSummary({
         </p>
 
         {failed && (
+          // the same sentence the failure toast said, built by the same
+          // function: main's wording, in the reader's language where the
+          // category names a russian one, and ours when it sent none
           <p className="text-sm text-slate-600 dark:text-slate-400">
-            {[state.error, state.suggestion].filter(Boolean).join(" ") ||
-              "Something went wrong. You can send us the details."}
+            {failureSentence(state)}
           </p>
         )}
 
         {cancelled && (
           <p className="text-sm text-slate-600 dark:text-slate-400">
-            Videos already saved are kept. Running it again picks up where this
-            one stopped.
+            {t("playlist.cancelledHint")}
           </p>
         )}
 
+        {/*
+          one miss is named without a count, and it is the sentence that says
+          so rather than a plural form: russian's `one` covers 21 and 101 too
+        */}
         {!failed && unsaved.length > 0 && (
           <p className="text-sm text-slate-600 dark:text-slate-400">
-            {unsaved.length === 1 ? "Not saved: " : `${unsaved.length} not saved: `}
-            {nameList(unsaved)}.
+            {t(
+              unsaved.length === 1
+                ? "playlist.notSavedOne"
+                : "playlist.notSavedMany",
+              { n: unsaved.length, names: nameList(unsaved) }
+            )}
           </p>
         )}
       </div>
@@ -105,7 +117,7 @@ export function PlaylistSummary({
           onClick={() => systemApi.openDownloadFolder()}
           className="bg-cyan-600 hover:bg-cyan-700 text-white"
         >
-          Open folder
+          {t("toast.openFolder")}
         </Button>
 
         {unsaved.length > 0 && (
@@ -113,9 +125,7 @@ export function PlaylistSummary({
             variant="outline"
             onClick={() => onRetry(unsaved.map((entry) => entry.index))}
           >
-            {unsaved.length === 1
-              ? "Retry the 1 that failed"
-              : `Retry the ${unsaved.length} that failed`}
+            {t("playlist.retryFailed", { n: unsaved.length })}
           </Button>
         )}
 
@@ -126,12 +136,12 @@ export function PlaylistSummary({
         */}
         {(state.itemsReused ?? 0) > 0 && (
           <Button variant="outline" onClick={() => onRun({ ignoreArchive: true })}>
-            Download everything again
+            {t("playlist.downloadAgain")}
           </Button>
         )}
 
         <Button variant="ghost" onClick={onPickAgain}>
-          Pick videos again
+          {t("playlist.pickAgain")}
         </Button>
       </div>
     </motion.div>

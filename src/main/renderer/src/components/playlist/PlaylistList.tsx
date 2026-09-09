@@ -1,3 +1,4 @@
+import { useT } from "@/lib/i18n"
 import { isSelectableEntry, usePlaylistStore } from "@/lib/playlistStore"
 import { summarizeBadges, type PlaylistPhase } from "@/lib/playlistView"
 import { cn } from "@/lib/utils"
@@ -20,6 +21,7 @@ export function PlaylistList({ phase, className }: PlaylistListProps) {
     selectAll,
     selectNone
   } = usePlaylistStore()
+  const t = useT()
 
   if (!playlistInfo) return null
 
@@ -39,7 +41,7 @@ export function PlaylistList({ phase, className }: PlaylistListProps) {
               onClick={selectAll}
               className="text-cyan-700 transition-colors hover:text-cyan-800 dark:text-cyan-400 dark:hover:text-cyan-300"
             >
-              Select all
+              {t("playlist.selectAll")}
             </button>
             <span className="text-slate-300 dark:text-slate-600">|</span>
             <button
@@ -47,18 +49,21 @@ export function PlaylistList({ phase, className }: PlaylistListProps) {
               onClick={selectNone}
               className="text-cyan-700 transition-colors hover:text-cyan-800 dark:text-cyan-400 dark:hover:text-cyan-300"
             >
-              Select none
+              {t("playlist.selectNone")}
             </button>
           </>
         ) : (
           <span className="text-slate-500 dark:text-slate-400">
-            Per video status
+            {t("playlist.perVideoStatus")}
           </span>
         )}
 
         <span className="ml-auto text-slate-500 dark:text-slate-400">
           {phase === "picking"
-            ? `${selectedIndices.size} of ${selectable} selected`
+            ? t("playlist.selectedCount", {
+                n: selectedIndices.size,
+                total: selectable
+              })
             : summarizeBadges(itemStatus)}
         </span>
       </div>

@@ -7,15 +7,9 @@ import {
   DialogHeader,
   DialogTitle
 } from "@/components/ui/dialog"
+import { useT } from "@/lib/i18n"
 import { useMixedLinkStore } from "@/lib/mixedLinkStore"
-import {
-  countLine,
-  MIXED_LINK_PLAYLIST_HINT,
-  MIXED_LINK_TITLE,
-  MIXED_LINK_VIDEO_CHOICE,
-  MIXED_LINK_VIDEO_HINT,
-  mixedLinkPlaylistChoice
-} from "@/lib/playlistView"
+import { countLine, mixedLinkPlaylistChoice } from "@/lib/playlistView"
 import { cn } from "@/lib/utils"
 
 /**
@@ -39,6 +33,7 @@ export function MixedLinkPrompt() {
   const question = useMixedLinkStore((state) => state.question)
   const answer = useMixedLinkStore((state) => state.answer)
   const dismiss = useMixedLinkStore((state) => state.dismiss)
+  const t = useT()
 
   if (!question) return null
 
@@ -56,7 +51,7 @@ export function MixedLinkPrompt() {
               <ListVideo className="h-4 w-4" />
             </span>
             <DialogTitle className="text-slate-900 dark:text-white">
-              {MIXED_LINK_TITLE}
+              {t("mixedLink.title")}
             </DialogTitle>
           </div>
           <DialogDescription className="text-slate-500 dark:text-slate-400">
@@ -80,10 +75,10 @@ export function MixedLinkPrompt() {
             )}
           >
             <span className="block text-sm font-semibold text-cyan-800 dark:text-cyan-200">
-              {MIXED_LINK_VIDEO_CHOICE}
+              {t("mixedLink.videoChoice")}
             </span>
             <span className="mt-0.5 block text-xs text-cyan-700/70 dark:text-cyan-300/70">
-              {MIXED_LINK_VIDEO_HINT}
+              {t("mixedLink.videoHint")}
             </span>
           </button>
 
@@ -99,7 +94,7 @@ export function MixedLinkPrompt() {
               {mixedLinkPlaylistChoice(info)}
             </span>
             <span className="mt-0.5 block text-xs text-slate-500 dark:text-slate-400">
-              {MIXED_LINK_PLAYLIST_HINT}
+              {t("mixedLink.playlistHint")}
             </span>
           </button>
         </div>

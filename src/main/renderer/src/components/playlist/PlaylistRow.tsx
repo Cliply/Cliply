@@ -1,4 +1,5 @@
 import type { PlaylistEntry } from "@/lib/api"
+import { useT } from "@/lib/i18n"
 import { isSelectableEntry, type PlaylistItemStatus } from "@/lib/playlistStore"
 import { rowBadge, type PlaylistPhase, type PlaylistRowBadge } from "@/lib/playlistView"
 import { cn } from "@/lib/utils"
@@ -45,6 +46,9 @@ export function PlaylistRow({
   onToggle
 }: PlaylistRowProps) {
   const selectable = isSelectableEntry(entry)
+  // the badge is a translated word (the row's title and its duration are the
+  // video's own), so the row follows the locale like anything else that speaks
+  useT()
   const badge = rowBadge(entry, phase, selected, status)
   const picking = phase === "picking"
 

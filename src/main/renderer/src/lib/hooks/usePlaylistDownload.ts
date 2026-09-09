@@ -10,6 +10,7 @@ import {
   type PlaylistInfoResponse
 } from "@/lib/api"
 import { isTerminalReason, terminalReason } from "@/lib/downloadOutcome"
+import { localizeError, t } from "@/lib/i18n"
 import { deliveredByIndex } from "@/lib/playlistFiles"
 import {
   isSelectableEntry,
@@ -40,6 +41,12 @@ export interface PlaylistDownloadState {
   error?: string
   // a failure that carries its own advice rather than the generic retry prompt
   suggestion?: string
+  // the taxonomy name main gave the failure. kept because it is what decides
+  // whether the two sentences above have a russian version to be read in
+  category?: string
+  // ...and the name of the specific wording, when main knew one. see
+  // `failureSentence` for why the category alone is not enough
+  wordingCode?: string
 
   // the second level: where inside the run we are. `itemIndex` is the queue
   // position and `playlistIndex` the video's true position in the playlist,
@@ -116,15 +123,13 @@ export function buildPlaylistDownloadRequest(
   const { playlistInfo } = selection
 
   if (!playlistInfo) {
-    throw new PlaylistSelectionError("Load a playlist before downloading it.")
+    throw new PlaylistSelectionError(t("playlist.errorNoPlaylist"))
   }
 
   // required rather than defaulted: it names the archive this run resumes from,
   // and main refuses a request without one
   if (!playlistInfo.playlist_id) {
-    throw new PlaylistSelectionError(
-      "This link doesn't name a playlist we can download."
-    )
+    throw new PlaylistSelectionError(t("playlist.errorNoId"))
   }
 
   const entries = playlistInfo.entries
@@ -138,7 +143,7 @@ export function buildPlaylistDownloadRequest(
   // an empty selection is not an empty spec: yt-dlp reads the absence of one as
   // "the whole playlist", which is the largest download available
   if (entries.length === 0) {
-    throw new PlaylistSelectionError("Select at least one video to download.")
+    throw new PlaylistSelectionError(t("playlist.errorNoSelection"))
   }
 
   const audioOnly = selection.activeTab === "audio"
@@ -173,6 +178,10 @@ export interface PlaylistItemCounts {
  * the file it refers to was written by an earlier run.
  *
  * no em-dashes: Cliply's own copy uses commas and periods.
+ *
+ * each clause is translated whole, and only the comma between them is shared:
+ * russian puts the verb first in all three, so a sentence assembled from a
+ * number and a translated word would come out in english order.
  */
 export function summarizePlaylistItems(
   counts: PlaylistItemCounts
@@ -191,17 +200,58 @@ export function summarizePlaylistItems(
     return undefined
   }
 
-  const parts = [`${saved} of ${total} ${total === 1 ? "video" : "videos"} saved`]
+  const parts = [t("playlist.summarySaved", { saved, n: total })]
 
   if (counts.reused) {
-    parts.push(`${counts.reused} already downloaded`)
+    parts.push(t("playlist.summaryReused", { n: counts.reused }))
   }
 
   if (counts.skipped) {
-    parts.push(`${counts.skipped} skipped`)
+    parts.push(t("playlist.summarySkipped", { n: counts.skipped }))
   }
 
   return `${parts.join(", ")}.`
+}
+
+/**
+ * what a failed run says under its title, in the reader's language
+ *
+ * main's own wording, which is english by design - it is what the logs, the
+ * analytics and the issue bodies carry - swapped for the russian one where the
+ * category names it, exactly as the single-video hooks do. a failure that
+ * arrived with no sentence at all gets ours.
+ *
+ * the suggestion is only ever shown when main sent one: `localizeError` swaps
+ * the pair, and printing its advice under an error that had none would be
+ * putting words in main's mouth.
+ *
+ * **the wording code wins over the category.** a run that cannot write its
+ * record of the download fails as a PERMISSION_ERROR, the same category as a
+ * download folder we cannot write to, and the category's russian advice is
+ * "pick another download folder" - which cannot fix a folder inside Cliply's
+ * own app data. main names that refusal `RECORDS_UNWRITABLE`, and translating
+ * the name rather than the category is what keeps the diagnosis it made.
+ *
+ * exported because the summary card says the same thing about the same
+ * failure, and the two reading from one function is what keeps them agreeing.
+ */
+export function failureSentence(data: {
+  error?: string
+  suggestion?: string
+  category?: string
+  wordingCode?: string
+}): string {
+  if (!data.error) return t("download.wentWrong")
+
+  const shown = localizeError({
+    message: data.error,
+    suggestion: data.suggestion,
+    category: data.wordingCode ?? data.category
+  })
+
+  return [shown.message, data.suggestion && shown.suggestion]
+    .filter(Boolean)
+    .join(" ")
 }
 
 const countsOf = (data: DownloadProgress): PlaylistItemCounts => ({
@@ -320,11 +370,11 @@ export const usePlaylistDownload = () => {
     setDownloadState((prev) => ({
       ...prev,
       status: "cancelled",
-      message: "Playlist download cancelled"
+      message: t("playlist.cancelled")
     }))
 
-    toast.info("Playlist download cancelled", {
-      description: "Videos already saved are kept. Re-running skips them."
+    toast.info(t("playlist.cancelled"), {
+      description: t("playlist.cancelledToast")
     })
 
     return true
@@ -336,7 +386,7 @@ export const usePlaylistDownload = () => {
       // from this line to the start ipc below runs without yielding, so a
       // second call cannot slip past it into the shared refs
       if (runningRef.current) {
-        throw new PlaylistBusyError("A playlist download is already running.")
+        throw new PlaylistBusyError(t("playlist.errorBusy"))
       }
 
       // throws before anything is started or subscribed to, so a selection that
@@ -366,7 +416,7 @@ export const usePlaylistDownload = () => {
         status: "starting",
         progress: 0,
         itemsTotal: request.entries.length,
-        message: "Starting playlist download..."
+        message: t("playlist.starting")
       })
 
       // correlate on an id we generate here, so the listener can filter from
@@ -412,7 +462,9 @@ export const usePlaylistDownload = () => {
           itemsSkipped: data.items_skipped ?? prev.itemsSkipped,
           message: data.error || undefined,
           error: data.error,
-          suggestion: data.suggestion
+          suggestion: data.suggestion,
+          category: data.category,
+          wordingCode: data.wordingCode
         }))
 
         if (data.status === "downloading") {
@@ -437,10 +489,10 @@ export const usePlaylistDownload = () => {
           .settleInFlightItems(data.status === "cancelled" ? "pending" : "skipped")
 
         if (data.status === "completed") {
-          toast.success("Playlist download completed!", {
+          toast.success(t("playlist.completed"), {
             description: summarizePlaylistItems(countsOf(data)),
             action: {
-              label: "Open Folder",
+              label: t("toast.openFolder"),
               onClick: () => systemApi.openDownloadFolder()
             }
           })
@@ -450,6 +502,8 @@ export const usePlaylistDownload = () => {
 
         if (data.status === "failed") {
           reportActions.stage({
+            // english on purpose, like every other line of a report: the
+            // maintainer reading the issue is not the user who filed it
             shortMessage: data.error || "Playlist download failed",
             details: data.details,
             category: data.category,
@@ -464,13 +518,8 @@ export const usePlaylistDownload = () => {
           // what decides which action the toast offers: a youtube refusal gets
           // "fix with cookies", everything else gets "report"
           showDownloadErrorToast(
-            "Playlist download failed",
-            [
-              data.error || "Something went wrong. You can send us the details.",
-              data.suggestion
-            ]
-              .filter(Boolean)
-              .join(" "),
+            t("playlist.failed"),
+            failureSentence(data),
             data.category,
             "youtube"
           )
@@ -603,7 +652,10 @@ export const usePlaylistDownload = () => {
         ...prev,
         status: "failed",
         error: error.message,
-        message: `Failed to start download: ${error.message}`
+        category: error instanceof DownloadError ? error.category : undefined,
+        wordingCode:
+          error instanceof DownloadError ? error.wordingCode : undefined,
+        message: t("download.startFailed", { message: error.message })
       }))
 
       reportActions.stage({
@@ -615,8 +667,13 @@ export const usePlaylistDownload = () => {
         videoUrl: lastUrlRef.current
       })
       showDownloadErrorToast(
-        "Playlist download failed",
-        error.message,
+        t("playlist.failed"),
+        failureSentence({
+          error: error.message,
+          category: error instanceof DownloadError ? error.category : undefined,
+          wordingCode:
+            error instanceof DownloadError ? error.wordingCode : undefined
+        }),
         error instanceof DownloadError ? error.category : undefined,
         "youtube"
       )

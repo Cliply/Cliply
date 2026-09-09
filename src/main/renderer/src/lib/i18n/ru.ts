@@ -40,6 +40,95 @@ export const ru: Record<Key, string> = {
   "playlist.loaded": "плейлист загружен",
   "playlist.infoFailed": "не удалось получить информацию о плейлисте",
 
+  // «видео» does not decline, so its three forms are the same word. they are
+  // spelled out anyway, so every counted sentence here reads the same way and
+  // nobody has to work out which ones were shortcuts
+  "playlist.videoCount": "{n} видео|{n} видео|{n} видео",
+  "playlist.showingFirst": "показаны первые {listed} из {count} видео",
+  "playlist.totalHours": "всего {hours} ч {minutes} мин",
+  "playlist.totalMinutes": "всего {minutes} мин",
+
+  "playlist.selectAll": "выбрать все",
+  "playlist.selectNone": "снять все",
+  // russian puts the verb first, which is the reason the count line is one key
+  // rather than a number with words glued around it
+  "playlist.selectedCount": "выбрано {n} из {total}",
+  "playlist.perVideoStatus": "статус по видео",
+  "playlist.badgeDone": "готово {n}",
+  "playlist.badgeDownloading": "скачивается {n}",
+
+  "playlist.rowSaved": "сохранено",
+  "playlist.rowSavedAt": "сохранено · {height}p",
+  "playlist.rowReused": "уже скачано",
+  "playlist.rowNotSaved": "не сохранено",
+  "playlist.rowQueued": "в очереди",
+  "playlist.rowStopping": "останавливаем",
+  "playlist.rowUnavailable": "недоступно",
+
+  "playlist.tabVideo": "видео",
+  "playlist.qualityHeading": "качество",
+  "playlist.qualityPlaceholder": "выберите ограничение качества...",
+  "playlist.ceilingLabel": "до {limit}",
+  "playlist.ceilingHelper":
+    "каждое видео сохраняется в MP4 в лучшем качестве до {limit}, с оригинальным звуком.",
+  "playlist.videoIntro":
+    "одно качество на весь плейлист. видео и звук объединяются автоматически.",
+  "playlist.audioIntro": "звук из каждого выбранного видео, в одном формате.",
+  "playlist.audioNote":
+    "каждое видео сохраняется целиком, в выбранном выше формате.",
+  "playlist.pickVideosFirst": "сначала выберите видео",
+  "playlist.pickTracksFirst": "сначала выберите дорожки",
+  "playlist.downloadVideos": "скачать {n} видео|скачать {n} видео|скачать {n} видео",
+  "playlist.downloadTracks":
+    "скачать {n} дорожку|скачать {n} дорожки|скачать {n} дорожек",
+
+  "playlist.starting": "начинаем скачивание плейлиста...",
+  "playlist.videoOf": "видео {current} из {total}",
+  "playlist.thisVideo": "это видео",
+  "playlist.cancelRemaining": "остановить остальные",
+  "playlist.cancelKeepsHint":
+    "уже сохранённые видео остаются. следующий запуск их пропустит.",
+
+  "playlist.completed": "плейлист скачан",
+  "playlist.finished": "скачивание плейлиста завершено",
+  "playlist.cancelled": "скачивание плейлиста отменено",
+  "playlist.cancelledToast":
+    "уже сохранённые видео остаются. повторный запуск их пропустит.",
+  "playlist.cancelledHint":
+    "уже сохранённые видео остаются. следующий запуск продолжит с того же места.",
+  "playlist.failed": "не удалось скачать плейлист",
+  "playlist.summarySaved":
+    "сохранено {saved} из {n} видео|сохранено {saved} из {n} видео|сохранено {saved} из {n} видео",
+  "playlist.summaryReused": "уже скачано {n}",
+  "playlist.summarySkipped": "пропущено {n}",
+  "playlist.notSavedOne": "не сохранено: {names}.",
+  "playlist.notSavedMany": "не сохранено {n} видео: {names}.",
+  "playlist.quotedName": "«{title}»",
+  "playlist.andMore": "ещё {n}",
+  "playlist.listJoin": "{items} и {last}",
+  // english says the same thing for one and for many; russian declines the
+  // noun, so it spells all three forms out
+  "playlist.retryFailed":
+    "повторить {n} загрузку|повторить {n} загрузки|повторить {n} загрузок",
+  "playlist.downloadAgain": "скачать всё заново",
+  "playlist.pickAgain": "выбрать видео заново",
+
+  "playlist.errorNoPlaylist": "сначала загрузите плейлист.",
+  "playlist.errorNoId": "по этой ссылке нет плейлиста, который можно скачать.",
+  "playlist.errorNoSelection": "выберите хотя бы одно видео.",
+  "playlist.errorBusy": "плейлист уже скачивается.",
+
+  "mixedLink.title": "это видео из плейлиста",
+  "mixedLink.videoChoice": "только это видео",
+  "mixedLink.videoHint": "то, которое открывает ссылка",
+  // "все 1 видео" is what agreement gets you at 1 and 21. naming the scope
+  // and then the count sidesteps it: the phrase is the same in all three
+  // forms, and the number is a number rather than something to agree with
+  "mixedLink.playlistChoice":
+    "весь плейлист: {n} видео|весь плейлист: {n} видео|весь плейлист: {n} видео",
+  "mixedLink.playlistFirst": "первые {n} видео",
+  "mixedLink.playlistHint": "открыть плейлист",
+
   "error.imageNotVideo": "это изображение, а не видео",
   "error.imageNotVideoDesc": "скачивать можно только видео",
   "error.youtubeUrl": "неверная ссылка на YouTube",
@@ -336,6 +425,12 @@ export const ru: Record<Key, string> = {
  * `TERMINAL_ERRORS` in `src/main/services/ytdlp-engine.js`; a category with no
  * entry keeps main's english, which is the right failure mode for a code this
  * file has not caught up with yet.
+ *
+ * a few entries are keyed by a `wordingCode` instead, for the failures main
+ * words more precisely than their category does. `RECORDS_UNWRITABLE` is one:
+ * it is a PERMISSION_ERROR, and the permission entry below tells the reader to
+ * choose another download folder, which does nothing about a folder inside
+ * cliply's own app data.
  */
 export const ruErrors: Partial<
   Record<string, { message: string; suggestion: string }>
@@ -375,6 +470,13 @@ export const ruErrors: Partial<
   PERMISSION_ERROR: {
     message: "не получается записать в папку загрузок.",
     suggestion: "проверьте права доступа или выберите другую папку."
+  },
+  // the same category, a different folder: this one is cliply's own, and no
+  // choice the user makes about the download folder touches it
+  RECORDS_UNWRITABLE: {
+    message: "cliply не смог подготовить запись об этой загрузке.",
+    suggestion:
+      "проверьте права доступа к папке с данными cliply и попробуйте снова."
   },
   PATH_ERROR: {
     message: "не удалось записать по этому пути.",

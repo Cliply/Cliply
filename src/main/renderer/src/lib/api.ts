@@ -46,6 +46,15 @@ export interface DownloadProgress {
   // payload's technical detail rides along with them
   details?: string
   category?: string
+  /**
+   * the stable name of a wording main chose over its category's own.
+   *
+   * a playlist run that cannot write its record of the download fails as a
+   * PERMISSION_ERROR, exactly like a download folder we cannot write to, and
+   * the two want opposite advice: one is Cliply's app data folder and the
+   * other is the folder the user picked. only this tells them apart.
+   */
+  wordingCode?: string
   // trimmed downloads report one sweep at the end, so there is no meaningful
   // percentage to show while ffmpeg works
   indeterminate?: boolean
@@ -373,6 +382,8 @@ export interface ApiError {
   category?: string
   /** main's own code for the failure, "GENERAL_ERROR" when it has none */
   code?: string
+  /** see `DownloadProgress.wordingCode`: a refusal that named itself */
+  wordingCode?: string
 }
 
 /**
@@ -390,12 +401,15 @@ export interface ApiError {
 export class DownloadError extends Error {
   details?: string
   category?: string
+  /** see `DownloadProgress.wordingCode`: a refusal that named itself */
+  wordingCode?: string
 
   constructor(message: string, error?: ApiError) {
     super(message)
     this.name = "DownloadError"
     this.details = error?.details
     this.category = error?.category
+    this.wordingCode = error?.wordingCode
   }
 }
 
