@@ -163,3 +163,156 @@ describe("a cookie test that youtube rejected", () => {
     expect(response.data.rejected).toBe(false)
   })
 })
+
+/**
+ * the codes have to survive the trip, or the renderer is back to matching
+ * english prose to work out what main just said
+ *
+ * main stays english on purpose - its sentences feed the logs and the issue
+ * bodies - so a russian install says the same thing by looking the code up.
+ * A code that main computes and then drops at the ipc boundary is a code the
+ * dialog can never use.
+ */
+describe("the codes reach the renderer beside the sentences", () => {
+  test("a refused import carries the code it was refused under", async () => {
+    dialog.showOpenDialog.mockResolvedValue({
+      canceled: false,
+      filePaths: [path.join("/tmp", "picked.txt")]
+    })
+
+    const refusal = Object.assign(
+      new Error("that's json, not a netscape cookies.txt. export it as cookies.txt instead."),
+      { code: "COOKIES_JSON" }
+    )
+
+    const handlers = handlersWith({
+      importCookieFile: jest.fn().mockRejectedValue(refusal),
+      hasValidCookies: jest.fn(() => false),
+      hasYouTubeCookies: jest.fn(() => false)
+    })
+
+    const response = await handlers.handleImportCookieFile(null)
+
+    expect(response.error.code).toBe("COOKIES_JSON")
+    // and the english is still the message, which is the field the ui throws
+    expect(response.error.message).toMatch(/json, not a netscape/)
+  })
+
+  // a failure with no code of its own - a full disk, a permission error - must
+  // still come back, just without one to translate by
+  test("a failure main has no code for keeps the placeholder", async () => {
+    dialog.showOpenDialog.mockResolvedValue({
+      canceled: false,
+      filePaths: [path.join("/tmp", "picked.txt")]
+    })
+
+    const handlers = handlersWith({
+      importCookieFile: jest
+        .fn()
+        .mockRejectedValue(new Error("ENOSPC: no space left on device")),
+      hasValidCookies: jest.fn(() => false),
+      hasYouTubeCookies: jest.fn(() => false)
+    })
+
+    const response = await handlers.handleImportCookieFile(null)
+
+    expect(response.error.code).toBe("GENERAL_ERROR")
+  })
+
+  test("the status reports a problem as both a sentence and a code", async () => {
+    const handlers = handlersWith({
+      getStatus: jest.fn().mockResolvedValue({}),
+      getFileInfo: jest.fn().mockResolvedValue({
+        cookieCount: 12,
+        youtubeCookieCount: 12,
+        expiredCookieCount: 0,
+        hasSid: true,
+        signedIn: false,
+        loadError: null
+      }),
+      hasValidCookies: jest.fn(() => false),
+      hasYouTubeCookies: jest.fn(() => true)
+    })
+
+    const response = await handlers.handleGetCookieStatus(null)
+
+    expect(response.data.problemCode).toBe("JAR_SESSION_ENDED")
+    expect(response.data.problem).toBe(
+      "youtube ended this session, export your cookies again"
+    )
+  })
+
+  // a working jar has neither, and the code must not outlive the sentence
+  test("a jar that works reports no problem at all", async () => {
+    const handlers = handlersWith({
+      getStatus: jest.fn().mockResolvedValue({}),
+      getFileInfo: jest.fn().mockResolvedValue({
+        cookieCount: 22,
+        youtubeCookieCount: 22,
+        expiredCookieCount: 0,
+        hasSid: true,
+        signedIn: true,
+        loadError: null
+      }),
+      hasValidCookies: jest.fn(() => true),
+      hasYouTubeCookies: jest.fn(() => true)
+    })
+
+    const response = await handlers.handleGetCookieStatus(null)
+
+    expect(response.data.problem).toBeNull()
+    expect(response.data.problemCode).toBeNull()
+  })
+
+  test("a jar too broken to test reports the code with its note", async () => {
+    const handlers = handlersWith({
+      inspectCookieFile: jest.fn().mockResolvedValue({
+        total: 0,
+        youtube: 0,
+        expired: 0,
+        hasSid: false,
+        signedIn: false,
+        usable: false,
+        loadError: "domain-flag-mismatch"
+      }),
+      getStatus: jest.fn().mockResolvedValue({}),
+      updateStatus: jest.fn().mockResolvedValue(undefined),
+      hasValidCookies: jest.fn(() => false),
+      hasYouTubeCookies: jest.fn(() => false)
+    })
+
+    const response = await handlers.handleTestCookies(null)
+
+    expect(response.data.noteCode).toBe("JAR_MALFORMED")
+    expect(response.data.note).toMatch(/malformed/)
+  })
+
+  test("and a probe's verdict carries its own code across", async () => {
+    const handlers = handlersWith({
+      inspectCookieFile: jest.fn().mockResolvedValue({
+        total: 2,
+        youtube: 2,
+        expired: 0,
+        hasSid: true,
+        signedIn: true,
+        usable: true,
+        loadError: null
+      }),
+      getCookieFilePath: jest.fn(() => "/tmp/jar.txt"),
+      getStatus: jest.fn().mockResolvedValue({}),
+      updateStatus: jest.fn().mockResolvedValue(undefined),
+      hasValidCookies: jest.fn(() => true),
+      hasYouTubeCookies: jest.fn(() => true)
+    })
+
+    handlers.probeCookies = jest.fn().mockResolvedValue({
+      extractionCheck: "rejected",
+      noteCode: "PROBE_REJECTED",
+      note: "youtube still asked us to prove we're not a bot while sending your cookies."
+    })
+
+    const response = await handlers.handleTestCookies(null)
+
+    expect(response.data.noteCode).toBe("PROBE_REJECTED")
+  })
+})

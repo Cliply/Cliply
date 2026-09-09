@@ -118,48 +118,46 @@ function normalizeTimeRange(range) {
  *     rotated the session away. yt-dlp warns about exactly this, and since
  *     --cookies writes the jar back it is our own copy that lost the marker
  */
-function cookieJarProblem({
-  total,
-  youtube,
-  expired,
-  hasSid,
-  signedIn,
-  loadError
-}) {
+const JAR_PROBLEMS = {
+  JAR_MALFORMED: "that file is malformed, export a fresh one instead of editing it",
+  JAR_NOT_COOKIE_FILE: "that isn't a cookies.txt file, export it again",
+  JAR_NOTHING_IMPORTED: "nothing imported yet",
+  JAR_NO_YOUTUBE: "no youtube cookies in that file",
+  JAR_EXPIRED: "your cookies expired, grab a fresh export",
+  JAR_SESSION_ENDED: "youtube ended this session, export your cookies again",
+  JAR_NEVER_SIGNED_IN:
+    "these cookies aren't from a signed-in session, sign in first then export",
+  JAR_UNUSABLE: "no usable youtube cookies"
+}
+
+/**
+ * which of the sentences above a jar has earned
+ *
+ * the code travels to the renderer beside the sentence, so a russian install
+ * can say the same thing without matching english prose - and the english stays
+ * the one wording the logs and issue bodies carry.
+ */
+function cookieJarProblemCode({ total, youtube, expired, hasSid, signedIn, loadError }) {
   // checked first: a jar yt-dlp refuses whole inspects as zero of everything,
   // and "no cookies imported" is the wrong thing to say about a file that is
   // sitting there full of them and taking every download down with it
-  if (loadError === JAR_DOMAIN_FLAG) {
-    return "that file is malformed, export a fresh one instead of editing it"
-  }
-
-  if (loadError) {
-    return "that isn't a cookies.txt file, export it again"
-  }
-
-  if (total === 0) {
-    return "nothing imported yet"
-  }
-
-  if (youtube === 0) {
-    return "no youtube cookies in that file"
-  }
+  if (loadError === JAR_DOMAIN_FLAG) return "JAR_MALFORMED"
+  if (loadError) return "JAR_NOT_COOKIE_FILE"
+  if (total === 0) return "JAR_NOTHING_IMPORTED"
+  if (youtube === 0) return "JAR_NO_YOUTUBE"
 
   // any expiry at all is worth saying so, rather than only a jar where every
   // last cookie is dead. an export whose login expired alongside a still-live
   // PREF used to fall through to "you were never signed in", which sends the
   // user to fix something that was never wrong
-  if (!signedIn && expired > 0) {
-    return "your cookies expired, grab a fresh export"
-  }
+  if (!signedIn && expired > 0) return "JAR_EXPIRED"
+  if (!signedIn) return hasSid ? "JAR_SESSION_ENDED" : "JAR_NEVER_SIGNED_IN"
 
-  if (!signedIn) {
-    return hasSid
-      ? "youtube ended this session, export your cookies again"
-      : "these cookies aren't from a signed-in session, sign in first then export"
-  }
+  return "JAR_UNUSABLE"
+}
 
-  return "no usable youtube cookies"
+function cookieJarProblem(inspection) {
+  return JAR_PROBLEMS[cookieJarProblemCode(inspection)]
 }
 
 /**
@@ -1203,7 +1201,11 @@ class IPCHandlers {
       // generic "Failed to import cookie file"
       return this.createError(
         error.message || "couldn't import that cookie file",
-        "export cookies.txt with a browser extension, then pick that file."
+        "export cookies.txt with a browser extension, then pick that file.",
+        // the manager's refusal code, so the renderer can say the same thing in
+        // russian. anything else - a full disk, a permission error - has none,
+        // and falls back to createError's placeholder
+        error.code || "GENERAL_ERROR"
       )
     }
   }
@@ -1226,13 +1228,15 @@ class IPCHandlers {
       const inspection = await this.cookieManager.inspectCookieFile()
 
       if (!inspection.usable) {
-        const note = cookieJarProblem(inspection)
+        const noteCode = cookieJarProblemCode(inspection)
+        const note = JAR_PROBLEMS[noteCode]
 
         await this.cookieManager.updateStatus({
           lastTest: new Date().toISOString(),
           cookiesLoaded: false,
           extractionCheck: "skipped",
-          note
+          note,
+          noteCode
         })
 
         return this.createSuccess({
@@ -1240,13 +1244,14 @@ class IPCHandlers {
           extractionCheck: "skipped",
           rejected: false,
           note,
+          noteCode,
           status: await this.cookieManager.getStatus(),
           hasValidCookies: false
         })
       }
 
       // probe with the cookie file forced on, so the result depends on it
-      const { extractionCheck, note } = await this.probeCookies(
+      const { extractionCheck, note, noteCode } = await this.probeCookies(
         this.cookieManager.getCookieFilePath()
       )
 
@@ -1254,7 +1259,8 @@ class IPCHandlers {
         lastTest: new Date().toISOString(),
         cookiesLoaded: true,
         extractionCheck,
-        note
+        note,
+        noteCode
       })
 
       return this.createSuccess({
@@ -1267,6 +1273,7 @@ class IPCHandlers {
         // turned them down
         rejected: extractionCheck === "rejected",
         note,
+        noteCode,
         status: await this.cookieManager.getStatus(),
         hasValidCookies: this.cookieManager.hasValidCookies()
       })
@@ -1283,8 +1290,13 @@ class IPCHandlers {
    * us nothing" rather than a verdict. anything else - a success, bot
    * detection, a network failure - is about the cookies, so it ends the walk.
    *
+   * every note carries a `noteCode` for the same reason the jar problems do:
+   * the renderer translates by code, and the english stays what the logs read.
+   * the codes: PROBE_PASSED, PROBE_EMPTY, PROBE_REJECTED, PROBE_UNREACHABLE,
+   * PROBE_FAILED, PROBE_TARGETS_DOWN.
+   *
    * @param {string|null} cookieFile - the jar to force on for the probe
-   * @returns {Promise<Object>} {extractionCheck, note}
+   * @returns {Promise<Object>} {extractionCheck, note, noteCode}
    */
   async probeCookies(cookieFile) {
     let deadTargets = 0
@@ -1296,12 +1308,14 @@ class IPCHandlers {
         if (info && info.title) {
           return {
             extractionCheck: "passed",
+            noteCode: "PROBE_PASSED",
             note: "the download path worked with your cookies attached. that alone doesn't prove youtube accepted them."
           }
         }
 
         return {
           extractionCheck: "unknown",
+          noteCode: "PROBE_EMPTY",
           note: "the test video came back with nothing."
         }
       } catch (probeError) {
@@ -1316,6 +1330,7 @@ class IPCHandlers {
         if (probeError.code === ERROR_CODES.BOT_DETECTION) {
           return {
             extractionCheck: "rejected",
+            noteCode: "PROBE_REJECTED",
             note: "youtube still asked us to prove we're not a bot while sending your cookies, so they're expired or not being accepted."
           }
         }
@@ -1323,12 +1338,14 @@ class IPCHandlers {
         if (probeError.code === ERROR_CODES.NETWORK_ERROR) {
           return {
             extractionCheck: "unknown",
+            noteCode: "PROBE_UNREACHABLE",
             note: "couldn't reach youtube, so the cookies went untested."
           }
         }
 
         return {
           extractionCheck: "unknown",
+          noteCode: "PROBE_FAILED",
           note: `the test couldn't finish: ${probeError.message}`
         }
       }
@@ -1336,6 +1353,7 @@ class IPCHandlers {
 
     return {
       extractionCheck: "unknown",
+      noteCode: "PROBE_TARGETS_DOWN",
       note: `all ${deadTargets} of our test videos are down right now, so this says nothing about your cookies.`
     }
   }
@@ -1346,26 +1364,28 @@ class IPCHandlers {
       const status = await this.cookieManager.getStatus()
       const fileInfo = await this.cookieManager.getFileInfo()
       const usable = this.cookieManager.hasValidCookies()
+      // the sentence rather than the ingredients: cookieJarProblem already
+      // knows which way a jar is unusable, and a second copy of that in the
+      // renderer is the drift the shared parser exists to prevent. an
+      // unreadable file reports zero of everything, which is the "nothing
+      // imported" branch and the right thing to say
+      const problemCode = usable
+        ? null
+        : cookieJarProblemCode({
+            total: fileInfo.cookieCount,
+            youtube: fileInfo.youtubeCookieCount || 0,
+            expired: fileInfo.expiredCookieCount || 0,
+            hasSid: fileInfo.hasSid,
+            signedIn: fileInfo.signedIn,
+            loadError: fileInfo.loadError ?? null
+          })
 
       return this.createSuccess({
         status,
         fileInfo,
         hasValidCookies: usable,
-        // the sentence rather than the ingredients: cookieJarProblem already
-        // knows which way a jar is unusable, and a second copy of that in the
-        // renderer is the drift the shared parser exists to prevent. an
-        // unreadable file reports zero of everything, which is the "nothing
-        // imported" branch and the right thing to say
-        problem: usable
-          ? null
-          : cookieJarProblem({
-              total: fileInfo.cookieCount,
-              youtube: fileInfo.youtubeCookieCount || 0,
-              expired: fileInfo.expiredCookieCount || 0,
-              hasSid: fileInfo.hasSid,
-              signedIn: fileInfo.signedIn,
-              loadError: fileInfo.loadError ?? null
-            })
+        problem: problemCode && JAR_PROBLEMS[problemCode],
+        problemCode
       })
     } catch (error) {
       console.error("Get cookie status failed:", error.message)
@@ -1701,3 +1721,4 @@ module.exports = IPCHandlers
 // the wrong sentence sends the user to fix the wrong thing, so it is worth a
 // test even though nothing else imports it
 module.exports.cookieJarProblem = cookieJarProblem
+module.exports.cookieJarProblemCode = cookieJarProblemCode

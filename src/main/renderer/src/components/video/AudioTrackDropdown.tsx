@@ -1,5 +1,6 @@
 import type { AudioTrack } from "@/lib/api"
 import { languageName } from "@/lib/api"
+import { useT } from "@/lib/i18n"
 import { useYouTubeStore } from "@/lib/youtubeStore"
 import { Languages } from "lucide-react"
 import { useEffect } from "react"
@@ -23,6 +24,7 @@ export function AudioTrackDropdown({
   className
 }: AudioTrackDropdownProps) {
   const { selectedAudioLanguage, setSelectedAudioLanguage } = useYouTubeStore()
+  const t = useT()
 
   const hasChoice = tracks.length > 1
 
@@ -52,14 +54,16 @@ export function AudioTrackDropdown({
   return (
     <SelectionDropdown
       icon={Languages}
-      heading="Audio Language"
-      placeholder="Select audio language..."
+      heading={t("dropdown.audioLanguage")}
+      placeholder={t("dropdown.audioLanguagePlaceholder")}
       options={tracks}
       selected={selected}
       onSelect={(track) => setSelectedAudioLanguage(track.code)}
       optionKey={(track) => track.code}
       renderLabel={(track) => languageName(track.code)}
-      renderDetail={(track) => (track.is_original ? "Original" : null)}
+      renderDetail={(track) =>
+        track.is_original ? t("dropdown.original") : null
+      }
       className={className}
     />
   )

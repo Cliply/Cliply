@@ -7,10 +7,13 @@
 // chrome and is the only pre-emptive one, so it is worth a test that it still
 // opens the thing it advertises.
 
-import { cleanup, render, screen } from "@testing-library/react"
+import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
 
 import { useCookieStore } from "@/lib/cookieStore"
+import { en } from "@/lib/i18n/en"
+import { ru } from "@/lib/i18n/ru"
+import { useLocale } from "@/lib/i18n"
 
 vi.mock("@/lib/api", () => ({
   updaterApi: { checkForUpdates: vi.fn() },
@@ -120,5 +123,46 @@ describe("the menu", () => {
     expect(hrefs.github).toBe("https://github.com/Cliply/Cliply/")
     // the label changed, the route did not
     expect(hrefs.about).toBe("/disclaimer")
+  })
+})
+
+// every test above renders english, because jsdom reports en-US and that is
+// what an english user still sees. this is the other half
+describe("in russian", () => {
+  afterEach(() => useLocale.setState({ locale: "en" }))
+
+  const pressed = () => ({
+    en: screen.getByText("en").getAttribute("aria-pressed"),
+    ru: screen.getByText("ru").getAttribute("aria-pressed")
+  })
+
+  test("the hero speaks it when the machine already does", async () => {
+    useLocale.setState({ locale: "ru" })
+    const { HeroSection } = await import("./HeroSection")
+    render(<HeroSection />)
+
+    expect(screen.getByText(new RegExp(ru["hero.tagline"]))).toBeTruthy()
+    expect(pressed()).toEqual({ en: "false", ru: "true" })
+  })
+
+  // clicked rather than pre-set, and in both directions: setting the store
+  // before the first render would still pass with `useT`'s subscription torn
+  // out, or with the toggle wired to nothing
+  test("the toggle switches a mounted hero, and switches it back", async () => {
+    const { HeroSection } = await import("./HeroSection")
+    render(<HeroSection />)
+
+    expect(screen.getByText(new RegExp(en["hero.tagline"]))).toBeTruthy()
+
+    fireEvent.click(screen.getByText("ru"))
+
+    expect(screen.getByText(new RegExp(ru["hero.tagline"]))).toBeTruthy()
+    expect(screen.queryByText(new RegExp(en["hero.tagline"]))).toBeNull()
+    expect(pressed()).toEqual({ en: "false", ru: "true" })
+
+    fireEvent.click(screen.getByText("en"))
+
+    expect(screen.getByText(new RegExp(en["hero.tagline"]))).toBeTruthy()
+    expect(pressed()).toEqual({ en: "true", ru: "false" })
   })
 })

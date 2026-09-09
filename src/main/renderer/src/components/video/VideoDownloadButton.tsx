@@ -11,6 +11,7 @@ import {
   validateTimeRange
 } from "@/lib/api"
 import { useVideoDownload } from "@/lib/hooks/useVideoDownload"
+import { useT } from "@/lib/i18n"
 import { useYouTubeStore } from "@/lib/youtubeStore"
 import { isTerminalReason } from "@/lib/downloadOutcome"
 import { cn } from "@/lib/utils"
@@ -41,6 +42,7 @@ export function VideoDownloadButton({
   } = useYouTubeStore()
 
   const videoDownloadMutation = useVideoDownload()
+  const t = useT()
 
   const selectedDuration = videoTimeRange.end - videoTimeRange.start
 
@@ -117,7 +119,7 @@ export function VideoDownloadButton({
             <div className="flex items-center gap-2">
               <Video className="h-4 w-4 text-slate-500 dark:text-slate-500" />
               <span className="text-sm text-slate-600 dark:text-slate-400">
-                Video Quality:
+                {t("card.videoQuality")}
               </span>
             </div>
             <span className="font-medium text-slate-900 dark:text-white">
@@ -131,13 +133,13 @@ export function VideoDownloadButton({
             <div className="flex items-center gap-2">
               <Headphones className="h-4 w-4 text-slate-500 dark:text-slate-500" />
               <span className="text-sm text-slate-600 dark:text-slate-400">
-                Audio Track:
+                {t("card.audioTrack")}
               </span>
             </div>
             <span className="font-medium text-slate-900 dark:text-white">
               {selectedAudioLanguage
                 ? languageName(selectedAudioLanguage)
-                : "Best available"}
+                : t("card.bestAvailable")}
             </span>
           </div>
 
@@ -146,7 +148,7 @@ export function VideoDownloadButton({
           {!isSegmentDownload && selectedTier.filesize && (
             <div className="flex items-center justify-between">
               <span className="text-sm text-slate-600 dark:text-slate-400">
-                Size:
+                {t("card.size")}
               </span>
               <span className="font-medium text-slate-900 dark:text-white">
                 {formatFileSize(selectedTier.filesize)}
@@ -157,7 +159,7 @@ export function VideoDownloadButton({
           {/* Duration */}
           <div className="flex items-center justify-between">
             <span className="text-sm text-slate-600 dark:text-slate-400">
-              Duration:
+              {t("card.duration")}
             </span>
             <span className="font-medium text-slate-900 dark:text-white">
               {formatDuration(selectedDuration)}
@@ -167,7 +169,7 @@ export function VideoDownloadButton({
           {/* Time Range */}
           <div className="flex items-center justify-between">
             <span className="text-sm text-slate-600 dark:text-slate-400">
-              Time Range:
+              {t("card.timeRange")}
             </span>
             <span className="font-medium text-slate-900 dark:text-white">
               {Math.floor(videoTimeRange.start / 60)}:
@@ -183,7 +185,7 @@ export function VideoDownloadButton({
               <div className="flex items-center gap-2">
                 <Scissors className="h-4 w-4 text-slate-500 dark:text-slate-500" />
                 <span className="text-sm text-slate-600 dark:text-slate-400">
-                  Precise Cut:
+                  {t("card.preciseCut")}
                 </span>
               </div>
               <Tooltip>
@@ -199,11 +201,11 @@ export function VideoDownloadButton({
                         : "hover:bg-slate-100 dark:hover:bg-slate-700"
                     )}
                   >
-                    {videoPreciseCut ? "Enabled" : "Disabled"}
+                    {videoPreciseCut ? t("card.enabled") : t("card.disabled")}
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent side="left">
-                  <p>Turn off for faster download but less precise cuts</p>
+                  <p>{t("card.preciseCutHint")}</p>
                 </TooltipContent>
               </Tooltip>
             </div>
@@ -224,10 +226,10 @@ export function VideoDownloadButton({
       >
         {videoDownloadMutation.isPending ? (
           <>
-            <span className="animate-pulse">Downloading...</span>
+            <span className="animate-pulse">{t("download.inProgress")}</span>
           </>
         ) : (
-          "Download Video"
+          t("download.video")
         )}
       </Button>
 
@@ -235,7 +237,7 @@ export function VideoDownloadButton({
       {videoDownloadMutation.isPending && (
         <DownloadProgressBar
           state={videoDownloadMutation.downloadState}
-          label="video"
+          label={t("media.video")}
           onCancel={videoDownloadMutation.cancelDownload}
         />
       )}
@@ -243,7 +245,7 @@ export function VideoDownloadButton({
       {/* Helper Text */}
       {!videoDownloadMutation.isPending && (
         <div className="text-xs text-slate-500 dark:text-slate-500 text-center">
-          Video and audio will be merged automatically
+          {t("download.mergeHint")}
         </div>
       )}
     </motion.div>

@@ -6,9 +6,11 @@ import { useTheme } from "next-themes"
 import * as React from "react"
 
 import { Button } from "@/components/ui/button"
+import { useT } from "@/lib/i18n"
 import { cn } from "@/lib/utils"
 
 export function ModeToggle() {
+  const t = useT()
   // resolvedTheme rather than theme: they are the same now that system is off,
   // but an install carrying a stored "system" from an older build would still
   // make theme === "dark" false while rendering dark, and the icon would lie
@@ -61,7 +63,7 @@ export function ModeToggle() {
             <Moon className="h-5 w-5 text-slate-700 dark:text-slate-300" />
           )}
         </motion.div>
-        <span className="sr-only">Toggle theme</span>
+        <span className="sr-only">{t("theme.toggle")}</span>
       </Button>
     </motion.div>
   )

@@ -1,4 +1,5 @@
 import { updaterApi, type UpdateInfo, type UpdateProgress } from "@/lib/api"
+import { useT } from "@/lib/i18n"
 import { cn } from "@/lib/utils"
 import { motion } from "framer-motion"
 import React, { useEffect, useState } from "react"
@@ -32,6 +33,7 @@ export const UpdateNotification: React.FC<UpdateNotificationProps> = ({
   onUpdateDownloaded,
   showInlineCard = false
 }) => {
+  const t = useT()
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null)
   const [downloadProgress, setDownloadProgress] =
     useState<UpdateProgress | null>(null)
@@ -55,10 +57,10 @@ export const UpdateNotification: React.FC<UpdateNotificationProps> = ({
       if (info.requiresManualDownload) {
         // macOS: Show manual download dialog
         setShowUpdateDialog(true)
-        toast.success("Update Available", {
-          description: `Version ${info.version} requires manual download on Mac`,
+        toast.success(t("update.available"), {
+          description: t("update.macManual", { version: info.version }),
           action: {
-            label: "Download",
+            label: t("update.download"),
             onClick: () =>
               window.open(
                 `https://github.com/Cliply/Cliply/releases/latest`,
@@ -69,17 +71,17 @@ export const UpdateNotification: React.FC<UpdateNotificationProps> = ({
         })
       } else if (info.autoDownloading) {
         // Auto-downloading - only show toast, no dialog
-        toast.success("Update Downloading", {
-          description: `Version ${info.version} is downloading automatically in the background`,
+        toast.success(t("update.downloadingTitle"), {
+          description: t("update.autoDownloading", { version: info.version }),
           duration: 5000
         })
       } else {
         // Manual download - show dialog and toast
         setShowUpdateDialog(true)
-        toast.success("Update Available", {
-          description: `Version ${info.version} is ready to download`,
+        toast.success(t("update.available"), {
+          description: t("update.readyToDownload", { version: info.version }),
           action: {
-            label: "Download",
+            label: t("update.download"),
             onClick: () => handleDownloadUpdate()
           },
           duration: 10000
@@ -95,8 +97,8 @@ export const UpdateNotification: React.FC<UpdateNotificationProps> = ({
       () => {
         console.log("App is up to date")
         toast.dismiss("update-check") // Dismiss the checking toast
-        toast.success("App is up to date", {
-          description: "You're running the latest version",
+        toast.success(t("update.upToDate"), {
+          description: t("update.upToDateDesc"),
           duration: 3000
         })
       }
@@ -113,12 +115,12 @@ export const UpdateNotification: React.FC<UpdateNotificationProps> = ({
         // Show progress toast every 10% or if it's the first progress update
         if (progress.percent % 10 === 0 || progress.percent < 5) {
           toast.loading(
-            `Downloading Update: ${Math.round(progress.percent)}%`,
+            t("update.progress", { percent: Math.round(progress.percent) }),
             {
               id: "update-progress",
               description: progress.bytesPerSecond
                 ? `${Math.round(progress.bytesPerSecond / 1024)} KB/s`
-                : "Downloading in background..."
+                : t("update.inBackground")
             }
           )
         }
@@ -140,10 +142,10 @@ export const UpdateNotification: React.FC<UpdateNotificationProps> = ({
         // All updates now use simple auto-install on quit
         setShowInstallDialog(true)
 
-        toast.success("Update Ready to Install!", {
-          description: `Version ${info.version} has been downloaded successfully. It will install when you close the app.`,
+        toast.success(t("update.readyToInstallToast"), {
+          description: t("update.downloadedDesc", { version: info.version }),
           action: {
-            label: "Install Now",
+            label: t("update.installNow"),
             onClick: () => handleInstallUpdate()
           },
           duration: 0 // Keep open until dismissed
@@ -157,7 +159,7 @@ export const UpdateNotification: React.FC<UpdateNotificationProps> = ({
     // Update checking
     const unsubscribeChecking = updaterApi.events.onUpdateChecking(() => {
       console.log("Checking for updates...")
-      toast.loading("Checking for updates...", {
+      toast.loading(t("update.checking"), {
         id: "update-check"
       })
     })
@@ -170,7 +172,7 @@ export const UpdateNotification: React.FC<UpdateNotificationProps> = ({
       setIsDownloading(false)
 
       toast.dismiss("update-check")
-      toast.error("Update Error", {
+      toast.error(t("update.error"), {
         description: error.message,
         duration: 5000
       })
@@ -187,31 +189,28 @@ export const UpdateNotification: React.FC<UpdateNotificationProps> = ({
       setShowUpdateDialog(false)
       setError(null)
 
-      toast.loading("Preparing download...", {
+      toast.loading(t("update.preparing"), {
         id: "update-download",
-        description: "Initializing update download"
+        description: t("update.preparingDesc")
       })
 
       await updaterApi.downloadUpdate()
 
       toast.dismiss("update-download")
-      toast.success("Download Started", {
-        description:
-          "Update is downloading in the background. You can continue using the app.",
+      toast.success(t("update.started"), {
+        description: t("update.startedDesc"),
         duration: 4000
       })
     } catch (error) {
       console.error("Failed to download update:", error)
       setError(
-        error instanceof Error ? error.message : "Failed to download update"
+        error instanceof Error ? error.message : t("update.downloadFailedDesc")
       )
 
       toast.dismiss("update-download")
-      toast.error("Download Failed", {
+      toast.error(t("update.downloadFailed"), {
         description:
-          error instanceof Error
-            ? error.message
-            : "Please try again or check your internet connection"
+          error instanceof Error ? error.message : t("update.checkConnection")
       })
     }
   }
@@ -220,19 +219,19 @@ export const UpdateNotification: React.FC<UpdateNotificationProps> = ({
     try {
       setShowInstallDialog(false)
 
-      toast.loading("Installing Update", {
-        description: "The app will close and reopen with the new version",
+      toast.loading(t("update.installing"), {
+        description: t("update.installingDesc"),
         duration: 0
       })
 
       await updaterApi.installUpdate()
     } catch (error) {
       console.error("Failed to install update:", error)
-      toast.error("Installation Failed", {
+      toast.error(t("update.installFailed"), {
         description:
           error instanceof Error
             ? error.message
-            : "Please try downloading the update again",
+            : t("update.installFailedDesc"),
         duration: 6000
       })
     }
@@ -243,16 +242,19 @@ export const UpdateNotification: React.FC<UpdateNotificationProps> = ({
       await updaterApi.checkForUpdates()
     } catch (error) {
       console.error("Failed to check for updates:", error)
-      toast.error("Check Failed", {
+      // the same failure the hero's own check reports, in the same words
+      toast.error(t("hero.updateCheckFailed"), {
         description:
-          error instanceof Error ? error.message : "Failed to check for updates"
+          error instanceof Error
+            ? error.message
+            : t("hero.updateCheckFailedBody")
       })
     }
   }
 
   const handleForceSecurityCheck = async () => {
     try {
-      toast.loading("Checking for updates...", {
+      toast.loading(t("update.checking"), {
         id: "update-check"
       })
 
@@ -264,9 +266,11 @@ export const UpdateNotification: React.FC<UpdateNotificationProps> = ({
     } catch (error) {
       console.error("Failed to check for updates:", error)
       toast.dismiss("update-check")
-      toast.error("Check Failed", {
+      toast.error(t("hero.updateCheckFailed"), {
         description:
-          error instanceof Error ? error.message : "Failed to check for updates"
+          error instanceof Error
+            ? error.message
+            : t("hero.updateCheckFailedBody")
       })
     }
   }
@@ -299,11 +303,13 @@ export const UpdateNotification: React.FC<UpdateNotificationProps> = ({
                 </div>
                 <div>
                   <div className="font-medium text-slate-900 dark:text-white">
-                    Downloading Update
+                    {t("update.cardDownloading")}
                   </div>
                   <CardDescription className="text-xs text-slate-600 dark:text-slate-400">
-                    Version {updateInfo?.version} • {downloadProgress.percent}%
-                    complete
+                    {t("update.cardProgress", {
+                      version: updateInfo?.version ?? "",
+                      percent: downloadProgress.percent
+                    })}
                   </CardDescription>
                 </div>
               </CardTitle>
@@ -345,10 +351,12 @@ export const UpdateNotification: React.FC<UpdateNotificationProps> = ({
                 </div>
                 <div>
                   <div className="font-medium text-slate-900 dark:text-white">
-                    Update Ready
+                    {t("update.cardReady")}
                   </div>
                   <CardDescription className="text-xs text-slate-600 dark:text-slate-400">
-                    Version {updateInfo?.version} is ready to install
+                    {t("update.cardReadyDesc", {
+                      version: updateInfo?.version ?? ""
+                    })}
                   </CardDescription>
                 </div>
               </CardTitle>
@@ -359,7 +367,7 @@ export const UpdateNotification: React.FC<UpdateNotificationProps> = ({
                 size="sm"
                 className="w-full bg-cyan-600 hover:bg-cyan-700 text-white border-2 border-cyan-600 hover:border-cyan-700 transition-all duration-200"
               >
-                Install & Restart
+                {t("update.installRestart")}
               </Button>
             </CardContent>
           </Card>
@@ -391,7 +399,7 @@ export const UpdateNotification: React.FC<UpdateNotificationProps> = ({
                 </div>
                 <div>
                   <div className="font-medium text-slate-900 dark:text-white">
-                    Update Error
+                    {t("update.error")}
                   </div>
                   <CardDescription className="text-xs text-slate-600 dark:text-slate-400">
                     {error}
@@ -406,7 +414,7 @@ export const UpdateNotification: React.FC<UpdateNotificationProps> = ({
                 variant="outline"
                 className="w-full"
               >
-                Try Again
+                {t("update.tryAgain")}
               </Button>
               <Button
                 onClick={handleForceSecurityCheck}
@@ -414,7 +422,7 @@ export const UpdateNotification: React.FC<UpdateNotificationProps> = ({
                 variant="outline"
                 className="w-full"
               >
-                Check for Important Updates
+                {t("update.importantUpdates")}
               </Button>
             </CardContent>
           </Card>
@@ -448,12 +456,12 @@ export const UpdateNotification: React.FC<UpdateNotificationProps> = ({
                 </div>
                 <div>
                   <DialogTitle className="text-left">
-                    Update Available
+                    {t("update.available")}
                   </DialogTitle>
                   <DialogDescription className="text-left">
                     {updateInfo?.requiresManualDownload
-                      ? "We can't auto-update on Mac. Click 'Learn Why' to find out more."
-                      : "A new version of Cliply is available."}
+                      ? t("update.macDesc")
+                      : t("update.newVersion")}
                   </DialogDescription>
                 </div>
               </div>
@@ -463,12 +471,15 @@ export const UpdateNotification: React.FC<UpdateNotificationProps> = ({
               <div className="text-center py-6">
                 <div className="rounded-lg bg-slate-100/80 dark:bg-slate-700/50 p-4">
                   <h4 className="font-medium text-slate-900 dark:text-white">
-                    Version {updateInfo.version}
+                    {t("update.version", { version: updateInfo.version })}
                   </h4>
                   {updateInfo.releaseDate && (
                     <p className="text-sm text-slate-600 dark:text-slate-400 mt-1">
-                      Released{" "}
-                      {new Date(updateInfo.releaseDate).toLocaleDateString()}
+                      {t("update.released", {
+                        date: new Date(
+                          updateInfo.releaseDate
+                        ).toLocaleDateString()
+                      })}
                     </p>
                   )}
                 </div>
@@ -485,7 +496,7 @@ export const UpdateNotification: React.FC<UpdateNotificationProps> = ({
                   onClick={() => setShowUpdateDialog(false)}
                   className="w-full sm:w-auto"
                 >
-                  Later
+                  {t("update.later")}
                 </Button>
                 <Button
                   onClick={() =>
@@ -497,7 +508,7 @@ export const UpdateNotification: React.FC<UpdateNotificationProps> = ({
                   variant="outline"
                   className="w-full sm:w-auto"
                 >
-                  Learn Why
+                  {t("update.learnWhy")}
                 </Button>
                 <Button
                   onClick={() =>
@@ -508,7 +519,7 @@ export const UpdateNotification: React.FC<UpdateNotificationProps> = ({
                   }
                   className="w-full sm:w-auto bg-cyan-600 hover:bg-cyan-700 text-white border-2 border-cyan-600 hover:border-cyan-700 transition-all duration-200"
                 >
-                  Download from GitHub
+                  {t("update.downloadFromGithub")}
                 </Button>
               </>
             ) : (
@@ -519,13 +530,13 @@ export const UpdateNotification: React.FC<UpdateNotificationProps> = ({
                   onClick={() => setShowUpdateDialog(false)}
                   className="w-full sm:w-auto"
                 >
-                  Later
+                  {t("update.later")}
                 </Button>
                 <Button
                   onClick={handleDownloadUpdate}
                   className="w-full sm:w-auto bg-cyan-600 hover:bg-cyan-700 text-white border-2 border-cyan-600 hover:border-cyan-700 transition-all duration-200"
                 >
-                  Download Update
+                  {t("update.downloadUpdate")}
                 </Button>
               </>
             )}
@@ -552,11 +563,10 @@ export const UpdateNotification: React.FC<UpdateNotificationProps> = ({
                 </div>
                 <div>
                   <DialogTitle className="text-left">
-                    Update Ready to Install
+                    {t("update.readyToInstall")}
                   </DialogTitle>
                   <DialogDescription className="text-left">
-                    The update has been downloaded and is ready to install. The
-                    app will restart automatically.
+                    {t("update.readyToInstallDesc")}
                   </DialogDescription>
                 </div>
               </div>
@@ -566,10 +576,10 @@ export const UpdateNotification: React.FC<UpdateNotificationProps> = ({
               <div className="text-center py-6">
                 <div className="rounded-lg bg-slate-100/80 dark:bg-slate-700/50 p-4">
                   <h4 className="font-medium text-slate-900 dark:text-white">
-                    Version {updateInfo.version}
+                    {t("update.version", { version: updateInfo.version })}
                   </h4>
                   <p className="text-sm text-slate-600 dark:text-slate-400 mt-1">
-                    Ready to install when you're ready
+                    {t("update.whenReady")}
                   </p>
                 </div>
               </div>
@@ -582,13 +592,13 @@ export const UpdateNotification: React.FC<UpdateNotificationProps> = ({
               onClick={() => setShowInstallDialog(false)}
               className="w-full sm:w-auto"
             >
-              Later
+              {t("update.later")}
             </Button>
             <Button
               onClick={handleInstallUpdate}
               className="w-full sm:w-auto bg-cyan-600 hover:bg-cyan-700 text-white border-2 border-cyan-600 hover:border-cyan-700 transition-all duration-200"
             >
-              Install & Restart
+              {t("update.installRestart")}
             </Button>
           </DialogFooter>
         </DialogContent>

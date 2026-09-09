@@ -14,6 +14,7 @@ const openReport = vi.fn()
 vi.mock("@/lib/cookieStore", () => ({ cookieActions: { open: () => openCookies() } }))
 vi.mock("@/lib/reportStore", () => ({ reportActions: { open: () => openReport() } }))
 
+import { useLocale } from "@/lib/i18n"
 import { showBotDetectionToast, showDownloadErrorToast } from "@/lib/toast-utils"
 
 function actionOf(call: number = 0) {
@@ -27,6 +28,7 @@ beforeEach(() => {
   toastError.mockClear()
   openCookies.mockClear()
   openReport.mockClear()
+  useLocale.setState({ locale: "en" })
 })
 
 describe("showDownloadErrorToast", () => {
@@ -111,4 +113,23 @@ describe("showBotDetectionToast", () => {
       expect(openCookies).not.toHaveBeenCalled()
     }
   )
+
+  /**
+   * the toast a blocked russian user reads, which is the walk this whole
+   * translation exists for. The title is main's own sentence, localized at the
+   * call site before it reaches here; the description and the way out are ours.
+   */
+  test("speaks russian, and still offers the cookie door", () => {
+    useLocale.setState({ locale: "ru" })
+
+    showBotDetectionToast("YouTube просит подтвердить, что вы не бот.", "youtube")
+
+    expect(toastError.mock.calls[0][1].description).toBe(
+      "обычно помогает вход через запасной аккаунт."
+    )
+    expect(actionOf().label).toBe("исправить через cookies")
+
+    actionOf().onClick()
+    expect(openCookies).toHaveBeenCalled()
+  })
 })

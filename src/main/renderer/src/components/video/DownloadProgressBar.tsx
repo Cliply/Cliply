@@ -8,6 +8,7 @@ import {
   ProgressBarTrack,
   ProgressBarValue
 } from "@/components/ui/progress-bar"
+import { useT } from "@/lib/i18n"
 import { cn } from "@/lib/utils"
 
 interface DownloadProgressBarState {
@@ -21,6 +22,7 @@ interface DownloadProgressBarState {
 
 interface DownloadProgressBarProps {
   state: DownloadProgressBarState
+  /** the media noun, already translated - "video", "аудио" */
   label: string
   className?: string
   /** omit to render progress without a stop control */
@@ -40,13 +42,14 @@ export function DownloadProgressBar({
   className,
   onCancel
 }: DownloadProgressBarProps) {
+  const t = useT()
   const isStarting = state.status === "starting"
   const isIndeterminate = state.indeterminate || isStarting
 
   const meta = isIndeterminate
     ? isStarting
-      ? "Starting up"
-      : "Progress isn't reported while trimming"
+      ? t("progress.startingUp")
+      : t("progress.trimming")
     : [state.speed, state.eta && `ETA ${state.eta}`].filter(Boolean).join("  ·  ")
 
   return (
@@ -57,7 +60,9 @@ export function DownloadProgressBar({
     >
       <ProgressBarHeader>
         <ProgressBarLabel>
-          {isIndeterminate ? `Processing ${label}` : `Downloading ${label}`}
+          {isIndeterminate
+            ? t("progress.processing", { label })
+            : t("progress.downloading", { label })}
         </ProgressBarLabel>
         <ProgressBarValue />
       </ProgressBarHeader>
@@ -84,12 +89,14 @@ function StopButton({
   onCancel: () => void
   disabled: boolean
 }) {
+  const t = useT()
+
   return (
     <button
       type="button"
       onClick={onCancel}
       disabled={disabled}
-      title={disabled ? "Starting up" : "Stop this download"}
+      title={disabled ? t("progress.startingUp") : t("progress.stopTitle")}
       className={cn(
         "-my-0.5 flex shrink-0 items-center gap-1 rounded-lg border px-2 py-0.5",
         "font-mono text-[11px] leading-4 transition-colors duration-200 ease-out",
@@ -103,7 +110,7 @@ function StopButton({
       )}
     >
       <X className="h-3 w-3" />
-      Stop
+      {t("progress.stop")}
     </button>
   )
 }

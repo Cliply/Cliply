@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { toast } from "sonner"
 import { Check, Cookie, Copy, KeyRound } from "lucide-react"
-import { cookiesApi, systemApi, type CookieStatus } from "@/lib/api"
+import { CookieError, cookiesApi, systemApi, type CookieStatus } from "@/lib/api"
 import { useCookieStore } from "@/lib/cookieStore"
+import { localizeCode, t, useLocale } from "@/lib/i18n"
 import {
   Dialog,
   DialogContent,
@@ -19,8 +20,10 @@ import { cn } from "@/lib/utils"
 // than a shortcut
 const CHROME_EXTENSION =
   "https://chromewebstore.google.com/detail/get-cookiestxt-locally/cclelndahbckbenkjhflpdbgdldlbecc"
-const FIREFOX_EXTENSION =
-  "https://addons.mozilla.org/en-US/firefox/addon/cookies-txt/"
+// the chrome store localizes itself from the account; addons.mozilla.org takes
+// the language in the path and would otherwise land a russian reader on english
+const FIREFOX_EXTENSION = (locale: string) =>
+  `https://addons.mozilla.org/${locale === "ru" ? "ru" : "en-US"}/firefox/addon/cookies-txt/`
 const YTDLP_COOKIE_GUIDE =
   "https://github.com/yt-dlp/yt-dlp/wiki/Extractors#exporting-youtube-cookies"
 
@@ -41,13 +44,15 @@ function daysAgo(iso?: string | null): string | null {
   if (!Number.isFinite(then)) return null
 
   const days = Math.floor((Date.now() - then) / 86_400_000)
-  if (days <= 0) return "imported today"
-  if (days === 1) return "imported yesterday"
+  if (days <= 0) return t("cookies.importedToday")
+  if (days === 1) return t("cookies.importedYesterday")
 
-  return `imported ${days} days ago`
+  return t("cookies.importedDaysAgo", { n: days })
 }
 
 export function CookieDialog() {
+  // also the re-render when the locale flips, which every t() below needs
+  const locale = useLocale((s) => s.locale)
   const { isOpen, close } = useCookieStore()
   const [status, setStatus] = useState<CookieStatus | null>(null)
   const [busy, setBusy] = useState<"import" | "test" | "clear" | null>(null)
@@ -98,22 +103,29 @@ export function CookieDialog() {
         const next = await refresh()
 
         if (result.hasValidCookies) {
-          toast.success("cookies imported", {
-            description: "youtube will see you as signed in from now on."
+          toast.success(t("cookies.imported"), {
+            description: t("cookies.importedDesc")
           })
         } else {
           // an import that lands but is not a login used to say nothing at all,
           // which reads as the button doing nothing. main already worked out
           // which way it fell short
-          toast.warning("imported, but not signed in", {
-            description: next?.problem ?? "these cookies won't sign you in."
+          toast.warning(t("cookies.notSignedIn"), {
+            description: next?.problem
+              ? localizeCode(next.problemCode, next.problem)
+              : t("cookies.notSignedInDesc")
           })
         }
       }
     } catch (error) {
-      toast.error("couldn't import that file", {
+      toast.error(t("cookies.importFailed"), {
         description:
-          error instanceof Error ? error.message : "couldn't import cookies"
+          error instanceof Error
+            ? localizeCode(
+                error instanceof CookieError ? error.code : null,
+                error.message
+              )
+            : t("cookies.importFailedDesc")
       })
     } finally {
       setBusy(null)
@@ -129,17 +141,17 @@ export function CookieDialog() {
       // three outcomes, not two. titling this off cookiesLoaded alone put
       // "Cookies look fine" above a description explaining that YouTube had
       // just refused them
+      const note = localizeCode(result.noteCode, result.note)
+
       if (result.rejected) {
-        toast.warning("youtube turned these down", {
-          description: result.note
-        })
+        toast.warning(t("cookies.turnedDown"), { description: note })
       } else {
-        toast(result.cookiesLoaded ? "cookies look fine" : "cookies aren't usable", {
-          description: result.note
+        toast(t(result.cookiesLoaded ? "cookies.lookFine" : "cookies.notUsable"), {
+          description: note
         })
       }
     } catch (error) {
-      toast.error("couldn't test the cookies", {
+      toast.error(t("cookies.testFailed"), {
         description: error instanceof Error ? error.message : undefined
       })
     } finally {
@@ -155,11 +167,9 @@ export function CookieDialog() {
     } catch (error) {
       // a failure here means the jar is still on disk, which is the opposite
       // of what the screen would otherwise go on to show
-      toast.error("couldn't remove the cookies", {
+      toast.error(t("cookies.removeFailed"), {
         description:
-          error instanceof Error
-            ? error.message
-            : "they're still on this machine."
+          error instanceof Error ? error.message : t("cookies.removeFailedDesc")
       })
       await refresh()
     } finally {
@@ -179,8 +189,8 @@ export function CookieDialog() {
       window.setTimeout(() => setCopied(false), 1600)
     } catch {
       // clipboard is best-effort, and the address is on screen to type
-      toast.error("couldn't copy that", {
-        description: "type youtube.com/robots.txt into that tab instead."
+      toast.error(t("cookies.copyFailed"), {
+        description: t("cookies.copyFailedDesc")
       })
     }
   }
@@ -207,13 +217,11 @@ export function CookieDialog() {
               <Cookie className="h-4 w-4" />
             </span>
             <DialogTitle className="text-slate-900 dark:text-white">
-              youtube cookies
+              {t("cookies.title")}
             </DialogTitle>
           </div>
           <DialogDescription className="text-slate-500 dark:text-slate-400">
-            youtube sometimes decides this machine looks like a bot, usually
-            because of your network rather than anything you did. a cookie file
-            from your own browser is how you tell it otherwise.
+            {t("cookies.description")}
           </DialogDescription>
         </DialogHeader>
 
@@ -224,17 +232,15 @@ export function CookieDialog() {
           <KeyRound className="mt-0.5 h-3.5 w-3.5 shrink-0 text-cyan-600 dark:text-cyan-400" />
           <div className="space-y-1">
             <p className="text-slate-600 dark:text-slate-300">
-              you sign in to youtube in your own browser, never to cliply.
-              everything stays on this device, we never upload any of it, and
-              you can delete it whenever you want.
+              {t("cookies.privacy")}
             </p>
             {/* borrowed credibility. "some app wants my youtube session" is a
                 reasonable thing to balk at, and the answer is that this is the
                 documented way the tool underneath asks for them */}
             <p className="text-xs text-slate-400 dark:text-slate-500">
-              it&apos;s the standard process yt-dlp recommends.{" "}
+              {t("cookies.ytdlpCredit")}{" "}
               <button className={linkClass} onClick={openLink(YTDLP_COOKIE_GUIDE)}>
-                read their guide
+                {t("cookies.readGuide")}
               </button>
             </p>
           </div>
@@ -259,10 +265,12 @@ export function CookieDialog() {
             )}
             <span className="text-slate-700 dark:text-slate-200">
               {signedIn
-                ? `signed in · ${status?.fileInfo.youtubeCookieCount ?? 0} cookies`
+                ? `${t("cookies.signedIn")} · ${t("cookies.count", {
+                    n: status?.fileInfo.youtubeCookieCount ?? 0
+                  })}`
                 : untouched
-                  ? "here's how to import them"
-                  : status?.problem}
+                  ? t("cookies.howTo")
+                  : localizeCode(status?.problemCode, status?.problem ?? "")}
             </span>
             {imported && daysAgo(status?.status?.lastImport) && (
               <span className="ml-auto shrink-0 text-xs text-slate-400 dark:text-slate-500">
@@ -276,12 +284,13 @@ export function CookieDialog() {
               that an import ever happened. that reads as "it deleted them" */}
           {imported && !signedIn && (
             <p className="text-sm text-slate-600 dark:text-slate-300">
-              your file is still here
+              {t("cookies.stillHere")}
               {status?.fileInfo.youtubeCookieCount
-                ? ` (${status.fileInfo.youtubeCookieCount} cookies)`
+                ? ` (${t("cookies.count", {
+                    n: status.fileInfo.youtubeCookieCount
+                  })})`
                 : ""}
-              , it just stopped working. nothing got deleted. grab a fresh
-              export and import it over the top.
+              {t("cookies.stillHereRest")}
             </p>
           )}
 
@@ -296,29 +305,26 @@ export function CookieDialog() {
                   which account to use */}
               <ol className="space-y-3 text-sm">
                 <Step n={1}>
-                  install{" "}
+                  {t("cookies.step1")}{" "}
                   <button className={linkClass} onClick={openLink(CHROME_EXTENSION)}>
                     get cookies.txt LOCALLY
                   </button>{" "}
-                  (chrome) or{" "}
-                  <button className={linkClass} onClick={openLink(FIREFOX_EXTENSION)}>
+                  {t("cookies.step1or")}{" "}
+                  <button
+                    className={linkClass}
+                    onClick={openLink(FIREFOX_EXTENSION(locale))}
+                  >
                     cookies.txt
                   </button>{" "}
-                  (firefox)
+                  {t("cookies.step1firefox")}
                 </Step>
 
-                <Step
-                  n={2}
-                  note="use a spare account if you have one. youtube has been known to ban accounts it catches using downloaders."
-                >
-                  open youtube in your browser and sign in
+                <Step n={2} note={t("cookies.step2note")}>
+                  {t("cookies.step2")}
                 </Step>
 
-                <Step
-                  n={3}
-                  note="parks the tab somewhere youtube isn't handing out fresh cookies."
-                >
-                  in that same tab, go to{" "}
+                <Step n={3} note={t("cookies.step3note")}>
+                  {t("cookies.step3")}{" "}
                   <button
                     onClick={copyRobots}
                     className="inline-flex items-center gap-1.5 rounded bg-slate-200/70 px-1.5 py-0.5 align-middle text-xs text-cyan-700 transition-colors hover:bg-slate-200 dark:bg-slate-900/60 dark:text-cyan-400 dark:hover:bg-slate-900"
@@ -331,7 +337,7 @@ export function CookieDialog() {
                     )}
                   </button>{" "}
                   <span className="text-xs text-slate-400 dark:text-slate-500">
-                    {copied ? "copied, paste it there" : "click to copy"}
+                    {t(copied ? "cookies.copied" : "cookies.copyHint")}
                   </span>
                 </Step>
 
@@ -339,38 +345,34 @@ export function CookieDialog() {
                     a gesture. it is a toolbar icon and a button, and saying so
                     is the difference between following the steps and giving up
                     on step 4 */}
-                <Step
-                  n={4}
-                  note="up by your address bar, sometimes under the puzzle piece. saves a .txt to your downloads."
-                >
-                  click the extension&apos;s icon, then hit <Em>export</Em>
+                <Step n={4} note={t("cookies.step4note")}>
+                  {t("cookies.step4")} <Em>{t("cookies.step4export")}</Em>
                 </Step>
 
                 {/* the trim took the point out with the words: "youtube keeps
                     refreshing cookies on open tabs" says what youtube does and
                     leaves the reader to work out why they should care. the
                     consequence is the whole reason the step exists */}
-                <Step
-                  n={5}
-                  note="youtube keeps refreshing cookies on open youtube tabs, and every refresh ages your export. closing it is what makes these last."
-                >
-                  close that youtube tab
+                <Step n={5} note={t("cookies.step5note")}>
+                  {t("cookies.step5")}
                 </Step>
 
-                <Step n={6}>import that file here</Step>
+                <Step n={6}>{t("cookies.step6")}</Step>
               </ol>
             </>
           )}
 
           <div className="flex items-center gap-2">
             <Button ref={importRef} onClick={handleImport} disabled={busy !== null}>
-              {busy === "import"
-                ? "importing…"
-                : signedIn
-                  ? "replace…"
-                  : imported
-                    ? "try again…"
-                    : "import cookies…"}
+              {t(
+                busy === "import"
+                  ? "cookies.importing"
+                  : signedIn
+                    ? "cookies.replace"
+                    : imported
+                      ? "cookies.tryAgain"
+                      : "cookies.import"
+              )}
             </Button>
 
             {imported && (
@@ -379,7 +381,7 @@ export function CookieDialog() {
                 onClick={handleTest}
                 disabled={busy !== null}
               >
-                {busy === "test" ? "testing…" : "test"}
+                {t(busy === "test" ? "cookies.testing" : "cookies.test")}
               </Button>
             )}
 
@@ -390,7 +392,7 @@ export function CookieDialog() {
                 onClick={handleClear}
                 disabled={busy !== null}
               >
-                remove
+                {t("cookies.remove")}
               </Button>
             )}
           </div>
@@ -399,14 +401,7 @@ export function CookieDialog() {
               answers actually is. saying it twice in one dialog reads as
               insisting */}
           <p className="text-xs text-slate-400 dark:text-slate-500">
-            {signedIn ? (
-              "youtube rotates these out eventually. when it does, cliply will say so right here."
-            ) : (
-              <>
-                nothing here is sent anywhere. the file only ever goes to
-                youtube, from your own machine.
-              </>
-            )}
+            {t(signedIn ? "cookies.footerSignedIn" : "cookies.footer")}
           </p>
         </div>
       </DialogContent>

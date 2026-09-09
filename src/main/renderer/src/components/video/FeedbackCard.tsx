@@ -1,4 +1,5 @@
 import { Button } from "@/components/ui/button"
+import { useT } from "@/lib/i18n"
 import { cn } from "@/lib/utils"
 import { motion } from "framer-motion"
 import { Heart, MessageSquare } from "lucide-react"
@@ -8,6 +9,8 @@ interface FeedbackCardProps {
 }
 
 export function FeedbackCard({ className }: FeedbackCardProps) {
+  const t = useT()
+
   const handleFeedback = () => {
     // Open cliply.space/hey page
     window.open("https://cliply.space/hey", "_blank")
@@ -37,10 +40,10 @@ export function FeedbackCard({ className }: FeedbackCardProps) {
           </div>
           <div>
             <h3 className="font-medium text-cyan-900 dark:text-cyan-100">
-              Help us improve
+              {t("feedback.title")}
             </h3>
             <p className="text-sm text-cyan-700 dark:text-cyan-300">
-              Request a feature
+              {t("feedback.subtitle")}
             </p>
           </div>
         </div>
@@ -54,7 +57,7 @@ export function FeedbackCard({ className }: FeedbackCardProps) {
           )}
         >
           <MessageSquare className="h-4 w-4 mr-01" />
-          tap me :)
+          {t("feedback.cta")}
         </Button>
       </div>
     </motion.div>

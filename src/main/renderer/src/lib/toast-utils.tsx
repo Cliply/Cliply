@@ -1,5 +1,6 @@
 import { toast } from "sonner"
 import { cookieActions } from "@/lib/cookieStore"
+import { t } from "@/lib/i18n"
 import { reportActions } from "@/lib/reportStore"
 import type { Platform } from "@/lib/store"
 
@@ -7,26 +8,25 @@ export const showServerOverwhelmedToast = () => {
   toast(
     <div className="flex items-center gap-3 font-space-grotesk">
       <span className="text-lg">🌻</span>
-      <span>we&apos;re overwhelmed</span>
+      <span>{t("toast.overwhelmed")}</span>
     </div>
   )
 }
 
 export const showDownloadSuccessToast = (type: "audio" | "video") => {
-  toast.success(
-    `${type === "audio" ? "Audio" : "Video"} downloaded successfully!`,
-    {
-      description: `Your ${type} file has been downloaded to your device.`,
-      action: {
-        label: "Open Folder",
-        onClick: () => window.electronAPI?.system?.openDownloadFolder?.()
-      }
+  const audio = type === "audio"
+
+  toast.success(t(audio ? "toast.audioDone" : "toast.videoDone"), {
+    description: t(audio ? "toast.audioDoneDesc" : "toast.videoDoneDesc"),
+    action: {
+      label: t("toast.openFolder"),
+      onClick: () => window.electronAPI?.system?.openDownloadFolder?.()
     }
-  )
+  })
 }
 
 export const showFolderSelectedToast = () => {
-  toast.success("Download folder updated!")
+  toast.success(t("folder.updated"))
 }
 
 /**
@@ -55,12 +55,12 @@ export const showBotDetectionToast = (message: string, platform?: Platform) => {
   toast.error(message, {
     id: "bot-detected",
     description: cookiesCanHelp(platform)
-      ? "signing in with a throwaway account usually clears this."
-      : "this site wants us to prove we're not a bot.",
+      ? t("toast.botCookies")
+      : t("toast.botGeneric"),
     duration: 12000,
     action: cookiesCanHelp(platform)
-      ? { label: "fix with cookies", onClick: () => cookieActions.open() }
-      : { label: "report", onClick: () => reportActions.open() }
+      ? { label: t("toast.fixWithCookies"), onClick: () => cookieActions.open() }
+      : { label: t("toast.report"), onClick: () => reportActions.open() }
   })
 }
 
@@ -92,7 +92,7 @@ export const showDownloadErrorToast = (
     description,
     duration: 12000,
     action: blocked
-      ? { label: "fix with cookies", onClick: () => cookieActions.open() }
-      : { label: "report", onClick: () => reportActions.open() }
+      ? { label: t("toast.fixWithCookies"), onClick: () => cookieActions.open() }
+      : { label: t("toast.report"), onClick: () => reportActions.open() }
   })
 }

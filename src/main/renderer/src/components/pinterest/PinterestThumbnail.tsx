@@ -1,4 +1,5 @@
 import { systemApi } from "@/lib/api"
+import { useT } from "@/lib/i18n"
 import { cn } from "@/lib/utils"
 import { motion } from "framer-motion"
 import { ExternalLink } from "lucide-react"
@@ -17,12 +18,14 @@ export function PinterestThumbnail({
   title,
   className
 }: PinterestThumbnailProps) {
+  const t = useT()
+
   const handleOpenPin = async () => {
     try {
       await systemApi.openExternal(pinUrl)
     } catch (error) {
       console.error("Failed to open Pinterest link:", error)
-      toast.error("Could not open Pinterest link")
+      toast.error(t("thumb.openFailed", { name: "Pinterest" }))
     }
   }
 
@@ -50,7 +53,7 @@ export function PinterestThumbnail({
         ) : (
           <div className="absolute inset-0 flex items-center justify-center">
             <p className="text-sm text-slate-500 dark:text-slate-400">
-              Thumbnail unavailable
+              {t("thumb.unavailable")}
             </p>
           </div>
         )}
@@ -66,7 +69,7 @@ export function PinterestThumbnail({
           )}
         >
           <ExternalLink className="h-4 w-4" />
-          View on Pinterest
+          {t("thumb.viewOn", { name: "Pinterest" })}
         </button>
       </div>
     </motion.div>

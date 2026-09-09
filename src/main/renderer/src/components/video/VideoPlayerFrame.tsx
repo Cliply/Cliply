@@ -1,4 +1,5 @@
 import { extractVideoId, isYouTubeShorts } from "@/lib/api"
+import { useT } from "@/lib/i18n"
 import { cn } from "@/lib/utils"
 import { motion } from "framer-motion"
 
@@ -13,6 +14,7 @@ export function VideoPlayerFrame({
   title,
   className
 }: VideoPlayerFrameProps) {
+  const t = useT()
   const videoId = extractVideoId(url)
   const isShorts = isYouTubeShorts(url)
 
@@ -33,7 +35,9 @@ export function VideoPlayerFrame({
           className
         )}
       >
-        <p className="text-slate-500 dark:text-slate-400">Can't display video</p>
+        <p className="text-slate-500 dark:text-slate-400">
+          {t("player.cantDisplay")}
+        </p>
       </motion.div>
     )
   }

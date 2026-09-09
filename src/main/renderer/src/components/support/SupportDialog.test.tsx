@@ -7,6 +7,8 @@
 import { cleanup, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
 
+import { useLocale } from "@/lib/i18n"
+
 const openExternal = vi.fn(async () => true)
 vi.mock("@/lib/api", () => ({
   systemApi: { openExternal: (...a: unknown[]) => openExternal(...(a as [])) }
@@ -32,7 +34,10 @@ beforeEach(() => {
   }
 })
 
-afterEach(cleanup)
+afterEach(() => {
+  cleanup()
+  useLocale.setState({ locale: "en" })
+})
 
 async function mount() {
   const { SupportDialog } = await import("./SupportDialog")
@@ -96,6 +101,17 @@ describe("SupportDialog", () => {
       )
     )
     await waitFor(() => expect(screen.queryByText("no thanks")).toBeNull())
+  })
+
+  // an ask nobody can read is worse than no ask: declining has to stay the
+  // plain word it is in english, and russian picks its plural for the count
+  test("declining is a real button in russian too", async () => {
+    useLocale.setState({ locale: "ru" })
+    await mount()
+    listener?.({ count: 5 })
+
+    await waitFor(() => expect(screen.getByText("нет, спасибо")).toBeTruthy())
+    expect(screen.getByText("это уже 5 загрузок")).toBeTruthy()
   })
 
   // a build whose preload predates the support bridge must still render the app

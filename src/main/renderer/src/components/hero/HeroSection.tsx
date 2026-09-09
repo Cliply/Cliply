@@ -1,7 +1,9 @@
+import { LocaleToggle } from "@/components/ui/locale-toggle"
 import { MenuVertical } from "@/components/ui/menu-vertical"
 import { ModeToggle } from "@/components/ui/mode-toggle"
 import { updaterApi } from "@/lib/api"
 import { cookieActions } from "@/lib/cookieStore"
+import { useT } from "@/lib/i18n"
 import { motion } from "framer-motion"
 import { toast } from "sonner"
 import { useAppStore } from "@/lib/store"
@@ -9,14 +11,17 @@ import { SearchCard } from "./SearchCard"
 
 export function HeroSection() {
   const { selectedPlatform } = useAppStore()
+  const t = useT()
   const handleCheckForUpdates = async () => {
     try {
       await updaterApi.checkForUpdates()
     } catch (error) {
       console.error("Failed to check for updates:", error)
-      toast.error("Check Failed", {
+      toast.error(t("hero.updateCheckFailed"), {
         description:
-          error instanceof Error ? error.message : "Failed to check for updates"
+          error instanceof Error
+            ? error.message
+            : t("hero.updateCheckFailedBody")
       })
     }
   }
@@ -36,11 +41,11 @@ export function HeroSection() {
             // opens has titled itself "about" the whole time. The menu was the
             // only place still calling it the disclaimer.
             {
-              label: "about",
+              label: t("menu.about"),
               href: "/disclaimer"
             },
             {
-              label: "update",
+              label: t("menu.update"),
               onClick: handleCheckForUpdates
             },
             // cookies came out of here once the line in the top chrome started
@@ -49,12 +54,12 @@ export function HeroSection() {
             // the users who already went looking, and two doors to the same
             // room made the menu longer for nothing
             {
-              label: "donate",
+              label: t("menu.donate"),
               href: "https://buymeacoffee.com/itssdevk",
               external: true
             },
             {
-              label: "github",
+              label: t("menu.github"),
               href: "https://github.com/Cliply/Cliply/",
               external: true
             }
@@ -64,8 +69,9 @@ export function HeroSection() {
         />
       </div>
 
-      {/* Mode toggle - top right */}
-      <div className="absolute top-6 right-6 z-20">
+      {/* Language and mode toggles - top right */}
+      <div className="absolute top-6 right-6 z-20 flex items-center gap-2">
+        <LocaleToggle />
         <ModeToggle />
       </div>
 
@@ -93,7 +99,7 @@ export function HeroSection() {
               'Geist Mono, ui-monospace, SFMono-Regular, "SF Mono", Consolas, "Liberation Mono", Menlo, monospace'
           }}
         >
-          having trouble with downloads? try cookies
+          {t("hero.cookieHint")}
         </button>
       </motion.div>
 
@@ -137,7 +143,7 @@ export function HeroSection() {
                   'Geist Mono, ui-monospace, SFMono-Regular, "SF Mono", Consolas, "Liberation Mono", Menlo, monospace'
               }}
             >
-              download stuff effortlessly{" "}
+              {t("hero.tagline")}{" "}
               <span className="text-cyan-500">(&gt;ᴗ•)</span>
             </motion.p>
           </motion.div>
@@ -179,19 +185,16 @@ export function HeroSection() {
               'Geist Mono, ui-monospace, SFMono-Regular, "SF Mono", Consolas, "Liberation Mono", Menlo, monospace'
           }}
         >
+          <span className="block">{t("hero.footerFree")}</span>
           <span className="block">
-            cliply is free and open source. just one guy tries to keep it
-            running.
-          </span>
-          <span className="block">
-            if it&apos;s useful,{" "}
+            {t("hero.footerUseful")}{" "}
             <a
               href="https://buymeacoffee.com/itssdevk"
               target="_blank"
               rel="noopener noreferrer"
               className="text-slate-500 underline underline-offset-4 transition-colors duration-200 hover:text-cyan-500 dark:text-slate-400 dark:hover:text-cyan-400"
             >
-              buy me a coffee
+              {t("hero.donate")}
             </a>
           </span>
         </p>

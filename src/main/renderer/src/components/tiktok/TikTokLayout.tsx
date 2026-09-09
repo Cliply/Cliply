@@ -1,5 +1,6 @@
 import { ModeToggle } from "@/components/ui/mode-toggle"
 import { FeedbackCard, UnifiedDownloadCard } from "@/components/video"
+import { useT } from "@/lib/i18n"
 import { useTikTokStore } from "@/lib/tiktokStore"
 import { useAppStore } from "@/lib/store"
 import { motion } from "framer-motion"
@@ -10,6 +11,7 @@ import { TikTokThumbnail } from "./TikTokThumbnail"
 export function TikTokLayout() {
   const { videoInfo, url } = useTikTokStore()
   const { setShowMediaDetails } = useAppStore()
+  const t = useT()
 
   if (!videoInfo) return null
 
@@ -97,7 +99,7 @@ export function TikTokLayout() {
               className="flex-shrink-0 px-1 mb-3"
             >
               <div className="text-xs text-slate-500 dark:text-slate-400 font-space-grotesk">
-                Downloads stored at{" "}
+                {t("layout.downloadsAt")}{" "}
                 <span className="font-mono text-slate-600 dark:text-slate-300">
                   ~/Downloads/Cliply
                 </span>

@@ -8,6 +8,7 @@ import {
   type DownloadProgress
 } from "@/lib/api"
 import { isTerminalReason, terminalReason } from "@/lib/downloadOutcome"
+import { localizeError, t } from "@/lib/i18n"
 import { reportActions } from "@/lib/reportStore"
 import { showDownloadErrorToast } from "@/lib/toast-utils"
 import { useMutation } from "@tanstack/react-query"
@@ -69,7 +70,7 @@ export const useAudioDownload = () => {
       setDownloadState({
         status: "starting",
         progress: 0,
-        message: "Starting audio download..."
+        message: t("download.startingAudio")
       })
 
       // Correlate on an id we generate here: the listener can then filter from
@@ -104,19 +105,21 @@ export const useAudioDownload = () => {
               indeterminate: progressData.indeterminate,
               message:
                 progressData.error ||
-                `Downloading audio... ${(progressData.progress || 0).toFixed(1)}%`,
+                t("download.audioProgress", {
+                  percent: (progressData.progress || 0).toFixed(1)
+                }),
               outputFile: progressData.filename,
               error: progressData.error
             }))
 
             // Handle completion
             if (progressData.status === "completed") {
-              toast.success("Audio download completed!", {
+              toast.success(t("download.audioCompleted"), {
                 description: progressData.filename
-                  ? `Saved: ${progressData.filename}`
+                  ? t("download.saved", { filename: progressData.filename })
                   : undefined,
                 action: {
-                  label: "Open Folder",
+                  label: t("toast.openFolder"),
                   onClick: () => systemApi.openDownloadFolder()
                 }
               })
@@ -135,8 +138,15 @@ export const useAudioDownload = () => {
                 videoUrl: lastUrlRef.current
               })
               showDownloadErrorToast(
-                "Audio download failed",
-                progressData.error || "Something went wrong. You can send us the details.",
+                t("download.audioFailed"),
+                // the report above keeps main's english; only what is read here
+                // is translated
+                progressData.error
+                  ? localizeError({
+                      message: progressData.error,
+                      category: progressData.category
+                    }).message
+                  : t("download.wentWrong"),
                 progressData.category,
                 "youtube"
               )
@@ -203,7 +213,7 @@ export const useAudioDownload = () => {
         ...prev,
         status: "failed",
         error: error.message,
-        message: `Failed to start download: ${error.message}`
+        message: t("download.startFailed", { message: error.message })
       }))
 
       reportActions.stage({
@@ -215,8 +225,11 @@ export const useAudioDownload = () => {
         videoUrl: lastUrlRef.current
       })
       showDownloadErrorToast(
-        "Audio download failed",
-        error.message,
+        t("download.audioFailed"),
+        localizeError({
+          message: error.message,
+          category: error instanceof DownloadError ? error.category : undefined
+        }).message,
         error instanceof DownloadError ? error.category : undefined,
         "youtube"
       )
@@ -241,7 +254,7 @@ export const useAudioDownload = () => {
         setDownloadState((prev) => ({
           ...prev,
           status: "cancelled",
-          message: "Download cancelled"
+          message: t("download.cancelled")
         }))
 
         // settle the pending mutation so the button never stays stuck
@@ -249,7 +262,7 @@ export const useAudioDownload = () => {
           terminalReason("cancelled", "Download cancelled")
         )
 
-        toast.info("Audio download cancelled")
+        toast.info(t("download.audioCancelled"))
       } catch (error) {
         console.error("Failed to cancel download:", error)
       }

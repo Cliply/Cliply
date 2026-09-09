@@ -12,6 +12,7 @@ import {
   type QualityTier,
   type TikTokVideoInfoResponse
 } from "@/lib/api"
+import { localizeError, useT } from "@/lib/i18n"
 import { reportActions } from "@/lib/reportStore"
 import { usePinterestStore } from "@/lib/pinterestStore"
 import { useTikTokStore } from "@/lib/tiktokStore"
@@ -88,6 +89,7 @@ function YouTubeDownloadCard({
 }) {
   const { audioTimeRange, selectedAudioMode, videoTimeRange, selectedTier } =
     useYouTubeStore()
+  const t = useT()
 
   const [isVideoQualityDropdownOpen, setIsVideoQualityDropdownOpen] =
     useState(false)
@@ -135,13 +137,13 @@ function YouTubeDownloadCard({
               value="video"
               className="flex items-center gap-2 data-[state=active]:bg-white data-[state=active]:shadow-sm dark:data-[state=active]:bg-slate-700 dark:data-[state=active]:border-slate-600 transition-all duration-200"
             >
-              🎬 Video Download
+              🎬 {t("card.tabVideo")}
             </TabsTrigger>
             <TabsTrigger
               value="audio"
               className="flex items-center gap-2 data-[state=active]:bg-white data-[state=active]:shadow-sm dark:data-[state=active]:bg-slate-700 dark:data-[state=active]:border-slate-600 transition-all duration-200"
             >
-              🎵 Audio Only
+              🎵 {t("card.tabAudio")}
             </TabsTrigger>
           </TabsList>
         </div>
@@ -150,7 +152,7 @@ function YouTubeDownloadCard({
           <div className="space-y-4">
             <div className="mb-6">
               <p className="text-sm text-slate-600 dark:text-slate-400">
-                Download video with automatically paired audio
+                {t("card.videoIntro")}
               </p>
             </div>
 
@@ -182,7 +184,7 @@ function YouTubeDownloadCard({
           <div className="space-y-4">
             <div className="mb-6">
               <p className="text-sm text-slate-600 dark:text-slate-400">
-                Extract audio from the video with custom time range
+                {t("card.audioIntro")}
               </p>
             </div>
 
@@ -222,6 +224,8 @@ function SimpleVideoDownloadCard({
   onDownload: () => void
   className?: string
 }) {
+  const t = useT()
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 20 }}
@@ -238,7 +242,7 @@ function SimpleVideoDownloadCard({
       <div className="p-6 space-y-4">
         <div className="space-y-1">
           <h3 className="text-base font-medium text-slate-900 dark:text-white">
-            Download Video
+            {t("download.video")}
           </h3>
           <p className="text-sm text-slate-600 dark:text-slate-400">
             {subtitle}
@@ -249,8 +253,12 @@ function SimpleVideoDownloadCard({
           <p className="font-medium text-slate-900 dark:text-white line-clamp-2">
             {videoInfo.title}
           </p>
-          <p className="mt-1">Uploader: {videoInfo.uploader}</p>
-          <p>Duration: {videoInfo.duration_string}</p>
+          <p className="mt-1">
+            {t("card.uploader")} {videoInfo.uploader}
+          </p>
+          <p>
+            {t("card.duration")} {videoInfo.duration_string}
+          </p>
         </div>
 
         <Button
@@ -262,7 +270,7 @@ function SimpleVideoDownloadCard({
             "disabled:opacity-50 disabled:cursor-not-allowed shadow-lg hover:shadow-xl"
           )}
         >
-          {isDownloading ? "Downloading..." : "Download Video"}
+          {isDownloading ? t("download.inProgress") : t("download.video")}
         </Button>
       </div>
     </motion.div>
@@ -277,6 +285,7 @@ function PinterestDownloadCard({
   className?: string
 }) {
   const { url, isDownloading, setIsDownloading } = usePinterestStore()
+  const t = useT()
 
   const handleDownload = async () => {
     if (!url || isDownloading) return
@@ -294,7 +303,7 @@ function PinterestDownloadCard({
       })
 
       await pinterestApi.download({ url, title: pinInfo?.title })
-      toast.success("Download complete!", { action: { label: "Open Folder", onClick: () => systemApi.openDownloadFolder() } })
+      toast.success(t("download.complete"), { action: { label: t("toast.openFolder"), onClick: () => systemApi.openDownloadFolder() } })
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to download video"
       if (message.includes("network") || message.includes("fetch")) { showServerOverwhelmedToast() }
@@ -308,8 +317,12 @@ function PinterestDownloadCard({
           videoUrl: url
         })
         showDownloadErrorToast(
-          "Download failed",
-          message,
+          t("download.failed"),
+          // the staged report above keeps main's english; the toast is read
+          localizeError({
+            message,
+            category: error instanceof DownloadError ? error.category : undefined
+          }).message,
           error instanceof DownloadError ? error.category : undefined,
           "pinterest"
         )
@@ -322,7 +335,7 @@ function PinterestDownloadCard({
   return (
     <SimpleVideoDownloadCard
       videoInfo={pinInfo}
-      subtitle="Best available quality, saved as MP4."
+      subtitle={t("card.pinterestSubtitle")}
       isDownloading={isDownloading}
       onDownload={handleDownload}
       className={className}
@@ -338,6 +351,7 @@ function TikTokDownloadCard({
   className?: string
 }) {
   const { url, isDownloading, setIsDownloading } = useTikTokStore()
+  const t = useT()
 
   const handleDownload = async () => {
     if (!url || isDownloading) return
@@ -353,7 +367,7 @@ function TikTokDownloadCard({
       })
 
       await tiktokApi.download({ url, title: tikTokInfo?.title })
-      toast.success("Download complete!", { action: { label: "Open Folder", onClick: () => systemApi.openDownloadFolder() } })
+      toast.success(t("download.complete"), { action: { label: t("toast.openFolder"), onClick: () => systemApi.openDownloadFolder() } })
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to download video"
       if (message.includes("network") || message.includes("fetch")) { showServerOverwhelmedToast() }
@@ -367,8 +381,12 @@ function TikTokDownloadCard({
           videoUrl: url
         })
         showDownloadErrorToast(
-          "Download failed",
-          message,
+          t("download.failed"),
+          // the staged report above keeps main's english; the toast is read
+          localizeError({
+            message,
+            category: error instanceof DownloadError ? error.category : undefined
+          }).message,
           error instanceof DownloadError ? error.category : undefined,
           "tiktok"
         )
@@ -381,7 +399,7 @@ function TikTokDownloadCard({
   return (
     <SimpleVideoDownloadCard
       videoInfo={tikTokInfo}
-      subtitle="Best available quality, saved as MP4. No watermark."
+      subtitle={t("card.tiktokSubtitle")}
       isDownloading={isDownloading}
       onDownload={handleDownload}
       className={className}

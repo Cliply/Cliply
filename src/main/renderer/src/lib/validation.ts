@@ -1,5 +1,13 @@
 import { z } from "zod"
 
+import type { Key } from "@/lib/i18n"
+
+/**
+ * zod bakes a message into the schema when the schema is built, which is once,
+ * at module load. so the message a schema carries is a translation key, and
+ * whoever renders or toasts it calls `t()` on it then.
+ */
+
 const YOUTUBE_URL_REGEX = /^(https?:\/\/)?(www\.)?(youtube\.com\/(watch\?v=|embed\/|v\/|shorts\/)|youtu\.be\/)[\w-]+/
 /**
  * pinterest sends people to their own country's domain, so `www.pinterest.com`
@@ -22,8 +30,11 @@ const TIKTOK_URL_REGEX = /^https?:\/\/(?:(?:www\.)?tiktok\.com\/@[\w.-]+\/video\
 export const youtubeUrlSchema = z.object({
   url: z
     .string()
-    .min(1, "Please enter a YouTube URL")
-    .refine((url: string) => YOUTUBE_URL_REGEX.test(url), "Please enter a valid YouTube URL")
+    .min(1, "validation.youtubeRequired" satisfies Key)
+    .refine(
+      (url: string) => YOUTUBE_URL_REGEX.test(url),
+      "validation.youtubeInvalid" satisfies Key
+    )
 })
 
 export type YouTubeUrlFormData = z.infer<typeof youtubeUrlSchema>
@@ -35,10 +46,10 @@ export const isValidYouTubeUrl = (url: string): boolean => {
 export const pinterestUrlSchema = z.object({
   url: z
     .string()
-    .min(1, "Please enter a Pinterest URL")
+    .min(1, "validation.pinterestRequired" satisfies Key)
     .refine(
       (url: string) => PINTEREST_URL_REGEX.test(url),
-      "Please enter a valid Pinterest URL"
+      "validation.pinterestInvalid" satisfies Key
     )
 })
 
@@ -51,10 +62,10 @@ export const isValidPinterestUrl = (url: string): boolean => {
 export const tiktokUrlSchema = z.object({
   url: z
     .string()
-    .min(1, "Please enter a TikTok URL")
+    .min(1, "validation.tiktokRequired" satisfies Key)
     .refine(
       (url: string) => TIKTOK_URL_REGEX.test(url),
-      "Please enter a valid TikTok URL"
+      "validation.tiktokInvalid" satisfies Key
     )
 })
 

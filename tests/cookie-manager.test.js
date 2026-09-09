@@ -38,18 +38,34 @@ function loginPair(expires, domain = ".youtube.com") {
 const HOUR = 3600
 const nowSeconds = () => Math.floor(Date.now() / 1000)
 
+/**
+ * the constructor fires initialize() and does not await it, so every manager
+ * these tests build leaves one running against paths the next two lines are
+ * about to move. that stray run ends with
+ * `this.isValid = await this.validateCookieFile()`, and there is a window where
+ * it reads the jar before a test overwrites it and assigns after - inside the
+ * updateStatus await in importCookies, between that method's own validate and
+ * its `return this.isValid`. the test then reads a verdict about the previous
+ * file. it only loses the race under a full parallel run, which is exactly when
+ * it was seen.
+ *
+ * nothing here wants that initialize: managerWith writes every fixture itself,
+ * and the two tests that want its steps call ensureCookieFile() directly. so it
+ * is stubbed out for this suite - which also stops each construction from
+ * mkdir-ing the real APP_CONFIG.COOKIES_DIR on the machine running the tests.
+ */
+beforeEach(() => {
+  jest.spyOn(CookieManager.prototype, "initialize").mockResolvedValue(undefined)
+})
+
 async function managerWith(content) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "cliply-cookies-"))
   const cookieFile = path.join(dir, "youtube_cookies.txt")
 
-  // write the fixture first: the constructor kicks off initialize(), which
-  // creates an empty cookie file when it finds none, and would otherwise race
-  // this write and clobber it
   await fs.writeFile(cookieFile, content, "utf8")
 
   const manager = new CookieManager()
 
-  // reassigned synchronously, before initialize() gets past its first await
   manager.cookieDir = dir
   manager.cookieFile = cookieFile
   manager.statusFile = path.join(dir, "cookie_status.json")
@@ -602,5 +618,83 @@ describe("clearing", () => {
     expect(await manager.validateCookieFile()).toBe(true)
 
     write.mockRestore()
+  })
+})
+
+/**
+ * every refusal carries a code as well as a sentence
+ *
+ * the sentence stays english, because it is what the logs, the issue bodies and
+ * the maintainers read. The renderer has to say the same thing in the user's
+ * language, and matching english prose to work out which refusal it is holding
+ * would break the first time anyone reworded one. So the code is the contract,
+ * and these are the six of it.
+ */
+describe("the code beside the refusal", () => {
+  const live = () => String(nowSeconds() + HOUR)
+
+  const codeOf = async (importing) => {
+    try {
+      await importing
+      throw new Error("that import was supposed to be refused")
+    } catch (error) {
+      return error.code
+    }
+  }
+
+  test("a file with nothing in it", async () => {
+    const manager = await managerWith(HEADER)
+
+    expect(await codeOf(manager.importCookies("   "))).toBe("COOKIES_FILE_EMPTY")
+  })
+
+  test("a jar yt-dlp will not open", async () => {
+    const manager = await managerWith(HEADER)
+
+    expect(
+      await codeOf(
+        manager.importCookies(
+          HEADER + ".youtube.com\tFALSE\t/\tTRUE\t1999999999\tLOGIN_INFO\tv\n"
+        )
+      )
+    ).toBe("COOKIES_MALFORMED")
+  })
+
+  test("a file with no cookies in it", async () => {
+    const manager = await managerWith(HEADER)
+
+    expect(await codeOf(manager.importCookies("milk\neggs\nbread\n"))).toBe(
+      "COOKIES_EMPTY"
+    )
+  })
+
+  test("a valid jar exported for some other site", async () => {
+    const manager = await managerWith(HEADER)
+
+    expect(
+      await codeOf(
+        manager.importCookies(
+          HEADER + cookieLine(".example.com", "session", live()) + "\n"
+        )
+      )
+    ).toBe("COOKIES_NOT_YOUTUBE")
+  })
+
+  test("a file too big to be a cookie export", async () => {
+    const manager = await managerWith(HEADER)
+    const huge = path.join(manager.cookieDir, "huge.txt")
+
+    await fs.writeFile(huge, "x".repeat(1024 * 1024 + 1), "utf8")
+
+    expect(await codeOf(manager.importCookieFile(huge))).toBe("COOKIES_TOO_BIG")
+  })
+
+  test("the json export several extensions offer", async () => {
+    const manager = await managerWith(HEADER)
+    const file = path.join(manager.cookieDir, "cookies.json")
+
+    await fs.writeFile(file, '[{"name": "SID", "domain": ".youtube.com"}]', "utf8")
+
+    expect(await codeOf(manager.importCookieFile(file))).toBe("COOKIES_JSON")
   })
 })
