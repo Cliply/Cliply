@@ -5,6 +5,10 @@
 const os = require("os")
 const { APP_CONFIG, SUPPORTED_PLATFORMS } = require("../utils/constants")
 const { redactLogLine } = require("./ytdlp-engine")
+// the ceiling on any one playlist link, which is what bounds every item count
+// below. imported rather than written out: a cap that moves has to move the
+// validation with it, or every count above the old one is dropped in silence
+const { PLAYLIST_MAX_ITEMS } = require("../utils/ytdlp-mappers")
 const { describeError, getAppVersion } = require("../utils/analytics-helpers")
 const {
   ERROR_CATEGORIES,
@@ -39,7 +43,10 @@ const ALLOWED_PROPERTIES = {
     "duration_bucket",
     "formats_count",
     "load_ms_bucket",
-    "used_cookies"
+    "used_cookies",
+    // a playlist listing instead of a video's: it has no duration and no format
+    // list, and what it has instead is a length. bucketed, never raw
+    "playlist_size"
   ],
   media_info_failed: [
     "platform",
@@ -48,12 +55,42 @@ const ALLOWED_PROPERTIES = {
     "error_message",
     "used_cookies"
   ],
+  /**
+   * which half of a `watch?v=…&list=…` link the user meant.
+   *
+   * the one event this taxonomy owes to url_kind's "playlist" value, which
+   * counts how often such a link is pasted and cannot say what was wanted. two
+   * properties and no more: the answer, and how big the list they were choosing
+   * about was.
+   */
+  playlist_prompt_answered: ["choice", "playlist_size"],
+  /**
+   * somebody took the helper line up on its offer of a playlist.
+   *
+   * the platform and nothing else, and the platform is a constant here: the
+   * link is ours rather than one the user pasted, so there is nothing about it
+   * to report. what it answers is whether telling people playlists exist is
+   * what makes them try one, which is a count of clicks against the
+   * url_kind: "playlist" submissions that follow.
+   */
+  playlist_hint_clicked: ["platform"],
   download_started: [
     "platform",
     "media_type",
     "quality",
     "is_trimmed",
-    "audio_format"
+    "audio_format",
+    /**
+     * a playlist is one download of n videos, so it extends this event rather
+     * than sending one beside it: the same platform, media type and requested
+     * quality, plus that it is a playlist and how many videos were ticked.
+     *
+     * absent rather than false on a single video. every existing event keeps
+     * exactly the properties it has always had, which is what lets the two be
+     * compared at all - and "not a playlist" is what no is_playlist means.
+     */
+    "is_playlist",
+    "item_count"
   ],
   // download_started's properties plus the completion measures, which is what
   // makes the two ends of the funnel join on the same dimensions
@@ -66,7 +103,21 @@ const ALLOWED_PROPERTIES = {
     "file_size_mb",
     "elapsed_bucket",
     "speed_bucket",
-    "used_cookies"
+    "used_cookies",
+    /**
+     * what the playlist run actually did, and this is the event that can say.
+     *
+     * a run that saved eight of nine videos exits 1 and is a completion all the
+     * same, so a non-zero `items_skipped` here is the normal shape of a partial
+     * success rather than a failure in disguise. `items_reused` is its own
+     * number and is never folded into `items_saved`: an archive skip records
+     * that some earlier run wrote the file, not that this one did.
+     */
+    "is_playlist",
+    "items_saved",
+    "items_reused",
+    "items_skipped",
+    "items_total"
   ],
   // likewise download_started's properties plus its own. a schema consistent
   // on success and silent on failure would be worse than either answer applied
@@ -81,9 +132,30 @@ const ALLOWED_PROPERTIES = {
     "error_stage",
     "error_message",
     "progress_at_failure",
-    "used_cookies"
+    "used_cookies",
+    /**
+     * what a failed playlist had already written, which is the half a user can
+     * still see on disk.
+     *
+     * two counts and not four, deliberately. a run that broke halfway never
+     * reached the videos behind the break, so calling them skipped would be a
+     * guess dressed as a measurement - and a reuse count is about an archive
+     * that a run this broken may never have read.
+     */
+    "is_playlist",
+    "items_saved",
+    "items_total"
   ],
-  download_cancelled: ["platform", "media_type", "progress_at_cancel"],
+  // the same two counts, for the same reason: a cancel is a kill, and the
+  // videos it had already finished are still there
+  download_cancelled: [
+    "platform",
+    "media_type",
+    "progress_at_cancel",
+    "is_playlist",
+    "items_saved",
+    "items_total"
+  ],
   engine_seeded: ["reason", "engine_version", "elapsed_bucket"],
   engine_updated: ["from_version", "to_version"],
   engine_update_failed: ["update_reason", "error_message"],
@@ -115,6 +187,7 @@ const PROPERTY_KINDS = {
   // flags
   is_first_launch: "bool",
   is_trimmed: "bool",
+  is_playlist: "bool",
   success: "bool",
   has_youtube_cookies: "bool",
   signed_in: "bool",
@@ -131,6 +204,28 @@ const PROPERTY_KINDS = {
   // which step of the sequence a prompt was, so 5 and 100 stay distinguishable
   milestone: "number",
 
+  /**
+   * a playlist run's own arithmetic, and all five are raw rather than bucketed.
+   *
+   * they describe the operation rather than the person: "8 saved, 2 already
+   * downloaded, 1 skipped of 11" is the outcome, and rounding it into buckets
+   * would destroy exactly the arithmetic these exist for. how big the playlist
+   * they came from was is a different question, and that one is NOT raw - see
+   * playlist_size below.
+   *
+   * their own kind rather than "number", because the bound is real and knowable:
+   * a run covers at most PLAYLIST_MAX_ITEMS videos, so a whole number from 0 to
+   * the cap is the whole range, where the generic kind would take a fractional
+   * 1e9. narrowing a kind to what the feature guarantees is the cheapest
+   * validation there is, and the reviewer that asked for it is right that
+   * "small integer" is not a claim a 0-to-a-billion check makes.
+   */
+  item_count: "count",
+  items_saved: "count",
+  items_reused: "count",
+  items_skipped: "count",
+  items_total: "count",
+
   // a controlled vocabulary that normalizes instead of dropping
   platform: "platform",
 
@@ -138,6 +233,24 @@ const PROPERTY_KINDS = {
   url_kind: "vocabulary",
   media_type: "vocabulary",
   audio_format: "vocabulary",
+  choice: "vocabulary",
+
+  /**
+   * how many videos the pasted playlist holds, as one of four labels.
+   *
+   * a **vocabulary** and not a bucket, which was a correction: the generic
+   * bucket grammar is "a digit or a comparison and a short unit", and it
+   * forwarded "1984 film", a video-id-shaped "123456789abC" and the exact
+   * length "5283 vids" untouched. that the renderer's own helper only produces
+   * safe labels is not an argument this module accepts - the renderer is the
+   * least-trusted caller here by construction, and its bag arrives over ipc.
+   *
+   * the values are ours and there are four of them, which is precisely the case
+   * the note below says a vocabulary is for. bucketing it at all is still the
+   * right call for the value itself: the exact length of a list, next to a
+   * platform and a locale, is close to naming which list it was.
+   */
+  playlist_size: "vocabulary",
   reason: "vocabulary",
   update_reason: "vocabulary",
   error_category: "vocabulary",
@@ -416,6 +529,41 @@ const PROPERTY_VOCABULARIES = {
     // normally: merging them would hide a bug in our own code inside the
     // commonest network blip there is
     "check-rejected"
+  ]),
+
+  /**
+   * which half of an ambiguous link the user meant.
+   *
+   * the two values of MixedLinkChoice (renderer/src/lib/mixedLinkStore.ts), and
+   * there cannot be a third: the question has two buttons, and closing it
+   * without pressing either sends nothing at all - an abandoned paste teaches
+   * us nothing and is not an answer.
+   *
+   * named `choice` rather than `playlist_choice` because the event already says
+   * what was being chosen, and it is a closed vocabulary either way: nothing a
+   * later caller invents can reach this property without being listed here.
+   */
+  choice: new Set(["video", "playlist"]),
+
+  /**
+   * how big the pasted playlist is, as one of four labels.
+   *
+   * these are PLAYLIST_SIZE_BUCKET_LABELS in renderer/src/lib/analytics.ts,
+   * written out here rather than derived because there is no way to import them:
+   * they live in the renderer's own build. so this is the mirror, and it is the
+   * authority - a label the renderer adds without adding it here is dropped, and
+   * that is the direction this list is meant to fail in.
+   *
+   * the two boundaries that are load-bearing are the item cap (100) and the fact
+   * that the top bucket is open: a channel of 5,283 videos and a channel of
+   * 300 are the same answer to "did somebody paste something enormous", and one
+   * exact figure would say which channel.
+   */
+  playlist_size: new Set([
+    "1-5 vids",
+    "6-25 vids",
+    "26-100 vids",
+    ">100 vids"
   ]),
 
   // the shape of a submitted link, named by urlKind() in the renderer's
@@ -772,6 +920,21 @@ function checkKind(kind, value, key) {
     case "number":
       // isFinite does not coerce, so "5" and NaN both fail here
       return Number.isFinite(value) && value >= 0 && value <= MAX_NUMBER
+        ? { ok: true, value }
+        : { ok: false }
+
+    /**
+     * a whole number of playlist items, 0 to the cap.
+     *
+     * isInteger rather than isFinite, because half a video was not saved: a
+     * fraction here is a caller that computed something rather than counted it,
+     * and the same is true of a count above the cap - a run covers at most
+     * PLAYLIST_MAX_ITEMS videos, so anything larger did not come from one.
+     */
+    case "count":
+      return Number.isInteger(value) &&
+        value >= 0 &&
+        value <= PLAYLIST_MAX_ITEMS
         ? { ok: true, value }
         : { ok: false }
 

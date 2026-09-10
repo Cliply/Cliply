@@ -361,6 +361,10 @@ describe("the shape of the boundary is pinned, so widening it is a decision", ()
       open: true,
       why: "a finite non-negative number, never a coerced string - but an account id is one too"
     },
+    count: {
+      open: true,
+      why: "a whole number of playlist items, 0 to the item cap - narrower than `number` and still the shape of an age"
+    },
     platform: {
       open: false,
       why: "a closed set of site names; anything else is rewritten to 'unsupported'"
@@ -425,6 +429,28 @@ describe("the shape of the boundary is pinned, so widening it is a decision", ()
     // which step of the coffee prompt was shown. one of five constants this
     // process picks itself, never anything the user typed or a url produced
     milestone: "number",
+
+    /**
+     * a playlist run's counts, and they are the reason this pin is worth
+     * having: five more numbers on events that already carry numbers is the
+     * least alarming edit in the ticket. each describes the run rather than the
+     * user, which is what "a number is not an account id" has to mean here.
+     *
+     * they use `count` rather than `number`, which holds them to a whole number
+     * between 0 and the item cap - the bound the feature already guarantees,
+     * read off PLAYLIST_MAX_ITEMS so raising the cap cannot silently start
+     * dropping counts.
+     *
+     * how big the playlist itself was is deliberately NOT one of these. it is a
+     * closed vocabulary of four labels, which is why it does not appear in this
+     * map at all: a raw list length beside a platform is most of a fingerprint
+     * for one playlist
+     */
+    item_count: "count",
+    items_saved: "count",
+    items_reused: "count",
+    items_skipped: "count",
+    items_total: "count",
 
     previous_version: "version",
     engine_version: "version",

@@ -1,5 +1,6 @@
 import { ModeToggle } from "@/components/ui/mode-toggle"
 import { FeedbackCard, UnifiedDownloadCard } from "@/components/video"
+import { useDownloadPath } from "@/lib/hooks/useDownloadPath"
 import { useT } from "@/lib/i18n"
 import { usePinterestStore } from "@/lib/pinterestStore"
 import { useAppStore } from "@/lib/store"
@@ -12,6 +13,9 @@ export function PinterestLayout() {
   const { pinInfo, url } = usePinterestStore()
   const { setShowMediaDetails } = useAppStore()
   const t = useT()
+  // the folder the user actually chose, rather than the default this
+  // line named whether or not it was still true
+  const { downloadPath } = useDownloadPath()
 
   if (!pinInfo) return null
 
@@ -92,19 +96,25 @@ export function PinterestLayout() {
             transition={{ duration: 0.5 }}
             className="flex-1 flex flex-col space-y-3 lg:space-y-4 xl:overflow-y-auto xl:h-full"
           >
-            <motion.div
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.5, delay: 0.1 }}
-              className="flex-shrink-0 px-1 mb-3"
-            >
-              <div className="text-xs text-slate-500 dark:text-slate-400 font-space-grotesk">
-                {t("layout.downloadsAt")}{" "}
-                <span className="font-mono text-slate-600 dark:text-slate-300">
-                  ~/Downloads/Cliply
-                </span>
-              </div>
-            </motion.div>
+            {/*
+              nothing at all until the folder is known: a line naming the wrong
+              folder is worse than no line
+            */}
+            {downloadPath && (
+              <motion.div
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.5, delay: 0.1 }}
+                className="flex-shrink-0 px-1 mb-3"
+              >
+                <div className="text-xs text-slate-500 dark:text-slate-400 font-space-grotesk">
+                  {t("layout.downloadsAt")}{" "}
+                  <span className="font-mono text-slate-600 dark:text-slate-300">
+                    {downloadPath.path}
+                  </span>
+                </div>
+              </motion.div>
+            )}
 
             <div className="flex-shrink-0">
               <PinterestDetailsCard pinInfo={pinInfo} />

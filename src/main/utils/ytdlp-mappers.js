@@ -2,6 +2,9 @@
 // and picks the -o templates downloads are named by
 // the simple-platform half is still ported from python/platforms/*.py
 
+const crypto = require("crypto")
+const path = require("path")
+
 // yt-dlp's own default vcodec preference, best first. mirroring it is what
 // makes the stream we describe the stream `-S res:<height>` actually picks
 const VCODEC_PREFERENCE = ["av1", "vp9", "h265", "h264", "vp8"]
@@ -28,6 +31,87 @@ const VIDEO_TRIM_TEMPLATE =
 const AUDIO_TEMPLATE = "%(title).120B_audio_%(epoch)s.%(ext)s"
 const AUDIO_TRIM_TEMPLATE =
   "%(title).120B_audio_%(section_start)s-%(section_end)s_%(epoch)s.%(ext)s"
+
+// the ceiling on any one link, for the listing, for the selection built out of
+// it, and for the width the item numbers are padded to. a 5,283-item channel
+// lists in 63 s and 3.8 MB; the first 100 list in about a second and cover
+// nearly every real playlist, and anything bigger is shown honestly as "the
+// first 100 of 5,283".
+//
+// it lives here rather than in the engine because the padding below has to be
+// derived from it, and the engine may depend on this module while this module
+// must not depend on the engine
+const PLAYLIST_MAX_ITEMS = 100
+
+// pad to the width of the cap, not to whatever yt-dlp picks.
+//
+// left to itself `%(playlist_index)s` pads to the digit width of the *largest
+// selected index*, which is per-run rather than per-playlist. measured against
+// 2026.08.19 on one 13-item playlist: `-I 1,3` gives `1`, `3`; `-I 7,11` gives
+// `07`, `11`; `-I 1:13` gives `01`..`13`. each run is internally consistent,
+// so nothing sorts wrongly *within* a run.
+//
+// the problem is that a playlist folder outlives one run. download items 1 and
+// 3, come back and download 7 and 11, and the same folder holds `1 - ...`,
+// `3 - ...`, `07 - ...` and `11 - ...` - four files at two widths, which no
+// file manager sorts sensibly. a width pinned to the cap is the same in every
+// run, and it follows the constant if the cap ever changes
+const PLAYLIST_INDEX_WIDTH = String(PLAYLIST_MAX_ITEMS).length
+
+// a playlist follows yt-dlp's own recommended pattern instead of the flat
+// single-video names above: a folder per playlist, then a name led by the
+// item's true position in the list.
+//
+// the pair splits the same way VIDEO_TEMPLATE and AUDIO_TEMPLATE do, and for
+// the same reason - the video name carries the height it really got, the audio
+// name has no height to carry. that is not cosmetic here: the download archive
+// is keyed by video id alone, so it is quality-blind, and a name that did not
+// vary with the height would defeat the per-quality archive scoping one layer
+// down. yt-dlp would find the file already there and skip it, and "download
+// this playlist again in 4K" would quietly do nothing.
+//
+// the consequence is worth stating: a later run at a *lower* ceiling that
+// lands on the same delivered height does hit yt-dlp's own "has already been
+// downloaded" skip. that is the right outcome - the file on disk is the file
+// that run asked for.
+//
+// two more details are deliberate:
+//   - `[%(id)s]` is from yt-dlp's own guidance: titles are not unique and get
+//     edited after the fact, ids never change
+//   - no `%(epoch)s`, unlike the single-video templates: the id and the height
+//     already make the name unique, so a timestamp would only add noise to a
+//     hundred filenames
+//
+// the video title is capped at .80B rather than the .120B a single video gets,
+// and that is a budget rather than a preference. `--trim-filenames 240` counts
+// the whole *relative* path - the playlist folder included - and truncates the
+// stem from the tail, so whatever sits at the end of the name is what it eats
+// first. measured against 2026.08.19 with an artificially low trim:
+//
+//     trim 90: .../003 - Mark Lesek： A New⧸Old Prosthetic [V4DDt30.mp4
+//     trim 70: .../003 - Mark Lesek： A New⧸Old.mp4
+//     trim 30: .../Google Search Stories [PLBCF2D.mp4   <- the folder is gone
+//
+// the height goes first, then the id - which is precisely the pair that keeps
+// two runs at different ceilings from colliding. an 80-byte playlist title, a
+// 41-character `OLAK5uy_` album id and a .100B video title reach 251 and lose
+// them; at .80B the worst case is 231, inside the budget. the test that pins
+// this computes the number from the template rather than restating it
+const PLAYLIST_DIR = `%(playlist_title).80B [%(playlist_id)s]`
+const PLAYLIST_ITEM = `%(playlist_index)0${PLAYLIST_INDEX_WIDTH}d - %(title).80B [%(id)s]`
+const PLAYLIST_VIDEO_TEMPLATE = `${PLAYLIST_DIR}/${PLAYLIST_ITEM} %(height)sp.%(ext)s`
+const PLAYLIST_AUDIO_TEMPLATE = `${PLAYLIST_DIR}/${PLAYLIST_ITEM}.%(ext)s`
+
+// resume archives live together under userData rather than beside the videos:
+// they are our bookkeeping, and a stray .txt in the user's playlist folder is
+// something they would reasonably delete
+const PLAYLIST_ARCHIVE_DIR = "playlists"
+
+// a playlist id and a quality both become path components, so they are
+// stripped to the characters an id actually uses. youtube's are `PL...` /
+// `UU...` / `RD...` and other extractors' are just as tame, but nothing
+// arriving over ipc gets to write `../` into a path we then open for writing
+const ARCHIVE_COMPONENT_PATTERN = /[^A-Za-z0-9_-]/g
 
 /**
  * strip characters that are illegal in filenames (ported from shared_utils)
@@ -396,6 +480,141 @@ function mapVideoInfo(info) {
 }
 
 /**
+ * the thumbnail for one playlist row
+ *
+ * a flat entry carries a `thumbnails[]` array rather than the single
+ * `thumbnail` field mapVideoInfo reads, ordered worst first the way yt-dlp
+ * orders every thumbnail list - so the last usable one is its own best pick.
+ * on youtube that is 336x188, which is the right size for a list row anyway.
+ *
+ * @param {Object[]} thumbnails - the entry's thumbnails
+ * @returns {string|null} url, or null when there is none
+ */
+function pickEntryThumbnail(thumbnails) {
+  if (!Array.isArray(thumbnails)) {
+    return null
+  }
+
+  for (let index = thumbnails.length - 1; index >= 0; index -= 1) {
+    const url = thumbnails[index] && thumbnails[index].url
+
+    if (typeof url === "string" && url.trim()) {
+      return url.trim()
+    }
+  }
+
+  return null
+}
+
+/**
+ * can the user actually download this entry?
+ *
+ * a deleted or private video still appears in the listing, and getting this
+ * wrong is expensive: an entry we call downloadable is one the user ticks,
+ * which then errors and spends one of the five --skip-playlist-after-errors
+ * failures. five private videos in a row would end the whole run.
+ *
+ * so it is worth being exact about what such an entry looks like. measured
+ * against 2026.08.19 on a 19-item playlist holding 5 private videos:
+ *
+ *     { id: "mt7rGhAm2CY", title: null, duration: null, view_count: null,
+ *       live_status: null, availability: null,
+ *       thumbnails: [4 placeholders],
+ *       url: "https://www.youtube.com/watch?v=mt7rGhAm2CY" }
+ *
+ * two things that sound like the signal are not. there is no `[Private video]`
+ * title to match - the title is **null**, and were it there it would be
+ * localised anyway. and the url is *always* present: yt-dlp synthesises it
+ * from the video id for every entry it sees, dead or alive, so "has no url"
+ * is never true for a youtube listing.
+ *
+ * what is left is no duration and no title, and both halves are needed: a live
+ * stream also reports no duration, and what it has is a title.
+ *
+ * @param {Object} entry - one flat playlist entry
+ * @param {number|null} duration - the duration already read off it
+ * @returns {boolean} true when there is nothing here to download
+ */
+function isUnavailableEntry(entry, duration) {
+  if (duration !== null) {
+    return false
+  }
+
+  return !String(entry.title == null ? "" : entry.title).trim()
+}
+
+/**
+ * one flat playlist entry -> one row
+ * @param {Object} entry - the entry, or null where yt-dlp emitted nothing
+ * @param {number} index - its 1-based position in the playlist
+ * @returns {Object} row
+ */
+function mapPlaylistEntry(entry, index) {
+  const source = entry || {}
+  const seconds = Number(source.duration)
+  const duration =
+    Number.isFinite(seconds) && seconds > 0 ? Math.floor(seconds) : null
+
+  return {
+    index,
+    id: source.id || null,
+    title: source.title || "Unknown",
+    duration,
+    // null rather than formatDuration's "00:00": a row with no duration has
+    // nothing to show, and a zero would read as a video of zero length
+    duration_string: duration === null ? null : formatDuration(duration),
+    thumbnail: pickEntryThumbnail(source.thumbnails),
+    unavailable: isUnavailableEntry(source, duration)
+  }
+}
+
+/**
+ * playlist info -> the shape the playlist list renders
+ *
+ * the entries come from `--flat-playlist`, which carries no formats at all -
+ * so there is no quality ladder and no byte size here, and there cannot be.
+ * that is the whole reason a playlist's quality menu is a fixed ceiling rather
+ * than one derived from what the video really offers.
+ *
+ * @param {Object} info - parsed --dump-single-json payload
+ * @returns {Object} response body
+ */
+function mapPlaylistInfo(info) {
+  const source = info || {}
+  const entries = Array.isArray(source.entries) ? source.entries : []
+
+  // the playlist's *true* size. a `list=PL...` playlist reports it even when
+  // the listing was bounded (183 reported, 100 returned - measured); a channel
+  // feed paginates lazily and reports nothing at all. that null is passed on
+  // rather than papered over with the number we happened to fetch, because the
+  // two mean different things to the header
+  //
+  // Number(null) is 0, so the absent case has to be tested before the coercion
+  // rather than after it - a channel feed would otherwise report a playlist of
+  // zero videos while listing a hundred of them
+  const total =
+    source.playlist_count == null ? NaN : Number(source.playlist_count)
+  const count = Number.isFinite(total) && total >= 0 ? Math.floor(total) : null
+
+  return {
+    playlist_id: source.id || null,
+    title: source.title || "Unknown",
+    uploader: source.uploader || source.channel || "Unknown",
+    count,
+    listed: entries.length,
+    // "there is more of this than we are showing you", which is only something
+    // we can claim when the true size is known
+    truncated: count !== null && count > entries.length,
+    // the position in the array *is* the playlist index: the listing is always
+    // taken from item 1, and a flat entry carries no playlist_index field of
+    // its own - verified against 2026.08.19. counting positions also keeps the
+    // numbering aligned when yt-dlp emits a null entry, where reading a field
+    // off the entry would not
+    entries: entries.map((entry, position) => mapPlaylistEntry(entry, position + 1))
+  }
+}
+
+/**
  * tiktok / pinterest info -> their simpler shared shape
  * @param {Object} info - parsed --dump-json payload
  * @param {string} fallbackTitle - used when the extractor has no title
@@ -457,6 +676,86 @@ function buildAudioOutputTemplate({ timeRange } = {}) {
 }
 
 /**
+ * output template for a playlist download
+ *
+ * both land in one folder per playlist; only the video name carries the
+ * height, which is what keeps the per-quality download archive meaningful -
+ * see the templates for why
+ *
+ * @param {Object} params - {audioOnly}
+ * @returns {string} yt-dlp -o template
+ */
+function buildPlaylistOutputTemplate({ audioOnly } = {}) {
+  return audioOnly ? PLAYLIST_AUDIO_TEMPLATE : PLAYLIST_VIDEO_TEMPLATE
+}
+
+/**
+ * where the resume archive for one playlist run lives
+ *
+ * the archive is keyed by video id and nothing else, which makes it
+ * quality-blind: a single `archive.txt` per playlist would make "download this
+ * one again in 4K" silently do nothing at all. scoping the *filename* by the
+ * quality as well gives resume where the user wants it - an interrupted run
+ * continues - and a fresh run when they change their mind.
+ *
+ * @param {Object} params - {userDataPath, playlistId, mode} - mode names the
+ *   quality the run asked for, "1080p-mp4" or "mp3"
+ * @returns {string} absolute path to the archive file
+ * @throws {Error} when there is no userData path, or no mode to scope by
+ */
+function buildPlaylistArchivePath({ userDataPath, playlistId, mode, outputDir } = {}) {
+  if (!userDataPath) {
+    throw new Error("A playlist archive needs a userData path.")
+  }
+
+  // the mode is the whole point of this function, so a missing one is refused
+  // rather than defaulted. a default would be one shared filename that two
+  // careless callers at different qualities both land on - which is exactly
+  // the quality-blind archive the scoping exists to avoid
+  if (!mode) {
+    throw new Error("A playlist archive needs the quality it is scoped to.")
+  }
+
+  // ...and the destination for the same reason one layer out. an archive
+  // records that a download once succeeded, not that a file is on disk now:
+  // download to one folder, pick another, run again, and a destination-blind
+  // archive skips the lot and reports a finished run over an empty folder.
+  // scoping by folder does not make the archive a claim about the filesystem -
+  // nothing can, which is why an archive skip is reported as `itemsReused`
+  // rather than as a save - but it does stop the commonest way of being wrong
+  if (!outputDir) {
+    throw new Error("A playlist archive needs to know where the files go.")
+  }
+
+  // the folder is hashed rather than sanitised into the name: a full path is
+  // far longer than the component limit, and squeezing it would collide two
+  // different folders under one archive. resolved first so `a/sub/..` and `a`
+  // are one scope
+  const destination = crypto
+    .createHash("sha256")
+    .update(path.resolve(outputDir))
+    .digest("hex")
+    .slice(0, 8)
+
+  const name =
+    `${archiveComponent(playlistId, "playlist")}__` +
+    `${archiveComponent(mode, "any")}__${destination}`
+
+  return path.join(userDataPath, PLAYLIST_ARCHIVE_DIR, `${name}.txt`)
+}
+
+// one half of an archive filename, reduced to characters that cannot mean
+// anything to a filesystem. the length cap is the same 255-byte component
+// limit --trim-filenames exists for
+function archiveComponent(value, fallback) {
+  const cleaned = String(value == null ? "" : value)
+    .replace(ARCHIVE_COMPONENT_PATTERN, "")
+    .slice(0, 100)
+
+  return cleaned || fallback
+}
+
+/**
  * output template for a simple platform download (tiktok / pinterest)
  * @param {Object} params - {title, platform, now}
  * @returns {string} yt-dlp -o template
@@ -478,7 +777,15 @@ module.exports = {
   extractAudioTracks,
   mapVideoInfo,
   mapSimpleInfo,
+  mapPlaylistInfo,
   buildVideoOutputTemplate,
   buildAudioOutputTemplate,
-  buildSimpleOutputTemplate
+  buildPlaylistOutputTemplate,
+  buildPlaylistArchivePath,
+  buildSimpleOutputTemplate,
+  // the engine builds `-I 1:<cap>` and bounds the selection against the same
+  // number - this module owns it because the index padding is derived from it
+  PLAYLIST_MAX_ITEMS,
+  PLAYLIST_INDEX_WIDTH,
+  PLAYLIST_ARCHIVE_DIR
 }

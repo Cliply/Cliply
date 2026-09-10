@@ -1,4 +1,4 @@
-import { useCallback } from "react"
+import { useCallback, useEffect } from "react"
 import { settingsApi, systemApi } from "@/lib/api"
 import { t } from "@/lib/i18n"
 import { useYouTubeStore } from "@/lib/youtubeStore"
@@ -12,6 +12,34 @@ export function useDownloadPath() {
     setIsLoadingDownloadPath,
     isLoadingDownloadPath
   } = useYouTubeStore()
+
+  /**
+   * where files land right now, read once
+   *
+   * the store only ever learned this from `selectFolder`, so it was null for
+   * everybody who had not changed the folder in this session - which is why
+   * the screens that name the folder used to print `~/Downloads/Cliply` as a
+   * literal and were wrong for anyone who had.
+   *
+   * a failure is swallowed rather than toasted: nothing was asked for, and a
+   * screen with no path to show says nothing instead of guessing at one.
+   */
+  useEffect(() => {
+    if (downloadPath) return
+
+    let cancelled = false
+
+    settingsApi
+      .getDownloadPath()
+      .then((info) => {
+        if (!cancelled) setDownloadPath(info)
+      })
+      .catch(() => {})
+
+    return () => {
+      cancelled = true
+    }
+  }, [downloadPath, setDownloadPath])
 
   // folder selection logic
   // no engine gate: the download folder is stored by the main process, so

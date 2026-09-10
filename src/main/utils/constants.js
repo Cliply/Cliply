@@ -50,6 +50,10 @@ const IPC_CHANNELS = {
   VIDEO_DOWNLOAD_COMBINED: "video:download-combined",
   AUDIO_DOWNLOAD: "audio:download",
 
+  // playlist operations - one job covering n videos, youtube only
+  PLAYLIST_GET_INFO: "playlist:get-info",
+  PLAYLIST_DOWNLOAD: "playlist:download",
+
   // download management
   DOWNLOAD_PROGRESS: "download:progress",
   // fired only on the handful of downloads that hit a support milestone

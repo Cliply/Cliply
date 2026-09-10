@@ -18,6 +18,7 @@ import { beforeEach, describe, expect, test, vi } from "vitest"
 
 import payloads from "./analytics-payloads.fixture.json"
 import type { AudioDownloadRequest, VideoDownloadRequest } from "@/lib/api"
+import { en } from "@/lib/i18n/en"
 import type { Platform } from "@/lib/store"
 
 type Bag = { event: string; properties: Record<string, unknown> }
@@ -25,10 +26,12 @@ type ProgressListener = (payload: Record<string, unknown>) => void
 
 const mocks = vi.hoisted(() => ({
   getVideoInfo: vi.fn(),
+  getPlaylistInfo: vi.fn(),
   getPinInfo: vi.fn(),
   getTikTokInfo: vi.fn(),
   downloadVideo: vi.fn(),
   downloadAudio: vi.fn(),
+  downloadPlaylist: vi.fn(),
   downloadPin: vi.fn(),
   downloadTikTok: vi.fn(),
   listeners: [] as ProgressListener[]
@@ -56,6 +59,15 @@ vi.mock("@/lib/api", () => {
       getVideoInfo: (url: string) => mocks.getVideoInfo(url),
       downloadVideo: (request: unknown) => mocks.downloadVideo(request),
       downloadAudio: (request: unknown) => mocks.downloadAudio(request)
+    },
+    playlistApi: {
+      getPlaylistInfo: (url: string) => mocks.getPlaylistInfo(url),
+      download: (request: unknown) => mocks.downloadPlaylist(request)
+    },
+    // the header reads the download folder over ipc; no screen driven here
+    // shows it, and a rejection is what the hook already expects to swallow
+    settingsApi: {
+      getDownloadPath: () => Promise.reject(new Error("no path here"))
     },
     pinterestApi: {
       getInfo: (url: string) => mocks.getPinInfo(url),
@@ -91,12 +103,16 @@ vi.mock("sonner", () => ({
   toast: { success: vi.fn(), info: vi.fn(), error: vi.fn() }
 }))
 
+import { SearchCard } from "@/components/hero/SearchCard"
 import { UnifiedDownloadCard } from "@/components/video/UnifiedDownloadCard"
 import { DownloadError } from "@/lib/api"
 import { useAudioDownload } from "@/lib/hooks/useAudioDownload"
 import { useMediaSearch } from "@/lib/hooks/useMediaSearch"
+import { usePlaylistDownload } from "@/lib/hooks/usePlaylistDownload"
 import { useVideoDownload } from "@/lib/hooks/useVideoDownload"
+import { useMixedLinkStore } from "@/lib/mixedLinkStore"
 import { usePinterestStore } from "@/lib/pinterestStore"
+import { usePlaylistStore } from "@/lib/playlistStore"
 import { useTikTokStore } from "@/lib/tiktokStore"
 
 let recorded: Bag[]
@@ -105,6 +121,12 @@ beforeEach(() => {
   recorded = []
   mocks.listeners.length = 0
   vi.clearAllMocks()
+  // an ambiguous link is asked about once per session, so the answer one case
+  // gives must not carry into the next
+  useMixedLinkStore.getState().reset()
+  // ...and a listing left loaded is a selection the next playlist download
+  // would send
+  usePlaylistStore.getState().reset()
 
   // handleSearchError logs every failure, and the failures below are the point
   vi.spyOn(console, "error").mockImplementation(() => {})
@@ -124,6 +146,23 @@ function wrapper({ children }: { children: ReactNode }) {
   })
 
   return <QueryClientProvider client={client}>{children}</QueryClientProvider>
+}
+
+/**
+ * click the helper line's playlist link, on the real search box
+ *
+ * driven through SearchCard rather than URLInput alone because the box's form
+ * is useMediaSearch's: the click writes a url into the same form a paste lands
+ * in, and a hand-rolled one here would report a bag no user can produce.
+ */
+async function clickPlaylistHint() {
+  const view = render(<SearchCard platform="youtube" />)
+
+  await act(async () => {
+    screen.getByRole("button", { name: en["url.youtubeHelperPlaylists"] }).click()
+  })
+
+  view.unmount()
 }
 
 /** put a url through the real submit flow, whatever the api does with it */
@@ -150,6 +189,45 @@ const youtubeInfo = (duration: number | null, tiers: number) => ({
   })),
   audio_tracks: []
 })
+
+/**
+ * enough of a listing for the mixed-link prompt to have something to ask about
+ *
+ * `count` is the playlist's true size and `listed` how many rows came back,
+ * capped at 100 - they differ for a channel-sized list, and the bucket is
+ * derived from the first
+ */
+const listingOf = (count: number, listed = count) => ({
+  playlist_id: "PL123",
+  title: "Short talks",
+  uploader: "Someone",
+  count,
+  listed,
+  truncated: listed < count,
+  entries: []
+})
+
+const playlistListing = listingOf(2)
+
+const playlistEntry = (index: number) => ({
+  index,
+  id: `video${index}`,
+  title: "My Holiday Video",
+  duration: 60,
+  duration_string: "1:00",
+  thumbnail: null,
+  unavailable: false
+})
+
+/** press one of the prompt's two buttons, the way the dialog does */
+async function answerMixedLink(choice: "video" | "playlist") {
+  await act(async () => {
+    useMixedLinkStore.getState().answer(choice)
+    // the video branch is a lookup the answer itself does not wait for
+    await Promise.resolve()
+    await Promise.resolve()
+  })
+}
 
 const simpleInfo = (duration: number | null) => ({
   title: "My Holiday Video",
@@ -248,6 +326,61 @@ async function startSimpleDownload(platform: "pinterest" | "tiktok") {
   view.unmount()
 }
 
+/**
+ * run one playlist download far enough to send its start event, then settle it
+ *
+ * the selection comes from the store rather than from a request argument,
+ * because that is where the hook reads it: `buildPlaylistDownloadRequest` joins
+ * the ticked positions against the listing on screen, and `item_count` is how
+ * many of those there were.
+ */
+async function startPlaylist(tab: "video" | "audio") {
+  const store = usePlaylistStore.getState()
+
+  store.setLoadedPlaylist("https://www.youtube.com/playlist?list=PL123", {
+    ...playlistListing,
+    entries: [playlistEntry(1), playlistEntry(2)]
+  })
+
+  if (tab === "audio") {
+    usePlaylistStore.getState().setActiveTab("audio")
+    usePlaylistStore.getState().setSelectedAudioMode("m4a")
+  }
+
+  const { result, unmount } = renderHook(() => usePlaylistDownload(), {
+    wrapper
+  })
+
+  let pending!: Promise<unknown>
+
+  await act(async () => {
+    pending = result.current.mutateAsync({})
+  })
+  pending.catch(() => {})
+
+  const downloadId = mocks.downloadPlaylist.mock.calls.at(-1)?.[0]
+    .download_id as string
+
+  // a playlist mutation is only settled by a terminal progress event, so a run
+  // left going would hold a listener into the next case
+  await act(async () => {
+    for (const listener of [...mocks.listeners]) {
+      listener({
+        downloadId,
+        status: "completed",
+        progress: 100,
+        items_saved: 2,
+        items_reused: 0,
+        items_skipped: 0,
+        items_total: 2
+      })
+    }
+  })
+
+  await pending
+  unmount()
+}
+
 const startAudio = (request: Partial<AudioDownloadRequest>) =>
   download(
     useAudioDownload,
@@ -265,6 +398,16 @@ describe("the bags the call sites build", () => {
     mocks.downloadVideo.mockResolvedValue({ downloadId: "ignored" })
     mocks.downloadAudio.mockResolvedValue({ downloadId: "ignored" })
 
+    /**
+     * the one thing on the hero that is not a paste.
+     *
+     * the helper line says playlists work and offers one to try, and this is
+     * how often that offer is taken. it carries the platform and nothing else:
+     * the link is ours, so there is no url_kind to report about it, and the
+     * submission it leads to reports itself like any other paste.
+     */
+    await clickPlaylistHint()
+
     // --- the front of the funnel, one link shape at a time ---
     mocks.getVideoInfo.mockResolvedValueOnce(youtubeInfo(240, 6))
     await search("youtube", "https://www.youtube.com/watch?v=dQw4w9WgXcQ")
@@ -272,8 +415,23 @@ describe("the bags the call sites build", () => {
     mocks.getVideoInfo.mockResolvedValueOnce(youtubeInfo(30, 2))
     await search("youtube", "https://www.youtube.com/shorts/abc123")
 
+    /**
+     * a link naming a video *and* the playlist it sits in.
+     *
+     * this used to be one more search: the link went straight to the single
+     * video, so `url_submitted` and `media_info_loaded` came out of the one
+     * call. it is now asked about first, and the video's own bags arrive only
+     * once "Just this video" is answered - so the answer is driven here, and
+     * the pair of bags is unchanged.
+     *
+     * between them sits the answer itself, which is the question the prompt was
+     * built to ask: how often somebody pastes a link like this and did not mean
+     * the video Cliply used to take out of it silently.
+     */
+    mocks.getPlaylistInfo.mockResolvedValueOnce(playlistListing)
     mocks.getVideoInfo.mockResolvedValueOnce(youtubeInfo(900, 4))
     await search("youtube", "https://www.youtube.com/watch?v=abc&list=PL123")
+    await answerMixedLink("video")
 
     mocks.getVideoInfo.mockResolvedValueOnce(youtubeInfo(2400, 1))
     await search("youtube", "https://youtu.be/dQw4w9WgXcQ")
@@ -318,6 +476,33 @@ describe("the bags the call sites build", () => {
     )
     await search("tiktok", "https://www.tiktok.com/@someone/video/12345")
 
+    /**
+     * a link that is only a playlist, which is the one youtube link that names
+     * no video at all.
+     *
+     * its `media_info_loaded` carries neither a duration nor a format count and
+     * cannot: a flat listing has no formats, and one duration for a list of
+     * videos is not a thing. what it carries instead is how many videos are in
+     * it, bucketed - the reason `URL_KINDS.playlist` was added in the first
+     * place was to ask how often this happens, and this is the other half of
+     * that answer
+     */
+    mocks.getPlaylistInfo.mockResolvedValueOnce(listingOf(30))
+    await search("youtube", "https://www.youtube.com/playlist?list=PL456")
+
+    /**
+     * ...and an ambiguous link answered the other way. a different link from the
+     * one above, because an answer is remembered per link and a repeat would
+     * skip the question rather than ask it again.
+     *
+     * the listing is a channel-sized one truncated at the item cap: the bucket
+     * comes off `count`, what the platform says the list holds, not off the
+     * hundred rows we listed
+     */
+    mocks.getPlaylistInfo.mockResolvedValueOnce(listingOf(5283, 100))
+    await search("youtube", "https://www.youtube.com/watch?v=xyz&list=PL999")
+    await answerMixedLink("playlist")
+
     // --- and the downloads those searches lead to ---
     await startVideo({ height: 1080 })
     await startVideo({ height: 2160, time_range: { start: 10, end: 30 } })
@@ -342,6 +527,22 @@ describe("the bags the call sites build", () => {
     mocks.downloadTikTok.mockResolvedValue({ downloadId: "ignored" })
     await startSimpleDownload("pinterest")
     await startSimpleDownload("tiktok")
+
+    /**
+     * one download of n videos, on each tab.
+     *
+     * it extends `download_started` rather than sending an event of its own, so
+     * the funnel joins on the same dimensions: the same platform, the same media
+     * type, and `quality` as the ceiling that was asked for. what a playlist adds
+     * is that it is one, and how many videos were ticked.
+     *
+     * `is_trimmed` is false by construction - the playlist operation does not
+     * accept a range at all, which is a stronger statement than the control
+     * being hidden
+     */
+    mocks.downloadPlaylist.mockResolvedValue({ downloadId: "ignored" })
+    await startPlaylist("video")
+    await startPlaylist("audio")
 
     expect(recorded).toEqual(payloads.callSites)
   })

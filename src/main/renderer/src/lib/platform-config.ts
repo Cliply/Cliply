@@ -4,6 +4,7 @@ import type { Resolver } from "react-hook-form"
 import { pinterestApi, tiktokApi, videoApi } from "@/lib/api"
 import type { Key } from "@/lib/i18n"
 import { usePinterestStore } from "@/lib/pinterestStore"
+import { usePlaylistStore } from "@/lib/playlistStore"
 import type { Platform } from "@/lib/store"
 import { useTikTokStore } from "@/lib/tiktokStore"
 import { pinterestUrlSchema, tiktokUrlSchema, youtubeUrlSchema } from "@/lib/validation"
@@ -64,7 +65,9 @@ export const PLATFORM_REGISTRY: Record<Platform, PlatformConfig> = {
     label: "youtube",
     logo: "./youtube-logo.svg",
     formResolver: zodResolver(youtubeUrlSchema),
-    placeholder: "url.placeholder",
+    // the one box that takes a playlist link, so the one placeholder that says
+    // so. pinterest and tiktok keep the shared line, which is still true of them
+    placeholder: "url.youtubePlaceholder",
     helperText: "url.youtubeHelper",
     loadingText: "url.loading",
     successMessage: "url.loaded",
@@ -78,6 +81,9 @@ export const PLATFORM_REGISTRY: Record<Platform, PlatformConfig> = {
     fetchAndStore: async (url: string) => {
       const info = await videoApi.getVideoInfo(url)
       useYouTubeStore.getState().setVideoInfo(info)
+      // the youtube box holds either a video or a playlist, never both at once:
+      // whichever was loaded last is what the page shows
+      usePlaylistStore.getState().reset()
 
       return {
         durationSeconds: info.duration ?? null,
@@ -91,7 +97,11 @@ export const PLATFORM_REGISTRY: Record<Platform, PlatformConfig> = {
       setIsLoading: (loading) =>
         useYouTubeStore.getState().setIsLoadingVideoInfo(loading),
       hasInfo: () => useYouTubeStore.getState().videoInfo !== null,
-      reset: () => useYouTubeStore.getState().reset()
+      // clearing the box clears both of the things it can be holding
+      reset: () => {
+        useYouTubeStore.getState().reset()
+        usePlaylistStore.getState().reset()
+      }
     }
   },
   pinterest: {

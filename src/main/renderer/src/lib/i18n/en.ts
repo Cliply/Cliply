@@ -25,18 +25,133 @@ export const en = {
   "menu.github": "github",
 
   "url.placeholder": "paste video url here...",
+  // youtube's box is the one that takes a playlist link, and the empty box is
+  // the first place somebody looks to find out what it accepts
+  "url.youtubePlaceholder": "paste a video or playlist url...",
   // the details screen asks for a replacement link
   "url.replacePlaceholder": "Enter new video URL...",
   "url.loading": "\u{1F40B} getting video information",
   "url.loaded": "Video information loaded successfully!",
   "url.selectFolder": "Select folder",
   "url.pickerBusy": "Wait for the current link to finish",
-  "url.youtubeHelper":
-    "supports youtube videos & shorts from youtube.com and youtu.be",
+  // the box takes a playlist link now, and a helper line that only mentions
+  // videos and shorts is the reason somebody would never try one.
+  //
+  // three keys rather than one because the middle word is a link that fills the
+  // box with a playlist: same reason cookies.stillHere is split around its
+  // count, and the halves carry their own spacing so word order can differ
+  "url.youtubeHelper": "supports youtube videos, shorts & ",
+  "url.youtubeHelperPlaylists": "playlists",
+  "url.youtubeHelperRest": " from youtube.com and youtu.be",
   "url.pinterestHelper":
     "supports pin.it and pinterest.com/pin links, any country domain",
   "url.tiktokHelper":
     "supports tiktok.com/@user/video/ID, vm.tiktok.com, and vt.tiktok.com links",
+
+  // the two toasts a playlist link sends from the search box
+  "playlist.loaded": "Playlist loaded successfully!",
+  "playlist.infoFailed": "Failed to get playlist information",
+
+  /**
+   * the playlist screens: the listing on the left, the card on the right, and
+   * what a run says about itself
+   *
+   * every sentence that counts something is built from pieces that are each
+   * translated whole and joined by the same punctuation in both languages.
+   * gluing translated fragments together in english word order is the one
+   * thing this section must never do, because russian does not share it.
+   */
+
+  // the header over the listing
+  "playlist.videoCount": "{n} video|{n} videos",
+  "playlist.showingFirst": "Showing the first {listed} of {count} videos",
+  "playlist.totalHours": "{hours} h {minutes} m total",
+  "playlist.totalMinutes": "{minutes} m total",
+
+  // the toolbar above the rows
+  "playlist.selectAll": "Select all",
+  "playlist.selectNone": "Select none",
+  "playlist.selectedCount": "{n} of {total} selected",
+  "playlist.perVideoStatus": "Per video status",
+  "playlist.badgeDone": "{n} done",
+  "playlist.badgeDownloading": "{n} downloading",
+
+  // one row's badge. the height a save came down at is data, not a word
+  "playlist.rowSaved": "saved",
+  "playlist.rowSavedAt": "saved · {height}p",
+  "playlist.rowReused": "already downloaded",
+  "playlist.rowNotSaved": "not saved",
+  "playlist.rowQueued": "queued",
+  "playlist.rowStopping": "stopping",
+  "playlist.rowUnavailable": "unavailable",
+
+  // the picker
+  "playlist.tabVideo": "Video",
+  "playlist.qualityHeading": "Quality",
+  "playlist.qualityPlaceholder": "Select a quality limit...",
+  // the six rows differ only by a height, which is the same in any language
+  "playlist.ceilingLabel": "Up to {limit}",
+  "playlist.ceilingHelper":
+    "Each video is saved as MP4 at its best quality up to {limit}, with its original audio.",
+  "playlist.videoIntro":
+    "One quality for the whole playlist. Video and audio are merged automatically.",
+  "playlist.audioIntro":
+    "Take the audio from every video you picked, in one format.",
+  "playlist.audioNote": "Each video is saved whole, in the format picked above.",
+  "playlist.pickVideosFirst": "Pick some videos first",
+  "playlist.pickTracksFirst": "Pick some tracks first",
+  "playlist.downloadVideos": "Download {n} video|Download {n} videos",
+  "playlist.downloadTracks": "Download {n} track|Download {n} tracks",
+
+  // the run
+  "playlist.starting": "Starting playlist download...",
+  "playlist.videoOf": "Video {current} of {total}",
+  "playlist.thisVideo": "This video",
+  "playlist.cancelRemaining": "Cancel remaining",
+  "playlist.cancelKeepsHint":
+    "Videos already saved are kept. Running it again skips them.",
+
+  // how it ended
+  "playlist.completed": "Playlist download completed!",
+  "playlist.finished": "Playlist download finished",
+  "playlist.cancelled": "Playlist download cancelled",
+  "playlist.cancelledToast":
+    "Videos already saved are kept. Re-running skips them.",
+  "playlist.cancelledHint":
+    "Videos already saved are kept. Running it again picks up where this one stopped.",
+  "playlist.failed": "Playlist download failed",
+  // the three pieces of "8 of 9 videos saved, 2 already downloaded, 1 skipped."
+  "playlist.summarySaved":
+    "{saved} of {n} video saved|{saved} of {n} videos saved",
+  "playlist.summaryReused": "{n} already downloaded",
+  "playlist.summarySkipped": "{n} skipped",
+  // the ones the run did not save, named. a single miss is named without a
+  // count, which is a rule about the sentence rather than about grammar - so
+  // it is a branch in code rather than the `one` form of a plural set
+  "playlist.notSavedOne": "Not saved: {names}.",
+  "playlist.notSavedMany": "{n} not saved: {names}.",
+  "playlist.quotedName": '"{title}"',
+  "playlist.andMore": "{n} more",
+  "playlist.listJoin": "{items} and {last}",
+  "playlist.retryFailed": "Retry the {n} that failed",
+  "playlist.downloadAgain": "Download everything again",
+  "playlist.pickAgain": "Pick videos again",
+
+  // a start the screen refused before anything ran
+  "playlist.errorNoPlaylist": "Load a playlist before downloading it.",
+  "playlist.errorNoId": "This link doesn't name a playlist we can download.",
+  "playlist.errorNoSelection": "Select at least one video to download.",
+  "playlist.errorBusy": "A playlist download is already running.",
+
+  // the question a watch?v=…&list=… link asks
+  "mixedLink.title": "This link is part of a playlist",
+  "mixedLink.videoChoice": "Just this video",
+  "mixedLink.videoHint": "The one the link opens",
+  "mixedLink.playlistChoice": "All {n} video|All {n} videos",
+  // a listing we only hold the first hundred of is not all of it, so the
+  // button counts what it will really download rather than promising all
+  "mixedLink.playlistFirst": "The first {n} videos",
+  "mixedLink.playlistHint": "Open the playlist",
 
   "error.imageNotVideo": "This is an image, not a video",
   "error.imageNotVideoDesc": "Only videos can be downloaded",
@@ -46,7 +161,7 @@ export const en = {
   "error.unavailable": "This video is not available for download",
   "error.infoFailed": "Failed to get video information",
   "error.tiktokBlocked":
-    "TikTok blocked this request — please try again in a moment",
+    "TikTok blocked this request. Please try again in a moment",
 
   "validation.youtubeRequired": "Please enter a YouTube URL",
   "validation.youtubeInvalid": "Please enter a valid YouTube URL",
@@ -194,7 +309,7 @@ export const en = {
   "dropdown.plusBestAudio": "+ best audio",
   "dropdown.original": "Original",
   "dropdown.noVideoStreams":
-    "This link has no video streams to download — only audio. The Audio Only tab still works.",
+    "This link has no video streams to download, only audio. The Audio Only tab still works.",
 
   // the container names are the same word everywhere; they sit in the
   // dictionary only so the row beside them can be typed as a key

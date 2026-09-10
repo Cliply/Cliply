@@ -219,7 +219,7 @@ export function DisclaimerPage() {
                 <p>
                   every event carries a random install id and a country, region
                   and city worked out from your ip, so it's pseudonymous rather
-                  than anonymous — it isn't your name, but it does follow one
+                  than anonymous: it isn't your name, but it does follow one
                   installation over time. posthog stores it for us; we don't
                   sell it and we won't hand it to anyone else.
                 </p>

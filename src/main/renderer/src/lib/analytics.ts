@@ -11,7 +11,7 @@
 // each is noted with what it mirrors. src/main/services/analytics.js is where
 // they are enforced.
 
-import type { AudioMode, TimeRange } from "@/lib/api"
+import type { AudioMode, PlaylistInfoResponse, TimeRange } from "@/lib/api"
 
 type AnalyticsValue = string | number | boolean
 
@@ -88,12 +88,63 @@ export function durationBucket(
 }
 
 /**
+ * how many videos the pasted playlist holds, as a label rather than a count.
+ *
+ * bucketed for the same reason a duration is: the exact length of a list, next
+ * to the platform and a locale, is close to naming which list it was. what the
+ * question actually is - are these five-video mixtapes or three-hundred-video
+ * channels - a bucket answers just as well.
+ *
+ * the boundaries are the ones this feature already has. 100 is the item cap
+ * (PLAYLIST_MAX_ITEMS), so a playlist above it is one we could only ever list
+ * part of; 5 separates a handful from a real list; and 25 is where the picker
+ * stops fitting on a screen. no bucket is open at the bottom because a playlist
+ * with nothing in it is never put on screen at all.
+ */
+const PLAYLIST_SIZE_BUCKETS = [
+  { upTo: 5, label: "1-5 vids" },
+  { upTo: 25, label: "6-25 vids" },
+  { upTo: 100, label: "26-100 vids" },
+  { upTo: Number.POSITIVE_INFINITY, label: ">100 vids" }
+] as const
+
+// exported for the same reason DURATION_BUCKET_LABELS is: a label added above
+// has to be one the main process's bucket grammar accepts, and the fixture the
+// main suite replays is where that is proved rather than discovered in the field
+export const PLAYLIST_SIZE_BUCKET_LABELS = PLAYLIST_SIZE_BUCKETS.map(
+  (bucket) => bucket.label
+)
+
+/**
+ * @param info - the listing that is on screen, or about to be
+ * @returns a bucket label, or null when there was nothing to bucket
+ *
+ * `count` is the playlist's true size and is what the question is about. it is
+ * null when the platform does not report one - a channel feed paginates lazily
+ * and never says - and then the rows that did come back are the only honest
+ * answer available.
+ */
+export function playlistSizeBucket(
+  info: Pick<PlaylistInfoResponse, "count" | "listed">
+): string | null {
+  const reported = typeof info.count === "number" ? info.count : 0
+  const size = Number.isFinite(reported) && reported > 0 ? reported : info.listed
+
+  if (typeof size !== "number" || !Number.isFinite(size) || size <= 0) {
+    return null
+  }
+
+  return PLAYLIST_SIZE_BUCKETS.find((bucket) => size <= bucket.upTo)?.label ?? null
+}
+
+/**
  * the kinds of link people paste.
  *
  * these are ours to invent, and they are the shape of the link and never the
- * link. "playlist" is the one that pays for the rest: we take the single video
- * out of a playlist url, and how often somebody expects otherwise is a question
- * nothing else here answers.
+ * link. "playlist" is the one that paid for the rest: it is how often a link
+ * carrying a video *and* a list gets pasted, which is the whole reason such a
+ * link is now asked about instead of quietly taken as the video. what people
+ * answer is a separate measurement, and not one this property can make.
  *
  * every value must also appear in PROPERTY_VOCABULARIES.url_kind
  * (services/analytics.js) or it is dropped on arrival.

@@ -34,21 +34,35 @@ const optionFor = (mode: AudioMode) =>
 interface AudioFormatDropdownProps {
   isVisible: boolean
   className?: string
+  /**
+   * which store the menu is reading and writing.
+   *
+   * the three modes are presets rather than anything derived from a format
+   * list, so a playlist offers exactly the same menu as a single video and
+   * should not get a second copy of it. it does keep its own selection though,
+   * so the two are passed in when the caller is not the video screen.
+   */
+  value?: AudioMode
+  onChange?: (mode: AudioMode) => void
 }
 
 export function AudioFormatDropdown({
   isVisible,
-  className
+  className,
+  value,
+  onChange
 }: AudioFormatDropdownProps) {
   const { selectedAudioMode, setSelectedAudioMode } = useYouTubeStore()
   const t = useT()
 
   // no defaulting effect: the three modes are the same on every video, so mp3
   // is simply what the store starts on
+  const mode = value ?? selectedAudioMode
+  const select = onChange ?? setSelectedAudioMode
 
   if (!isVisible) return null
 
-  const selected = optionFor(selectedAudioMode)
+  const selected = optionFor(mode)
 
   return (
     <SelectionDropdown
@@ -57,7 +71,7 @@ export function AudioFormatDropdown({
       placeholder={t("dropdown.audioFormatPlaceholder")}
       options={AUDIO_MODES}
       selected={selected}
-      onSelect={(option) => setSelectedAudioMode(option.mode)}
+      onSelect={(option) => select(option.mode)}
       optionKey={(option) => option.mode}
       renderLabel={(option) => t(option.label)}
       renderDetail={(option) => t(option.detail)}

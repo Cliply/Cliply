@@ -1,5 +1,6 @@
 {
   "callSites": [
+    { "event": "playlist_hint_clicked", "properties": { "platform": "youtube" } },
     { "event": "url_submitted", "properties": { "platform": "youtube", "url_kind": "video" } },
     {
       "event": "media_info_loaded",
@@ -11,6 +12,10 @@
       "properties": { "platform": "youtube", "duration_bucket": "<1 min", "formats_count": 2 }
     },
     { "event": "url_submitted", "properties": { "platform": "youtube", "url_kind": "playlist" } },
+    {
+      "event": "playlist_prompt_answered",
+      "properties": { "choice": "video", "playlist_size": "1-5 vids" }
+    },
     {
       "event": "media_info_loaded",
       "properties": { "platform": "youtube", "duration_bucket": "5-20 min", "formats_count": 4 }
@@ -71,6 +76,20 @@
         "error_stage": "fetch_info",
         "error_message": "Network interrupted the download."
       }
+    },
+    { "event": "url_submitted", "properties": { "platform": "youtube", "url_kind": "playlist" } },
+    {
+      "event": "media_info_loaded",
+      "properties": { "platform": "youtube", "playlist_size": "26-100 vids" }
+    },
+    { "event": "url_submitted", "properties": { "platform": "youtube", "url_kind": "playlist" } },
+    {
+      "event": "playlist_prompt_answered",
+      "properties": { "choice": "playlist", "playlist_size": ">100 vids" }
+    },
+    {
+      "event": "media_info_loaded",
+      "properties": { "platform": "youtube", "playlist_size": ">100 vids" }
     },
     {
       "event": "download_started",
@@ -149,6 +168,29 @@
         "media_type": "video",
         "quality": "best_available",
         "is_trimmed": false
+      }
+    },
+    {
+      "event": "download_started",
+      "properties": {
+        "platform": "youtube",
+        "media_type": "video",
+        "quality": "1080p",
+        "is_trimmed": false,
+        "is_playlist": true,
+        "item_count": 2
+      }
+    },
+    {
+      "event": "download_started",
+      "properties": {
+        "platform": "youtube",
+        "media_type": "audio",
+        "quality": "m4a",
+        "audio_format": "m4a",
+        "is_trimmed": false,
+        "is_playlist": true,
+        "item_count": 2
       }
     }
   ],

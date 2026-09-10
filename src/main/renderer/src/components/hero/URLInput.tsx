@@ -3,12 +3,14 @@ import { ChevronUp, Folder, Loader2, Send } from "lucide-react"
 import { useEffect, useState } from "react"
 import type { UseFormReturn } from "react-hook-form"
 
+import { track } from "@/lib/analytics"
 import { useDownloadPath } from "@/lib/hooks/useDownloadPath"
 import { useT, type Key } from "@/lib/i18n"
 import {
   PLATFORM_LIST,
   PLATFORM_REGISTRY
 } from "@/lib/platform-config"
+import { DEMO_PLAYLIST_URL } from "@/lib/playlistView"
 import { useAppStore, type Platform } from "@/lib/store"
 import { cn } from "@/lib/utils"
 
@@ -22,7 +24,7 @@ interface URLInputProps {
 }
 
 export function URLInput({ form, onFocusChange, isLoading, platform }: URLInputProps) {
-  const { register, formState: { errors }, watch } = form
+  const { register, formState: { errors }, watch, setValue, setFocus } = form
   const t = useT()
   const { selectFolder, isLoading: folderLoading } = useDownloadPath()
   const { selectedPlatform, setSelectedPlatform, setShowMediaDetails } = useAppStore()
@@ -54,6 +56,30 @@ export function URLInput({ form, onFocusChange, isLoading, platform }: URLInputP
       setShowMediaDetails(false)
     }
     setIsOpen(false)
+  }
+
+  /**
+   * hand somebody a playlist instead of only telling them playlists work
+   *
+   * the box is filled and focused and nothing is submitted: the user presses
+   * Enter, which is the habit the box is already built around, and until they
+   * do the link is sitting there to be read rather than a lookup somebody's
+   * click spent for them.
+   *
+   * shouldValidate because the send button is disabled off the form's error
+   * state, and a value written past the resolver would leave it disabled with a
+   * perfectly good link in the box.
+   */
+  const fillWithDemoPlaylist = () => {
+    setValue("url", DEMO_PLAYLIST_URL, {
+      shouldDirty: true,
+      shouldValidate: true
+    })
+    setFocus("url")
+
+    // which platform, and nothing else: the link is ours, so there is nothing
+    // here to report about what the user pasted
+    track("playlist_hint_clicked", { platform: "youtube" })
   }
 
   return (
@@ -253,6 +279,32 @@ export function URLInput({ form, onFocusChange, isLoading, platform }: URLInputP
           ) : (
             <p className="text-sm text-slate-600 dark:text-slate-500 text-center" style={{ fontFamily: MONO }}>
               {t(config.helperText)}
+              {/* only youtube's line ends in a link, because youtube is the
+                  only platform here with playlists to offer. the word keeps
+                  the sentence's size and font and takes the palette's inline
+                  link colours, so it reads as clickable mid-sentence rather
+                  than as emphasis */}
+              {platform === "youtube" && (
+                <>
+                  <button
+                    type="button"
+                    onClick={fillWithDemoPlaylist}
+                    className={cn(
+                      "text-cyan-600 dark:text-cyan-400 underline underline-offset-4",
+                      "transition-colors duration-200",
+                      "hover:text-cyan-500 dark:hover:text-cyan-300",
+                      // the browser's default outline is dropped for the mouse
+                      // and replaced for the keyboard: a tab stop with no ring
+                      // is a link a keyboard user cannot find
+                      "focus:outline-none rounded-sm",
+                      "focus-visible:ring-2 focus-visible:ring-cyan-500/50"
+                    )}
+                  >
+                    {t("url.youtubeHelperPlaylists")}
+                  </button>
+                  {t("url.youtubeHelperRest")}
+                </>
+              )}
             </p>
           )}
         </div>

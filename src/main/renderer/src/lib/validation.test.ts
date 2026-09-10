@@ -13,7 +13,13 @@
 
 import { describe, expect, it } from "vitest"
 
-import { detectPlatform, isValidPinterestUrl } from "./validation"
+import {
+  detectPlatform,
+  detectYouTubeTarget,
+  isValidYouTubePlaylistUrl,
+  isValidYouTubeUrl,
+  isValidPinterestUrl
+} from "./validation"
 
 describe("pinterest links", () => {
   it.each([
@@ -94,5 +100,110 @@ describe("the platforms it must not steal", () => {
 
   it("still refuses a site nobody supports", () => {
     expect(detectPlatform("https://vimeo.com/123456")).toBeNull()
+  })
+})
+
+/**
+ * a playlist link was refused at the input until now: YOUTUBE_URL_REGEX asks
+ * for /watch, /embed, /v, /shorts or youtu.be, and a bare playlist link is
+ * none of them. the same lookalike discipline as pinterest applies - the
+ * hostname is read at its end, never as a substring.
+ */
+describe("playlist links", () => {
+  it.each([
+    "https://www.youtube.com/playlist?list=PLLojVvWCZ5N4",
+    "https://youtube.com/playlist?list=PLLojVvWCZ5N4",
+    // the share sheet's own shape, with its tracking parameter first
+    "https://www.youtube.com/playlist?si=abc123&list=PLLojVvWCZ5N4",
+    "https://m.youtube.com/playlist?list=PLLojVvWCZ5N4",
+    "https://music.youtube.com/playlist?list=OLAK5uy_abc",
+    // pasted out of a chat window, which drops the protocol
+    "youtube.com/playlist?list=PLLojVvWCZ5N4",
+    "www.youtube.com/playlist?list=PLLojVvWCZ5N4"
+  ])("takes a playlist link: %s", (url) => {
+    expect(isValidYouTubePlaylistUrl(url)).toBe(true)
+    // and the input the user types into accepts it, which is the whole point
+    expect(isValidYouTubeUrl(url)).toBe(true)
+    expect(detectPlatform(url)).toBe("youtube")
+  })
+
+  it.each([
+    "https://youtube.com.evil.com/playlist?list=PL123",
+    "https://notyoutube.com/playlist?list=PL123",
+    "https://evil.com/redirect?to=youtube.com/playlist?list=PL123",
+    "https://www.youtube.com/playlist",
+    "https://www.youtube.com/playlist?list=",
+    "not a url at all",
+    ""
+  ])("refuses what is not a playlist link: %s", (url) => {
+    expect(isValidYouTubePlaylistUrl(url)).toBe(false)
+  })
+
+  it("does not call a plain video a playlist", () => {
+    expect(
+      isValidYouTubePlaylistUrl("https://www.youtube.com/watch?v=dQw4w9WgXcQ")
+    ).toBe(false)
+  })
+})
+
+/**
+ * which of the two things a youtube link points at.
+ *
+ * `both` is the mixed link, and this ticket only has to *classify* it: the
+ * caller still sends it down the single-video path, which is what it has always
+ * done. the prompt that asks the user is a later ticket, and it needs this
+ * answer to exist first.
+ */
+describe("detectYouTubeTarget", () => {
+  it.each([
+    "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+    "https://youtu.be/dQw4w9WgXcQ",
+    "https://www.youtube.com/shorts/abc123",
+    "https://www.youtube.com/embed/dQw4w9WgXcQ",
+    "youtube.com/watch?v=dQw4w9WgXcQ"
+  ])("calls a plain video a video: %s", (url) => {
+    const target = detectYouTubeTarget(url)
+
+    expect(target.kind).toBe("video")
+    expect(target.videoId).toBeTruthy()
+    expect(target.listId).toBeNull()
+  })
+
+  it.each([
+    "https://www.youtube.com/playlist?list=PLLojVvWCZ5N4",
+    "youtube.com/playlist?list=PLLojVvWCZ5N4",
+    "https://www.youtube.com/playlist?si=abc&list=PLLojVvWCZ5N4"
+  ])("calls a plain playlist a playlist: %s", (url) => {
+    const target = detectYouTubeTarget(url)
+
+    expect(target.kind).toBe("playlist")
+    expect(target.videoId).toBeNull()
+    expect(target.listId).toBe("PLLojVvWCZ5N4")
+  })
+
+  it.each([
+    "https://www.youtube.com/watch?v=dQw4w9WgXcQ&list=PLLojVvWCZ5N4",
+    "https://www.youtube.com/watch?list=PLLojVvWCZ5N4&v=dQw4w9WgXcQ",
+    "https://youtu.be/dQw4w9WgXcQ?list=PLLojVvWCZ5N4",
+    "youtube.com/watch?v=dQw4w9WgXcQ&list=PLLojVvWCZ5N4&index=2"
+  ])("calls a link carrying both both: %s", (url) => {
+    const target = detectYouTubeTarget(url)
+
+    expect(target.kind).toBe("both")
+    expect(target.videoId).toBe("dQw4w9WgXcQ")
+    expect(target.listId).toBe("PLLojVvWCZ5N4")
+  })
+
+  // a list parameter on somebody else's domain is not our playlist, and a
+  // caller routing on `kind` must never be sent to the playlist path by one
+  it.each([
+    "https://vimeo.com/watch?v=abc&list=PL123",
+    "https://evil.com/?list=PL123",
+    "not a url at all"
+  ])("keeps a link that is not youtube's on the video path: %s", (url) => {
+    const target = detectYouTubeTarget(url)
+
+    expect(target.kind).toBe("video")
+    expect(target.listId).toBeNull()
   })
 })

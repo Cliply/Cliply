@@ -9,6 +9,7 @@ const fs = require("fs")
 
 const { ERROR_CODES } = require("./ytdlp-engine")
 const { describeError } = require("../utils/analytics-helpers")
+const { classify, ERROR_STAGES } = require("../utils/error-taxonomy")
 
 // the statuses the renderer hooks already understand
 const STATUS = {
@@ -45,7 +46,7 @@ class DownloadRunner {
    * overwriting bookkeeping the first one is still using.
    *
    * @param {string} downloadId - the id handed to the renderer
-   * @param {Object} details - {type, platform, title}
+   * @param {Object} details - {type, platform, title, playlist}
    * @returns {boolean} false when this id is already running
    */
   reserve(downloadId, details = {}) {
@@ -57,6 +58,11 @@ class DownloadRunner {
       type: details.type,
       title: details.title,
       platform: details.platform,
+      // one row covering n files rather than one covering a file. `type` stays
+      // what it always was - "combined" or "audio" is still what this download
+      // fetches, and analytics and the audit log read it - so the difference
+      // lives in its own field instead of as a fifth media type
+      playlist: Boolean(details.playlist),
       started: Date.now(),
       status: STATUS.DOWNLOADING,
       handle: null,
@@ -72,8 +78,14 @@ class DownloadRunner {
 
   /**
    * run a download to completion, emitting progress events as it goes
+   *
+   * a playlist is one download id covering N files, so `playlist` widens what
+   * this reports rather than changing how it runs: the same handle, the same
+   * four terminal states, plus the item counts every one of them now carries.
+   *
    * @param {Object} options - {downloadId, type, platform, title, formatId,
-   *   trimmed, createHandle} - createHandle() returns a fresh engine handle
+   *   trimmed, playlist, createHandle} - createHandle() returns a fresh engine
+   *   handle
    * @returns {Promise<Object>} {success, filename, file_path, file_size} or {success:false, error}
    */
   async run(options) {
@@ -84,11 +96,12 @@ class DownloadRunner {
       title = "unknown",
       formatId = "unknown",
       trimmed = false,
+      playlist = false,
       createHandle
     } = options
 
     if (!this.active.has(downloadId)) {
-      this.reserve(downloadId, { type, platform, title })
+      this.reserve(downloadId, { type, platform, title, playlist })
     }
 
     // a cancel may already have landed in the reservation window
@@ -133,7 +146,8 @@ class DownloadRunner {
           progress: trimmed ? undefined : update.progress,
           indeterminate: trimmed || undefined,
           speed: update.speed || undefined,
-          eta: update.eta || undefined
+          eta: update.eta || undefined,
+          ...(playlist ? itemProgressFields(update) : null)
         })
       })
 
@@ -144,10 +158,17 @@ class DownloadRunner {
         lastError = error
 
         if (error.code === ERROR_CODES.CANCELLED) {
-          return this.settleCancelled(downloadId)
+          // the engine attaches the tally to the rejection, so a cancel can
+          // still say which files it left on disk
+          return this.settleCancelled(downloadId, error)
         }
 
-        // an extraction-signature break is exactly what a newer yt-dlp fixes
+        // an extraction-signature break is exactly what a newer yt-dlp fixes.
+        //
+        // a playlist retry re-runs the whole operation rather than resuming
+        // where it broke, which sounds worse than it is: --download-archive
+        // holds every item that already landed, so the second pass skips them
+        // and picks up at the one that failed
         if (error.updateMayFix && !repaired && this.updater) {
           repaired = true
           const update = await this.updater.updateNow().catch(() => null)
@@ -207,13 +228,32 @@ class DownloadRunner {
     const filePath = result.filePath || null
     const filename = filePath ? path.basename(filePath) : undefined
     const fileSize = fileSizeOf(filePath)
+    const tally = itemTally(result)
+
+    /**
+     * partial success must not lose the taxonomy of what did not make it.
+     *
+     * a run where one item was archive-skipped and the other nine hit bot
+     * detection arrives here as a *completed* download, and the only account
+     * of those nine is the stderr the engine attached to the result. so it is
+     * classified while the reason is still readable: the renderer gets to say
+     * why nine were skipped, and the PO token escalation - which fires off a
+     * category and nothing else - still hears about a refusal it would
+     * otherwise have slept through, because this download succeeded.
+     */
+    const skipped =
+      tally && tally.items_skipped > 0
+        ? classify(result.stderr, ERROR_STAGES.DOWNLOAD).category
+        : null
 
     this.logAudit("download_success", true, { type, filename })
 
     this.sendEvent(downloadId, {
       status: STATUS.COMPLETED,
       progress: 100,
-      filename
+      filename,
+      ...tally,
+      ...(skipped ? { category: skipped } : null)
     })
 
     // no title and no filename: what was downloaded is not a question
@@ -224,7 +264,8 @@ class DownloadRunner {
       formatId,
       trimmed,
       fileSize,
-      elapsedMs
+      elapsedMs,
+      ...playlistTelemetry(entry, result)
     })
 
     return {
@@ -233,30 +274,38 @@ class DownloadRunner {
       file_path: filePath,
       file_size: fileSize,
       type,
-      download_id: downloadId
+      download_id: downloadId,
+      ...tally,
+      ...(skipped ? { category: skipped } : null)
     }
   }
 
-  settleCancelled(downloadId) {
+  settleCancelled(downloadId, error = null) {
     // read before the delete: a cancel can land in any of four places, and the
     // reservation is the one thing all four of them have
     const entry = this.active.get(downloadId)
+    // a playlist cancel is a kill, and the videos it had already finished are
+    // still on disk. reporting an empty list is how "we downloaded nothing"
+    // ends up in front of a user looking at eight finished files
+    const tally = itemTally(error)
 
     this.active.delete(downloadId)
     this.logAudit("download_cancelled", true, {})
 
     this.sendEvent(downloadId, {
       status: STATUS.CANCELLED,
-      progress: 0
+      progress: 0,
+      ...tally
     })
 
     this.track("download_cancelled", {
       type: entry && entry.type,
       platform: entry && entry.platform,
-      progress: entry ? entry.progress : 0
+      progress: entry ? entry.progress : 0,
+      ...playlistTelemetry(entry, error)
     })
 
-    return { success: false, cancelled: true, download_id: downloadId }
+    return { success: false, cancelled: true, download_id: downloadId, ...tally }
   }
 
   settleFailed({ downloadId, type, platform, formatId, trimmed, error }) {
@@ -267,6 +316,9 @@ class DownloadRunner {
 
     const message = (error && error.message) || "Download failed"
     const details = buildFailureDetails(error)
+    // a stalled playlist rejects like a cancelled one, with the files it did
+    // save attached, and they are just as real as the ones a cancel kept
+    const tally = itemTally(error)
 
     this.logAudit("download_failed", false, { type, error: message })
 
@@ -275,7 +327,29 @@ class DownloadRunner {
       progress: 0,
       error: message,
       details,
-      category: (error && error.code) || "DOWNLOAD_FAILED"
+      category: (error && error.code) || "DOWNLOAD_FAILED",
+      ...tally,
+      /**
+       * a playlist can refuse to start for a reason that has nothing to do
+       * with the network, the link or the download folder: the engine writes
+       * a private record of what it saved, and if it cannot prepare that file
+       * it rejects with a PERMISSION_ERROR of its own wording before anything
+       * spawns. "Please try again" is the wrong answer to that, and it is the
+       * one the renderer falls back to when nothing else arrives - so the
+       * suggestion that came with the failure travels with it.
+       *
+       * playlist runs only. a single-video failed event carries the four keys
+       * it has always carried, and every existing consumer reads exactly those
+       */
+      ...(tally && error && error.suggestion
+        ? { suggestion: error.suggestion }
+        : null),
+      // and the name of that wording, when it has one. the category says
+      // PERMISSION_ERROR either way, so this is the only thing separating a
+      // records folder we cannot write from a download folder we cannot write
+      ...(tally && error && error.wordingCode
+        ? { wordingCode: error.wordingCode }
+        : null)
     })
 
     // the code goes over as-is, absent and all: the engine sets DOWNLOAD_FAILED
@@ -289,10 +363,11 @@ class DownloadRunner {
       trimmed,
       progress,
       errorCode: error && error.code,
-      errorMessage: message
+      errorMessage: message,
+      ...playlistTelemetry(entry, error)
     })
 
-    return { success: false, error, message, details, download_id: downloadId }
+    return { success: false, error, message, details, download_id: downloadId, ...tally }
   }
 
   /**
@@ -344,7 +419,9 @@ class DownloadRunner {
    *
    * shaped to match the renderer's DownloadStatus contract (downloadId,
    * status, progress) plus the extra bookkeeping fields a caller building a
-   * downloads list would also want
+   * downloads list would also want - `playlist` among them, because a playlist
+   * is one row that expands into n videos and a single video is one row that
+   * does not, and nothing else in here says which of the two this is
    * @returns {Object[]}
    */
   list() {
@@ -355,8 +432,110 @@ class DownloadRunner {
       type: entry.type,
       title: entry.title,
       platform: entry.platform,
+      playlist: entry.playlist,
       startTime: entry.started
     }))
+  }
+}
+
+/**
+ * what a playlist run did, in the spelling the ipc payloads use
+ *
+ * the engine hangs the same five keys on a result and on a rejection, so one
+ * reader serves all four terminal states. a single-video settle has none of
+ * them and must keep having none of them: a result shape widened for everybody
+ * is a result shape every existing consumer has to re-learn.
+ *
+ * `items_reused` stays its own number and is never folded into `items_saved`.
+ * an archive skip records that a download once succeeded, not that this run
+ * wrote a file - the user deleted it, or pointed us at a new folder - so
+ * adding the two together would claim saves we did not make.
+ *
+ * @param {Object|null} source - an engine result, or the error it rejected with
+ * @returns {Object|null} the counts, or null when this was not a playlist
+ */
+function itemTally(source) {
+  if (!source || !Array.isArray(source.files)) return null
+
+  return {
+    files: source.files,
+    items_saved: source.itemsSaved,
+    items_reused: source.itemsReused,
+    items_skipped: source.itemsSkipped,
+    items_total: source.itemsTotal,
+    /**
+     * which positions the archive accounted for, when the engine said.
+     *
+     * yt-dlp never announces an archive-skipped item, so without these the
+     * renderer's rows for videos the user already has sit at "never reached"
+     * and settle as skipped. spread conditionally rather than passed through
+     * as undefined: an engine result from before this key existed produces
+     * exactly the payload it always did.
+     */
+    ...(Array.isArray(source.reusedIndices)
+      ? { reused_indices: source.reusedIndices }
+      : null)
+  }
+}
+
+/**
+ * the playlist half of a terminal analytics payload
+ *
+ * two separate sources, because they answer two questions that come apart. the
+ * **reservation** is what knows this download is a playlist at all: a run
+ * refused before the engine could write its own record rejects carrying no
+ * tally, and it was a playlist all the same - so `is_playlist` never depends on
+ * anything having been counted. the **engine's** result or rejection is what
+ * knows the counts, and a payload with none of them is honest about a run that
+ * never got as far as counting.
+ *
+ * camelCase, like every other key in a track payload. the ipc payloads use the
+ * snake_case spelling (see itemTally above) and trackDownloadEvent in
+ * ipc-handlers.js is the one place the two meet - it decides which counts each
+ * event may carry, because the allowlist there does.
+ *
+ * @param {Object|null} entry - the reservation, before it was deleted
+ * @param {Object|null} source - an engine result, or the error it rejected with
+ * @returns {Object|null} the playlist properties, or null for a single video
+ */
+function playlistTelemetry(entry, source) {
+  if (!entry || !entry.playlist) return null
+
+  const counts = source || {}
+
+  return {
+    playlist: true,
+    itemsSaved: counts.itemsSaved,
+    itemsReused: counts.itemsReused,
+    itemsSkipped: counts.itemsSkipped,
+    itemsTotal: counts.itemsTotal
+  }
+}
+
+/**
+ * the per-item half of a playlist's two-level progress
+ *
+ * the engine's playlist update is a superset of the single-video one - its
+ * `progress` is the whole run's bar, which is what a flat consumer already
+ * reads - so this only has to carry the second level across.
+ *
+ * there is no item title here because the engine never sees one: yt-dlp
+ * announces an item by id, and the renderer is holding the listing that names
+ * it. `playlist_index` is the video's true position in the playlist and
+ * `item_index` its position in this run's queue, which are different numbers
+ * for any selection with a gap in it.
+ *
+ * @param {Object} update - a progress event from PlaylistProgressTracker
+ * @returns {Object} the fields to add to the download:progress payload
+ */
+function itemProgressFields(update) {
+  return {
+    item_progress: update.itemProgress,
+    item_index: update.itemIndex,
+    items_completed: update.itemsCompleted,
+    items_total: update.totalItems,
+    playlist_index: update.playlistIndex,
+    video_id: update.videoId
   }
 }
 
