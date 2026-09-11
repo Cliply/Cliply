@@ -128,7 +128,8 @@ function normalizeTimeRange(range) {
  *
  * an absent platform means youtube, which is the default every single-video
  * handler already applies to the same field. **this is not the check that
- * matters** - see isYouTubeUrl, which reads the link rather than the label.
+ * matters** - see isYouTubeRequestUrl, which reads the link rather than the
+ * label.
  *
  * @param {*} platform - what the request named, if anything
  * @returns {boolean} whether a playlist request may proceed
@@ -139,6 +140,10 @@ function isPlaylistPlatform(platform) {
 
 /**
  * is this link actually youtube's?
+ *
+ * the request half of the two youtube predicates: it decides whether a request
+ * is allowed to proceed, which is why it insists on a real http(s) link. The
+ * engine's isYouTubeCookieHost answers a different question and is wider.
  *
  * the `platform` field is optional and arrives from the renderer, which does
  * not send it for a playlist at all - so a handler that only checks the label
@@ -161,7 +166,7 @@ function isPlaylistPlatform(platform) {
  * @param {*} url - the link the request carried
  * @returns {boolean} whether it points at youtube
  */
-function isYouTubeUrl(url) {
+function isYouTubeRequestUrl(url) {
   if (typeof url !== "string") return false
 
   let parsed
@@ -1396,7 +1401,7 @@ class IPCHandlers {
       const { url, platform } = data
 
       // the link decides, and a label that disagrees with it loses
-      if (!isPlaylistPlatform(platform) || !isYouTubeUrl(url)) {
+      if (!isPlaylistPlatform(platform) || !isYouTubeRequestUrl(url)) {
         return this.unsupportedPlaylistPlatform()
       }
 
@@ -1487,7 +1492,7 @@ class IPCHandlers {
     // nothing and spawns nothing. the link decides, not the label beside it
     if (
       !isPlaylistPlatform(data && data.platform) ||
-      !isYouTubeUrl(data && data.url)
+      !isYouTubeRequestUrl(data && data.url)
     ) {
       return this.unsupportedPlaylistPlatform()
     }

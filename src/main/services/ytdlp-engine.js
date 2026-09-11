@@ -1597,6 +1597,10 @@ const YOUTUBE_HOSTS =
 /**
  * is this url one the youtube cookie jar has any business being sent with?
  *
+ * the cookie half of the two youtube predicates: it decides only what gets
+ * written back, so it takes youtube-nocookie too and asks nothing of the
+ * scheme. Whether a request is allowed at all is isYouTubeRequestUrl's answer.
+ *
  * --cookies is a save destination as well as a read source, so attaching the
  * jar to a pinterest or tiktok download does not merely fail to help - yt-dlp
  * writes that site's cookies back into youtube_cookies.txt on the way out.
@@ -1611,7 +1615,7 @@ const YOUTUBE_HOSTS =
  * @param {string} url - the url the operation is for
  * @returns {boolean}
  */
-function isYouTubeUrl(url) {
+function isYouTubeCookieHost(url) {
   try {
     return YOUTUBE_HOSTS.test(new URL(String(url)).hostname)
   } catch {
@@ -3087,7 +3091,7 @@ class YtdlpEngine {
       return params.cookieFile
     }
 
-    return isYouTubeUrl(params.url) ? this.getCookieFile() : null
+    return isYouTubeCookieHost(params.url) ? this.getCookieFile() : null
   }
 
   getCookieFile() {
@@ -3597,7 +3601,7 @@ module.exports = {
   countArchivedSelections,
   buildPlaylistRecordsPath,
   normalizeUrl,
-  isYouTubeUrl,
+  isYouTubeCookieHost,
   redactLogLine,
   mapError,
   RECORDS_UNWRITABLE,
