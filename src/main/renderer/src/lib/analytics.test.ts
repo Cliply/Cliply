@@ -225,7 +225,7 @@ describe("quality", () => {
 
 describe("isTrimmedRange", () => {
   test("agrees with what main will actually do with the range", () => {
-    // normalizeTimeRange (ipc-handlers.js) throws away a range that is not a
+    // normalizeTimeRange (ipc/validators.js) throws away a range that is not a
     // segment, so a download reported as trimmed here and untrimmed there would
     // be one download disagreeing with itself
     expect(isTrimmedRange({ start: 10, end: 30 })).toBe(true)

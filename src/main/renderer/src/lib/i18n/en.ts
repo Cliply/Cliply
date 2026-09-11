@@ -251,10 +251,6 @@ export const en = {
   "toast.botCookies":
     "signing in with a throwaway account usually clears this.",
   "toast.botGeneric": "this site wants us to prove we're not a bot.",
-  "toast.audioDone": "Audio downloaded successfully!",
-  "toast.videoDone": "Video downloaded successfully!",
-  "toast.audioDoneDesc": "Your audio file has been downloaded to your device.",
-  "toast.videoDoneDesc": "Your video file has been downloaded to your device.",
 
   "download.startingAudio": "Starting audio download...",
   "download.startingVideo": "Starting video download...",

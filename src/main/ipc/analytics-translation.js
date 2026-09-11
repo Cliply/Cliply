@@ -56,7 +56,8 @@ const MEDIA_TYPES = { combined: "video", video: "video", audio: "audio" }
 /**
  * the counts each terminal event may carry, in the order they read in.
  *
- * this is a mirror of ALLOWED_PROPERTIES (services/analytics.js) and it exists
+ * this is a mirror of ALLOWED_PROPERTIES (services/analytics/schema.js) and it
+ * exists
  * because that list is enforced by silence: a count sent to an event that did
  * not declare it is dropped behind a console.warn production never surfaces, so
  * "send them all and let the boundary sort it out" is how a playlist ends up

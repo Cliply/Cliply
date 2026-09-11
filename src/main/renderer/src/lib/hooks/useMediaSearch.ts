@@ -356,7 +356,7 @@ function commitPlaylist(
    * both routes to a loaded playlist come through here, so the pure playlist
    * link and the ambiguous one answered "the playlist" report the same thing.
    * playlists are a youtube feature and this is the only platform that reaches
-   * it (isPlaylistPlatform, ipc-handlers.js).
+   * it (isPlaylistPlatform, ipc/validators.js).
    */
   track("media_info_loaded", {
     platform: "youtube",

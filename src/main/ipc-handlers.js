@@ -206,7 +206,7 @@ class IPCHandlers {
        *
        * `payload.fileSize` is the size of the file the result named, and for a
        * playlist that is whichever video happened to land LAST (the result
-       * YtdlpOperation assembles in ytdlp-engine.js) - not the run. so
+       * YtdlpOperation assembles in ytdlp/operation.js) - not the run. so
        * `file_size_mb` would report one video out of eleven, and `speed_bucket`
        * would divide that one file's bytes by the time all eleven took, which
        * is not a speed anything experienced. both land on the same properties

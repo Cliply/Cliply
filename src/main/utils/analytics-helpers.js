@@ -272,7 +272,8 @@ function isFirstLaunch() {
 
 // sanitizeTitle and extractTitleFromFilename lived here to feed a video title
 // into the old aptabase events. no event has a property for a title any more -
-// ALLOWED_PROPERTIES (services/analytics.js) is the whole list - so the pair
+// ALLOWED_PROPERTIES (services/analytics/schema.js) is the whole list - so the
+// pair
 // was two ready-made ways to derive one with nowhere left to send it. deleted
 // rather than left dead: the privacy claim in PRIVACY.md is that a title has no
 // route out, and a helper that produces one is a route waiting for a caller

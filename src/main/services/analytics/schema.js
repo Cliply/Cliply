@@ -458,7 +458,7 @@ const PROPERTY_VOCABULARIES = {
   media_type: new Set(["video", "audio"]),
 
   // the keys of AUDIO_MODE_PRESETS - normalizeAudioMode returns the key, not
-  // the codec it maps to (both in ytdlp-engine.js)
+  // the codec it maps to (both in ytdlp/args.js)
   audio_format: new Set(["mp3", "m4a", "original"]),
 
   // every reason ytdlp-updater can report: its `reason:` literals, the three
@@ -531,8 +531,9 @@ const PROPERTY_VOCABULARIES = {
   /**
    * which half of an ambiguous link the user meant.
    *
-   * the two values of MixedLinkChoice (renderer/src/lib/mixedLinkStore.ts), and
-   * there cannot be a third: the question has two buttons, and closing it
+   * the two values of MixedLinkChoice
+   * (renderer/src/lib/stores/mixedLinkStore.ts), and there cannot be a third:
+   * the question has two buttons, and closing it
    * without pressing either sends nothing at all - an abandoned paste teaches
    * us nothing and is not an answer.
    *

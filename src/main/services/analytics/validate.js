@@ -35,10 +35,9 @@ const MAX_NUMBER = 1e9
  * @param {*} value
  * @param {string} key - the property name, for the per-property vocabularies
  * @param {Function} redact - redactLogLine, handed in by analytics.js rather
- *   than required here. the tests that drive this module mock the engine
- *   barrel and re-export the real redaction through it, and a second require
- *   site is a second thing that has to keep resolving to the mocked one - so
- *   there is exactly one, and it is in the module those tests already load.
+ *   than required here. utils/log-redaction.js is required once, at the
+ *   boundary, and every check reads that one binding - so a suite that wants
+ *   the real sanitizer or a stub has a single place that decides which it got.
  * @returns {{ok: boolean, value?: *, normalized?: boolean, because?: string}}
  */
 function checkKind(kind, value, key, redact) {

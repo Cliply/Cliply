@@ -8,8 +8,9 @@
 // is invisible in the field rather than loud.
 //
 // the value sets below are therefore mirrors of specific main-process code, and
-// each is noted with what it mirrors. src/main/services/analytics.js is where
-// they are enforced.
+// each is noted with what it mirrors. src/main/services/analytics/schema.js is
+// where they are declared, and src/main/services/analytics.js is the boundary
+// that enforces them.
 
 import type { AudioMode, PlaylistInfoResponse, TimeRange } from "@/lib/api"
 
@@ -157,7 +158,7 @@ export function playlistSizeBucket(
  * answer is a separate measurement, and not one this property can make.
  *
  * every value must also appear in PROPERTY_VOCABULARIES.url_kind
- * (services/analytics.js) or it is dropped on arrival.
+ * (services/analytics/schema.js) or it is dropped on arrival.
  */
 export const URL_KINDS = {
   playlist: "playlist",
@@ -241,7 +242,7 @@ export const SIMPLE_QUALITY = "best_available"
 /**
  * whether this download is really a segment
  *
- * mirrors normalizeTimeRange (ipc-handlers.js), which throws away a range
+ * mirrors normalizeTimeRange (ipc/validators.js), which throws away a range
  * that covers nothing: the store opens on {start: 0, end: 0}, and a truthiness
  * check here would report a trimmed download that main will run whole.
  */

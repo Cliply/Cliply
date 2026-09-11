@@ -24,7 +24,7 @@
  *     a decision somebody took on purpose rather than a line that slipped past
  *     a reviewer.
  *
- * nothing here is mocked. a suite that mocks services/ytdlp-engine takes
+ * nothing here is mocked. a suite that mocks utils/log-redaction takes
  * redactLogLine down with it, and one that mocks utils/analytics-helpers takes
  * describeError; either way every text-bearing capture dies in capture()'s
  * catch and the guard passes having sent nothing. the liveness assertions at

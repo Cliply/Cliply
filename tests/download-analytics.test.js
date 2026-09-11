@@ -958,7 +958,7 @@ describe("a playlist's terminal events", () => {
    *
    * `fileSize` is read off the file the result named, and for a playlist that is
    * whichever video landed LAST (the result YtdlpOperation assembles in
-   * ytdlp-engine.js). so file_size_mb would report one video out of eleven,
+   * ytdlp/operation.js). so file_size_mb would report one video out of eleven,
    * and speed_bucket would divide that one file's bytes by the time all
    * eleven took - a speed nothing experienced.
    * both are the properties the single-video funnel is measured by, so sending

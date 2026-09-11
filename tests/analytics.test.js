@@ -1156,7 +1156,7 @@ describe("Analytics", () => {
 
         const supported = [
           ...Object.keys(SUPPORTED_PLATFORMS).map((k) => k.toLowerCase()),
-          // SUPPORTED_DOWNLOAD_PLATFORMS in ipc-handlers.js - the engine's own
+          // SUPPORTED_DOWNLOAD_PLATFORMS in ipc/validators.js - the engine's own
           // download list, which is not the same set. pinterest lives only here
           "youtube",
           "pinterest",
@@ -2033,7 +2033,7 @@ describe("Analytics", () => {
       })
 
       it("leaves the engine's own wording exactly as it is", async () => {
-        // ERROR_METADATA and TERMINAL_ERRORS in ytdlp-engine.js. a sample
+        // ERROR_METADATA and TERMINAL_ERRORS in ytdlp/errors.js. a sample
         // rather than the whole table, chosen for the shapes that could trip
         // a pattern: an apostrophe, sentence periods, a bare hyphenated word
         for (const wording of [
