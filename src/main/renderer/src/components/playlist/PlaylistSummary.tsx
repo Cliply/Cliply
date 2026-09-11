@@ -61,8 +61,7 @@ export function PlaylistSummary({
         reused: state.itemsReused,
         skipped: state.itemsSkipped,
         total: state.itemsTotal
-      }) ||
-      t(cancelled ? "playlist.cancelled" : "playlist.finished")
+      }) || t(cancelled ? "playlist.cancelled" : "playlist.finished")
 
   return (
     <motion.div
@@ -135,7 +134,10 @@ export function PlaylistSummary({
           downloaded" over an empty folder, and this is the way out of it
         */}
         {(state.itemsReused ?? 0) > 0 && (
-          <Button variant="outline" onClick={() => onRun({ ignoreArchive: true })}>
+          <Button
+            variant="outline"
+            onClick={() => onRun({ ignoreArchive: true })}
+          >
             {t("playlist.downloadAgain")}
           </Button>
         )}

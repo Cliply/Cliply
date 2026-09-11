@@ -98,7 +98,9 @@ describe("a dubbed video", () => {
   })
 
   test("a code the next video does not carry is replaced, not kept", () => {
-    const { rerender } = render(<AudioTrackDropdown tracks={DUBBED} isVisible />)
+    const { rerender } = render(
+      <AudioTrackDropdown tracks={DUBBED} isVisible />
+    )
     openMenu()
     fireEvent.click(screen.getByRole("button", { name: "Hindi" }))
 
@@ -116,7 +118,9 @@ describe("a dubbed video", () => {
    * instead of silently downloading a dub nobody asked for.
    */
   test("a code the next video also carries is still reset to its original", () => {
-    const { rerender } = render(<AudioTrackDropdown tracks={DUBBED} isVisible />)
+    const { rerender } = render(
+      <AudioTrackDropdown tracks={DUBBED} isVisible />
+    )
     openMenu()
     fireEvent.click(screen.getByRole("button", { name: "Hindi" }))
     expect(useYouTubeStore.getState().selectedAudioLanguage).toBe("hi")
@@ -140,7 +144,9 @@ describe("a dubbed video", () => {
   // moving from a dubbed video to an ordinary one has to leave the ordinary
   // one requesting nothing, or it would inherit a language it has no track for
   test("moving to a single-language video clears the code", () => {
-    const { rerender } = render(<AudioTrackDropdown tracks={DUBBED} isVisible />)
+    const { rerender } = render(
+      <AudioTrackDropdown tracks={DUBBED} isVisible />
+    )
     openMenu()
     fireEvent.click(screen.getByRole("button", { name: "Hindi" }))
 

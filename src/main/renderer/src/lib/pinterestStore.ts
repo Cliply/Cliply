@@ -30,7 +30,8 @@ export const usePinterestStore = create<PinterestState>((set) => ({
   setIsLoadingPinInfo: (loading) => set({ isLoadingPinInfo: loading }),
   setIsDownloading: (downloading) => set({ isDownloading: downloading }),
   setDownloadPath: (pathInfo) => set({ downloadPath: pathInfo }),
-  setIsLoadingDownloadPath: (loading) => set({ isLoadingDownloadPath: loading }),
+  setIsLoadingDownloadPath: (loading) =>
+    set({ isLoadingDownloadPath: loading }),
   reset: () =>
     set({
       url: "",

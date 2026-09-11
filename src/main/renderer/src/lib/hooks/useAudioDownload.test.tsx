@@ -122,7 +122,8 @@ const emit = async (payload: Record<string, unknown>) => {
   })
 }
 
-const sentDownloadId = () => downloadAudio.mock.calls[0][0].download_id as string
+const sentDownloadId = () =>
+  downloadAudio.mock.calls[0][0].download_id as string
 
 const flush = () => act(async () => {})
 
@@ -170,7 +171,10 @@ test("a mid-download failure reports and toasts exactly once", async () => {
     error: "Video unavailable"
   })
 
-  expect(await settled).toMatchObject({ ok: false, value: { outcome: "failed" } })
+  expect(await settled).toMatchObject({
+    ok: false,
+    value: { outcome: "failed" }
+  })
   await flush()
 
   expect(showDownloadErrorToast).toHaveBeenCalledTimes(1)

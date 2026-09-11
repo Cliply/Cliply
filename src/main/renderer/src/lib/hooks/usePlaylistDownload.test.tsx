@@ -10,7 +10,11 @@ import { act, renderHook, waitFor } from "@testing-library/react"
 import type { ReactNode } from "react"
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
 
-import { DownloadError, type PlaylistEntry, type PlaylistInfoResponse } from "@/lib/api"
+import {
+  DownloadError,
+  type PlaylistEntry,
+  type PlaylistInfoResponse
+} from "@/lib/api"
 
 type ProgressListener = (payload: Record<string, unknown>) => void
 
@@ -88,7 +92,10 @@ function wrapper({ children }: { children: ReactNode }) {
   return <QueryClientProvider client={client}>{children}</QueryClientProvider>
 }
 
-const entry = (index: number, overrides: Partial<PlaylistEntry> = {}): PlaylistEntry => ({
+const entry = (
+  index: number,
+  overrides: Partial<PlaylistEntry> = {}
+): PlaylistEntry => ({
   index,
   id: `video${index}`,
   title: `video ${index}`,
@@ -119,7 +126,12 @@ function loadPlaylist(url = "https://www.youtube.com/playlist?list=PL123") {
     url,
     listing([
       entry(1),
-      entry(2, { id: null, unavailable: true, duration: null, duration_string: null }),
+      entry(2, {
+        id: null,
+        unavailable: true,
+        duration: null,
+        duration_string: null
+      }),
       entry(3)
     ])
   )
@@ -291,7 +303,9 @@ describe("the request the hook builds", () => {
 describe("event correlation", () => {
   test("the id exists and the listener is live before the ack lands", async () => {
     const ack = deferredAck()
-    const { result, unmount } = renderHook(() => usePlaylistDownload(), { wrapper })
+    const { result, unmount } = renderHook(() => usePlaylistDownload(), {
+      wrapper
+    })
 
     const { settled } = await startDownload(result)
 
@@ -377,7 +391,10 @@ describe("what a finished run says it did", () => {
       category: "PERMISSION_ERROR"
     })
 
-    expect(await settled).toMatchObject({ ok: false, value: { outcome: "failed" } })
+    expect(await settled).toMatchObject({
+      ok: false,
+      value: { outcome: "failed" }
+    })
     await flush()
 
     expect(showDownloadErrorToast).toHaveBeenCalledTimes(1)
@@ -464,9 +481,12 @@ describe("what a finished run says it did", () => {
 
     const { settled } = await startDownload(result)
     ack.reject(
-      Object.assign(new DownloadError("YouTube asked us to confirm you're not a bot."), {
-        category: "BOT_DETECTION"
-      })
+      Object.assign(
+        new DownloadError("YouTube asked us to confirm you're not a bot."),
+        {
+          category: "BOT_DETECTION"
+        }
+      )
     )
 
     expect((await settled).ok).toBe(false)
@@ -538,9 +558,16 @@ describe("the second level of progress", () => {
     }
 
     await emit({ ...base, progress: 40, item_progress: 80, items_completed: 0 })
-    expect(usePlaylistStore.getState().itemStatus.get(1)?.state).toBe("downloading")
+    expect(usePlaylistStore.getState().itemStatus.get(1)?.state).toBe(
+      "downloading"
+    )
 
-    await emit({ ...base, progress: 50, item_progress: 100, items_completed: 1 })
+    await emit({
+      ...base,
+      progress: 50,
+      item_progress: 100,
+      items_completed: 1
+    })
     expect(usePlaylistStore.getState().itemStatus.get(1)).toEqual({
       state: "saved",
       progress: 100
@@ -788,7 +815,9 @@ describe("cancel inside the start window", () => {
 
 describe("unmount, reset and cancellation", () => {
   test("unmount settles the mutation and does not cancel the engine", async () => {
-    const { result, unmount } = renderHook(() => usePlaylistDownload(), { wrapper })
+    const { result, unmount } = renderHook(() => usePlaylistDownload(), {
+      wrapper
+    })
 
     const { settled } = await startDownload(result)
     await waitFor(() => expect(downloadPlaylist).toHaveBeenCalled())
@@ -867,7 +896,11 @@ describe("unmount, reset and cancellation", () => {
 
     // the evidence the acknowledgement would have thrown away
     const status = usePlaylistStore.getState().itemStatus
-    expect(status.get(1)).toEqual({ state: "saved", progress: 100, height: 720 })
+    expect(status.get(1)).toEqual({
+      state: "saved",
+      progress: 100,
+      height: 720
+    })
     expect(status.get(3)).toEqual({ state: "reused", progress: 100 })
     expect(result.current.downloadState.itemsSaved).toBe(1)
     expect(result.current.downloadState.itemsReused).toBe(1)
@@ -905,7 +938,10 @@ describe("summarizePlaylistItems", () => {
   test.each([
     [{ saved: 9, reused: 0, skipped: 0, total: 9 }, "9 of 9 videos saved."],
     [{ saved: 1, reused: 0, skipped: 0, total: 1 }, "1 of 1 video saved."],
-    [{ saved: 8, reused: 0, skipped: 1, total: 9 }, "8 of 9 videos saved, 1 skipped."],
+    [
+      { saved: 8, reused: 0, skipped: 1, total: 9 },
+      "8 of 9 videos saved, 1 skipped."
+    ],
     [
       { saved: 3, reused: 2, skipped: 0, total: 5 },
       "3 of 5 videos saved, 2 already downloaded."
@@ -971,8 +1007,16 @@ describe("what the terminal event adds to the rows", () => {
 
     // the same run, the same ceiling, two different heights: this is what
     // "best available up to the limit" actually looks like
-    expect(status.get(1)).toEqual({ state: "saved", progress: 100, height: 1080 })
-    expect(status.get(3)).toEqual({ state: "saved", progress: 100, height: 720 })
+    expect(status.get(1)).toEqual({
+      state: "saved",
+      progress: 100,
+      height: 1080
+    })
+    expect(status.get(3)).toEqual({
+      state: "saved",
+      progress: 100,
+      height: 720
+    })
 
     expect((await settled).ok).toBe(true)
   })
@@ -1024,7 +1068,11 @@ describe("what the terminal event adds to the rows", () => {
 
     const status = usePlaylistStore.getState().itemStatus
     expect(status.get(1)?.state).toBe("reused")
-    expect(status.get(3)).toEqual({ state: "saved", progress: 100, height: 480 })
+    expect(status.get(3)).toEqual({
+      state: "saved",
+      progress: 100,
+      height: 480
+    })
 
     expect((await settled).ok).toBe(true)
   })
@@ -1094,12 +1142,19 @@ describe("what the terminal event adds to the rows", () => {
     })
 
     const status = usePlaylistStore.getState().itemStatus
-    expect(status.get(1)).toEqual({ state: "saved", progress: 100, height: 720 })
+    expect(status.get(1)).toEqual({
+      state: "saved",
+      progress: 100,
+      height: 720
+    })
     // the row the kill interrupted goes back to queued: its .part is what the
     // next run resumes from
     expect(status.get(3)?.state).toBe("pending")
 
-    expect(await settled).toMatchObject({ ok: false, value: { outcome: "cancelled" } })
+    expect(await settled).toMatchObject({
+      ok: false,
+      value: { outcome: "cancelled" }
+    })
   })
 
   test("an audio row is saved without a height rather than not saved", async () => {
@@ -1198,7 +1253,10 @@ describe("a run the view has moved on from", () => {
 
     expect(result.current.downloadState.status).toBe("idle")
     expect(usePlaylistStore.getState().isDownloading).toBe(false)
-    expect(await settled).toMatchObject({ ok: false, value: { outcome: "abandoned" } })
+    expect(await settled).toMatchObject({
+      ok: false,
+      value: { outcome: "abandoned" }
+    })
   })
 
   test("its events are dropped rather than written to the new view's rows", async () => {
@@ -1227,7 +1285,10 @@ describe("a run the view has moved on from", () => {
     expect(result.current.downloadState.status).toBe("idle")
     expect(successToast).not.toHaveBeenCalled()
 
-    expect(await settled).toMatchObject({ ok: false, value: { outcome: "abandoned" } })
+    expect(await settled).toMatchObject({
+      ok: false,
+      value: { outcome: "abandoned" }
+    })
   })
 
   test("the admission guard still comes off, so the next run can start", async () => {

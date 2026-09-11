@@ -50,7 +50,9 @@ export function DownloadProgressBar({
     ? isStarting
       ? t("progress.startingUp")
       : t("progress.trimming")
-    : [state.speed, state.eta && `ETA ${state.eta}`].filter(Boolean).join("  ·  ")
+    : [state.speed, state.eta && `ETA ${state.eta}`]
+        .filter(Boolean)
+        .join("  ·  ")
 
   return (
     <ProgressBar

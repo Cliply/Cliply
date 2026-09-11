@@ -30,7 +30,8 @@ export const useTikTokStore = create<TikTokState>((set) => ({
   setIsLoadingVideoInfo: (loading) => set({ isLoadingVideoInfo: loading }),
   setIsDownloading: (downloading) => set({ isDownloading: downloading }),
   setDownloadPath: (pathInfo) => set({ downloadPath: pathInfo }),
-  setIsLoadingDownloadPath: (loading) => set({ isLoadingDownloadPath: loading }),
+  setIsLoadingDownloadPath: (loading) =>
+    set({ isLoadingDownloadPath: loading }),
   reset: () =>
     set({
       url: "",

@@ -78,7 +78,8 @@ export const ru: Record<Key, string> = {
     "каждое видео сохраняется целиком, в выбранном выше формате.",
   "playlist.pickVideosFirst": "сначала выберите видео",
   "playlist.pickTracksFirst": "сначала выберите дорожки",
-  "playlist.downloadVideos": "скачать {n} видео|скачать {n} видео|скачать {n} видео",
+  "playlist.downloadVideos":
+    "скачать {n} видео|скачать {n} видео|скачать {n} видео",
   "playlist.downloadTracks":
     "скачать {n} дорожку|скачать {n} дорожки|скачать {n} дорожек",
 
@@ -240,7 +241,8 @@ export const ru: Record<Key, string> = {
   "download.audioFailed": "не удалось скачать аудио",
   "download.videoFailed": "не удалось скачать видео",
   "download.failed": "не удалось скачать",
-  "download.wentWrong": "что-то пошло не так. вы можете отправить нам подробности.",
+  "download.wentWrong":
+    "что-то пошло не так. вы можете отправить нам подробности.",
   "download.startFailed": "не удалось начать скачивание: {message}",
   "download.cancelled": "скачивание отменено",
   "download.audioCancelled": "скачивание аудио отменено",
@@ -441,7 +443,8 @@ export const ruErrors: Partial<
   },
   VIDEO_UNAVAILABLE: {
     message: "это видео недоступно для скачивания.",
-    suggestion: "возможно, оно приватное, с возрастным ограничением или удалено."
+    suggestion:
+      "возможно, оно приватное, с возрастным ограничением или удалено."
   },
   NOT_A_VIDEO: {
     message: "по этой ссылке нет видео.",
@@ -512,7 +515,8 @@ export const ruErrors: Partial<
   },
   ENGINE_MISSING: {
     message: "движок загрузчика отсутствует.",
-    suggestion: "перезапустите cliply, а если это повторяется, переустановите его."
+    suggestion:
+      "перезапустите cliply, а если это повторяется, переустановите его."
   },
   DOWNLOAD_FAILED: {
     message: "не удалось скачать.",
@@ -550,7 +554,8 @@ export const ruCodes: Partial<Record<string, string>> = {
   JAR_NOTHING_IMPORTED: "пока ничего не импортировано",
   JAR_NO_YOUTUBE: "в файле нет cookies от YouTube",
   JAR_EXPIRED: "ваши cookies истекли, сделайте свежий экспорт",
-  JAR_SESSION_ENDED: "YouTube завершил эту сессию, экспортируйте cookies заново",
+  JAR_SESSION_ENDED:
+    "YouTube завершил эту сессию, экспортируйте cookies заново",
   JAR_NEVER_SIGNED_IN:
     "эти cookies не из сессии со входом, сначала войдите, потом экспортируйте",
   JAR_UNUSABLE: "нет пригодных cookies от YouTube",

@@ -95,7 +95,11 @@ const SCREENS = [
 ] as const
 
 beforeEach(() => {
-  mocks.downloadPath = { path: "/Volumes/Media/Talks", exists: true, writable: true }
+  mocks.downloadPath = {
+    path: "/Volumes/Media/Talks",
+    exists: true,
+    writable: true
+  }
   useYouTubeStore.getState().reset()
   usePinterestStore.getState().reset()
   useTikTokStore.getState().reset()
@@ -124,7 +128,9 @@ describe("where files land", () => {
 
       render()
 
-      expect(screen.queryByText(new RegExp(en["layout.downloadsAt"]))).toBeNull()
+      expect(
+        screen.queryByText(new RegExp(en["layout.downloadsAt"]))
+      ).toBeNull()
       expect(document.body.textContent).not.toContain("~/Downloads/Cliply")
     }
   )
@@ -133,7 +139,9 @@ describe("where files land", () => {
   // whether or not we know the folder and must not disappear with it
   test("and youtube keeps its note about concurrent downloads either way", () => {
     SCREENS[0].render()
-    expect(screen.getByText(new RegExp(en["layout.concurrentNote"]))).toBeDefined()
+    expect(
+      screen.getByText(new RegExp(en["layout.concurrentNote"]))
+    ).toBeDefined()
 
     cleanup()
     mocks.downloadPath = null
@@ -142,16 +150,19 @@ describe("where files land", () => {
     expect(screen.getByText(en["layout.concurrentNote"])).toBeDefined()
   })
 
-  test.each(SCREENS)("the $name screen says it in russian too", ({ render }) => {
-    useLocale.getState().setLocale("ru")
+  test.each(SCREENS)(
+    "the $name screen says it in russian too",
+    ({ render }) => {
+      useLocale.getState().setLocale("ru")
 
-    try {
-      render()
+      try {
+        render()
 
-      expect(screen.getByText(/загрузки сохраняются в/)).toBeDefined()
-      expect(screen.getByText("/Volumes/Media/Talks")).toBeDefined()
-    } finally {
-      useLocale.getState().setLocale("en")
+        expect(screen.getByText(/загрузки сохраняются в/)).toBeDefined()
+        expect(screen.getByText("/Volumes/Media/Talks")).toBeDefined()
+      } finally {
+        useLocale.getState().setLocale("en")
+      }
     }
-  })
+  )
 })

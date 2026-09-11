@@ -7,15 +7,24 @@
 import { describe, expect, test, vi, beforeEach } from "vitest"
 
 const toastError = vi.fn()
-vi.mock("sonner", () => ({ toast: { error: (...a: unknown[]) => toastError(...a) } }))
+vi.mock("sonner", () => ({
+  toast: { error: (...a: unknown[]) => toastError(...a) }
+}))
 
 const openCookies = vi.fn()
 const openReport = vi.fn()
-vi.mock("@/lib/cookieStore", () => ({ cookieActions: { open: () => openCookies() } }))
-vi.mock("@/lib/reportStore", () => ({ reportActions: { open: () => openReport() } }))
+vi.mock("@/lib/cookieStore", () => ({
+  cookieActions: { open: () => openCookies() }
+}))
+vi.mock("@/lib/reportStore", () => ({
+  reportActions: { open: () => openReport() }
+}))
 
 import { useLocale } from "@/lib/i18n"
-import { showBotDetectionToast, showDownloadErrorToast } from "@/lib/toast-utils"
+import {
+  showBotDetectionToast,
+  showDownloadErrorToast
+} from "@/lib/toast-utils"
 
 function actionOf(call: number = 0) {
   return toastError.mock.calls[call][1].action as {
@@ -33,7 +42,12 @@ beforeEach(() => {
 
 describe("showDownloadErrorToast", () => {
   test("sends a blocked youtube user to the cookie import", () => {
-    showDownloadErrorToast("Download failed", "blocked", "BOT_DETECTION", "youtube")
+    showDownloadErrorToast(
+      "Download failed",
+      "blocked",
+      "BOT_DETECTION",
+      "youtube"
+    )
 
     expect(actionOf().label).toBe("fix with cookies")
 
@@ -47,7 +61,12 @@ describe("showDownloadErrorToast", () => {
   test.each([["NETWORK_ERROR"], ["RATE_LIMITED"], [undefined]])(
     "%s still offers Report",
     (category) => {
-      showDownloadErrorToast("Download failed", "went wrong", category, "youtube")
+      showDownloadErrorToast(
+        "Download failed",
+        "went wrong",
+        category,
+        "youtube"
+      )
 
       expect(actionOf().label).toBe("report")
 
@@ -85,7 +104,10 @@ describe("showDownloadErrorToast", () => {
 describe("showBotDetectionToast", () => {
   // the lookup path had no action at all, and it is where most blocks land
   test("carries main's wording and the cookie action", () => {
-    showBotDetectionToast("YouTube asked us to confirm you're not a bot.", "youtube")
+    showBotDetectionToast(
+      "YouTube asked us to confirm you're not a bot.",
+      "youtube"
+    )
 
     expect(toastError).toHaveBeenCalledWith(
       "YouTube asked us to confirm you're not a bot.",
@@ -102,7 +124,10 @@ describe("showBotDetectionToast", () => {
   test.each([["pinterest"], ["tiktok"]])(
     "a %s block keeps main's wording but not the cookie action",
     (platform) => {
-      showBotDetectionToast("They asked us to confirm we're not a bot.", platform as "pinterest" | "tiktok")
+      showBotDetectionToast(
+        "They asked us to confirm we're not a bot.",
+        platform as "pinterest" | "tiktok"
+      )
 
       expect(toastError.mock.calls[0][0]).toBe(
         "They asked us to confirm we're not a bot."
@@ -122,7 +147,10 @@ describe("showBotDetectionToast", () => {
   test("speaks russian, and still offers the cookie door", () => {
     useLocale.setState({ locale: "ru" })
 
-    showBotDetectionToast("YouTube просит подтвердить, что вы не бот.", "youtube")
+    showBotDetectionToast(
+      "YouTube просит подтвердить, что вы не бот.",
+      "youtube"
+    )
 
     expect(toastError.mock.calls[0][1].description).toBe(
       "обычно помогает вход через запасной аккаунт."

@@ -159,7 +159,9 @@ async function clickPlaylistHint() {
   const view = render(<SearchCard platform="youtube" />)
 
   await act(async () => {
-    screen.getByRole("button", { name: en["url.youtubeHelperPlaylists"] }).click()
+    screen
+      .getByRole("button", { name: en["url.youtubeHelperPlaylists"] })
+      .click()
   })
 
   view.unmount()

@@ -330,7 +330,9 @@ export const usePlaylistDownload = () => {
   // settled so nothing awaits forever
   useEffect(() => {
     return () => {
-      settleRef.current?.reject(terminalReason("abandoned", "Download view closed"))
+      settleRef.current?.reject(
+        terminalReason("abandoned", "Download view closed")
+      )
       settleRef.current = null
       cancelIntentRef.current = false
 
@@ -425,9 +427,11 @@ export const usePlaylistDownload = () => {
       downloadIdRef.current = downloadId
       setDownloadState((prev) => ({ ...prev, downloadId }))
 
-      const finished = new Promise<{ downloadId: string }>((resolve, reject) => {
-        settleRef.current = { resolve, reject }
-      })
+      const finished = new Promise<{ downloadId: string }>(
+        (resolve, reject) => {
+          settleRef.current = { resolve, reject }
+        }
+      )
 
       // nothing awaits this until the start ipc below resolves, so an unmount
       // in that window would reject a promise with no handler attached
@@ -486,7 +490,9 @@ export const usePlaylistDownload = () => {
         // whatever is still running when it arrives is settled here
         usePlaylistStore
           .getState()
-          .settleInFlightItems(data.status === "cancelled" ? "pending" : "skipped")
+          .settleInFlightItems(
+            data.status === "cancelled" ? "pending" : "skipped"
+          )
 
         if (data.status === "completed") {
           toast.success(t("playlist.completed"), {
@@ -807,10 +813,12 @@ function applyItemStatus(data: DownloadProgress): void {
     typeof data.item_index === "number" &&
     data.items_completed >= data.item_index
 
-  usePlaylistStore.getState().setItemStatus(
-    index,
-    landed
-      ? { state: "saved", progress: 100 }
-      : { state: "downloading", progress: data.item_progress ?? 0 }
-  )
+  usePlaylistStore
+    .getState()
+    .setItemStatus(
+      index,
+      landed
+        ? { state: "saved", progress: 100 }
+        : { state: "downloading", progress: data.item_progress ?? 0 }
+    )
 }

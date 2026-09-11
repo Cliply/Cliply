@@ -22,7 +22,10 @@ const mocks = vi.hoisted(() => ({
 }))
 
 vi.mock("@/lib/hooks/useDownloadPath", () => ({
-  useDownloadPath: () => ({ selectFolder: mocks.selectFolder, isLoading: false })
+  useDownloadPath: () => ({
+    selectFolder: mocks.selectFolder,
+    isLoading: false
+  })
 }))
 
 vi.mock("@/lib/platform-config", () => {
@@ -146,9 +149,13 @@ describe("the playlist link in the helper line", () => {
   test("sits inside youtube's sentence, whole", () => {
     render(<Harness isLoading={false} />)
 
-    expect(screen.getByText(en["url.youtubeHelper"], { exact: false })).toBeTruthy()
+    expect(
+      screen.getByText(en["url.youtubeHelper"], { exact: false })
+    ).toBeTruthy()
     expect(playlistLink()).toBeTruthy()
-    expect(screen.getByText(en["url.youtubeHelperRest"], { exact: false })).toBeTruthy()
+    expect(
+      screen.getByText(en["url.youtubeHelperRest"], { exact: false })
+    ).toBeTruthy()
   })
 
   test("keeps a focus ring for the keyboard", () => {

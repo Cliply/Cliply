@@ -28,8 +28,8 @@ export function VideoPlayerFrame({
           "dark:bg-slate-800/60 dark:border-slate-700/50 dark:backdrop-blur-sm",
           "bg-white/80 border-slate-300/50 backdrop-blur-sm",
           "shadow-xl shadow-black/10 font-space-grotesk",
-          isShorts 
-            ? "aspect-[9/16] w-full max-w-[280px] sm:max-w-[320px] md:max-w-[360px] lg:max-w-[400px] xl:max-w-[440px] mx-auto" 
+          isShorts
+            ? "aspect-[9/16] w-full max-w-[280px] sm:max-w-[320px] md:max-w-[360px] lg:max-w-[400px] xl:max-w-[440px] mx-auto"
             : "aspect-video",
           "flex items-center justify-center",
           className
@@ -55,12 +55,14 @@ export function VideoPlayerFrame({
         className
       )}
     >
-      <div className={cn(
-        "relative overflow-hidden rounded-xl",
-        isShorts 
-          ? "aspect-[9/16] w-full max-w-[280px] sm:max-w-[320px] md:max-w-[360px] lg:max-w-[400px] xl:max-w-[440px] mx-auto" 
-          : "aspect-[16/10]"
-      )}>
+      <div
+        className={cn(
+          "relative overflow-hidden rounded-xl",
+          isShorts
+            ? "aspect-[9/16] w-full max-w-[280px] sm:max-w-[320px] md:max-w-[360px] lg:max-w-[400px] xl:max-w-[440px] mx-auto"
+            : "aspect-[16/10]"
+        )}
+      >
         <iframe
           src={`https://www.youtube.com/embed/${videoId}?rel=0&showinfo=0&modestbranding=1`}
           title={title || isShorts ? "YouTube Shorts" : "YouTube video"}

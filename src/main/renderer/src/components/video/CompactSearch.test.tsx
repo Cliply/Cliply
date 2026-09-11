@@ -8,7 +8,13 @@
 // which is exactly the failure a shared contract produces: the surface that
 // nobody edited is the one that breaks.
 
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor
+} from "@testing-library/react"
 import { afterEach, describe, expect, test, vi } from "vitest"
 
 import { en } from "@/lib/i18n/en"
@@ -51,9 +57,7 @@ describe("the details-screen search box", () => {
     submit("not a link")
 
     await waitFor(() =>
-      expect(
-        screen.getByText(en["validation.youtubeInvalid"])
-      ).toBeTruthy()
+      expect(screen.getByText(en["validation.youtubeInvalid"])).toBeTruthy()
     )
   })
 

@@ -74,7 +74,9 @@ export function t(key: Key, params?: Record<string, string | number>): string {
   }
 
   return params
-    ? value.replace(/\{(\w+)\}/g, (whole, name) => String(params[name] ?? whole))
+    ? value.replace(/\{(\w+)\}/g, (whole, name) =>
+        String(params[name] ?? whole)
+      )
     : value
 }
 

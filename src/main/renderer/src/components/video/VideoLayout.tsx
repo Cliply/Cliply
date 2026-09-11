@@ -28,7 +28,7 @@ export function VideoLayout() {
           {/* Left side: Logo and brand text */}
           <div className="flex items-center gap-2 flex-shrink-0">
             {/* Small Logo */}
-            <div 
+            <div
               className="w-8 h-8 text-slate-700 dark:text-slate-300 transition-colors duration-300 cursor-pointer hover:text-slate-900 dark:hover:text-slate-100"
               onClick={() => {
                 const { reset } = useYouTubeStore.getState()

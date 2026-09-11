@@ -197,7 +197,17 @@ describe("quality", () => {
   test("says nothing about a height that is not one", () => {
     // the validator takes two to four digits and a p. anything else is dropped
     // behind a warning, so it is left out here instead
-    for (const value of [0, -1, 5, 12345, NaN, Infinity, 1080.5, null, undefined]) {
+    for (const value of [
+      0,
+      -1,
+      5,
+      12345,
+      NaN,
+      Infinity,
+      1080.5,
+      null,
+      undefined
+    ]) {
       expect(videoQuality(value)).toBeNull()
     }
   })
@@ -261,14 +271,10 @@ describe("track", () => {
 
   test("never throws when the bridge is missing", () => {
     // the browser dev server has no preload at all
-    expect(() =>
-      track("url_submitted", { platform: "youtube" })
-    ).not.toThrow()
+    expect(() => track("url_submitted", { platform: "youtube" })).not.toThrow()
 
     vi.stubGlobal("window", {})
-    expect(() =>
-      track("url_submitted", { platform: "youtube" })
-    ).not.toThrow()
+    expect(() => track("url_submitted", { platform: "youtube" })).not.toThrow()
   })
 
   test("never throws when the bridge does", () => {
@@ -280,13 +286,14 @@ describe("track", () => {
       }
     }
 
-    expect(() => track("download_started", { platform: "youtube" })).not.toThrow()
+    expect(() =>
+      track("download_started", { platform: "youtube" })
+    ).not.toThrow()
   })
 
   test("a rejected send is not an unhandled rejection", async () => {
     const unhandled = vi.fn()
     process.on("unhandledRejection", unhandled)
-
     ;(window as unknown as { electronAPI: unknown }).electronAPI = {
       analytics: { track: () => Promise.reject(new Error("no main process")) }
     }

@@ -59,7 +59,10 @@ export const showBotDetectionToast = (message: string, platform?: Platform) => {
       : t("toast.botGeneric"),
     duration: 12000,
     action: cookiesCanHelp(platform)
-      ? { label: t("toast.fixWithCookies"), onClick: () => cookieActions.open() }
+      ? {
+          label: t("toast.fixWithCookies"),
+          onClick: () => cookieActions.open()
+        }
       : { label: t("toast.report"), onClick: () => reportActions.open() }
   })
 }
@@ -92,7 +95,10 @@ export const showDownloadErrorToast = (
     description,
     duration: 12000,
     action: blocked
-      ? { label: t("toast.fixWithCookies"), onClick: () => cookieActions.open() }
+      ? {
+          label: t("toast.fixWithCookies"),
+          onClick: () => cookieActions.open()
+        }
       : { label: t("toast.report"), onClick: () => reportActions.open() }
   })
 }

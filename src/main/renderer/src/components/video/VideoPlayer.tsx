@@ -1,5 +1,3 @@
-
-
 import { extractVideoId, isYouTubeShorts } from "@/lib/api"
 import { cn } from "@/lib/utils"
 import { motion } from "framer-motion"
@@ -26,7 +24,9 @@ export function VideoPlayer({ url, title, className }: VideoPlayerProps) {
           className
         )}
       >
-        <p className="text-slate-500 dark:text-slate-400">Can't display video</p>
+        <p className="text-slate-500 dark:text-slate-400">
+          Can't display video
+        </p>
       </motion.div>
     )
   }
@@ -36,15 +36,14 @@ export function VideoPlayer({ url, title, className }: VideoPlayerProps) {
       initial={{ opacity: 0, scale: 0.95 }}
       animate={{ opacity: 1, scale: 1 }}
       transition={{ duration: 0.5, ease: "easeOut" }}
-      className={cn(
-        isShorts ? "max-w-sm mx-auto" : "w-full",
-        className
-      )}
+      className={cn(isShorts ? "max-w-sm mx-auto" : "w-full", className)}
     >
-      <div className={cn(
-        "relative overflow-hidden rounded-2xl shadow-2xl",
-        isShorts ? "aspect-[9/16]" : "aspect-video"
-      )}>
+      <div
+        className={cn(
+          "relative overflow-hidden rounded-2xl shadow-2xl",
+          isShorts ? "aspect-[9/16]" : "aspect-video"
+        )}
+      >
         <iframe
           src={`https://www.youtube.com/embed/${videoId}?rel=0&showinfo=0&modestbranding=1`}
           title={title || isShorts ? "YouTube Shorts" : "YouTube video"}

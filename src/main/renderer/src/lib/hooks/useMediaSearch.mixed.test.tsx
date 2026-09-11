@@ -220,7 +220,9 @@ describe("what the two answers do", () => {
 
 describe("a listing that does not arrive", () => {
   test("degrades to the video rather than blocking on it", async () => {
-    mocks.getPlaylistInfo.mockRejectedValueOnce(new Error("This playlist is private."))
+    mocks.getPlaylistInfo.mockRejectedValueOnce(
+      new Error("This playlist is private.")
+    )
 
     await submit(MIXED)
 
@@ -232,7 +234,9 @@ describe("a listing that does not arrive", () => {
   })
 
   test("says nothing about a lookup the user never asked for", async () => {
-    mocks.getPlaylistInfo.mockRejectedValueOnce(new Error("This playlist is private."))
+    mocks.getPlaylistInfo.mockRejectedValueOnce(
+      new Error("This playlist is private.")
+    )
 
     await submit(MIXED)
 

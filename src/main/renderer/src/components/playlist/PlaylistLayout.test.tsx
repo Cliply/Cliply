@@ -6,7 +6,15 @@
 // right does.
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within
+} from "@testing-library/react"
 import type { ReactNode } from "react"
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
 
@@ -39,7 +47,9 @@ vi.mock("@/lib/api", () => {
       },
       cancelDownload: (id: string) => mocks.cancelDownload(id)
     },
-    playlistApi: { download: (request: unknown) => mocks.downloadPlaylist(request) },
+    playlistApi: {
+      download: (request: unknown) => mocks.downloadPlaylist(request)
+    },
     systemApi: { openDownloadFolder: mocks.openDownloadFolder },
     // the header names the folder files land in, which it reads over ipc
     settingsApi: {
@@ -67,7 +77,10 @@ vi.mock("@/components/video/CompactSearch", () => ({
 import { usePlaylistStore } from "@/lib/playlistStore"
 import { PlaylistLayout } from "./PlaylistLayout"
 
-const entry = (index: number, overrides: Partial<PlaylistEntry> = {}): PlaylistEntry => ({
+const entry = (
+  index: number,
+  overrides: Partial<PlaylistEntry> = {}
+): PlaylistEntry => ({
   index,
   id: `video${index}`,
   title: `video ${index}`,
@@ -99,7 +112,10 @@ function wrapper({ children }: { children: ReactNode }) {
   return <QueryClientProvider client={client}>{children}</QueryClientProvider>
 }
 
-const load = (info = listing(), url = "https://youtube.com/playlist?list=PL123") =>
+const load = (
+  info = listing(),
+  url = "https://youtube.com/playlist?list=PL123"
+) =>
   act(() => {
     usePlaylistStore.getState().setLoadedPlaylist(url, info)
   })
@@ -140,14 +156,18 @@ describe("the whole screen, end to end", () => {
     expect(screen.getByText(/TED/)).toBeDefined()
     expect(screen.getAllByRole("checkbox")).toHaveLength(3)
     expect(screen.getByText("3 of 3 selected")).toBeDefined()
-    expect(screen.getByRole("button", { name: "Download 3 videos" })).toBeDefined()
+    expect(
+      screen.getByRole("button", { name: "Download 3 videos" })
+    ).toBeDefined()
   })
 
   test("a truncated listing says how much it is not showing", () => {
     load(listing({ listed: 3, count: 5283, truncated: true }))
     render(<PlaylistLayout />, { wrapper })
 
-    expect(screen.getByText(/Showing the first 3 of 5,283 videos/)).toBeDefined()
+    expect(
+      screen.getByText(/Showing the first 3 of 5,283 videos/)
+    ).toBeDefined()
   })
 
   test("pressing download swaps the checkboxes for badges and two bars", async () => {
@@ -171,7 +191,9 @@ describe("the whole screen, end to end", () => {
     expect(screen.getByText(en["playlist.thisVideo"])).toBeDefined()
     expect(within(rowFor(1)).getByText("62%")).toBeDefined()
     expect(within(rowFor(2)).getByText(en["playlist.rowQueued"])).toBeDefined()
-    expect(screen.getByRole("button", { name: en["playlist.cancelRemaining"] })).toBeDefined()
+    expect(
+      screen.getByRole("button", { name: en["playlist.cancelRemaining"] })
+    ).toBeDefined()
 
     // and the header names the folder the run is really writing into, which
     // it read over ipc rather than assuming the default
@@ -180,7 +202,11 @@ describe("the whole screen, end to end", () => {
     )
     expect(document.body.textContent).not.toContain("~/Downloads/Cliply")
 
-    await emit({ downloadId: sentDownloadId(), status: "completed", progress: 100 })
+    await emit({
+      downloadId: sentDownloadId(),
+      status: "completed",
+      progress: 100
+    })
   })
 
   /**
@@ -212,10 +238,16 @@ describe("the whole screen, end to end", () => {
     // the height this one really came down at, under a 1080p ceiling
     expect(within(rowFor(1)).getByText("saved · 720p")).toBeDefined()
     expect(within(rowFor(2)).getByText(en["playlist.rowReused"])).toBeDefined()
-    expect(within(rowFor(3)).getByText(en["playlist.rowNotSaved"])).toBeDefined()
+    expect(
+      within(rowFor(3)).getByText(en["playlist.rowNotSaved"])
+    ).toBeDefined()
 
-    expect(screen.getByRole("button", { name: en["toast.openFolder"] })).toBeDefined()
-    expect(screen.getByRole("button", { name: "Retry the 1 that failed" })).toBeDefined()
+    expect(
+      screen.getByRole("button", { name: en["toast.openFolder"] })
+    ).toBeDefined()
+    expect(
+      screen.getByRole("button", { name: "Retry the 1 that failed" })
+    ).toBeDefined()
     expect(
       screen.getByRole("button", { name: en["playlist.downloadAgain"] })
     ).toBeDefined()
@@ -248,7 +280,9 @@ describe("the whole screen, end to end", () => {
     })
 
     await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: en["playlist.cancelRemaining"] }))
+      fireEvent.click(
+        screen.getByRole("button", { name: en["playlist.cancelRemaining"] })
+      )
     })
 
     await waitFor(() =>
@@ -274,7 +308,9 @@ describe("the whole screen, end to end", () => {
     // a cancel is a kill, and the videos it had already finished are on disk
     expect(within(rowFor(1)).getByText("saved · 720p")).toBeDefined()
     expect(within(rowFor(3)).getByText(en["playlist.rowReused"])).toBeDefined()
-    expect(within(rowFor(2)).getByText(en["playlist.rowNotSaved"])).toBeDefined()
+    expect(
+      within(rowFor(2)).getByText(en["playlist.rowNotSaved"])
+    ).toBeDefined()
 
     expect(
       screen.getByText("1 of 3 videos saved, 1 already downloaded, 1 skipped.")
@@ -294,7 +330,9 @@ describe("the whole screen, end to end", () => {
     await start()
 
     await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: en["playlist.cancelRemaining"] }))
+      fireEvent.click(
+        screen.getByRole("button", { name: en["playlist.cancelRemaining"] })
+      )
     })
 
     expect(mocks.listeners).toHaveLength(1)
@@ -343,10 +381,16 @@ describe("the whole screen, end to end", () => {
       reused_indices: []
     })
 
-    expect(usePlaylistStore.getState().itemStatus.get(2)?.state).not.toBe("saved")
+    expect(usePlaylistStore.getState().itemStatus.get(2)?.state).not.toBe(
+      "saved"
+    )
     expect(within(rowFor(1)).getByText("saved · 720p")).toBeDefined()
-    expect(within(rowFor(2)).getByText(en["playlist.rowNotSaved"])).toBeDefined()
-    expect(screen.getByRole("button", { name: "Retry the 2 that failed" })).toBeDefined()
+    expect(
+      within(rowFor(2)).getByText(en["playlist.rowNotSaved"])
+    ).toBeDefined()
+    expect(
+      screen.getByRole("button", { name: "Retry the 2 that failed" })
+    ).toBeDefined()
   })
 
   /**
@@ -385,7 +429,9 @@ describe("the whole screen, end to end", () => {
     expect(screen.getByText("Another list")).toBeDefined()
     expect(screen.queryByText("3 of 3 videos saved.")).toBeNull()
     expect(screen.getAllByRole("checkbox")).toHaveLength(2)
-    expect(screen.getByRole("button", { name: "Download 2 videos" })).toBeDefined()
+    expect(
+      screen.getByRole("button", { name: "Download 2 videos" })
+    ).toBeDefined()
   })
 
   /**
@@ -413,7 +459,9 @@ describe("the whole screen, end to end", () => {
     load(listing())
 
     expect(mocks.listeners).toHaveLength(1)
-    expect(screen.getByRole("button", { name: en["playlist.cancelRemaining"] })).toBeDefined()
+    expect(
+      screen.getByRole("button", { name: en["playlist.cancelRemaining"] })
+    ).toBeDefined()
     expect(screen.getByText("Video 1 of 3")).toBeDefined()
     expect(within(rowFor(1)).getByText("60%")).toBeDefined()
 
@@ -457,7 +505,9 @@ describe("the whole screen, end to end", () => {
 
     expect(screen.getByText("Another list")).toBeDefined()
     expect(screen.queryByText(en["playlist.failed"])).toBeNull()
-    expect(screen.getByRole("button", { name: "Download 3 videos" })).toBeDefined()
+    expect(
+      screen.getByRole("button", { name: "Download 3 videos" })
+    ).toBeDefined()
   })
 
   test("nothing on the screen uses an em-dash", async () => {

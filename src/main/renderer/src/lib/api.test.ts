@@ -21,11 +21,7 @@ import type { PlaylistDownloadRequest } from "./api"
 
 type Responder = () => unknown
 
-function bridge({
-  getInfo
-}: {
-  getInfo: Responder
-}) {
+function bridge({ getInfo }: { getInfo: Responder }) {
   ;(window as unknown as { electronAPI: unknown }).electronAPI = {
     video: { getInfo: async () => getInfo() },
     pinterest: { getInfo: async () => getInfo() },

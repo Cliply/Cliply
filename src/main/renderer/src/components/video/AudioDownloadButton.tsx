@@ -61,7 +61,6 @@ export function AudioDownloadButton({
 
     // Check server status before attempting download
 
-
     try {
       setIsDownloadingAudio(true)
 

@@ -228,7 +228,10 @@ export function summarizeBadges(
 export function totalDuration(
   entries: { duration: number | null }[]
 ): string | null {
-  if (entries.length === 0 || entries.some((entry) => entry.duration === null)) {
+  if (
+    entries.length === 0 ||
+    entries.some((entry) => entry.duration === null)
+  ) {
     return null
   }
 

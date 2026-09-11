@@ -13,7 +13,12 @@ describe("a download reporting real progress", () => {
   test("reports its position to the label, the value and assistive tech", () => {
     render(
       <DownloadProgressBar
-        state={{ status: "downloading", progress: 42.4, speed: "3.79MiB/s", eta: "01:44" }}
+        state={{
+          status: "downloading",
+          progress: 42.4,
+          speed: "3.79MiB/s",
+          eta: "01:44"
+        }}
         label="video"
       />
     )
@@ -36,7 +41,9 @@ describe("a download reporting real progress", () => {
 
     const labelId = bar().getAttribute("aria-labelledby")
     expect(labelId).toBeTruthy()
-    expect(document.getElementById(labelId!)?.textContent).toBe("Downloading audio")
+    expect(document.getElementById(labelId!)?.textContent).toBe(
+      "Downloading audio"
+    )
   })
 
   test("clamps progress that arrives out of range", () => {

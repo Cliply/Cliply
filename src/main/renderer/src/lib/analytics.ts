@@ -29,7 +29,10 @@ export type AnalyticsProperties = Record<
  * @param event - one of the four events the main handler accepts
  * @param properties - the bag; an absent value is left out rather than nulled
  */
-export function track(event: string, properties: AnalyticsProperties = {}): void {
+export function track(
+  event: string,
+  properties: AnalyticsProperties = {}
+): void {
   try {
     const sendable: Record<string, AnalyticsValue> = {}
 
@@ -78,7 +81,11 @@ export function durationBucket(
   // a live stream, a pin with no duration, a mapper that returned nothing.
   // "unknown" is not a bucket label - the validator's grammar wants a digit or
   // a comparison first - so absence is reported by leaving the property out
-  if (typeof seconds !== "number" || !Number.isFinite(seconds) || seconds <= 0) {
+  if (
+    typeof seconds !== "number" ||
+    !Number.isFinite(seconds) ||
+    seconds <= 0
+  ) {
     return null
   }
 
@@ -128,13 +135,16 @@ export function playlistSizeBucket(
   info: Pick<PlaylistInfoResponse, "count" | "listed">
 ): string | null {
   const reported = typeof info.count === "number" ? info.count : 0
-  const size = Number.isFinite(reported) && reported > 0 ? reported : info.listed
+  const size =
+    Number.isFinite(reported) && reported > 0 ? reported : info.listed
 
   if (typeof size !== "number" || !Number.isFinite(size) || size <= 0) {
     return null
   }
 
-  return PLAYLIST_SIZE_BUCKETS.find((bucket) => size <= bucket.upTo)?.label ?? null
+  return (
+    PLAYLIST_SIZE_BUCKETS.find((bucket) => size <= bucket.upTo)?.label ?? null
+  )
 }
 
 /**

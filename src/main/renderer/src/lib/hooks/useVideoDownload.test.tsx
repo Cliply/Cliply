@@ -135,7 +135,8 @@ const emit = async (payload: Record<string, unknown>) => {
   })
 }
 
-const sentDownloadId = () => downloadVideo.mock.calls[0][0].download_id as string
+const sentDownloadId = () =>
+  downloadVideo.mock.calls[0][0].download_id as string
 
 const flush = () => act(async () => {})
 
@@ -154,7 +155,9 @@ afterEach(() => {
 describe("event correlation", () => {
   test("the id exists and the listener is live before the ack lands", async () => {
     const ack = deferredAck()
-    const { result, unmount } = renderHook(() => useVideoDownload(), { wrapper })
+    const { result, unmount } = renderHook(() => useVideoDownload(), {
+      wrapper
+    })
 
     const { settled } = await startDownload(result)
 
@@ -287,7 +290,9 @@ describe("unmount and reset", () => {
     process.on("unhandledRejection", unhandled)
 
     const ack = deferredAck()
-    const { result, unmount } = renderHook(() => useVideoDownload(), { wrapper })
+    const { result, unmount } = renderHook(() => useVideoDownload(), {
+      wrapper
+    })
 
     const { settled } = await startDownload(result)
 
@@ -310,7 +315,9 @@ describe("unmount and reset", () => {
   })
 
   test("unmount mid-download settles the mutation and does not cancel the engine", async () => {
-    const { result, unmount } = renderHook(() => useVideoDownload(), { wrapper })
+    const { result, unmount } = renderHook(() => useVideoDownload(), {
+      wrapper
+    })
 
     const { settled } = await startDownload(result)
     await waitFor(() => expect(downloadVideo).toHaveBeenCalled())

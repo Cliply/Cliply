@@ -230,9 +230,12 @@ describe("what the youtube box does with a link", () => {
     // main classifies a refused listing exactly as it classifies a refused
     // video lookup, and the cookies dialog is the one thing that fixes either
     mocks.getPlaylistInfo.mockRejectedValueOnce(
-      Object.assign(new DownloadError("YouTube asked us to confirm you're not a bot."), {
-        category: "BOT_DETECTION"
-      })
+      Object.assign(
+        new DownloadError("YouTube asked us to confirm you're not a bot."),
+        {
+          category: "BOT_DETECTION"
+        }
+      )
     )
 
     await submit("https://www.youtube.com/playlist?list=PL123")
@@ -284,7 +287,9 @@ describe("two lookups racing", () => {
     await submit("https://www.youtube.com/playlist?list=PLGOOD")
     const loaded = usePlaylistStore.getState()
 
-    mocks.getPlaylistInfo.mockRejectedValueOnce(new Error("This playlist is private."))
+    mocks.getPlaylistInfo.mockRejectedValueOnce(
+      new Error("This playlist is private.")
+    )
     await submit("https://www.youtube.com/playlist?list=PLBAD")
 
     const after = usePlaylistStore.getState()
@@ -297,10 +302,14 @@ describe("two lookups racing", () => {
 
   test("the newest link wins even when its answer comes back first", async () => {
     const first = deferredListing()
-    const a = submitConcurrently("https://www.youtube.com/playlist?list=PLFIRST")
+    const a = submitConcurrently(
+      "https://www.youtube.com/playlist?list=PLFIRST"
+    )
 
     const second = deferredListing()
-    const b = submitConcurrently("https://www.youtube.com/playlist?list=PLSECOND")
+    const b = submitConcurrently(
+      "https://www.youtube.com/playlist?list=PLSECOND"
+    )
 
     // the second link answers first, then the first one finally lands
     await act(async () => {
@@ -342,10 +351,14 @@ describe("two lookups racing", () => {
 
   test("a stale failure does not shout over the lookup that replaced it", async () => {
     const first = deferredListing()
-    const a = submitConcurrently("https://www.youtube.com/playlist?list=PLFIRST")
+    const a = submitConcurrently(
+      "https://www.youtube.com/playlist?list=PLFIRST"
+    )
 
     const second = deferredListing()
-    const b = submitConcurrently("https://www.youtube.com/playlist?list=PLSECOND")
+    const b = submitConcurrently(
+      "https://www.youtube.com/playlist?list=PLSECOND"
+    )
 
     await act(async () => {
       second.resolve(listingOf("PLSECOND"))
@@ -357,7 +370,9 @@ describe("two lookups racing", () => {
     })
 
     expect(mocks.errorToast).not.toHaveBeenCalled()
-    expect(usePlaylistStore.getState().playlistInfo?.playlist_id).toBe("PLSECOND")
+    expect(usePlaylistStore.getState().playlistInfo?.playlist_id).toBe(
+      "PLSECOND"
+    )
     // the spinner belongs to the newest lookup, which finished
     expect(usePlaylistStore.getState().isLoadingPlaylistInfo).toBe(false)
 
@@ -371,7 +386,9 @@ describe("two lookups racing", () => {
       "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
     )
 
-    mocks.getPlaylistInfo.mockRejectedValueOnce(new Error("This playlist is private."))
+    mocks.getPlaylistInfo.mockRejectedValueOnce(
+      new Error("This playlist is private.")
+    )
     await submit("https://www.youtube.com/playlist?list=PL123")
 
     // the video view is still on screen, and it would download its own link

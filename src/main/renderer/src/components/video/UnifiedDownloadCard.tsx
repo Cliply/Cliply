@@ -63,17 +63,28 @@ type UnifiedDownloadCardProps =
 export function UnifiedDownloadCard(props: UnifiedDownloadCardProps) {
   if (props.platform === "pinterest") {
     return (
-      <PinterestDownloadCard pinInfo={props.pinInfo} className={props.className} />
+      <PinterestDownloadCard
+        pinInfo={props.pinInfo}
+        className={props.className}
+      />
     )
   }
 
   if (props.platform === "tiktok") {
     return (
-      <TikTokDownloadCard tikTokInfo={props.tikTokInfo} className={props.className} />
+      <TikTokDownloadCard
+        tikTokInfo={props.tikTokInfo}
+        className={props.className}
+      />
     )
   }
 
-  return <YouTubeDownloadCard videoInfo={props.videoInfo} className={props.className} />
+  return (
+    <YouTubeDownloadCard
+      videoInfo={props.videoInfo}
+      className={props.className}
+    />
+  )
 }
 
 function YouTubeDownloadCard({
@@ -303,11 +314,18 @@ function PinterestDownloadCard({
       })
 
       await pinterestApi.download({ url, title: pinInfo?.title })
-      toast.success(t("download.complete"), { action: { label: t("toast.openFolder"), onClick: () => systemApi.openDownloadFolder() } })
+      toast.success(t("download.complete"), {
+        action: {
+          label: t("toast.openFolder"),
+          onClick: () => systemApi.openDownloadFolder()
+        }
+      })
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Failed to download video"
-      if (message.includes("network") || message.includes("fetch")) { showServerOverwhelmedToast() }
-      else {
+      const message =
+        error instanceof Error ? error.message : "Failed to download video"
+      if (message.includes("network") || message.includes("fetch")) {
+        showServerOverwhelmedToast()
+      } else {
         reportActions.stage({
           shortMessage: message,
           details: error instanceof DownloadError ? error.details : undefined,
@@ -321,7 +339,8 @@ function PinterestDownloadCard({
           // the staged report above keeps main's english; the toast is read
           localizeError({
             message,
-            category: error instanceof DownloadError ? error.category : undefined
+            category:
+              error instanceof DownloadError ? error.category : undefined
           }).message,
           error instanceof DownloadError ? error.category : undefined,
           "pinterest"
@@ -367,11 +386,18 @@ function TikTokDownloadCard({
       })
 
       await tiktokApi.download({ url, title: tikTokInfo?.title })
-      toast.success(t("download.complete"), { action: { label: t("toast.openFolder"), onClick: () => systemApi.openDownloadFolder() } })
+      toast.success(t("download.complete"), {
+        action: {
+          label: t("toast.openFolder"),
+          onClick: () => systemApi.openDownloadFolder()
+        }
+      })
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Failed to download video"
-      if (message.includes("network") || message.includes("fetch")) { showServerOverwhelmedToast() }
-      else {
+      const message =
+        error instanceof Error ? error.message : "Failed to download video"
+      if (message.includes("network") || message.includes("fetch")) {
+        showServerOverwhelmedToast()
+      } else {
         reportActions.stage({
           shortMessage: message,
           details: error instanceof DownloadError ? error.details : undefined,
@@ -385,7 +411,8 @@ function TikTokDownloadCard({
           // the staged report above keeps main's english; the toast is read
           localizeError({
             message,
-            category: error instanceof DownloadError ? error.category : undefined
+            category:
+              error instanceof DownloadError ? error.category : undefined
           }).message,
           error instanceof DownloadError ? error.category : undefined,
           "tiktok"

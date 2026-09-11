@@ -1,7 +1,11 @@
 import type { PlaylistInfoResponse } from "@/lib/api"
 import { useDownloadPath } from "@/lib/hooks/useDownloadPath"
 import { useT } from "@/lib/i18n"
-import { countLine, totalDuration, type PlaylistPhase } from "@/lib/playlistView"
+import {
+  countLine,
+  totalDuration,
+  type PlaylistPhase
+} from "@/lib/playlistView"
 import { cn } from "@/lib/utils"
 import { motion } from "framer-motion"
 
@@ -12,7 +16,11 @@ interface PlaylistHeaderProps {
 }
 
 /** what was pasted: the playlist, its channel, its size and its length */
-export function PlaylistHeader({ info, phase, className }: PlaylistHeaderProps) {
+export function PlaylistHeader({
+  info,
+  phase,
+  className
+}: PlaylistHeaderProps) {
   // the two lines below are built by `playlistView`, which reads the same
   // dictionary; this is what re-runs them when the locale flips
   const t = useT()
@@ -20,9 +28,11 @@ export function PlaylistHeader({ info, phase, className }: PlaylistHeaderProps) 
   // to name whether or not it was still true
   const { downloadPath } = useDownloadPath()
 
-  const meta = [info.uploader, countLine(info), totalDuration(info.entries)].filter(
-    Boolean
-  )
+  const meta = [
+    info.uploader,
+    countLine(info),
+    totalDuration(info.entries)
+  ].filter(Boolean)
 
   return (
     <motion.div

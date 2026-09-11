@@ -1,7 +1,11 @@
 import type { PlaylistEntry } from "@/lib/api"
 import { useT } from "@/lib/i18n"
 import { isSelectableEntry, type PlaylistItemStatus } from "@/lib/playlistStore"
-import { rowBadge, type PlaylistPhase, type PlaylistRowBadge } from "@/lib/playlistView"
+import {
+  rowBadge,
+  type PlaylistPhase,
+  type PlaylistRowBadge
+} from "@/lib/playlistView"
 import { cn } from "@/lib/utils"
 import { Check } from "lucide-react"
 

@@ -32,10 +32,13 @@ describe("setVideoInfo", () => {
    * original without anything on screen saying so.
    */
   test("drops the previous video's tier and language", () => {
-    const first = videoInfo([tier(1080, 270_000_000)], [
-      { code: "en", is_original: true },
-      { code: "hi", is_original: false }
-    ])
+    const first = videoInfo(
+      [tier(1080, 270_000_000)],
+      [
+        { code: "en", is_original: true },
+        { code: "hi", is_original: false }
+      ]
+    )
 
     useYouTubeStore.getState().setVideoInfo(first)
     useYouTubeStore.getState().setSelectedTier(first.quality_tiers[0])

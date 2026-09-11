@@ -16,10 +16,7 @@ import {
 import { en } from "@/lib/i18n/en"
 import { localizeError, t } from "@/lib/i18n"
 import { mixedLinkKey, useMixedLinkStore } from "@/lib/mixedLinkStore"
-import {
-  PLATFORM_REGISTRY,
-  type PlatformConfig
-} from "@/lib/platform-config"
+import { PLATFORM_REGISTRY, type PlatformConfig } from "@/lib/platform-config"
 import { usePinterestStore } from "@/lib/pinterestStore"
 import { usePlaylistStore } from "@/lib/playlistStore"
 import { useAppStore, type Platform } from "@/lib/store"
@@ -477,10 +474,7 @@ function handleSearchError(
   // failure here the user can actually fix, and main already decided which it
   // is. matching on text would put it behind whichever generic branch happened
   // to catch the sentence first
-  if (
-    error instanceof DownloadError &&
-    error.category === "BOT_DETECTION"
-  ) {
+  if (error instanceof DownloadError && error.category === "BOT_DETECTION") {
     // the platform decides which action the toast offers: BOT_DETECTION also
     // catches tiktok and pinterest, and the cookie dialog is youtube's alone
     showBotDetectionToast(shown, config.id)

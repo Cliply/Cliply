@@ -214,7 +214,8 @@ export const usePlaylistStore = create<PlaylistState>((set, get) => ({
     })
   },
 
-  setIsLoadingPlaylistInfo: (loading) => set({ isLoadingPlaylistInfo: loading }),
+  setIsLoadingPlaylistInfo: (loading) =>
+    set({ isLoadingPlaylistInfo: loading }),
 
   beginLookup: () => {
     const token = get().lookupToken + 1
@@ -244,7 +245,8 @@ export const usePlaylistStore = create<PlaylistState>((set, get) => ({
     set({ selectedIndices: next })
   },
 
-  selectAll: () => set({ selectedIndices: selectableIndices(get().playlistInfo) }),
+  selectAll: () =>
+    set({ selectedIndices: selectableIndices(get().playlistInfo) }),
   selectNone: () => set({ selectedIndices: new Set() }),
 
   setSelectedCeiling: (height) => set({ selectedCeiling: height }),

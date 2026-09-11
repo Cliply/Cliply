@@ -95,7 +95,8 @@ export const useYouTubeStore = create<YouTubeState>((set) => ({
   setVideoPreciseCut: (enabled) => set({ videoPreciseCut: enabled }),
   setAudioPreciseCut: (enabled) => set({ audioPreciseCut: enabled }),
   setDownloadPath: (pathInfo) => set({ downloadPath: pathInfo }),
-  setIsLoadingDownloadPath: (loading) => set({ isLoadingDownloadPath: loading }),
+  setIsLoadingDownloadPath: (loading) =>
+    set({ isLoadingDownloadPath: loading }),
 
   // Reset all state
   reset: () =>

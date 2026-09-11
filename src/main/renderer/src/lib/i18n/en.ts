@@ -97,7 +97,8 @@ export const en = {
     "One quality for the whole playlist. Video and audio are merged automatically.",
   "playlist.audioIntro":
     "Take the audio from every video you picked, in one format.",
-  "playlist.audioNote": "Each video is saved whole, in the format picked above.",
+  "playlist.audioNote":
+    "Each video is saved whole, in the format picked above.",
   "playlist.pickVideosFirst": "Pick some videos first",
   "playlist.pickTracksFirst": "Pick some tracks first",
   "playlist.downloadVideos": "Download {n} video|Download {n} videos",
@@ -240,13 +241,15 @@ export const en = {
   "cookies.removeFailed": "couldn't remove the cookies",
   "cookies.removeFailedDesc": "they're still on this machine.",
   "cookies.copyFailed": "couldn't copy that",
-  "cookies.copyFailedDesc": "type youtube.com/robots.txt into that tab instead.",
+  "cookies.copyFailedDesc":
+    "type youtube.com/robots.txt into that tab instead.",
 
   "toast.overwhelmed": "we're overwhelmed",
   "toast.openFolder": "Open Folder",
   "toast.report": "report",
   "toast.fixWithCookies": "fix with cookies",
-  "toast.botCookies": "signing in with a throwaway account usually clears this.",
+  "toast.botCookies":
+    "signing in with a throwaway account usually clears this.",
   "toast.botGeneric": "this site wants us to prove we're not a bot.",
   "toast.audioDone": "Audio downloaded successfully!",
   "toast.videoDone": "Video downloaded successfully!",
@@ -296,8 +299,7 @@ export const en = {
   "card.disabled": "Disabled",
   "card.preciseCutHint": "Turn off for faster download but less precise cuts",
   "card.pinterestSubtitle": "Best available quality, saved as MP4.",
-  "card.tiktokSubtitle":
-    "Best available quality, saved as MP4. No watermark.",
+  "card.tiktokSubtitle": "Best available quality, saved as MP4. No watermark.",
 
   "dropdown.videoQuality": "Video Quality",
   "dropdown.videoQualityPlaceholder": "Select video quality...",

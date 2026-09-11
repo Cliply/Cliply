@@ -52,9 +52,7 @@ describe("what the report says about your machine", () => {
   test("shows the engine version the report is about to attach", async () => {
     await openDialog()
 
-    await waitFor(() =>
-      expect(screen.getByText("2026.08.19")).toBeDefined()
-    )
+    await waitFor(() => expect(screen.getByText("2026.08.19")).toBeDefined())
   })
 
   test("shows every field the issue body carries, so nothing rides along unseen", async () => {

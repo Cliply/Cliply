@@ -247,7 +247,9 @@ describe("the playlist plurals", () => {
   test.each([[1], [2], [5], [11], [21], [100]])(
     "russian counts %i видео without declining it",
     async (n) => {
-      expect((await inRussian())("playlist.videoCount", { n })).toBe(`${n} видео`)
+      expect((await inRussian())("playlist.videoCount", { n })).toBe(
+        `${n} видео`
+      )
     }
   )
 
@@ -306,7 +308,9 @@ describe("the playlist plurals", () => {
     [21, "весь плейлист: 21 видео"],
     [100, "весь плейлист: 100 видео"]
   ])("the mixed link offers %i videos in russian", async (n, expected) => {
-    expect((await inRussian())("mixedLink.playlistChoice", { n })).toBe(expected)
+    expect((await inRussian())("mixedLink.playlistChoice", { n })).toBe(
+      expected
+    )
   })
 
   // the capped choice is a different sentence and keeps its own wording: a
@@ -323,14 +327,19 @@ describe("the playlist plurals", () => {
     [{ saved: 1, n: 1 }, "1 of 1 video saved"],
     [{ saved: 8, n: 9 }, "8 of 9 videos saved"],
     [{ saved: 0, n: 21 }, "0 of 21 videos saved"]
-  ])("the summary agrees with the total, not the saves", async (params, expected) => {
-    expect((await inEnglish())("playlist.summarySaved", params)).toBe(expected)
-  })
+  ])(
+    "the summary agrees with the total, not the saves",
+    async (params, expected) => {
+      expect((await inEnglish())("playlist.summarySaved", params)).toBe(
+        expected
+      )
+    }
+  )
 
   test("and russian says it the other way round", async () => {
-    expect((await inRussian())("playlist.summarySaved", { saved: 8, n: 9 })).toBe(
-      "сохранено 8 из 9 видео"
-    )
+    expect(
+      (await inRussian())("playlist.summarySaved", { saved: 8, n: 9 })
+    ).toBe("сохранено 8 из 9 видео")
   })
 })
 
@@ -360,7 +369,8 @@ describe("localizeError", () => {
 
     expect(localizeError(blocked)).toEqual({
       message: "YouTube просит подтвердить, что вы не бот.",
-      suggestion: "импортируйте cookies YouTube в настройках и попробуйте снова.",
+      suggestion:
+        "импортируйте cookies YouTube в настройках и попробуйте снова.",
       category: "BOT_DETECTION"
     })
   })

@@ -510,7 +510,9 @@ declare global {
         >
       }
       pinterest: {
-        getInfo: (url: string) => Promise<IPCResponse<PinterestVideoInfoResponse>>
+        getInfo: (
+          url: string
+        ) => Promise<IPCResponse<PinterestVideoInfoResponse>>
         download: (
           options: PinterestDownloadRequest
         ) => Promise<IPCResponse<PinterestDownloadResponse>>
@@ -532,9 +534,7 @@ declare global {
       // optional: an older preload has no support bridge, and the dialog has
       // to be able to mount against one
       support?: {
-        onMilestone: (
-          callback: (data: { count: number }) => void
-        ) => () => void
+        onMilestone: (callback: (data: { count: number }) => void) => () => void
       }
       system: {
         getHealth: () => Promise<IPCResponse<SystemHealth>>
@@ -547,7 +547,9 @@ declare global {
       }
       settings: {
         getDownloadPath: () => Promise<IPCResponse<DownloadPathInfo>>
-        setDownloadPath: (path: string) => Promise<IPCResponse<DownloadPathInfo>>
+        setDownloadPath: (
+          path: string
+        ) => Promise<IPCResponse<DownloadPathInfo>>
       }
       cookies: {
         importFile: () => Promise<IPCResponse<CookieImportResult>>
@@ -964,7 +966,9 @@ export const cookiesApi = {
     const response = await electronAPI.cookies.getStatus()
 
     if (!response.success || !response.data) {
-      throw new Error(response.error?.message || "couldn't read the cookie status")
+      throw new Error(
+        response.error?.message || "couldn't read the cookie status"
+      )
     }
 
     return response.data
@@ -1018,7 +1022,9 @@ export const cookiesApi = {
 }
 
 export const extractVideoId = (url: string): string | null => {
-  const match = url.match(/(?:youtube\.com\/(?:watch\?v=|embed\/|v\/|shorts\/)|youtu\.be\/)([^"&?/\s]{11})/)
+  const match = url.match(
+    /(?:youtube\.com\/(?:watch\?v=|embed\/|v\/|shorts\/)|youtu\.be\/)([^"&?/\s]{11})/
+  )
   return match ? match[1] : null
 }
 

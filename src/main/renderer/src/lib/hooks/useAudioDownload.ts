@@ -54,7 +54,9 @@ export const useAudioDownload = () => {
   // swapped out. The pending mutation is settled so nothing awaits forever.
   useEffect(() => {
     return () => {
-      settleRef.current?.reject(terminalReason("abandoned", "Download view closed"))
+      settleRef.current?.reject(
+        terminalReason("abandoned", "Download view closed")
+      )
       settleRef.current = null
 
       if (progressCleanupRef.current) {
@@ -81,9 +83,11 @@ export const useAudioDownload = () => {
 
       // settles when a terminal event arrives, which is what keeps the caller's
       // await (and the button's pending state) tied to the real download
-      const finished = new Promise<{ downloadId: string }>((resolve, reject) => {
-        settleRef.current = { resolve, reject }
-      })
+      const finished = new Promise<{ downloadId: string }>(
+        (resolve, reject) => {
+          settleRef.current = { resolve, reject }
+        }
+      )
 
       // nothing awaits `finished` until the start ipc below resolves, so an
       // unmount or reset in that window would reject a promise with no handler

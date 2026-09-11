@@ -35,7 +35,8 @@ const ask = (info: PlaylistInfoResponse, choose = vi.fn()) => {
   return choose
 }
 
-const videoButton = () => screen.getByRole("button", { name: /just this video/i })
+const videoButton = () =>
+  screen.getByRole("button", { name: /just this video/i })
 const playlistButton = () =>
   screen.getByRole("button", { name: /videos\s*Open the playlist/i })
 
@@ -120,7 +121,8 @@ describe("in russian", () => {
     // "все 11 видео" would have been "все 1 видео" at one, so the button
     // names the scope and then counts, which reads the same at every number
     expect(
-      screen.getByRole("button", { name: /весь плейлист: 11 видео/ }).textContent
+      screen.getByRole("button", { name: /весь плейлист: 11 видео/ })
+        .textContent
     ).toContain("открыть плейлист")
     expect(screen.getByRole("dialog").textContent).toContain("11 видео")
   })
@@ -132,7 +134,9 @@ describe("in russian", () => {
 
     const dialog = screen.getByRole("dialog").textContent
 
-    expect(screen.getByRole("button", { name: /первые 100 видео/ })).toBeTruthy()
+    expect(
+      screen.getByRole("button", { name: /первые 100 видео/ })
+    ).toBeTruthy()
     expect(dialog).not.toContain("весь плейлист")
     /*
       and the count is grouped the way russian groups it, on a machine whose
