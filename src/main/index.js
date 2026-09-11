@@ -220,6 +220,8 @@ class CliplyApp {
     // set once the shutdown drain has run, so the quit it re-issues is not
     // cancelled a second time
     this.hasShutDown = false
+    // the 12-hour update-check interval, held so the quit can clear it
+    this.periodicUpdateTimer = null
 
     // update handling
     this.updateState = {
@@ -664,7 +666,10 @@ class CliplyApp {
     // check every 12 hours using config
     const checkInterval = APP_CONFIG.UPDATE_CONFIG.PERIODIC_CHECK_INTERVAL
 
-    setInterval(() => {
+    // unref'd like every other timer here: a 12-hour interval is the longest
+    // lived handle in the process, and an armed one is on its own enough to
+    // hold the event loop open long after there is anything left to do
+    this.periodicUpdateTimer = setInterval(() => {
       // only check if app is not quitting and in production
       if (!this.isQuitting && !isDev) {
         console.log("Performing periodic update check...")
@@ -673,6 +678,7 @@ class CliplyApp {
         })
       }
     }, checkInterval)
+    this.periodicUpdateTimer.unref()
   }
 
   // setup app event handlers
@@ -965,6 +971,14 @@ class CliplyApp {
     }
 
     this.hasShutDown = true
+
+    // cleared unconditionally, install or not: the check it would fire is
+    // already refused by the isQuitting flag above, so all an armed interval
+    // can do from here is outlive the work
+    if (this.periodicUpdateTimer) {
+      clearInterval(this.periodicUpdateTimer)
+      this.periodicUpdateTimer = null
+    }
 
     /**
      * installing an update is still a quit, and it is the quit whose last
