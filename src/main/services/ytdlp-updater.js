@@ -28,9 +28,7 @@ const {
   createHttpClient,
   httpGet,
   resolveAddresses,
-  withAddressFallback,
-  isVersionString,
-  TAG_PATTERN
+  withAddressFallback
 } = require("./ytdlp/http")
 const {
   swapDirectories,
@@ -48,6 +46,9 @@ const {
 const RELEASE_LATEST_URL = "https://github.com/yt-dlp/yt-dlp/releases/latest"
 const RELEASE_DOWNLOAD_BASE = "https://github.com/yt-dlp/yt-dlp/releases/download"
 const CHECKSUM_ASSET = "SHA2-256SUMS"
+
+// the tag goes into a url, so it is validated rather than trusted
+const TAG_PATTERN = /^\d{4}\.\d{2}\.\d{2}(\.\d+)?$/
 
 // how long the download + unpack phase may take before it is aborted. the
 // archives are 18-54 mb, so this is a stalled-connection guard, not a budget
@@ -82,6 +83,12 @@ function releaseAssetFor(platform = process.platform, arch = process.arch) {
   }
 
   return null
+}
+
+// yt-dlp versions are the release date, optionally with a build suffix - the
+// same shape the release tags take
+function isVersionString(value) {
+  return typeof value === "string" && TAG_PATTERN.test(value.trim())
 }
 
 class YtdlpUpdater {

@@ -12,9 +12,6 @@ const https = require("https")
 const net = require("net")
 const { pipeline } = require("stream/promises")
 
-// the tag goes into a url, so it is validated rather than trusted
-const TAG_PATTERN = /^\d{4}\.\d{2}\.\d{2}(\.\d+)?$/
-
 const REQUEST_TIMEOUT_MS = 60 * 1000
 
 // how long a single address gets to answer before the next one is tried. the
@@ -263,12 +260,6 @@ async function followRedirects(url, options = {}, hops = 0) {
   return response
 }
 
-// yt-dlp versions are the release date, optionally with a build suffix - the
-// same shape the release tags take
-function isVersionString(value) {
-  return typeof value === "string" && TAG_PATTERN.test(value.trim())
-}
-
 function isRedirect(response) {
   return response.statusCode >= 300 && response.statusCode < 400
 }
@@ -281,9 +272,7 @@ module.exports = {
   httpGetVia,
   isAbortError,
   followRedirects,
-  isVersionString,
   isRedirect,
-  TAG_PATTERN,
   REQUEST_TIMEOUT_MS,
   CONNECT_TIMEOUT_MS,
   MAX_REDIRECTS,
