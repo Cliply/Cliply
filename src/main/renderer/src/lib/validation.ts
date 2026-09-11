@@ -46,8 +46,7 @@ const PLAYLIST_URL_REGEX =
 
 /**
  * the video id inside a youtube link, with the host read as strictly as the
- * validators above read it. `extractVideoId` below is the older, laxer reader
- * that predates this and is left alone.
+ * validators above read it.
  */
 const YOUTUBE_VIDEO_ID_REGEX =
   /^(?:https?:\/\/)?(?:[a-z0-9-]+\.)*(?:youtube\.com\/(?:watch\?(?:[^#]*&)?v=|embed\/|v\/|shorts\/)|youtu\.be\/)([\w-]+)/i
@@ -169,10 +168,6 @@ export const tiktokUrlSchema = z.object({
 
 export type TikTokUrlFormData = z.infer<typeof tiktokUrlSchema>
 
-export const isValidTikTokUrl = (url: string): boolean => {
-  return TIKTOK_URL_REGEX.test(url)
-}
-
 export const detectPlatform = (
   url: string
 ): "youtube" | "pinterest" | "tiktok" | null => {
@@ -186,11 +181,4 @@ export const detectPlatform = (
     return "tiktok"
   }
   return null
-}
-
-export const extractVideoId = (url: string): string | null => {
-  const match = url.match(
-    /(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/|youtube\.com\/shorts\/)([^&\n?#]+)/
-  )
-  return match ? match[1] : null
 }

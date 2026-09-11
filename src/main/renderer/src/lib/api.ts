@@ -322,18 +322,6 @@ export interface PlaylistDownloadRequest {
   title?: string
 }
 
-export type Platform = "youtube" | "pinterest" | "tiktok"
-
-export type MediaInfo =
-  | { platform: "youtube"; data: VideoInfoResponse }
-  | { platform: "pinterest"; data: PinterestVideoInfoResponse }
-  | { platform: "tiktok"; data: TikTokVideoInfoResponse }
-
-export type DownloadRequest =
-  | { platform: "youtube"; data: VideoDownloadRequest | AudioDownloadRequest }
-  | { platform: "pinterest"; data: PinterestDownloadRequest }
-  | { platform: "tiktok"; data: TikTokDownloadRequest }
-
 export interface TimeRange {
   start: number // seconds
   end: number // seconds

@@ -13,18 +13,6 @@ export const showServerOverwhelmedToast = () => {
   )
 }
 
-export const showDownloadSuccessToast = (type: "audio" | "video") => {
-  const audio = type === "audio"
-
-  toast.success(t(audio ? "toast.audioDone" : "toast.videoDone"), {
-    description: t(audio ? "toast.audioDoneDesc" : "toast.videoDoneDesc"),
-    action: {
-      label: t("toast.openFolder"),
-      onClick: () => window.electronAPI?.system?.openDownloadFolder?.()
-    }
-  })
-}
-
 export const showFolderSelectedToast = () => {
   toast.success(t("folder.updated"))
 }
