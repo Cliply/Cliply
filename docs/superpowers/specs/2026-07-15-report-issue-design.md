@@ -3,6 +3,13 @@
 Date: 2026-07-15
 Status: Approved
 
+> **Superseded. Historical record only.** This document was written when Cliply
+> had a separate Python FastAPI backend that the Electron main process talked to
+> over HTTP. That backend no longer exists: the main process now spawns yt-dlp
+> directly. Everything below describes the design as it stood at the time, so
+> read it as a record of what was intended then, not as a description of how
+> Cliply behaves today.
+
 ## Overview
 
 When a download fails, users currently see a short friendly error message
