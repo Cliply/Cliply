@@ -586,6 +586,70 @@ const isElectron = () => {
   return typeof window !== "undefined" && window.electronAPI
 }
 
+/** builds the failure a call site throws out of what main sent back */
+type ErrorFactory = (message: string, error?: ApiError) => Error
+
+const downloadError: ErrorFactory = (message, error) =>
+  new DownloadError(message, error)
+const plainError: ErrorFactory = (message) => new Error(message)
+const cookieError: ErrorFactory = (message, error) =>
+  new CookieError(message, error?.code)
+
+interface UnwrapOptions {
+  /** what to throw. the default is what most of these calls throw */
+  makeError?: ErrorFactory
+  /** logged with the resolved message before throwing, for the calls that log */
+  log?: string
+}
+
+/**
+ * the payload of an IPC response, or the failure the call site would throw
+ *
+ * every request below answers the same shape, so every request below used to
+ * repeat the same check: is it a success, did a payload come with it, and if
+ * not, throw main's message or a fallback of our own. this is that check, once.
+ *
+ * the error comes from a factory rather than a class because the three
+ * failures thrown here do not share a constructor: `DownloadError` reads
+ * `details` and `category` off the payload, `CookieError` reads `code`, and a
+ * bare `Error` reads nothing at all.
+ *
+ * that last one is the asymmetry worth naming here: 12 of these calls throw a
+ * plain `Error` and so drop `.category` on the floor, which leaves the UI on
+ * its generic wording even when main said precisely what went wrong. it is
+ * kept that way on purpose - which calls should carry a category is a decision
+ * for the download queue to make, not a refactor.
+ *
+ * `requireData: false` is for the handful that only need to know the call went
+ * through: they read the payload themselves, and a missing one is not a
+ * failure to them.
+ */
+function unwrap<T>(
+  response: IPCResponse<T>,
+  fallbackMessage: string,
+  options?: UnwrapOptions & { requireData?: true }
+): T
+function unwrap<T>(
+  response: IPCResponse<T>,
+  fallbackMessage: string,
+  options: UnwrapOptions & { requireData: false }
+): T | undefined
+function unwrap<T>(
+  response: IPCResponse<T>,
+  fallbackMessage: string,
+  options: UnwrapOptions & { requireData?: boolean } = {}
+): T | undefined {
+  const { makeError = downloadError, log, requireData = true } = options
+
+  if (!response.success || (requireData && !response.data)) {
+    const message = response.error?.message || fallbackMessage
+    if (log) console.error(log, message)
+    throw makeError(message, response.error)
+  }
+
+  return response.data
+}
+
 // Video API functions
 export const videoApi = {
   /**
@@ -597,13 +661,9 @@ export const videoApi = {
     const electronAPI = getElectronAPI()
     const response = await electronAPI.video.getInfo(url)
 
-    if (!response.success || !response.data) {
-      const errorMessage = response.error?.message || "Failed to get video info"
-      console.error("Video info failed:", errorMessage)
-      throw new DownloadError(errorMessage, response.error)
-    }
-
-    return response.data
+    return unwrap(response, "Failed to get video info", {
+      log: "Video info failed:"
+    })
   },
 
   /**
@@ -617,15 +677,13 @@ export const videoApi = {
     const electronAPI = getElectronAPI()
     const response = await electronAPI.video.downloadAudio(request)
 
-    if (!response.success || !response.data) {
-      const errorMessage = response.error?.message || "Failed to download audio"
-      console.error("Audio download failed:", errorMessage)
-      throw new DownloadError(errorMessage, response.error)
-    }
+    const data = unwrap(response, "Failed to download audio", {
+      log: "Audio download failed:"
+    })
 
     // Map the response to match expected format
     return {
-      downloadId: response.data.download_id
+      downloadId: data.download_id
     }
   },
 
@@ -640,15 +698,13 @@ export const videoApi = {
     const electronAPI = getElectronAPI()
     const response = await electronAPI.video.downloadCombined(request)
 
-    if (!response.success || !response.data) {
-      const errorMessage = response.error?.message || "Failed to download video"
-      console.error("Video download failed:", errorMessage)
-      throw new DownloadError(errorMessage, response.error)
-    }
+    const data = unwrap(response, "Failed to download video", {
+      log: "Video download failed:"
+    })
 
     // Map the response to match expected format
     return {
-      downloadId: response.data.download_id
+      downloadId: data.download_id
     }
   }
 }
@@ -670,14 +726,9 @@ export const playlistApi = {
     const electronAPI = getElectronAPI()
     const response = await electronAPI.playlist.getInfo(url)
 
-    if (!response.success || !response.data) {
-      const errorMessage =
-        response.error?.message || "Failed to get playlist info"
-      console.error("Playlist info failed:", errorMessage)
-      throw new DownloadError(errorMessage, response.error)
-    }
-
-    return response.data
+    return unwrap(response, "Failed to get playlist info", {
+      log: "Playlist info failed:"
+    })
   },
 
   /**
@@ -691,18 +742,15 @@ export const playlistApi = {
     const electronAPI = getElectronAPI()
     const response = await electronAPI.playlist.download(request)
 
-    if (!response.success || !response.data) {
-      const errorMessage =
-        response.error?.message || "Failed to download playlist"
-      console.error("Playlist download failed:", errorMessage)
-      throw new DownloadError(errorMessage, response.error)
-    }
+    const data = unwrap(response, "Failed to download playlist", {
+      log: "Playlist download failed:"
+    })
 
     return {
-      downloadId: response.data.download_id,
+      downloadId: data.download_id,
       // what main accepted, which is the selection it validated rather than
       // the one that was sent
-      itemsTotal: response.data.items_total
+      itemsTotal: data.items_total
     }
   }
 }
@@ -717,14 +765,9 @@ export const pinterestApi = {
     const electronAPI = getElectronAPI()
     const response = await electronAPI.pinterest.getInfo(url)
 
-    if (!response.success || !response.data) {
-      const errorMessage =
-        response.error?.message || "Failed to get Pinterest video info"
-      console.error("Pinterest info failed:", errorMessage)
-      throw new DownloadError(errorMessage, response.error)
-    }
-
-    return response.data
+    return unwrap(response, "Failed to get Pinterest video info", {
+      log: "Pinterest info failed:"
+    })
   },
 
   /**
@@ -738,15 +781,12 @@ export const pinterestApi = {
     const electronAPI = getElectronAPI()
     const response = await electronAPI.pinterest.download(request)
 
-    if (!response.success || !response.data) {
-      const errorMessage =
-        response.error?.message || "Failed to download Pinterest video"
-      console.error("Pinterest download failed:", errorMessage)
-      throw new DownloadError(errorMessage, response.error)
-    }
+    const data = unwrap(response, "Failed to download Pinterest video", {
+      log: "Pinterest download failed:"
+    })
 
     return {
-      downloadId: response.data.download_id
+      downloadId: data.download_id
     }
   }
 }
@@ -756,14 +796,9 @@ export const tiktokApi = {
     const electronAPI = getElectronAPI()
     const response = await electronAPI.tiktok.getInfo(url)
 
-    if (!response.success || !response.data) {
-      const errorMessage =
-        response.error?.message || "Failed to get TikTok video info"
-      console.error("TikTok info failed:", errorMessage)
-      throw new DownloadError(errorMessage, response.error)
-    }
-
-    return response.data
+    return unwrap(response, "Failed to get TikTok video info", {
+      log: "TikTok info failed:"
+    })
   },
 
   async download(
@@ -772,15 +807,12 @@ export const tiktokApi = {
     const electronAPI = getElectronAPI()
     const response = await electronAPI.tiktok.download(request)
 
-    if (!response.success || !response.data) {
-      const errorMessage =
-        response.error?.message || "Failed to download TikTok video"
-      console.error("TikTok download failed:", errorMessage)
-      throw new DownloadError(errorMessage, response.error)
-    }
+    const data = unwrap(response, "Failed to download TikTok video", {
+      log: "TikTok download failed:"
+    })
 
     return {
-      downloadId: response.data.download_id
+      downloadId: data.download_id
     }
   }
 }
@@ -807,13 +839,9 @@ export const downloadApi = {
     const electronAPI = getElectronAPI()
     const response = await electronAPI.download.getStatus(downloadId)
 
-    if (!response.success || !response.data) {
-      throw new Error(
-        response.error?.message || "Failed to get download status"
-      )
-    }
-
-    return response.data
+    return unwrap(response, "Failed to get download status", {
+      makeError: plainError
+    })
   },
 
   /**
@@ -824,11 +852,12 @@ export const downloadApi = {
     const electronAPI = getElectronAPI()
     const response = await electronAPI.download.getAll()
 
-    if (!response.success) {
-      throw new Error(response.error?.message || "Failed to get downloads")
-    }
-
-    return response.data || []
+    return (
+      unwrap(response, "Failed to get downloads", {
+        makeError: plainError,
+        requireData: false
+      }) || []
+    )
   },
 
   /**
@@ -852,11 +881,9 @@ export const systemApi = {
     const electronAPI = getElectronAPI()
     const response = await electronAPI.system.getHealth()
 
-    if (!response.success || !response.data) {
-      throw new Error(response.error?.message || "Failed to get system health")
-    }
-
-    return response.data
+    return unwrap(response, "Failed to get system health", {
+      makeError: plainError
+    })
   },
 
   /**
@@ -901,6 +928,8 @@ export const systemApi = {
     const electronAPI = getElectronAPI()
     const response = await electronAPI.system.selectDownloadFolder()
 
+    // the one response here that is not unwrapped: cancelling the picker is a
+    // failed response and must read as "no folder chosen", never as a throw
     if (!response.success || !response.data) {
       return null
     }
@@ -919,11 +948,9 @@ export const settingsApi = {
     const electronAPI = getElectronAPI()
     const response = await electronAPI.settings.getDownloadPath()
 
-    if (!response.success || !response.data) {
-      throw new Error(response.error?.message || "Failed to get download path")
-    }
-
-    return response.data
+    return unwrap(response, "Failed to get download path", {
+      makeError: plainError
+    })
   },
 
   /**
@@ -935,11 +962,9 @@ export const settingsApi = {
     const electronAPI = getElectronAPI()
     const response = await electronAPI.settings.setDownloadPath(path)
 
-    if (!response.success || !response.data) {
-      throw new Error(response.error?.message || "Failed to set download path")
-    }
-
-    return response.data
+    return unwrap(response, "Failed to set download path", {
+      makeError: plainError
+    })
   }
 }
 
@@ -953,13 +978,9 @@ export const cookiesApi = {
     const electronAPI = getElectronAPI()
     const response = await electronAPI.cookies.getStatus()
 
-    if (!response.success || !response.data) {
-      throw new Error(
-        response.error?.message || "couldn't read the cookie status"
-      )
-    }
-
-    return response.data
+    return unwrap(response, "couldn't read the cookie status", {
+      makeError: plainError
+    })
   },
 
   /**
@@ -971,26 +992,23 @@ export const cookiesApi = {
     const electronAPI = getElectronAPI()
     const response = await electronAPI.cookies.importFile()
 
-    if (!response.success) {
-      if (response.error?.message === "No file selected") return null
-      throw new CookieError(
-        response.error?.message || "couldn't import those cookies",
-        response.error?.code
-      )
+    if (!response.success && response.error?.message === "No file selected") {
+      return null
     }
 
-    return response.data ?? null
+    return (
+      unwrap(response, "couldn't import those cookies", {
+        makeError: cookieError,
+        requireData: false
+      }) ?? null
+    )
   },
 
   async test(): Promise<CookieTestResult> {
     const electronAPI = getElectronAPI()
     const response = await electronAPI.cookies.test()
 
-    if (!response.success || !response.data) {
-      throw new Error(response.error?.message || "Failed to test cookies")
-    }
-
-    return response.data
+    return unwrap(response, "Failed to test cookies", { makeError: plainError })
   },
 
   /**
@@ -1001,9 +1019,10 @@ export const cookiesApi = {
     const electronAPI = getElectronAPI()
     const response = await electronAPI.cookies.clear()
 
-    if (!response.success) {
-      throw new Error(response.error?.message || "couldn't remove the cookies")
-    }
+    unwrap(response, "couldn't remove the cookies", {
+      makeError: plainError,
+      requireData: false
+    })
 
     return true
   }
@@ -1109,11 +1128,12 @@ export const updaterApi = {
     const electronAPI = getElectronAPI()
     const response = await electronAPI.updater.checkForUpdates()
 
-    if (!response.success) {
-      console.error("Update check failed:", response.error?.message)
-      throw new Error(response.error?.message || "Failed to check for updates")
-    }
-    return response.data?.checking === true
+    const data = unwrap(response, "Failed to check for updates", {
+      makeError: plainError,
+      log: "Update check failed:",
+      requireData: false
+    })
+    return data?.checking === true
   },
 
   /**
@@ -1124,11 +1144,12 @@ export const updaterApi = {
     const electronAPI = getElectronAPI()
     const response = await electronAPI.updater.downloadUpdate()
 
-    if (!response.success) {
-      console.error("Update download failed:", response.error?.message)
-      throw new Error(response.error?.message || "Failed to download update")
-    }
-    return response.data?.downloading === true
+    const data = unwrap(response, "Failed to download update", {
+      makeError: plainError,
+      log: "Update download failed:",
+      requireData: false
+    })
+    return data?.downloading === true
   },
 
   /**
@@ -1139,11 +1160,12 @@ export const updaterApi = {
     const electronAPI = getElectronAPI()
     const response = await electronAPI.updater.installUpdate()
 
-    if (!response.success) {
-      console.error("Update install failed:", response.error?.message)
-      throw new Error(response.error?.message || "Failed to install update")
-    }
-    return response.data?.installing === true
+    const data = unwrap(response, "Failed to install update", {
+      makeError: plainError,
+      log: "Update install failed:",
+      requireData: false
+    })
+    return data?.installing === true
   },
 
   /**
@@ -1154,13 +1176,12 @@ export const updaterApi = {
     const electronAPI = getElectronAPI()
     const response = await electronAPI.updater.forceSecurityCheck()
 
-    if (!response.success) {
-      console.error("Force security check failed:", response.error?.message)
-      throw new Error(
-        response.error?.message || "Failed to check for security updates"
-      )
-    }
-    return response.data?.checking === true
+    const data = unwrap(response, "Failed to check for security updates", {
+      makeError: plainError,
+      log: "Force security check failed:",
+      requireData: false
+    })
+    return data?.checking === true
   },
 
   /**
