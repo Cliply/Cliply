@@ -18,8 +18,8 @@ import {
   summarizePlaylistItems,
   type PlaylistDownloadOptions
 } from "@/lib/playlistRequest"
-import { usePlaylistStore } from "@/lib/playlistStore"
-import { reportActions } from "@/lib/reportStore"
+import { usePlaylistStore } from "@/lib/stores/playlistStore"
+import { reportActions } from "@/lib/stores/reportStore"
 import { showDownloadErrorToast } from "@/lib/toast-utils"
 import { useMutation } from "@tanstack/react-query"
 import { useEffect, useRef, useState } from "react"

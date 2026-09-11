@@ -11,7 +11,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
 
 import { en } from "@/lib/i18n/en"
 import { DEMO_PLAYLIST_URL } from "@/lib/playlistView"
-import { useAppStore, type Platform } from "@/lib/store"
+import { useAppStore, type Platform } from "@/lib/stores/store"
 import { URLInput } from "./URLInput"
 
 const mocks = vi.hoisted(() => ({

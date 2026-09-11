@@ -4,7 +4,7 @@ import { cleanup, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
 
 import { buildIssueBody, environmentFields } from "@/lib/report"
-import { useReportStore } from "@/lib/reportStore"
+import { useReportStore } from "@/lib/stores/reportStore"
 
 const DIAGNOSTICS = {
   appVersion: "0.3.3",

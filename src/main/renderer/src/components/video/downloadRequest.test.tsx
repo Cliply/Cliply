@@ -14,7 +14,7 @@ import {
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
 
 import type { QualityTier } from "@/lib/api"
-import { useYouTubeStore } from "@/lib/youtubeStore"
+import { useYouTubeStore } from "@/lib/stores/youtubeStore"
 
 const mocks = vi.hoisted(() => ({
   downloadVideo: vi.fn(),

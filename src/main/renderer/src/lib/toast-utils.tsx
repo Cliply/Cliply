@@ -1,8 +1,8 @@
 import { toast } from "sonner"
-import { cookieActions } from "@/lib/cookieStore"
+import { cookieActions } from "@/lib/stores/cookieStore"
 import { t } from "@/lib/i18n"
-import { reportActions } from "@/lib/reportStore"
-import type { Platform } from "@/lib/store"
+import { reportActions } from "@/lib/stores/reportStore"
+import type { Platform } from "@/lib/stores/store"
 
 export const showServerOverwhelmedToast = () => {
   toast(

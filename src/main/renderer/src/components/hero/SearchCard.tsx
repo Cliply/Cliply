@@ -1,7 +1,7 @@
 import { motion } from "framer-motion"
 
 import { useMediaSearch } from "@/lib/hooks/useMediaSearch"
-import type { Platform } from "@/lib/store"
+import type { Platform } from "@/lib/stores/store"
 import { URLInput } from "./URLInput"
 
 interface SearchCardProps {

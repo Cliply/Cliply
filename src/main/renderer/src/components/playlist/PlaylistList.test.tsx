@@ -17,7 +17,7 @@ import { afterEach, beforeEach, describe, expect, test } from "vitest"
 import type { PlaylistEntry, PlaylistInfoResponse } from "@/lib/api"
 import { useLocale } from "@/lib/i18n"
 import { en } from "@/lib/i18n/en"
-import { usePlaylistStore } from "@/lib/playlistStore"
+import { usePlaylistStore } from "@/lib/stores/playlistStore"
 import { PlaylistList } from "./PlaylistList"
 
 const entry = (

@@ -16,7 +16,7 @@ import {
 } from "@/lib/api"
 import { isTerminalReason, terminalReason } from "@/lib/downloadOutcome"
 import { localizeError, t, type Key } from "@/lib/i18n"
-import { reportActions } from "@/lib/reportStore"
+import { reportActions } from "@/lib/stores/reportStore"
 import { showDownloadErrorToast } from "@/lib/toast-utils"
 import { useMutation } from "@tanstack/react-query"
 import { useEffect, useRef, useState } from "react"

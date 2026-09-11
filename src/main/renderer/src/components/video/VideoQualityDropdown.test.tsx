@@ -7,7 +7,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, test } from "vitest"
 
 import type { QualityTier } from "@/lib/api"
-import { useYouTubeStore } from "@/lib/youtubeStore"
+import { useYouTubeStore } from "@/lib/stores/youtubeStore"
 import { VideoQualityDropdown } from "./VideoQualityDropdown"
 
 const tier = (

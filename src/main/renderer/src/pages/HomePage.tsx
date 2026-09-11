@@ -7,11 +7,11 @@ import { TikTokLayout } from "@/components/tiktok"
 import { AnimatePresence } from "framer-motion"
 import { HeroSection } from "../components/hero/HeroSection"
 import { VideoLayout } from "../components/video/VideoLayout"
-import { usePinterestStore } from "../lib/pinterestStore"
-import { usePlaylistStore } from "../lib/playlistStore"
-import { useAppStore } from "../lib/store"
-import { useTikTokStore } from "../lib/tiktokStore"
-import { useYouTubeStore } from "../lib/youtubeStore"
+import { usePinterestStore } from "../lib/stores/pinterestStore"
+import { usePlaylistStore } from "../lib/stores/playlistStore"
+import { useAppStore } from "../lib/stores/store"
+import { useTikTokStore } from "../lib/stores/tiktokStore"
+import { useYouTubeStore } from "../lib/stores/youtubeStore"
 
 export function HomePage() {
   const { selectedPlatform, showMediaDetails } = useAppStore()

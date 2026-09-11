@@ -8,7 +8,7 @@ import { useDownloadPath } from "@/lib/hooks/useDownloadPath"
 import { useT, type Key } from "@/lib/i18n"
 import { PLATFORM_LIST, PLATFORM_REGISTRY } from "@/lib/platform-config"
 import { DEMO_PLAYLIST_URL } from "@/lib/playlistView"
-import { useAppStore, type Platform } from "@/lib/store"
+import { useAppStore, type Platform } from "@/lib/stores/store"
 import { cn } from "@/lib/utils"
 
 const MONO =

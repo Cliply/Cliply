@@ -1,5 +1,5 @@
 import type { AudioMode, PlaylistEntry, PlaylistInfoResponse } from "@/lib/api"
-import { useMixedLinkStore } from "@/lib/mixedLinkStore"
+import { useMixedLinkStore } from "@/lib/stores/mixedLinkStore"
 
 import { create } from "zustand"
 

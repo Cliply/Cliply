@@ -7,7 +7,7 @@ import type {
   PlaylistInfoResponse
 } from "@/lib/api"
 import { localizeError, t } from "@/lib/i18n"
-import { isSelectableEntry, type PlaylistTab } from "@/lib/playlistStore"
+import { isSelectableEntry, type PlaylistTab } from "@/lib/stores/playlistStore"
 import { ensureHttpScheme } from "@/lib/validation"
 
 export interface PlaylistDownloadOptions {

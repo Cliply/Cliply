@@ -1,8 +1,8 @@
 import { SIMPLE_QUALITY, track } from "@/lib/analytics"
 import { DownloadError, systemApi } from "@/lib/api"
 import { localizeError, useT } from "@/lib/i18n"
-import { reportActions } from "@/lib/reportStore"
-import type { Platform } from "@/lib/store"
+import { reportActions } from "@/lib/stores/reportStore"
+import type { Platform } from "@/lib/stores/store"
 import {
   showDownloadErrorToast,
   showServerOverwhelmedToast

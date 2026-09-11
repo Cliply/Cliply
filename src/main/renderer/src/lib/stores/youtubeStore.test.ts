@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, test } from "vitest"
 
 import type { QualityTier, VideoInfoResponse } from "@/lib/api"
-import { useYouTubeStore } from "@/lib/youtubeStore"
+import { useYouTubeStore } from "@/lib/stores/youtubeStore"
 
 const tier = (height: number, filesize: number): QualityTier => ({
   height,

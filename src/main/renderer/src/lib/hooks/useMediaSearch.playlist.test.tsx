@@ -46,10 +46,10 @@ vi.mock("sonner", () => ({
 
 import { useMediaSearch } from "./useMediaSearch"
 import { DownloadError } from "@/lib/api"
-import { useMixedLinkStore } from "@/lib/mixedLinkStore"
-import { usePlaylistStore } from "@/lib/playlistStore"
-import { useAppStore } from "@/lib/store"
-import { useYouTubeStore } from "@/lib/youtubeStore"
+import { useMixedLinkStore } from "@/lib/stores/mixedLinkStore"
+import { usePlaylistStore } from "@/lib/stores/playlistStore"
+import { useAppStore } from "@/lib/stores/store"
+import { useYouTubeStore } from "@/lib/stores/youtubeStore"
 
 const videoInfo: VideoInfoResponse = {
   title: "a video",

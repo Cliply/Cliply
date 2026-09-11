@@ -1,6 +1,9 @@
 import type { PlaylistEntry } from "@/lib/api"
 import { useT } from "@/lib/i18n"
-import { isSelectableEntry, type PlaylistItemStatus } from "@/lib/playlistStore"
+import {
+  isSelectableEntry,
+  type PlaylistItemStatus
+} from "@/lib/stores/playlistStore"
 import {
   rowBadge,
   type PlaylistPhase,

@@ -7,7 +7,7 @@ import {
   systemApi,
   type CookieStatus
 } from "@/lib/api"
-import { useCookieStore } from "@/lib/cookieStore"
+import { useCookieStore } from "@/lib/stores/cookieStore"
 import { localizeCode, t, useLocale } from "@/lib/i18n"
 import {
   Dialog,

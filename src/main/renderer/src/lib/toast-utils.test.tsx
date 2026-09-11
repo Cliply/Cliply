@@ -13,10 +13,10 @@ vi.mock("sonner", () => ({
 
 const openCookies = vi.fn()
 const openReport = vi.fn()
-vi.mock("@/lib/cookieStore", () => ({
+vi.mock("@/lib/stores/cookieStore", () => ({
   cookieActions: { open: () => openCookies() }
 }))
-vi.mock("@/lib/reportStore", () => ({
+vi.mock("@/lib/stores/reportStore", () => ({
   reportActions: { open: () => openReport() }
 }))
 

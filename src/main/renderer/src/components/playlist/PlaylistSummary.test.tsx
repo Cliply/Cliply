@@ -12,7 +12,7 @@ import type { PlaylistEntry, PlaylistInfoResponse } from "@/lib/api"
 import type { PlaylistDownloadState } from "@/lib/hooks/usePlaylistDownload"
 import { useLocale } from "@/lib/i18n"
 import { en } from "@/lib/i18n/en"
-import { usePlaylistStore } from "@/lib/playlistStore"
+import { usePlaylistStore } from "@/lib/stores/playlistStore"
 import { PlaylistSummary } from "./PlaylistSummary"
 
 const entry = (index: number, title: string): PlaylistEntry => ({

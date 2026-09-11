@@ -14,8 +14,8 @@ import type {
   PlaylistDownloadState,
   usePlaylistDownload
 } from "@/lib/hooks/usePlaylistDownload"
-import { usePlaylistStore } from "@/lib/playlistStore"
-import { useYouTubeStore } from "@/lib/youtubeStore"
+import { usePlaylistStore } from "@/lib/stores/playlistStore"
+import { useYouTubeStore } from "@/lib/stores/youtubeStore"
 import { PlaylistDownloadCard } from "./PlaylistDownloadCard"
 
 const entry = (

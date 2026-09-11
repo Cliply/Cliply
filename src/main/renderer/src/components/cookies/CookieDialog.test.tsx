@@ -10,7 +10,7 @@
 import { cleanup, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
 
-import { useCookieStore } from "@/lib/cookieStore"
+import { useCookieStore } from "@/lib/stores/cookieStore"
 import { useLocale } from "@/lib/i18n"
 
 const getStatus = vi.fn()

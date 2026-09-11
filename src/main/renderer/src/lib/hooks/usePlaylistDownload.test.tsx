@@ -66,7 +66,9 @@ vi.mock("@/lib/api", () => {
   }
 })
 
-vi.mock("@/lib/reportStore", () => ({ reportActions: { stage: mocks.stage } }))
+vi.mock("@/lib/stores/reportStore", () => ({
+  reportActions: { stage: mocks.stage }
+}))
 vi.mock("@/lib/toast-utils", () => ({
   showDownloadErrorToast: mocks.showDownloadErrorToast
 }))
@@ -78,7 +80,7 @@ vi.mock("sonner", () => ({
   }
 }))
 
-import { usePlaylistStore } from "@/lib/playlistStore"
+import { usePlaylistStore } from "@/lib/stores/playlistStore"
 import {
   summarizePlaylistItems,
   usePlaylistDownload

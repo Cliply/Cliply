@@ -15,12 +15,12 @@ import {
 } from "@/lib/api"
 import { en } from "@/lib/i18n/en"
 import { localizeError, t } from "@/lib/i18n"
-import { mixedLinkKey, useMixedLinkStore } from "@/lib/mixedLinkStore"
+import { mixedLinkKey, useMixedLinkStore } from "@/lib/stores/mixedLinkStore"
 import { PLATFORM_REGISTRY, type PlatformConfig } from "@/lib/platform-config"
-import { usePinterestStore } from "@/lib/pinterestStore"
-import { usePlaylistStore } from "@/lib/playlistStore"
-import { useAppStore, type Platform } from "@/lib/store"
-import { useTikTokStore } from "@/lib/tiktokStore"
+import { usePinterestStore } from "@/lib/stores/pinterestStore"
+import { usePlaylistStore } from "@/lib/stores/playlistStore"
+import { useAppStore, type Platform } from "@/lib/stores/store"
+import { useTikTokStore } from "@/lib/stores/tiktokStore"
 import {
   showBotDetectionToast,
   showServerOverwhelmedToast
@@ -30,7 +30,7 @@ import {
   ensureHttpScheme,
   type YouTubeTarget
 } from "@/lib/validation"
-import { useYouTubeStore } from "@/lib/youtubeStore"
+import { useYouTubeStore } from "@/lib/stores/youtubeStore"
 
 interface MediaSearchOptions {
   onSearch?: (url: string) => void

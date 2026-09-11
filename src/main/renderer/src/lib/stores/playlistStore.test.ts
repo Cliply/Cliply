@@ -15,7 +15,7 @@ import {
   PLAYLIST_DEFAULT_CEILING,
   isSelectableEntry,
   usePlaylistStore
-} from "@/lib/playlistStore"
+} from "@/lib/stores/playlistStore"
 
 const entry = (
   index: number,

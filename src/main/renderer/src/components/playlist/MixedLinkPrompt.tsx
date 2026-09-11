@@ -8,7 +8,7 @@ import {
   DialogTitle
 } from "@/components/ui/dialog"
 import { useT } from "@/lib/i18n"
-import { useMixedLinkStore } from "@/lib/mixedLinkStore"
+import { useMixedLinkStore } from "@/lib/stores/mixedLinkStore"
 import { countLine, mixedLinkPlaylistChoice } from "@/lib/playlistView"
 import { cn } from "@/lib/utils"
 

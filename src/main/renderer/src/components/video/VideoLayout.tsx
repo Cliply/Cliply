@@ -7,7 +7,7 @@ import {
 } from "@/components/video"
 import { useDownloadPath } from "@/lib/hooks/useDownloadPath"
 import { useT } from "@/lib/i18n"
-import { useYouTubeStore } from "@/lib/youtubeStore"
+import { useYouTubeStore } from "@/lib/stores/youtubeStore"
 import { motion } from "framer-motion"
 import { CompactSearch } from "./CompactSearch"
 

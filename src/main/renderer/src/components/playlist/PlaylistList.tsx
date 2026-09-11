@@ -1,5 +1,5 @@
 import { useT } from "@/lib/i18n"
-import { isSelectableEntry, usePlaylistStore } from "@/lib/playlistStore"
+import { isSelectableEntry, usePlaylistStore } from "@/lib/stores/playlistStore"
 import { summarizeBadges, type PlaylistPhase } from "@/lib/playlistView"
 import { cn } from "@/lib/utils"
 import { PlaylistRow } from "./PlaylistRow"

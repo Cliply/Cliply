@@ -14,7 +14,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
 import type { PlaylistInfoResponse } from "@/lib/api"
 import { useLocale } from "@/lib/i18n"
 import { en } from "@/lib/i18n/en"
-import { useMixedLinkStore } from "@/lib/mixedLinkStore"
+import { useMixedLinkStore } from "@/lib/stores/mixedLinkStore"
 import { MixedLinkPrompt } from "./MixedLinkPrompt"
 
 const listing = (

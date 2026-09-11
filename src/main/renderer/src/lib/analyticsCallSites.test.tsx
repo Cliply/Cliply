@@ -19,7 +19,7 @@ import { beforeEach, describe, expect, test, vi } from "vitest"
 import payloads from "./analytics-payloads.fixture.json"
 import type { AudioDownloadRequest, VideoDownloadRequest } from "@/lib/api"
 import { en } from "@/lib/i18n/en"
-import type { Platform } from "@/lib/store"
+import type { Platform } from "@/lib/stores/store"
 
 type Bag = { event: string; properties: Record<string, unknown> }
 type ProgressListener = (payload: Record<string, unknown>) => void
@@ -93,7 +93,9 @@ vi.mock("@/lib/api", () => {
   }
 })
 
-vi.mock("@/lib/reportStore", () => ({ reportActions: { stage: vi.fn() } }))
+vi.mock("@/lib/stores/reportStore", () => ({
+  reportActions: { stage: vi.fn() }
+}))
 vi.mock("@/lib/toast-utils", () => ({
   showDownloadErrorToast: vi.fn(),
   showServerOverwhelmedToast: vi.fn(),
@@ -110,10 +112,10 @@ import { useAudioDownload } from "@/lib/hooks/useAudioDownload"
 import { useMediaSearch } from "@/lib/hooks/useMediaSearch"
 import { usePlaylistDownload } from "@/lib/hooks/usePlaylistDownload"
 import { useVideoDownload } from "@/lib/hooks/useVideoDownload"
-import { useMixedLinkStore } from "@/lib/mixedLinkStore"
-import { usePinterestStore } from "@/lib/pinterestStore"
-import { usePlaylistStore } from "@/lib/playlistStore"
-import { useTikTokStore } from "@/lib/tiktokStore"
+import { useMixedLinkStore } from "@/lib/stores/mixedLinkStore"
+import { usePinterestStore } from "@/lib/stores/pinterestStore"
+import { usePlaylistStore } from "@/lib/stores/playlistStore"
+import { useTikTokStore } from "@/lib/stores/tiktokStore"
 
 let recorded: Bag[]
 

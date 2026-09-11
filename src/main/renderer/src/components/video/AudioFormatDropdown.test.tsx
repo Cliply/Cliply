@@ -3,7 +3,7 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, test } from "vitest"
 
-import { useYouTubeStore } from "@/lib/youtubeStore"
+import { useYouTubeStore } from "@/lib/stores/youtubeStore"
 import { AudioFormatDropdown } from "./AudioFormatDropdown"
 
 const openMenu = () => fireEvent.click(screen.getAllByRole("button")[0])

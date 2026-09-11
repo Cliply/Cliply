@@ -63,7 +63,9 @@ vi.mock("@/lib/api", () => {
   }
 })
 
-vi.mock("@/lib/reportStore", () => ({ reportActions: { stage: vi.fn() } }))
+vi.mock("@/lib/stores/reportStore", () => ({
+  reportActions: { stage: vi.fn() }
+}))
 vi.mock("@/lib/toast-utils", () => ({ showDownloadErrorToast: vi.fn() }))
 vi.mock("sonner", () => ({
   toast: { success: vi.fn(), info: vi.fn(), error: vi.fn() }
@@ -74,7 +76,7 @@ vi.mock("@/components/video/CompactSearch", () => ({
   CompactSearch: () => null
 }))
 
-import { usePlaylistStore } from "@/lib/playlistStore"
+import { usePlaylistStore } from "@/lib/stores/playlistStore"
 import { PlaylistLayout } from "./PlaylistLayout"
 
 const entry = (

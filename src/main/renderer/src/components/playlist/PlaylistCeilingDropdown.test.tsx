@@ -10,7 +10,7 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, test } from "vitest"
 
-import { usePlaylistStore } from "@/lib/playlistStore"
+import { usePlaylistStore } from "@/lib/stores/playlistStore"
 import { PlaylistCeilingDropdown } from "./PlaylistCeilingDropdown"
 
 const openMenu = () => fireEvent.click(screen.getAllByRole("button")[0])

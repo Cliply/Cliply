@@ -59,7 +59,9 @@ vi.mock("@/lib/api", () => {
   }
 })
 
-vi.mock("@/lib/reportStore", () => ({ reportActions: { stage: mocks.stage } }))
+vi.mock("@/lib/stores/reportStore", () => ({
+  reportActions: { stage: mocks.stage }
+}))
 vi.mock("@/lib/toast-utils", () => ({
   showDownloadErrorToast: mocks.showDownloadErrorToast
 }))

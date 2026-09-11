@@ -10,7 +10,7 @@ import {
   type ReportEnvironment,
   type ReportInput
 } from "@/lib/report"
-import { useReportStore } from "@/lib/reportStore"
+import { useReportStore } from "@/lib/stores/reportStore"
 import {
   Dialog,
   DialogContent,

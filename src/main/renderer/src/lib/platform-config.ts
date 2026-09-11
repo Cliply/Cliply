@@ -3,16 +3,16 @@ import type { Resolver } from "react-hook-form"
 
 import { pinterestApi, tiktokApi, videoApi } from "@/lib/api"
 import type { Key } from "@/lib/i18n"
-import { usePinterestStore } from "@/lib/pinterestStore"
-import { usePlaylistStore } from "@/lib/playlistStore"
-import type { Platform } from "@/lib/store"
-import { useTikTokStore } from "@/lib/tiktokStore"
+import { usePinterestStore } from "@/lib/stores/pinterestStore"
+import { usePlaylistStore } from "@/lib/stores/playlistStore"
+import type { Platform } from "@/lib/stores/store"
+import { useTikTokStore } from "@/lib/stores/tiktokStore"
 import {
   pinterestUrlSchema,
   tiktokUrlSchema,
   youtubeUrlSchema
 } from "@/lib/validation"
-import { useYouTubeStore } from "@/lib/youtubeStore"
+import { useYouTubeStore } from "@/lib/stores/youtubeStore"
 
 interface PlatformStoreAccessor {
   getUrl: () => string
