@@ -81,14 +81,14 @@ const SCREENS = [
   {
     name: "pinterest",
     render: () => {
-      usePinterestStore.getState().setPinInfo(media)
+      usePinterestStore.getState().setInfo(media)
       render(<PinterestLayout />)
     }
   },
   {
     name: "tiktok",
     render: () => {
-      useTikTokStore.getState().setVideoInfo(media)
+      useTikTokStore.getState().setInfo(media)
       render(<TikTokLayout />)
     }
   }

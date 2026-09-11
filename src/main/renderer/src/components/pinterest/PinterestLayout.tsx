@@ -10,14 +10,14 @@ import { PinterestDetailsCard } from "./PinterestDetailsCard"
 import { PinterestThumbnail } from "./PinterestThumbnail"
 
 export function PinterestLayout() {
-  const { pinInfo, url } = usePinterestStore()
+  const { info, url } = usePinterestStore()
   const { setShowMediaDetails } = useAppStore()
   const t = useT()
   // the folder the user actually chose, rather than the default this
   // line named whether or not it was still true
   const { downloadPath } = useDownloadPath()
 
-  if (!pinInfo) return null
+  if (!info) return null
 
   const handleReset = () => {
     const { reset } = usePinterestStore.getState()
@@ -117,14 +117,14 @@ export function PinterestLayout() {
             )}
 
             <div className="flex-shrink-0">
-              <PinterestDetailsCard pinInfo={pinInfo} />
+              <PinterestDetailsCard pinInfo={info} />
             </div>
 
             <div className="flex-1 min-h-[250px] sm:min-h-[300px] lg:min-h-[350px]">
               <PinterestThumbnail
-                thumbnailUrl={pinInfo.thumbnail}
+                thumbnailUrl={info.thumbnail}
                 pinUrl={url}
-                title={pinInfo.title}
+                title={info.title}
               />
             </div>
           </motion.div>
@@ -135,7 +135,7 @@ export function PinterestLayout() {
           <div className="flex-1 xl:overflow-y-auto">
             <div className="p-4 lg:p-6 space-y-4 lg:space-y-6">
               <FeedbackCard />
-              <UnifiedDownloadCard platform="pinterest" pinInfo={pinInfo} />
+              <UnifiedDownloadCard platform="pinterest" pinInfo={info} />
             </div>
           </div>
         </div>

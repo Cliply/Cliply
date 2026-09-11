@@ -17,8 +17,8 @@ export function HomePage() {
   const { selectedPlatform, showMediaDetails } = useAppStore()
   const { videoInfo } = useYouTubeStore()
   const { playlistInfo } = usePlaylistStore()
-  const { pinInfo } = usePinterestStore()
-  const { videoInfo: tikTokInfo } = useTikTokStore()
+  const { info: pinInfo } = usePinterestStore()
+  const { info: tikTokInfo } = useTikTokStore()
 
   // the youtube box holds one of two things. loading either clears the other,
   // so a listing in the store means the playlist is what was pasted last

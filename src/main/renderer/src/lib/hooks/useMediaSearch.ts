@@ -62,9 +62,9 @@ export function useMediaSearch(
   const ytUrl = useYouTubeStore((s) => s.url)
   const ytIsLoading = useYouTubeStore((s) => s.isLoadingVideoInfo)
   const ptUrl = usePinterestStore((s) => s.url)
-  const ptIsLoading = usePinterestStore((s) => s.isLoadingPinInfo)
+  const ptIsLoading = usePinterestStore((s) => s.isLoadingInfo)
   const ttUrl = useTikTokStore((s) => s.url)
-  const ttIsLoading = useTikTokStore((s) => s.isLoadingVideoInfo)
+  const ttIsLoading = useTikTokStore((s) => s.isLoadingInfo)
   // a playlist is the second thing the youtube box can hold, and listing one is
   // a request like any other - the box has to say it is working
   const plIsLoading = usePlaylistStore((s) => s.isLoadingPlaylistInfo)
