@@ -32,7 +32,9 @@ export function terminalReason(
 }
 
 /** Has this error already been surfaced by the hook's event path? */
-export function isTerminalReason(error: unknown): error is TerminalDownloadReason {
+export function isTerminalReason(
+  error: unknown
+): error is TerminalDownloadReason {
   return (
     error instanceof TerminalDownloadReason ||
     Boolean(error && (error as { alreadyReported?: boolean }).alreadyReported)

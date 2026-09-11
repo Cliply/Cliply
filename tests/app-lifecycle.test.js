@@ -67,14 +67,14 @@ jest.mock("../src/main/services/cookie-manager", () =>
   jest.fn(() => ({ initialize: jest.fn().mockResolvedValue(undefined) }))
 )
 
+// the engine class is all this mock owes anyone. it used to re-export the real
+// redactLogLine as well, because analytics scrubbed its one free-text property
+// through the engine barrel and a requireActual on analytics still resolved
+// *its* dependencies through this mock - so a missing re-export killed every
+// event carrying an error_message inside capture()'s catch. redaction now lives
+// in utils/log-redaction, which analytics requires directly and no mock here
+// intercepts, so there is nothing left to forward
 jest.mock("../src/main/services/ytdlp-engine", () => ({
-  // the real redaction, not a stand-in: analytics scrubs its one free-text
-  // property through this module, and a requireActual on analytics still
-  // resolves *its* dependencies through this mock. left out, every event
-  // carrying an error_message dies in capture()'s catch instead of being
-  // validated - which reads as a passing replay that sent nothing at all
-  redactLogLine: jest.requireActual("../src/main/services/ytdlp-engine")
-    .redactLogLine,
   YtdlpEngine: jest.fn(() => mockEngine)
 }))
 

@@ -15,9 +15,12 @@ import {
   PLAYLIST_DEFAULT_CEILING,
   isSelectableEntry,
   usePlaylistStore
-} from "@/lib/playlistStore"
+} from "@/lib/stores/playlistStore"
 
-const entry = (index: number, overrides: Partial<PlaylistEntry> = {}): PlaylistEntry => ({
+const entry = (
+  index: number,
+  overrides: Partial<PlaylistEntry> = {}
+): PlaylistEntry => ({
   index,
   id: `video${index}`,
   title: `video ${index}`,
@@ -51,7 +54,8 @@ const listing = (
   ...overrides
 })
 
-const selected = () => [...usePlaylistStore.getState().selectedIndices].sort((a, b) => a - b)
+const selected = () =>
+  [...usePlaylistStore.getState().selectedIndices].sort((a, b) => a - b)
 
 const PLAYLIST_URL = "https://www.youtube.com/playlist?list=PL123"
 
@@ -59,7 +63,10 @@ const load = (
   entries: PlaylistEntry[],
   url = PLAYLIST_URL,
   overrides: Partial<PlaylistInfoResponse> = {}
-) => usePlaylistStore.getState().setLoadedPlaylist(url, listing(entries, overrides))
+) =>
+  usePlaylistStore
+    .getState()
+    .setLoadedPlaylist(url, listing(entries, overrides))
 
 beforeEach(() => usePlaylistStore.getState().reset())
 
@@ -103,7 +110,9 @@ describe("setLoadedPlaylist", () => {
 
   test("a new playlist drops the previous run's per-row badges", () => {
     load([entry(1), entry(2)])
-    usePlaylistStore.getState().setItemStatus(1, { state: "saved", progress: 100 })
+    usePlaylistStore
+      .getState()
+      .setItemStatus(1, { state: "saved", progress: 100 })
 
     load([entry(1), entry(2)], PLAYLIST_URL, { playlist_id: "PL456" })
 
@@ -185,7 +194,10 @@ describe("re-loading the playlist already on screen", () => {
 
     // main takes the link and the id as two separate fields and cross-checks
     // neither, so both halves have to match for this to be the same view
-    load([entry(1), entry(2)], "https://www.youtube.com/playlist?list=PL123&x=1")
+    load(
+      [entry(1), entry(2)],
+      "https://www.youtube.com/playlist?list=PL123&x=1"
+    )
 
     expect(selected()).toEqual([1, 2])
   })

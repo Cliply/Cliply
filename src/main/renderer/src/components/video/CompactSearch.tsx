@@ -1,7 +1,7 @@
 import { Button } from "@/components/ui/button"
 import { useMediaSearch } from "@/lib/hooks/useMediaSearch"
 import { useT, type Key } from "@/lib/i18n"
-import type { Platform } from "@/lib/store"
+import type { Platform } from "@/lib/stores/store"
 import { cn } from "@/lib/utils"
 import { motion } from "framer-motion"
 import { Loader2, Search, Send, X } from "lucide-react"

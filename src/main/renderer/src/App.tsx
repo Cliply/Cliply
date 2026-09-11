@@ -1,5 +1,5 @@
 import { HashRouter, Route, Routes } from "react-router-dom"
-import { ThemeProvider } from "./components/theme-provider"
+import { ThemeProvider } from "./components/theme/theme-provider"
 import "./index.css"
 import { Providers } from "./lib/providers"
 import { DisclaimerPage } from "./pages/DisclaimerPage"

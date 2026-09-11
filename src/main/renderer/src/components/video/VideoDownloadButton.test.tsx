@@ -10,7 +10,7 @@ import { afterEach, describe, expect, test, vi } from "vitest"
 import type { QualityTier } from "@/lib/api"
 import { useLocale } from "@/lib/i18n"
 import { ru } from "@/lib/i18n/ru"
-import { useYouTubeStore } from "@/lib/youtubeStore"
+import { useYouTubeStore } from "@/lib/stores/youtubeStore"
 
 vi.mock("@/lib/hooks/useVideoDownload", () => ({
   useVideoDownload: () => ({

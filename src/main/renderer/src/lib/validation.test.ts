@@ -80,7 +80,9 @@ describe("pinterest links", () => {
 
   it("routes a country domain to pinterest and nothing else", () => {
     expect(detectPlatform("https://ru.pinterest.com/pin/123")).toBe("pinterest")
-    expect(detectPlatform("https://www.pinterest.co.uk/pin/123")).toBe("pinterest")
+    expect(detectPlatform("https://www.pinterest.co.uk/pin/123")).toBe(
+      "pinterest"
+    )
   })
 })
 

@@ -5,7 +5,7 @@ import {
   validateTimeRange
 } from "@/lib/api"
 import { useT, type Key } from "@/lib/i18n"
-import { useYouTubeStore } from "@/lib/youtubeStore"
+import { useYouTubeStore } from "@/lib/stores/youtubeStore"
 import { cn } from "@/lib/utils"
 import { motion } from "framer-motion"
 import { Clock } from "lucide-react"

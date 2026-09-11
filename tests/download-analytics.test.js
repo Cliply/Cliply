@@ -352,9 +352,9 @@ describe("download_completed", () => {
 
   it("carries the audio mode the start event named", async () => {
     // the renderer sends download_started's audio_format straight off
-    // request.audio_mode (lib/hooks/useAudioDownload.ts:169), and main receives
-    // that same string as the download's format id (ipc-handlers.js:782). so
-    // this is the value, not one that merely looks like it
+    // request.audio_mode (useAudioDownload in lib/hooks), and main receives
+    // that same string as the download's format id (handleDownloadAudio in
+    // ipc-handlers.js). so this is the value, not one that merely looks like it
     const { handlers, captured } = createHandlers()
 
     for (const mode of ["mp3", "m4a", "original"]) {
@@ -957,9 +957,10 @@ describe("a playlist's terminal events", () => {
    * the one existing property a playlist could not honestly keep.
    *
    * `fileSize` is read off the file the result named, and for a playlist that is
-   * whichever video landed LAST (ytdlp-engine.js:2218). so file_size_mb would
-   * report one video out of eleven, and speed_bucket would divide that one
-   * file's bytes by the time all eleven took - a speed nothing experienced.
+   * whichever video landed LAST (the result YtdlpOperation assembles in
+   * ytdlp/operation.js). so file_size_mb would report one video out of eleven,
+   * and speed_bucket would divide that one file's bytes by the time all
+   * eleven took - a speed nothing experienced.
    * both are the properties the single-video funnel is measured by, so sending
    * them would not just be unreadable, it would move the existing averages.
    *

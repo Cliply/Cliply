@@ -1,8 +1,8 @@
 import { toast } from "sonner"
-import { cookieActions } from "@/lib/cookieStore"
+import { cookieActions } from "@/lib/stores/cookieStore"
 import { t } from "@/lib/i18n"
-import { reportActions } from "@/lib/reportStore"
-import type { Platform } from "@/lib/store"
+import { reportActions } from "@/lib/stores/reportStore"
+import type { Platform } from "@/lib/stores/store"
 
 export const showServerOverwhelmedToast = () => {
   toast(
@@ -11,18 +11,6 @@ export const showServerOverwhelmedToast = () => {
       <span>{t("toast.overwhelmed")}</span>
     </div>
   )
-}
-
-export const showDownloadSuccessToast = (type: "audio" | "video") => {
-  const audio = type === "audio"
-
-  toast.success(t(audio ? "toast.audioDone" : "toast.videoDone"), {
-    description: t(audio ? "toast.audioDoneDesc" : "toast.videoDoneDesc"),
-    action: {
-      label: t("toast.openFolder"),
-      onClick: () => window.electronAPI?.system?.openDownloadFolder?.()
-    }
-  })
 }
 
 export const showFolderSelectedToast = () => {
@@ -59,7 +47,10 @@ export const showBotDetectionToast = (message: string, platform?: Platform) => {
       : t("toast.botGeneric"),
     duration: 12000,
     action: cookiesCanHelp(platform)
-      ? { label: t("toast.fixWithCookies"), onClick: () => cookieActions.open() }
+      ? {
+          label: t("toast.fixWithCookies"),
+          onClick: () => cookieActions.open()
+        }
       : { label: t("toast.report"), onClick: () => reportActions.open() }
   })
 }
@@ -92,7 +83,10 @@ export const showDownloadErrorToast = (
     description,
     duration: 12000,
     action: blocked
-      ? { label: t("toast.fixWithCookies"), onClick: () => cookieActions.open() }
+      ? {
+          label: t("toast.fixWithCookies"),
+          onClick: () => cookieActions.open()
+        }
       : { label: t("toast.report"), onClick: () => reportActions.open() }
   })
 }

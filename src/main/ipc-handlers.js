@@ -30,402 +30,37 @@ const {
 } = require("./utils/ytdlp-mappers")
 const { getSimplePlatformOptions } = require("./utils/ytdlp-formats")
 const { resolveDownloadId } = require("./utils/download-id")
-const { JAR_DOMAIN_FLAG } = require("./utils/cookie-jar")
 
 const { DownloadRunner } = require("./services/download-runner")
 const { SettingsStore } = require("./services/settings-store")
 const {
   ERROR_CODES,
-  PLAYLIST_MAX_ITEMS,
   PLAYLIST_CONTAINER,
   RECORDS_UNWRITABLE
 } = require("./services/ytdlp-engine")
 
-/**
- * urls the cookie test probes, tried in order
- *
- * a probe target can die upstream - yt-dlp's own long-standing test video
- * (BaW_jenozKc) is gone - and a dead target must never be read as "your
- * cookies failed". so an unavailable video moves on to the next url instead of
- * deciding anything, and only a real extraction result ends the probe.
- */
-const COOKIE_TEST_URLS = [
-  "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
-  // the oldest video on youtube - about as unlikely to vanish as they come
-  "https://www.youtube.com/watch?v=jNQXAC9IVRw",
-  "https://www.youtube.com/watch?v=9bZkp7q19f0"
-]
-
-/**
- * the downloads that earn a coffee ask, and the fact that there are only three
- *
- * front-loaded so the first one lands while the app is still new to somebody,
- * then spaced further apart each time, then done. The widening gap is the
- * point: a recurring ask is the thing that makes people resent an app they
- * otherwise like, and someone on their five hundredth download has answered
- * already.
- */
-const SUPPORT_MILESTONES = [5, 15, 40, 60, 100]
-
-// platforms served by the binary engine's single-video flows
-const SUPPORTED_DOWNLOAD_PLATFORMS = ["youtube", "pinterest", "tiktok"]
-
-/**
- * the only events the renderer may report.
- *
- * these are the ones it knows first-hand: what was pasted, what came back, what
- * was answered about it, and that a download was asked for. everything after
- * that is main's own - it watches the engine, and a renderer that could name
- * download_completed could report a download that never happened.
- *
- * the mixed-link answer belongs on this side of the line for the same reason:
- * the question is asked, answered and acted on entirely in the renderer, and
- * main never sees a link it was asked about unless the answer was "the
- * playlist".
- *
- * this is not the property allowlist. that lives in services/analytics.js and
- * runs on every bag regardless, which is what makes forwarding the renderer's
- * properties wholesale safe.
- */
-const RENDERER_EVENTS = new Set([
-  "url_submitted",
-  "media_info_loaded",
-  "media_info_failed",
-  "playlist_prompt_answered",
-  // a click on the helper line's playlist link, which happens in the hero and
-  // nowhere main can see
-  "playlist_hint_clicked",
-  "download_started",
-  // the outcome of the coffee prompt. which button someone pressed is a
-  // renderer-side fact by definition - main sends the prompt and hears nothing
-  // more - so it belongs to the same category as the six above
-  "support_prompt_clicked"
-])
-
-/**
- * treat an empty or zero-length selection as "no time range"
- *
- * the renderer only sends a range for a real segment now, but a stale client
- * (or the {start:0,end:0} the store starts with) must not turn a full download
- * into an ffmpeg section download, which costs granular progress and speed.
- *
- * @param {Object} range - {start, end} in seconds, or nothing
- * @returns {Object|undefined} the range, or undefined when it is not a segment
- */
-function normalizeTimeRange(range) {
-  if (!range) return undefined
-
-  const start = Number(range.start) || 0
-  const end = Number(range.end) || 0
-
-  if (end <= start) return undefined
-
-  return { start, end }
-}
-
-/**
- * playlists are a youtube feature, and this is where that is enforced
- *
- * an absent platform means youtube, which is the default every single-video
- * handler already applies to the same field. **this is not the check that
- * matters** - see isYouTubeUrl, which reads the link rather than the label.
- *
- * @param {*} platform - what the request named, if anything
- * @returns {boolean} whether a playlist request may proceed
- */
-function isPlaylistPlatform(platform) {
-  return (platform ? String(platform).toLowerCase() : "youtube") === "youtube"
-}
-
-/**
- * is this link actually youtube's?
- *
- * the `platform` field is optional and arrives from the renderer, which does
- * not send it for a playlist at all - so a handler that only checks the label
- * checks nothing. the engine will not save us either: `normalizeUrl` asks for
- * an http(s) link and no more, so a vimeo url with the right shape around it
- * reached yt-dlp. the host is the only evidence here, so the host is what is
- * read.
- *
- * the test is anchored at the **end** of the hostname, for the reason the
- * renderer's PINTEREST_URL_REGEX comment spells out: the interesting part of a
- * hostname is where it ends, not whether our word appears somewhere in it, and
- * `youtube.com.evil.com` is somebody else's domain. any subdomain is fine
- * (`m.`, `music.`, `www.`), and `youtu.be` is admitted exactly, never as a
- * suffix - `myyoutu.be` is not ours.
- *
- * a link with no scheme does not parse and is refused. that is not new: the
- * engine's normalizeUrl already refuses one for every download there is, so
- * this only says so before anything spawns.
- *
- * @param {*} url - the link the request carried
- * @returns {boolean} whether it points at youtube
- */
-function isYouTubeUrl(url) {
-  if (typeof url !== "string") return false
-
-  let parsed
-
-  try {
-    parsed = new URL(url.trim())
-  } catch {
-    return false
-  }
-
-  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-    return false
-  }
-
-  // URL lowercases the hostname for us, so this needs no folding of its own
-  const host = parsed.hostname
-
-  return (
-    host === "youtube.com" ||
-    host.endsWith(".youtube.com") ||
-    host === "youtu.be"
-  )
-}
-
-/**
- * the audio modes a playlist may ask for
- *
- * the engine falls back to mp3 for anything it does not recognise, which is
- * the right answer for a download and the wrong one for the archive beside it:
- * the archive filename is scoped by the mode the *request* named, so an
- * unrecognised mode would file an mp3 run under its own name and no later run
- * would ever find it again. refused here, where the two still agree.
- */
-const PLAYLIST_AUDIO_MODES = ["mp3", "m4a", "original"]
-
-// a youtube video id. it becomes an archive lookup key, and an id that is not
-// an id would simply never match one - which reads as "download this again"
-// rather than as the malformed payload it is
-const VIDEO_ID_PATTERN = /^[A-Za-z0-9_-]+$/
-
-// the highest ceiling the quality menu offers, with room above it. a height is
-// not just passed through here the way the single-video flow passes one: it
-// names the archive this run resumes from, so a NaN would scope every garbled
-// request to one shared file
-const PLAYLIST_MAX_HEIGHT = 4320
-
-/**
- * the selection, checked before anything can spawn on it
- *
- * this is untrusted input twice over. the indices become yt-dlp's `-I` spec,
- * and the ids are what the engine intersects with the download archive to work
- * out what it is allowed to skip - so both halves are checked for what they
- * are, never coerced into it.
- *
- * @param {Object[]} entries - [{index, id}] as the renderer read them off the
- *   listing it is showing
- * @returns {Object[]} the same entries, validated
- * @throws {Error} carrying the sentence the user is shown
- */
-function normalizePlaylistEntries(entries) {
-  // an empty selection is not an empty spec: `-I ""` is the *absence* of a
-  // selection, which downloads the whole playlist. so "nothing was ticked" has
-  // to be refused rather than left to become the largest download available
-  if (!Array.isArray(entries) || entries.length === 0) {
-    throw new Error("Select at least one video to download.")
-  }
-
-  if (entries.length > PLAYLIST_MAX_ITEMS) {
-    throw new Error(
-      `Cliply downloads at most ${PLAYLIST_MAX_ITEMS} videos from a playlist at a time.`
-    )
-  }
-
-  const seen = new Set()
-
-  return entries.map((entry) => {
-    const index = entry ? entry.index : null
-    const id = entry ? entry.id : null
-
-    // an integer and only an integer: coercing "3" or 3.5 into a position is
-    // how a malformed payload gets laundered into something -I accepts
-    if (!Number.isInteger(index) || index < 1 || index > PLAYLIST_MAX_ITEMS) {
-      throw new Error("That selection isn't a list of playlist positions.")
-    }
-
-    if (typeof id !== "string" || !VIDEO_ID_PATTERN.test(id)) {
-      throw new Error("That selection carries a video id we can't read.")
-    }
-
-    // the same position twice downloads once and is counted twice - once as
-    // another item asked for, and again as another archive skip
-    if (seen.has(index)) {
-      throw new Error("That selection lists the same video twice.")
-    }
-
-    seen.add(index)
-    return { index, id }
-  })
-}
-
-/**
- * the quality ceiling for a playlist, as a number the archive can be named for
- * @param {*} height - whatever the request sent
- * @returns {number} the ceiling
- * @throws {Error} when it is not a height
- */
-function normalizePlaylistHeight(height) {
-  const value = Number(height)
-
-  if (!Number.isInteger(value) || value < 1 || value > PLAYLIST_MAX_HEIGHT) {
-    throw new Error("That isn't a quality we can download a playlist at.")
-  }
-
-  return value
-}
-
-/**
- * the audio mode for a playlist download
- * @param {*} audioMode - whatever the request sent
- * @returns {string} mp3 | m4a | original
- * @throws {Error} when it is none of them
- */
-function normalizePlaylistAudioMode(audioMode) {
-  const mode = String(audioMode || "").toLowerCase()
-
-  if (!PLAYLIST_AUDIO_MODES.includes(mode)) {
-    throw new Error("That isn't an audio format we can download a playlist as.")
-  }
-
-  return mode
-}
-
-/**
- * say which way the jar is unusable, so "not working" is actionable
- *
- * the two signed-in cases below are the ones worth telling apart, because they
- * ask the user for different things and both used to report as a working
- * login. yt-dlp calls a jar authenticated when LOGIN_INFO sits alongside a
- * SAPISID cookie, so:
- *
- *   - youtube cookies, no LOGIN_INFO, no SAPISID either: the export was taken
- *     from a browser that was never signed in
- *   - SAPISID but no LOGIN_INFO: they *were* signed in and youtube has since
- *     rotated the session away. yt-dlp warns about exactly this, and since
- *     --cookies writes the jar back it is our own copy that lost the marker
- */
-const JAR_PROBLEMS = {
-  JAR_MALFORMED: "that file is malformed, export a fresh one instead of editing it",
-  JAR_NOT_COOKIE_FILE: "that isn't a cookies.txt file, export it again",
-  JAR_NOTHING_IMPORTED: "nothing imported yet",
-  JAR_NO_YOUTUBE: "no youtube cookies in that file",
-  JAR_EXPIRED: "your cookies expired, grab a fresh export",
-  JAR_SESSION_ENDED: "youtube ended this session, export your cookies again",
-  JAR_NEVER_SIGNED_IN:
-    "these cookies aren't from a signed-in session, sign in first then export",
-  JAR_UNUSABLE: "no usable youtube cookies"
-}
-
-/**
- * which of the sentences above a jar has earned
- *
- * the code travels to the renderer beside the sentence, so a russian install
- * can say the same thing without matching english prose - and the english stays
- * the one wording the logs and issue bodies carry.
- */
-function cookieJarProblemCode({ total, youtube, expired, hasSid, signedIn, loadError }) {
-  // checked first: a jar yt-dlp refuses whole inspects as zero of everything,
-  // and "no cookies imported" is the wrong thing to say about a file that is
-  // sitting there full of them and taking every download down with it
-  if (loadError === JAR_DOMAIN_FLAG) return "JAR_MALFORMED"
-  if (loadError) return "JAR_NOT_COOKIE_FILE"
-  if (total === 0) return "JAR_NOTHING_IMPORTED"
-  if (youtube === 0) return "JAR_NO_YOUTUBE"
-
-  // any expiry at all is worth saying so, rather than only a jar where every
-  // last cookie is dead. an export whose login expired alongside a still-live
-  // PREF used to fall through to "you were never signed in", which sends the
-  // user to fix something that was never wrong
-  if (!signedIn && expired > 0) return "JAR_EXPIRED"
-  if (!signedIn) return hasSid ? "JAR_SESSION_ENDED" : "JAR_NEVER_SIGNED_IN"
-
-  return "JAR_UNUSABLE"
-}
-
-function cookieJarProblem(inspection) {
-  return JAR_PROBLEMS[cookieJarProblemCode(inspection)]
-}
-
-/**
- * what the runner calls a download, in the words the taxonomy answers in.
- *
- * the runner says "combined" for a merged video+audio download and never
- * "video" - an ffmpeg detail about how the file was assembled, where analytics
- * answers what the user took away. anything else is left out rather than
- * guessed at: absence is silent, and a value outside the vocabulary is not.
- */
-const MEDIA_TYPES = { combined: "video", video: "video", audio: "audio" }
-
-/**
- * the counts each terminal event may carry, in the order they read in.
- *
- * this is a mirror of ALLOWED_PROPERTIES (services/analytics.js) and it exists
- * because that list is enforced by silence: a count sent to an event that did
- * not declare it is dropped behind a console.warn production never surfaces, so
- * "send them all and let the boundary sort it out" is how a playlist ends up
- * with three quarters of its telemetry and no sign anything is wrong.
- *
- * a completion knows all four. a failure and a cancel know two: what landed on
- * disk, and how many were asked for. neither knows how many were *skipped* -
- * a run that broke or was killed never reached the videos behind it, and
- * counting those as skips is a guess wearing a measurement's clothes.
- */
-const PLAYLIST_EVENT_COUNTS = {
-  download_completed: [
-    "items_saved",
-    "items_reused",
-    "items_skipped",
-    "items_total"
-  ],
-  download_failed: ["items_saved", "items_total"],
-  download_cancelled: ["items_saved", "items_total"]
-}
-
-/**
- * what a playlist adds to one of its terminal events
- *
- * absent in its entirety for a single video, `is_playlist` included: every
- * existing event keeps exactly the properties it has always had, and an
- * `is_playlist: false` on all of them would be a schema change on the
- * single-video funnel that nothing asked for.
- *
- * @param {string} event - the analytics event being built
- * @param {Object} payload - what the runner knows about the download
- * @returns {Object|null} the properties to add, or null for a single video
- */
-function playlistProperties(event, payload) {
-  if (!payload.playlist) return null
-
-  const available = {
-    items_saved: payload.itemsSaved,
-    items_reused: payload.itemsReused,
-    items_skipped: payload.itemsSkipped,
-    items_total: payload.itemsTotal
-  }
-
-  const properties = { is_playlist: true }
-
-  for (const key of PLAYLIST_EVENT_COUNTS[event] || []) {
-    // a count the engine never supplied is left out rather than sent as a zero.
-    // a run that failed before it counted anything did not save none of them -
-    // it does not know, and a zero would read as "it saved nothing"
-    if (Number.isFinite(available[key])) {
-      properties[key] = available[key]
-    }
-  }
-
-  return properties
-}
-
-// an error message may arrive as "<short user message>\n\n<full technical>".
-// the first paragraph is what the user is shown; the rest travels as details.
-// analytics no longer reads this path at all - it takes the runner's payload.
-const shortErrorMessage = (message) =>
-  (message || "").split(/\n\s*\n/, 1)[0].trim() || "Download failed"
+const {
+  SUPPORTED_DOWNLOAD_PLATFORMS,
+  normalizeTimeRange,
+  isPlaylistPlatform,
+  isYouTubeRequestUrl,
+  normalizePlaylistEntries,
+  normalizePlaylistHeight,
+  normalizePlaylistAudioMode
+} = require("./ipc/validators")
+const {
+  COOKIE_TEST_URLS,
+  JAR_PROBLEMS,
+  cookieJarProblemCode,
+  cookieJarProblem
+} = require("./ipc/cookie-problems")
+const {
+  RENDERER_EVENTS,
+  SUPPORT_MILESTONES,
+  MEDIA_TYPES,
+  playlistProperties,
+  shortErrorMessage
+} = require("./ipc/analytics-translation")
 
 class IPCHandlers {
   constructor(services, autoUpdater = null) {
@@ -570,13 +205,14 @@ class IPCHandlers {
        * one place further along.
        *
        * `payload.fileSize` is the size of the file the result named, and for a
-       * playlist that is whichever video happened to land LAST (ytdlp-engine.js
-       * :2218) - not the run. so `file_size_mb` would report one video out of
-       * eleven, and `speed_bucket` would divide that one file's bytes by the
-       * time all eleven took, which is not a speed anything experienced. both
-       * land on the same properties the single-video funnel is measured by, so
-       * sending them would not merely be unreadable - it would drag the average
-       * every existing chart already reads.
+       * playlist that is whichever video happened to land LAST (the result
+       * YtdlpOperation assembles in ytdlp/operation.js) - not the run. so
+       * `file_size_mb` would report one video out of eleven, and `speed_bucket`
+       * would divide that one file's bytes by the time all eleven took, which
+       * is not a speed anything experienced. both land on the same properties
+       * the single-video funnel is measured by, so sending them would not
+       * merely be unreadable - it would drag the average every existing chart
+       * already reads.
        *
        * `elapsed_bucket` is kept: how long the run took is the same question
        * whether the run held one video or eleven, and the answer is measured
@@ -1395,7 +1031,7 @@ class IPCHandlers {
       const { url, platform } = data
 
       // the link decides, and a label that disagrees with it loses
-      if (!isPlaylistPlatform(platform) || !isYouTubeUrl(url)) {
+      if (!isPlaylistPlatform(platform) || !isYouTubeRequestUrl(url)) {
         return this.unsupportedPlaylistPlatform()
       }
 
@@ -1486,7 +1122,7 @@ class IPCHandlers {
     // nothing and spawns nothing. the link decides, not the label beside it
     if (
       !isPlaylistPlatform(data && data.platform) ||
-      !isYouTubeUrl(data && data.url)
+      !isYouTubeRequestUrl(data && data.url)
     ) {
       return this.unsupportedPlaylistPlatform()
     }

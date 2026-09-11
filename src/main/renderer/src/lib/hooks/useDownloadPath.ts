@@ -1,7 +1,7 @@
 import { useCallback, useEffect } from "react"
 import { settingsApi, systemApi } from "@/lib/api"
 import { t } from "@/lib/i18n"
-import { useYouTubeStore } from "@/lib/youtubeStore"
+import { useYouTubeStore } from "@/lib/stores/youtubeStore"
 import { showFolderSelectedToast } from "@/lib/toast-utils"
 import { toast } from "sonner"
 

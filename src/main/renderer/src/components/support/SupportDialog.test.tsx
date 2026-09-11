@@ -92,7 +92,9 @@ describe("SupportDialog", () => {
     await mount()
     listener?.({ count: 40 })
 
-    await waitFor(() => expect(screen.getByText("buy me a coffee")).toBeTruthy())
+    await waitFor(() =>
+      expect(screen.getByText("buy me a coffee")).toBeTruthy()
+    )
     screen.getByText("buy me a coffee").click()
 
     await waitFor(() =>

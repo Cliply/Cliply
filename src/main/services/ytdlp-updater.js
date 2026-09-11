@@ -16,13 +16,7 @@
  */
 
 const fsp = require("fs").promises
-const { createWriteStream } = require("fs")
-const crypto = require("crypto")
-const dns = require("dns").promises
-const https = require("https")
-const net = require("net")
 const path = require("path")
-const { pipeline } = require("stream/promises")
 
 const { resolveExecutableIn, legacyBinaryName } = require("./ytdlp-engine")
 const {
@@ -30,6 +24,22 @@ const {
   parseChecksums,
   throwIfAborted
 } = require("../utils/archive")
+const {
+  createHttpClient,
+  httpGet,
+  resolveAddresses,
+  withAddressFallback
+} = require("./ytdlp/http")
+const {
+  swapDirectories,
+  copyDirectory,
+  makeExecutable,
+  readJson,
+  writeJson,
+  pathExists,
+  removeQuietly,
+  compareVersions
+} = require("./ytdlp/fs-ops")
 
 // the redirect names the newest *stable* tag and, unlike the releases api, is
 // not rate limited - which matters when every install checks on launch
@@ -50,18 +60,6 @@ const STAGED_PROBE_TIMEOUT_MS = 5 * 60 * 1000
 
 // remembers which packaged engine we have already read a version out of
 const BUNDLED_MARKER = ".bundled-engine.json"
-
-const REQUEST_TIMEOUT_MS = 60 * 1000
-
-// how long a single address gets to answer before the next one is tried. the
-// os gives up on an unreachable host after ~75s, far too long to sit through
-// when a sibling address would have answered in milliseconds
-const CONNECT_TIMEOUT_MS = 10 * 1000
-
-const MAX_REDIRECTS = 5
-// SHA2-256SUMS is ~2 kb; anything near this is a redirect to something else
-const MAX_TEXT_BYTES = 1024 * 1024
-const USER_AGENT = "Cliply-Desktop"
 
 /**
  * the release asset for a platform/arch pair
@@ -85,6 +83,12 @@ function releaseAssetFor(platform = process.platform, arch = process.arch) {
   }
 
   return null
+}
+
+// yt-dlp versions are the release date, optionally with a build suffix - the
+// same shape the release tags take
+function isVersionString(value) {
+  return typeof value === "string" && TAG_PATTERN.test(value.trim())
 }
 
 class YtdlpUpdater {
@@ -594,7 +598,7 @@ class YtdlpUpdater {
    * @returns {Promise<void>}
    */
   async swapIn(preparedDir, installedDir) {
-    return swapIn(preparedDir, installedDir)
+    return swapDirectories(preparedDir, installedDir)
   }
 
   /**
@@ -714,412 +718,6 @@ class YtdlpUpdater {
   }
 }
 
-// =============================================================================
-// http - plain node https, no dependency and no electron import
-// =============================================================================
-
-function createHttpClient() {
-  return {
-    /**
-     * the Location of a single redirect hop, without following it
-     * @param {string} url - url to ask
-     * @param {Object} options - {signal}
-     * @returns {Promise<string|null>} absolute location, or null when not a redirect
-     */
-    async getRedirectLocation(url, options = {}) {
-      const response = await httpGet(url, options)
-      response.resume()
-
-      if (!isRedirect(response) || !response.headers.location) {
-        return null
-      }
-
-      return new URL(response.headers.location, url).toString()
-    },
-
-    /**
-     * fetch a small text document
-     * @param {string} url - url to fetch
-     * @param {Object} options - {signal}
-     * @returns {Promise<string>} the body
-     */
-    async getText(url, options = {}) {
-      const response = await followRedirects(url, options)
-      let body = ""
-
-      response.setEncoding("utf8")
-
-      for await (const chunk of response) {
-        body += chunk
-
-        if (body.length > MAX_TEXT_BYTES) {
-          response.destroy()
-          throw new Error(`unexpectedly large response from ${url}`)
-        }
-      }
-
-      return body
-    },
-
-    /**
-     * stream a file to disk, digesting it on the way past
-     * @param {string} url - url to download
-     * @param {string} destPath - where to write it
-     * @param {Object} options - {signal}
-     * @returns {Promise<string>} lowercase sha-256 hex digest
-     */
-    async download(url, destPath, options = {}) {
-      const response = await followRedirects(url, options)
-      const hash = crypto.createHash("sha256")
-
-      response.on("data", (chunk) => hash.update(chunk))
-      await pipeline(response, createWriteStream(destPath), {
-        signal: options.signal || undefined
-      })
-
-      return hash.digest("hex")
-    }
-  }
-}
-
-/**
- * GET a url, trying every address its hostname resolves to
- *
- * github serves releases from an anycast host with four A records, and one
- * blackholed address is enough to stall an update indefinitely: https.get
- * resolves through dns.lookup, which returns a single address and never falls
- * back to its siblings, and the node electron 28 ships leaves happy eyeballs
- * off by default. so the addresses are resolved up front and tried in turn.
- *
- * @param {string} url - url to GET
- * @param {Object} options - {signal, timeoutMs, connectTimeoutMs, lookup}
- * @returns {Promise<import("http").IncomingMessage>} the unread response
- */
-async function httpGet(url, options = {}) {
-  const addresses = await resolveAddresses(new URL(url).hostname, options)
-
-  return withAddressFallback(addresses, (address) =>
-    httpGetVia(url, address, options)
-  )
-}
-
-/**
- * every address a hostname resolves to, in the order the resolver gave them
- *
- * dns.lookup rather than dns.resolve so the os stays in charge - hosts files,
- * vpn split dns and corporate resolvers all still apply
- * @param {string} hostname - host to resolve
- * @param {Object} options - {lookup} for tests
- * @returns {Promise<string[]>} at least one address
- */
-async function resolveAddresses(hostname, options = {}) {
-  const lookup = options.lookup || dns.lookup
-  const found = await lookup(hostname, { all: true, verbatim: true })
-  const addresses = found.map((entry) => entry.address)
-
-  if (addresses.length === 0) {
-    throw new Error(`could not resolve ${hostname}`)
-  }
-
-  return addresses
-}
-
-/**
- * run an attempt per address, stopping at the first that gets through
- *
- * only a failure that happened before a connection was established moves on to
- * the next address. a tls, http or abort failure would repeat identically
- * there, so it is surfaced immediately rather than multiplied by four.
- * @param {string[]} addresses - addresses to try, in order
- * @param {(address: string) => Promise<any>} attempt - what to try per address
- * @returns {Promise<any>} the first successful attempt
- */
-async function withAddressFallback(addresses, attempt) {
-  let lastError = null
-
-  for (const address of addresses) {
-    try {
-      return await attempt(address)
-    } catch (error) {
-      if (!error || error.connectFailed !== true) {
-        throw error
-      }
-
-      lastError = error
-    }
-  }
-
-  throw lastError
-}
-
-/**
- * one GET, pinned to one address
- * @param {string} url - url to GET
- * @param {string} address - the address to reach it at
- * @param {Object} options - {signal, timeoutMs, connectTimeoutMs}
- * @returns {Promise<import("http").IncomingMessage>} the unread response
- */
-function httpGetVia(url, address, options = {}) {
-  return new Promise((resolve, reject) => {
-    let request
-    let connected = false
-
-    const fail = (error) => {
-      // an abort is the caller's decision, not something a sibling address fixes
-      error.connectFailed = !connected && !isAbortError(error)
-      reject(error)
-    }
-
-    const onConnect = () => {
-      connected = true
-      // the short fuse only covers reaching the host - from here the longer
-      // stalled-transfer guard owns the rest of the response
-      request.setTimeout(options.timeoutMs || REQUEST_TIMEOUT_MS)
-    }
-
-    try {
-      request = https.get(
-        url,
-        {
-          signal: options.signal || undefined,
-          headers: { "user-agent": USER_AGENT, accept: "*/*" },
-          // the url still carries the hostname, so sni, the host header and
-          // certificate validation are all untouched by pinning the address
-          lookup: (_hostname, lookupOptions, callback) => {
-            const family = net.isIPv6(address) ? 6 : 4
-
-            if (lookupOptions && lookupOptions.all) {
-              callback(null, [{ address, family }])
-              return
-            }
-
-            callback(null, address, family)
-          },
-          // set here rather than through request.setTimeout so the timer is
-          // armed when the socket is created, and so covers the connect itself
-          timeout: options.connectTimeoutMs || CONNECT_TIMEOUT_MS
-        },
-        resolve
-      )
-    } catch (error) {
-      fail(error)
-      return
-    }
-
-    request.on("socket", (socket) => {
-      if (socket.connecting) {
-        socket.once("connect", onConnect)
-        return
-      }
-
-      onConnect()
-    })
-
-    request.on("error", fail)
-    request.on("timeout", () => {
-      request.destroy(
-        new Error(
-          connected
-            ? `request timed out: ${url}`
-            : `could not connect to ${address} for ${url}`
-        )
-      )
-    })
-  })
-}
-
-function isAbortError(error) {
-  return Boolean(error) && (error.name === "AbortError" || error.code === "ABORT_ERR")
-}
-
-async function followRedirects(url, options = {}, hops = 0) {
-  const response = await httpGet(url, options)
-
-  if (isRedirect(response) && response.headers.location) {
-    response.resume()
-
-    if (hops >= MAX_REDIRECTS) {
-      throw new Error(`too many redirects for ${url}`)
-    }
-
-    const next = new URL(response.headers.location, url).toString()
-    return followRedirects(next, options, hops + 1)
-  }
-
-  if (response.statusCode !== 200) {
-    response.resume()
-    throw new Error(`HTTP ${response.statusCode} for ${url}`)
-  }
-
-  return response
-}
-
-// yt-dlp versions are the release date, optionally with a build suffix - the
-// same shape the release tags take
-function isVersionString(value) {
-  return typeof value === "string" && TAG_PATTERN.test(value.trim())
-}
-
-function isRedirect(response) {
-  return response.statusCode >= 300 && response.statusCode < 400
-}
-
-// =============================================================================
-// small file helpers
-// =============================================================================
-
-/**
- * put a prepared directory in place of the live one
- *
- * both directories live under the same userData parent, so the renames are
- * same-filesystem and atomic; the old copy is only deleted once the new one is
- * in place, and a failure halfway puts it straight back. nothing ever observes
- * a half-written directory at the live path, which is the whole point - both
- * the engine and the PO token payload are found by looking for files inside
- * one, so a directory that is partly there reads as one that is fully there.
- *
- * @param {string} preparedDir - directory to move in
- * @param {string} installedDir - directory to replace
- * @returns {Promise<void>}
- */
-async function swapIn(preparedDir, installedDir) {
-  const retiredDir = `${installedDir}.retired-${Date.now()}`
-  let retired = false
-
-  try {
-    // whatever is there goes, directory or not - an older build's onefile
-    // could be sitting on this exact path
-    if (await pathExists(installedDir)) {
-      await fsp.rename(installedDir, retiredDir)
-      retired = true
-    }
-
-    await fsp.rename(preparedDir, installedDir)
-  } catch (error) {
-    if (retired) {
-      await removeQuietly(installedDir)
-
-      try {
-        await fsp.rename(retiredDir, installedDir)
-      } catch (restoreError) {
-        // the previous engine is still on disk, just not where the engine
-        // looks for it. losing that fact here is how a user ends up with no
-        // downloader at all, so it travels with the error
-        error.retiredDir = retiredDir
-        error.restoreError = restoreError.message
-      }
-    }
-
-    throw error
-  }
-
-  await removeQuietly(retiredDir)
-}
-
-/**
- * copy a directory tree, preserving permission bits
- * fs.promises.cp would do this in one line, but it still prints an
- * experimental warning on the node electron 28 ships
- * @param {string} source - directory to copy
- * @param {string} destination - directory to create
- * @returns {Promise<void>}
- */
-async function copyDirectory(source, destination) {
-  await fsp.mkdir(destination, { recursive: true })
-
-  const entries = await fsp.readdir(source, { withFileTypes: true })
-
-  for (const entry of entries) {
-    const from = path.join(source, entry.name)
-    const to = path.join(destination, entry.name)
-
-    if (entry.isDirectory()) {
-      await copyDirectory(from, to)
-      continue
-    }
-
-    if (entry.isSymbolicLink()) {
-      await fsp.symlink(await fsp.readlink(from), to)
-      continue
-    }
-
-    const stats = await fsp.stat(from)
-    await fsp.copyFile(from, to)
-    await fsp.chmod(to, stats.mode & 0o7777)
-  }
-}
-
-// the executable bit is the one permission the engine cannot run without
-async function makeExecutable(engineDir) {
-  const executable = resolveExecutableIn(engineDir)
-
-  if (!executable) {
-    return
-  }
-
-  await fsp.chmod(executable, 0o755)
-}
-
-async function readJson(filePath) {
-  try {
-    return JSON.parse(await fsp.readFile(filePath, "utf8"))
-  } catch {
-    // absent or unreadable is simply "nothing remembered"
-    return null
-  }
-}
-
-async function writeJson(filePath, value) {
-  try {
-    await fsp.writeFile(filePath, JSON.stringify(value))
-  } catch {
-    // a marker we could not write just means we probe again next launch
-  }
-}
-
-async function pathExists(target) {
-  try {
-    await fsp.stat(target)
-    return true
-  } catch {
-    return false
-  }
-}
-
-function removeQuietly(target) {
-  return fsp.rm(target, { recursive: true, force: true }).catch(() => {})
-}
-
-/**
- * compare two yt-dlp versions ("2026.08.19", "2026.08.19.232357")
- * @param {string} a - left version
- * @param {string} b - right version
- * @returns {number} 1 when a is newer, -1 when b is newer, 0 when equal
- */
-function compareVersions(a, b) {
-  const left = versionParts(a)
-  const right = versionParts(b)
-  const length = Math.max(left.length, right.length)
-
-  for (let index = 0; index < length; index++) {
-    const leftPart = left[index] || 0
-    const rightPart = right[index] || 0
-
-    if (leftPart > rightPart) return 1
-    if (leftPart < rightPart) return -1
-  }
-
-  return 0
-}
-
-function versionParts(version) {
-  return String(version || "")
-    .trim()
-    .split(/[^\d]+/)
-    .filter((part) => part !== "")
-    .map((part) => parseInt(part, 10))
-}
-
 module.exports = {
   YtdlpUpdater,
   compareVersions,
@@ -1127,12 +725,10 @@ module.exports = {
   createHttpClient,
   // the atomic install, shared with the PO token payload - it lands the same
   // way, beside the engine, for the same reason
-  swapIn,
+  swapIn: swapDirectories,
   removeQuietly,
   // exported for tests - the address fallback has no seam through the client
   httpGet,
   resolveAddresses,
-  withAddressFallback,
-  UPDATE_TIMEOUT_MS,
-  STAGED_PROBE_TIMEOUT_MS
+  withAddressFallback
 }

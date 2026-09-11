@@ -7,18 +7,18 @@ import { TikTokLayout } from "@/components/tiktok"
 import { AnimatePresence } from "framer-motion"
 import { HeroSection } from "../components/hero/HeroSection"
 import { VideoLayout } from "../components/video/VideoLayout"
-import { usePinterestStore } from "../lib/pinterestStore"
-import { usePlaylistStore } from "../lib/playlistStore"
-import { useAppStore } from "../lib/store"
-import { useTikTokStore } from "../lib/tiktokStore"
-import { useYouTubeStore } from "../lib/youtubeStore"
+import { usePinterestStore } from "../lib/stores/pinterestStore"
+import { usePlaylistStore } from "../lib/stores/playlistStore"
+import { useAppStore } from "../lib/stores/store"
+import { useTikTokStore } from "../lib/stores/tiktokStore"
+import { useYouTubeStore } from "../lib/stores/youtubeStore"
 
 export function HomePage() {
   const { selectedPlatform, showMediaDetails } = useAppStore()
   const { videoInfo } = useYouTubeStore()
   const { playlistInfo } = usePlaylistStore()
-  const { pinInfo } = usePinterestStore()
-  const { videoInfo: tikTokInfo } = useTikTokStore()
+  const { info: pinInfo } = usePinterestStore()
+  const { info: tikTokInfo } = useTikTokStore()
 
   // the youtube box holds one of two things. loading either clears the other,
   // so a listing in the store means the playlist is what was pasted last

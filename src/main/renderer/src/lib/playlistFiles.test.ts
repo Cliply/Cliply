@@ -33,7 +33,9 @@ describe("one filename", () => {
 
   test("reads a windows path as readily as a posix one", () => {
     expect(
-      parseDeliveredFile("C:\\Users\\x\\Downloads\\002 - Two [kz-I5zIGbj4] 720p.mp4")
+      parseDeliveredFile(
+        "C:\\Users\\x\\Downloads\\002 - Two [kz-I5zIGbj4] 720p.mp4"
+      )
     ).toEqual({ index: 2, id: "kz-I5zIGbj4", height: 720 })
   })
 
@@ -52,7 +54,9 @@ describe("one filename", () => {
 
   test("a height yt-dlp did not know is no height, not a wrong one", () => {
     // %(height)s renders as NA when the merged output has none to report
-    expect(parseDeliveredFile("/dl/PL/004 - Four [ddddddddddd] NAp.mkv")).toEqual({
+    expect(
+      parseDeliveredFile("/dl/PL/004 - Four [ddddddddddd] NAp.mkv")
+    ).toEqual({
       index: 4,
       id: "ddddddddddd",
       height: null
@@ -66,14 +70,18 @@ describe("one filename", () => {
    */
   test("a title with brackets of its own does not steal the id", () => {
     expect(
-      parseDeliveredFile("/dl/PL/005 - Live [4K remaster] set [aaaaaaaaaaa] 2160p.mp4")
+      parseDeliveredFile(
+        "/dl/PL/005 - Live [4K remaster] set [aaaaaaaaaaa] 2160p.mp4"
+      )
     ).toEqual({ index: 5, id: "aaaaaaaaaaa", height: 2160 })
   })
 
   test("a position past the padding is still read", () => {
     // the padding is the cap's digit width, so 100 is three digits like the
     // rest, but nothing here depends on the width
-    expect(parseDeliveredFile("/dl/PL/100 - Hundred [aaaaaaaaaaa] 360p.mp4")).toEqual({
+    expect(
+      parseDeliveredFile("/dl/PL/100 - Hundred [aaaaaaaaaaa] 360p.mp4")
+    ).toEqual({
       index: 100,
       id: "aaaaaaaaaaa",
       height: 360
@@ -96,13 +104,21 @@ describe("one filename", () => {
     // the engine only reports verified after_move records, so this should
     // never arrive - but a half-written file is the one thing that must never
     // be read as a save if it ever does
-    expect(parseDeliveredFile("/dl/PL/001 - One [aaaaaaaaaaa] 1080p.mp4.part")).toBeNull()
-    expect(parseDeliveredFile("/dl/PL/001 - One [aaaaaaaaaaa] 1080p.mp4.ytdl")).toBeNull()
+    expect(
+      parseDeliveredFile("/dl/PL/001 - One [aaaaaaaaaaa] 1080p.mp4.part")
+    ).toBeNull()
+    expect(
+      parseDeliveredFile("/dl/PL/001 - One [aaaaaaaaaaa] 1080p.mp4.ytdl")
+    ).toBeNull()
   })
 })
 
 describe("the run's files, against the rows on screen", () => {
-  const entries = [entry(1, "aaaaaaaaaaa"), entry(4, "bbbbbbbbbbb"), entry(6, "ccccccccccc")]
+  const entries = [
+    entry(1, "aaaaaaaaaaa"),
+    entry(4, "bbbbbbbbbbb"),
+    entry(6, "ccccccccccc")
+  ]
 
   test("each file lands on the row whose id it names", () => {
     const delivered = deliveredByIndex(
@@ -121,7 +137,10 @@ describe("the run's files, against the rows on screen", () => {
   })
 
   test("a saved row with no height is still a saved row", () => {
-    const delivered = deliveredByIndex(["/dl/PL/004 - Four [bbbbbbbbbbb].mp3"], entries)
+    const delivered = deliveredByIndex(
+      ["/dl/PL/004 - Four [bbbbbbbbbbb].mp3"],
+      entries
+    )
 
     expect(delivered.has(4)).toBe(true)
     expect(delivered.get(4)).toBeNull()
@@ -138,7 +157,10 @@ describe("the run's files, against the rows on screen", () => {
    */
   test("a video the playlist holds twice is saved one position at a time", () => {
     const twice = [entry(2, "aaaaaaaaaaa"), entry(7, "aaaaaaaaaaa")]
-    const delivered = deliveredByIndex(["/dl/PL/002 - One [aaaaaaaaaaa] 720p.mp4"], twice)
+    const delivered = deliveredByIndex(
+      ["/dl/PL/002 - One [aaaaaaaaaaa] 720p.mp4"],
+      twice
+    )
 
     expect([...delivered.entries()]).toEqual([[2, 720]])
     expect(delivered.has(7)).toBe(false)
@@ -161,7 +183,10 @@ describe("the run's files, against the rows on screen", () => {
   })
 
   test("a file naming a video this listing does not hold is dropped", () => {
-    const delivered = deliveredByIndex(["/dl/PL/009 - Nine [zzzzzzzzzzz] 720p.mp4"], entries)
+    const delivered = deliveredByIndex(
+      ["/dl/PL/009 - Nine [zzzzzzzzzzz] 720p.mp4"],
+      entries
+    )
 
     expect(delivered.size).toBe(0)
   })
@@ -169,7 +194,10 @@ describe("the run's files, against the rows on screen", () => {
   test("a file whose position and id disagree with the row is dropped", () => {
     // the position exists and the id exists, but not together: nothing here
     // is evidence about either row
-    const delivered = deliveredByIndex(["/dl/PL/001 - One [bbbbbbbbbbb] 720p.mp4"], entries)
+    const delivered = deliveredByIndex(
+      ["/dl/PL/001 - One [bbbbbbbbbbb] 720p.mp4"],
+      entries
+    )
 
     expect(delivered.size).toBe(0)
   })
@@ -177,9 +205,12 @@ describe("the run's files, against the rows on screen", () => {
   test("no files, no listing and no matches are all just nothing", () => {
     expect(deliveredByIndex(undefined, entries).size).toBe(0)
     expect(deliveredByIndex([], entries).size).toBe(0)
-    expect(deliveredByIndex(["/dl/PL/001 - One [aaaaaaaaaaa] 1080p.mp4"], []).size).toBe(0)
     expect(
-      deliveredByIndex(["/dl/PL/001 - One [aaaaaaaaaaa] 1080p.mp4"], undefined).size
+      deliveredByIndex(["/dl/PL/001 - One [aaaaaaaaaaa] 1080p.mp4"], []).size
+    ).toBe(0)
+    expect(
+      deliveredByIndex(["/dl/PL/001 - One [aaaaaaaaaaa] 1080p.mp4"], undefined)
+        .size
     ).toBe(0)
   })
 })

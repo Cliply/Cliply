@@ -3,12 +3,16 @@ import type { Resolver } from "react-hook-form"
 
 import { pinterestApi, tiktokApi, videoApi } from "@/lib/api"
 import type { Key } from "@/lib/i18n"
-import { usePinterestStore } from "@/lib/pinterestStore"
-import { usePlaylistStore } from "@/lib/playlistStore"
-import type { Platform } from "@/lib/store"
-import { useTikTokStore } from "@/lib/tiktokStore"
-import { pinterestUrlSchema, tiktokUrlSchema, youtubeUrlSchema } from "@/lib/validation"
-import { useYouTubeStore } from "@/lib/youtubeStore"
+import { usePinterestStore } from "@/lib/stores/pinterestStore"
+import { usePlaylistStore } from "@/lib/stores/playlistStore"
+import type { Platform } from "@/lib/stores/store"
+import { useTikTokStore } from "@/lib/stores/tiktokStore"
+import {
+  pinterestUrlSchema,
+  tiktokUrlSchema,
+  youtubeUrlSchema
+} from "@/lib/validation"
+import { useYouTubeStore } from "@/lib/stores/youtubeStore"
 
 interface PlatformStoreAccessor {
   getUrl: () => string
@@ -122,17 +126,17 @@ export const PLATFORM_REGISTRY: Record<Platform, PlatformConfig> = {
     },
     fetchAndStore: async (url: string) => {
       const info = await pinterestApi.getInfo(url)
-      usePinterestStore.getState().setPinInfo(info)
+      usePinterestStore.getState().setInfo(info)
 
       return { durationSeconds: info.duration ?? null, formatsCount: null }
     },
     store: {
       getUrl: () => usePinterestStore.getState().url,
       setUrl: (url) => usePinterestStore.getState().setUrl(url),
-      isLoading: () => usePinterestStore.getState().isLoadingPinInfo,
+      isLoading: () => usePinterestStore.getState().isLoadingInfo,
       setIsLoading: (loading) =>
-        usePinterestStore.getState().setIsLoadingPinInfo(loading),
-      hasInfo: () => usePinterestStore.getState().pinInfo !== null,
+        usePinterestStore.getState().setIsLoadingInfo(loading),
+      hasInfo: () => usePinterestStore.getState().info !== null,
       reset: () => usePinterestStore.getState().reset()
     }
   },
@@ -154,17 +158,17 @@ export const PLATFORM_REGISTRY: Record<Platform, PlatformConfig> = {
     },
     fetchAndStore: async (url: string) => {
       const info = await tiktokApi.getInfo(url)
-      useTikTokStore.getState().setVideoInfo(info)
+      useTikTokStore.getState().setInfo(info)
 
       return { durationSeconds: info.duration ?? null, formatsCount: null }
     },
     store: {
       getUrl: () => useTikTokStore.getState().url,
       setUrl: (url) => useTikTokStore.getState().setUrl(url),
-      isLoading: () => useTikTokStore.getState().isLoadingVideoInfo,
+      isLoading: () => useTikTokStore.getState().isLoadingInfo,
       setIsLoading: (loading) =>
-        useTikTokStore.getState().setIsLoadingVideoInfo(loading),
-      hasInfo: () => useTikTokStore.getState().videoInfo !== null,
+        useTikTokStore.getState().setIsLoadingInfo(loading),
+      hasInfo: () => useTikTokStore.getState().info !== null,
       reset: () => useTikTokStore.getState().reset()
     }
   }

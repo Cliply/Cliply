@@ -132,9 +132,7 @@ export function buildIssueUrl(input: ReportInput): {
   truncated: boolean
 } {
   const title = buildIssueTitle(input.context)
-  let logLines = input.context.details
-    ? input.context.details.split("\n")
-    : []
+  let logLines = input.context.details ? input.context.details.split("\n") : []
   let notes = input.userNotes
   let truncated = false
 

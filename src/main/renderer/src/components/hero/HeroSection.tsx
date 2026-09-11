@@ -2,11 +2,11 @@ import { LocaleToggle } from "@/components/ui/locale-toggle"
 import { MenuVertical } from "@/components/ui/menu-vertical"
 import { ModeToggle } from "@/components/ui/mode-toggle"
 import { updaterApi } from "@/lib/api"
-import { cookieActions } from "@/lib/cookieStore"
+import { cookieActions } from "@/lib/stores/cookieStore"
 import { useT } from "@/lib/i18n"
 import { motion } from "framer-motion"
 import { toast } from "sonner"
-import { useAppStore } from "@/lib/store"
+import { useAppStore } from "@/lib/stores/store"
 import { SearchCard } from "./SearchCard"
 
 export function HeroSection() {

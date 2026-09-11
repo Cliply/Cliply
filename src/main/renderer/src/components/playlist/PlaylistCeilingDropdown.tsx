@@ -1,6 +1,6 @@
 import { SelectionDropdown } from "@/components/video/SelectionDropdown"
 import { useT } from "@/lib/i18n"
-import { usePlaylistStore } from "@/lib/playlistStore"
+import { usePlaylistStore } from "@/lib/stores/playlistStore"
 import {
   ceilingFor,
   ceilingHelperText,

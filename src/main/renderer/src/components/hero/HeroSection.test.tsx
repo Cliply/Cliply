@@ -10,7 +10,7 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
 
-import { useCookieStore } from "@/lib/cookieStore"
+import { useCookieStore } from "@/lib/stores/cookieStore"
 import { en } from "@/lib/i18n/en"
 import { ru } from "@/lib/i18n/ru"
 import { useLocale } from "@/lib/i18n"

@@ -23,7 +23,10 @@ import {
   totalDuration
 } from "@/lib/playlistView"
 
-const entry = (index: number, overrides: Partial<PlaylistEntry> = {}): PlaylistEntry => ({
+const entry = (
+  index: number,
+  overrides: Partial<PlaylistEntry> = {}
+): PlaylistEntry => ({
   index,
   id: `video${index}`,
   title: `video ${index}`,
@@ -34,7 +37,9 @@ const entry = (index: number, overrides: Partial<PlaylistEntry> = {}): PlaylistE
   ...overrides
 })
 
-const info = (overrides: Partial<PlaylistInfoResponse> = {}): PlaylistInfoResponse => ({
+const info = (
+  overrides: Partial<PlaylistInfoResponse> = {}
+): PlaylistInfoResponse => ({
   playlist_id: "PL123",
   title: "Short talks",
   uploader: "TED",
@@ -131,7 +136,9 @@ describe("the other thing an ambiguous link could mean", () => {
    */
   test("never says all of a listing that is not all of it", () => {
     expect(
-      mixedLinkPlaylistChoice(info({ listed: 100, count: 5283, truncated: true }))
+      mixedLinkPlaylistChoice(
+        info({ listed: 100, count: 5283, truncated: true })
+      )
     ).toBe("The first 100 videos")
   })
 })
@@ -139,9 +146,9 @@ describe("the other thing an ambiguous link could mean", () => {
 describe("how long it all is", () => {
   test("adds up the rows and reads in hours and minutes", () => {
     // twelve five-minute talks
-    expect(totalDuration(Array.from({ length: 12 }, (_, i) => entry(i + 1)))).toBe(
-      "1 h 00 m total"
-    )
+    expect(
+      totalDuration(Array.from({ length: 12 }, (_, i) => entry(i + 1)))
+    ).toBe("1 h 00 m total")
     expect(totalDuration([entry(1), entry(2)])).toBe("10 m total")
   })
 
@@ -161,9 +168,9 @@ describe("naming the ones that did not make it", () => {
   })
 
   test("two are joined with and", () => {
-    expect(nameList([entry(1, { title: "One" }), entry(2, { title: "Two" })])).toBe(
-      '"One" and "Two"'
-    )
+    expect(
+      nameList([entry(1, { title: "One" }), entry(2, { title: "Two" })])
+    ).toBe('"One" and "Two"')
   })
 
   test("beyond three, the rest are counted rather than listed", () => {
@@ -175,7 +182,9 @@ describe("naming the ones that did not make it", () => {
   })
 
   test("uses no em-dash", () => {
-    expect(nameList([entry(1), entry(2), entry(3), entry(4)])).not.toContain("—")
+    expect(nameList([entry(1), entry(2), entry(3), entry(4)])).not.toContain(
+      "—"
+    )
   })
 })
 
@@ -236,8 +245,9 @@ describe("which rows get a badge at all", () => {
    * accent one.
    */
   test("an outcome is muted or accented, never an alarm", () => {
-    expect(rowBadge(entry(1), "finished", true, { state: "skipped", progress: 0 }))
-      .toEqual({ text: en["playlist.rowNotSaved"], tone: "gone" })
+    expect(
+      rowBadge(entry(1), "finished", true, { state: "skipped", progress: 0 })
+    ).toEqual({ text: en["playlist.rowNotSaved"], tone: "gone" })
 
     expect(
       rowBadge(entry(1), "finished", true, {
@@ -247,8 +257,9 @@ describe("which rows get a badge at all", () => {
       })
     ).toEqual({ text: "saved · 1080p", tone: "done" })
 
-    expect(rowBadge(entry(1), "finished", true, { state: "reused", progress: 100 }))
-      .toEqual({ text: en["playlist.rowReused"], tone: "done" })
+    expect(
+      rowBadge(entry(1), "finished", true, { state: "reused", progress: 100 })
+    ).toEqual({ text: en["playlist.rowReused"], tone: "done" })
   })
 })
 

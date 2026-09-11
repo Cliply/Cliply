@@ -78,7 +78,8 @@ export const ru: Record<Key, string> = {
     "каждое видео сохраняется целиком, в выбранном выше формате.",
   "playlist.pickVideosFirst": "сначала выберите видео",
   "playlist.pickTracksFirst": "сначала выберите дорожки",
-  "playlist.downloadVideos": "скачать {n} видео|скачать {n} видео|скачать {n} видео",
+  "playlist.downloadVideos":
+    "скачать {n} видео|скачать {n} видео|скачать {n} видео",
   "playlist.downloadTracks":
     "скачать {n} дорожку|скачать {n} дорожки|скачать {n} дорожек",
 
@@ -225,10 +226,6 @@ export const ru: Record<Key, string> = {
   "toast.fixWithCookies": "исправить через cookies",
   "toast.botCookies": "обычно помогает вход через запасной аккаунт.",
   "toast.botGeneric": "сайт просит подтвердить, что мы не боты.",
-  "toast.audioDone": "аудио скачано",
-  "toast.videoDone": "видео скачано",
-  "toast.audioDoneDesc": "аудиофайл сохранён на ваше устройство.",
-  "toast.videoDoneDesc": "видеофайл сохранён на ваше устройство.",
 
   "download.startingAudio": "начинаем скачивание аудио...",
   "download.startingVideo": "начинаем скачивание видео...",
@@ -240,7 +237,8 @@ export const ru: Record<Key, string> = {
   "download.audioFailed": "не удалось скачать аудио",
   "download.videoFailed": "не удалось скачать видео",
   "download.failed": "не удалось скачать",
-  "download.wentWrong": "что-то пошло не так. вы можете отправить нам подробности.",
+  "download.wentWrong":
+    "что-то пошло не так. вы можете отправить нам подробности.",
   "download.startFailed": "не удалось начать скачивание: {message}",
   "download.cancelled": "скачивание отменено",
   "download.audioCancelled": "скачивание аудио отменено",
@@ -422,7 +420,7 @@ export const ru: Record<Key, string> = {
  * main stays english on purpose - its sentences feed logs, analytics and issue
  * bodies that maintainers read - so the translation is an overlay here, applied
  * only to the toast the user reads. one entry per key of `ERROR_METADATA` and
- * `TERMINAL_ERRORS` in `src/main/services/ytdlp-engine.js`; a category with no
+ * `TERMINAL_ERRORS` in `src/main/services/ytdlp/errors.js`; a category with no
  * entry keeps main's english, which is the right failure mode for a code this
  * file has not caught up with yet.
  *
@@ -441,7 +439,8 @@ export const ruErrors: Partial<
   },
   VIDEO_UNAVAILABLE: {
     message: "это видео недоступно для скачивания.",
-    suggestion: "возможно, оно приватное, с возрастным ограничением или удалено."
+    suggestion:
+      "возможно, оно приватное, с возрастным ограничением или удалено."
   },
   NOT_A_VIDEO: {
     message: "по этой ссылке нет видео.",
@@ -512,7 +511,8 @@ export const ruErrors: Partial<
   },
   ENGINE_MISSING: {
     message: "движок загрузчика отсутствует.",
-    suggestion: "перезапустите cliply, а если это повторяется, переустановите его."
+    suggestion:
+      "перезапустите cliply, а если это повторяется, переустановите его."
   },
   DOWNLOAD_FAILED: {
     message: "не удалось скачать.",
@@ -525,7 +525,8 @@ export const ruErrors: Partial<
  *
  * the same overlay as `ruErrors`, for the three places main words a cookie
  * verdict: the import refusals thrown by `cookie-manager.js`, the jar problems
- * (`JAR_*`) and the probe notes (`PROBE_*`) composed in `ipc-handlers.js`.
+ * (`JAR_*`) listed in `ipc/cookie-problems.js` and the probe notes (`PROBE_*`)
+ * composed in `ipc-handlers.js`.
  *
  * two of main's notes interpolate a value - the probe's own error text, and how
  * many test videos were down - and the code arrives without it. Both say
@@ -550,7 +551,8 @@ export const ruCodes: Partial<Record<string, string>> = {
   JAR_NOTHING_IMPORTED: "пока ничего не импортировано",
   JAR_NO_YOUTUBE: "в файле нет cookies от YouTube",
   JAR_EXPIRED: "ваши cookies истекли, сделайте свежий экспорт",
-  JAR_SESSION_ENDED: "YouTube завершил эту сессию, экспортируйте cookies заново",
+  JAR_SESSION_ENDED:
+    "YouTube завершил эту сессию, экспортируйте cookies заново",
   JAR_NEVER_SIGNED_IN:
     "эти cookies не из сессии со входом, сначала войдите, потом экспортируйте",
   JAR_UNUSABLE: "нет пригодных cookies от YouTube",

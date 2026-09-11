@@ -1,6 +1,6 @@
 import type { PlaylistEntry, PlaylistInfoResponse } from "@/lib/api"
 import { t, useLocale } from "@/lib/i18n"
-import type { PlaylistItemStatus } from "@/lib/playlistStore"
+import type { PlaylistItemStatus } from "@/lib/stores/playlistStore"
 
 /**
  * the sentences and rules the playlist screens are drawn from
@@ -228,7 +228,10 @@ export function summarizeBadges(
 export function totalDuration(
   entries: { duration: number | null }[]
 ): string | null {
-  if (entries.length === 0 || entries.some((entry) => entry.duration === null)) {
+  if (
+    entries.length === 0 ||
+    entries.some((entry) => entry.duration === null)
+  ) {
     return null
   }
 

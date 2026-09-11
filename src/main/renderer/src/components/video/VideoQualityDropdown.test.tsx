@@ -7,7 +7,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, test } from "vitest"
 
 import type { QualityTier } from "@/lib/api"
-import { useYouTubeStore } from "@/lib/youtubeStore"
+import { useYouTubeStore } from "@/lib/stores/youtubeStore"
 import { VideoQualityDropdown } from "./VideoQualityDropdown"
 
 const tier = (
@@ -73,7 +73,9 @@ describe("the rows", () => {
     render(<VideoQualityDropdown tiers={FOUR_K} isVisible />)
     openMenu()
 
-    expect(rows().filter((row) => row.textContent?.includes("MKV"))).toHaveLength(2)
+    expect(
+      rows().filter((row) => row.textContent?.includes("MKV"))
+    ).toHaveLength(2)
   })
 })
 
@@ -89,7 +91,10 @@ describe("the default selection", () => {
 
   test("falls back to the best row when the source has no mp4 at all", () => {
     render(
-      <VideoQualityDropdown tiers={[tier(2160, "mkv", 1), tier(1440, "mkv", 1)]} isVisible />
+      <VideoQualityDropdown
+        tiers={[tier(2160, "mkv", 1), tier(1440, "mkv", 1)]}
+        isVisible
+      />
     )
 
     expect(useYouTubeStore.getState().selectedTier).toMatchObject({
@@ -108,7 +113,9 @@ describe("the default selection", () => {
   })
 
   test("a selection the next video does not offer is replaced, not kept", () => {
-    const { rerender } = render(<VideoQualityDropdown tiers={FOUR_K} isVisible />)
+    const { rerender } = render(
+      <VideoQualityDropdown tiers={FOUR_K} isVisible />
+    )
     openMenu()
     fireEvent.click(screen.getByRole("button", { name: /2160p/ }))
 
@@ -127,7 +134,9 @@ describe("the default selection", () => {
    * exists to remove
    */
   test("a matching height and container does not preserve the previous row", () => {
-    const { rerender } = render(<VideoQualityDropdown tiers={FOUR_K} isVisible />)
+    const { rerender } = render(
+      <VideoQualityDropdown tiers={FOUR_K} isVisible />
+    )
     openMenu()
     fireEvent.click(screen.getByRole("button", { name: /720p/ }))
     expect(useYouTubeStore.getState().selectedTier).toBe(FOUR_K[3])

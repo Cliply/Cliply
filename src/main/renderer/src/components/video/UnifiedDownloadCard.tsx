@@ -1,30 +1,22 @@
 import { Button } from "@/components/ui/button"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { SIMPLE_QUALITY, track } from "@/lib/analytics"
 import {
-  DownloadError,
   pinterestApi,
   tiktokApi,
-  systemApi,
   validateTimeRange,
   type AudioTrack,
   type PinterestVideoInfoResponse,
   type QualityTier,
   type TikTokVideoInfoResponse
 } from "@/lib/api"
-import { localizeError, useT } from "@/lib/i18n"
-import { reportActions } from "@/lib/reportStore"
-import { usePinterestStore } from "@/lib/pinterestStore"
-import { useTikTokStore } from "@/lib/tiktokStore"
-import { useYouTubeStore } from "@/lib/youtubeStore"
-import {
-  showDownloadErrorToast,
-  showServerOverwhelmedToast
-} from "@/lib/toast-utils"
+import { useSimplePlatformDownload } from "@/lib/hooks/useSimplePlatformDownload"
+import { useT } from "@/lib/i18n"
+import { usePinterestStore } from "@/lib/stores/pinterestStore"
+import { useTikTokStore } from "@/lib/stores/tiktokStore"
+import { useYouTubeStore } from "@/lib/stores/youtubeStore"
 import { cn } from "@/lib/utils"
 import { motion } from "framer-motion"
 import { useState } from "react"
-import { toast } from "sonner"
 import { AudioDownloadButton } from "./AudioDownloadButton"
 import { AudioFormatDropdown } from "./AudioFormatDropdown"
 import { AudioTrackDropdown } from "./AudioTrackDropdown"
@@ -63,17 +55,28 @@ type UnifiedDownloadCardProps =
 export function UnifiedDownloadCard(props: UnifiedDownloadCardProps) {
   if (props.platform === "pinterest") {
     return (
-      <PinterestDownloadCard pinInfo={props.pinInfo} className={props.className} />
+      <PinterestDownloadCard
+        pinInfo={props.pinInfo}
+        className={props.className}
+      />
     )
   }
 
   if (props.platform === "tiktok") {
     return (
-      <TikTokDownloadCard tikTokInfo={props.tikTokInfo} className={props.className} />
+      <TikTokDownloadCard
+        tikTokInfo={props.tikTokInfo}
+        className={props.className}
+      />
     )
   }
 
-  return <YouTubeDownloadCard videoInfo={props.videoInfo} className={props.className} />
+  return (
+    <YouTubeDownloadCard
+      videoInfo={props.videoInfo}
+      className={props.className}
+    />
+  )
 }
 
 function YouTubeDownloadCard({
@@ -284,53 +287,13 @@ function PinterestDownloadCard({
   pinInfo: PinterestVideoInfoResponse
   className?: string
 }) {
-  const { url, isDownloading, setIsDownloading } = usePinterestStore()
   const t = useT()
-
-  const handleDownload = async () => {
-    if (!url || isDownloading) return
-    try {
-      setIsDownloading(true)
-
-      // main reports this download's end, so it has to hear about its start:
-      // completions with no starts is a funnel that shows the impossible
-      track("download_started", {
-        platform: "pinterest",
-        media_type: "video",
-        quality: SIMPLE_QUALITY,
-        // there is no trimming here to report - no range is ever sent
-        is_trimmed: false
-      })
-
-      await pinterestApi.download({ url, title: pinInfo?.title })
-      toast.success(t("download.complete"), { action: { label: t("toast.openFolder"), onClick: () => systemApi.openDownloadFolder() } })
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Failed to download video"
-      if (message.includes("network") || message.includes("fetch")) { showServerOverwhelmedToast() }
-      else {
-        reportActions.stage({
-          shortMessage: message,
-          details: error instanceof DownloadError ? error.details : undefined,
-          category: error instanceof DownloadError ? error.category : undefined,
-          platform: "pinterest",
-          downloadType: "video",
-          videoUrl: url
-        })
-        showDownloadErrorToast(
-          t("download.failed"),
-          // the staged report above keeps main's english; the toast is read
-          localizeError({
-            message,
-            category: error instanceof DownloadError ? error.category : undefined
-          }).message,
-          error instanceof DownloadError ? error.category : undefined,
-          "pinterest"
-        )
-      }
-    } finally {
-      setIsDownloading(false)
-    }
-  }
+  const { isDownloading, handleDownload } = useSimplePlatformDownload({
+    platform: "pinterest",
+    store: usePinterestStore,
+    api: pinterestApi,
+    title: pinInfo?.title
+  })
 
   return (
     <SimpleVideoDownloadCard
@@ -350,51 +313,13 @@ function TikTokDownloadCard({
   tikTokInfo: TikTokVideoInfoResponse
   className?: string
 }) {
-  const { url, isDownloading, setIsDownloading } = useTikTokStore()
   const t = useT()
-
-  const handleDownload = async () => {
-    if (!url || isDownloading) return
-    try {
-      setIsDownloading(true)
-
-      // as pinterest above: one button, one quality, never a range
-      track("download_started", {
-        platform: "tiktok",
-        media_type: "video",
-        quality: SIMPLE_QUALITY,
-        is_trimmed: false
-      })
-
-      await tiktokApi.download({ url, title: tikTokInfo?.title })
-      toast.success(t("download.complete"), { action: { label: t("toast.openFolder"), onClick: () => systemApi.openDownloadFolder() } })
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Failed to download video"
-      if (message.includes("network") || message.includes("fetch")) { showServerOverwhelmedToast() }
-      else {
-        reportActions.stage({
-          shortMessage: message,
-          details: error instanceof DownloadError ? error.details : undefined,
-          category: error instanceof DownloadError ? error.category : undefined,
-          platform: "tiktok",
-          downloadType: "video",
-          videoUrl: url
-        })
-        showDownloadErrorToast(
-          t("download.failed"),
-          // the staged report above keeps main's english; the toast is read
-          localizeError({
-            message,
-            category: error instanceof DownloadError ? error.category : undefined
-          }).message,
-          error instanceof DownloadError ? error.category : undefined,
-          "tiktok"
-        )
-      }
-    } finally {
-      setIsDownloading(false)
-    }
-  }
+  const { isDownloading, handleDownload } = useSimplePlatformDownload({
+    platform: "tiktok",
+    store: useTikTokStore,
+    api: tiktokApi,
+    title: tikTokInfo?.title
+  })
 
   return (
     <SimpleVideoDownloadCard

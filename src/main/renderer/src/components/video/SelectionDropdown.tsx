@@ -80,7 +80,9 @@ export function SelectionDropdown<T>({
     >
       <div className="flex items-center gap-2">
         <Icon className="h-5 w-5 text-slate-600 dark:text-slate-400" />
-        <h3 className="font-medium text-slate-900 dark:text-white">{heading}</h3>
+        <h3 className="font-medium text-slate-900 dark:text-white">
+          {heading}
+        </h3>
       </div>
 
       {emptyState && options.length === 0 ? (

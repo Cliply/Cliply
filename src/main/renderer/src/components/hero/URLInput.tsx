@@ -6,15 +6,13 @@ import type { UseFormReturn } from "react-hook-form"
 import { track } from "@/lib/analytics"
 import { useDownloadPath } from "@/lib/hooks/useDownloadPath"
 import { useT, type Key } from "@/lib/i18n"
-import {
-  PLATFORM_LIST,
-  PLATFORM_REGISTRY
-} from "@/lib/platform-config"
+import { PLATFORM_LIST, PLATFORM_REGISTRY } from "@/lib/platform-config"
 import { DEMO_PLAYLIST_URL } from "@/lib/playlistView"
-import { useAppStore, type Platform } from "@/lib/store"
+import { useAppStore, type Platform } from "@/lib/stores/store"
 import { cn } from "@/lib/utils"
 
-const MONO = 'Geist Mono, ui-monospace, SFMono-Regular, "SF Mono", Consolas, "Liberation Mono", Menlo, monospace'
+const MONO =
+  'Geist Mono, ui-monospace, SFMono-Regular, "SF Mono", Consolas, "Liberation Mono", Menlo, monospace'
 
 interface URLInputProps {
   form: UseFormReturn<{ url: string }>
@@ -23,15 +21,28 @@ interface URLInputProps {
   platform: Platform
 }
 
-export function URLInput({ form, onFocusChange, isLoading, platform }: URLInputProps) {
-  const { register, formState: { errors }, watch, setValue, setFocus } = form
+export function URLInput({
+  form,
+  onFocusChange,
+  isLoading,
+  platform
+}: URLInputProps) {
+  const {
+    register,
+    formState: { errors },
+    watch,
+    setValue,
+    setFocus
+  } = form
   const t = useT()
   const { selectFolder, isLoading: folderLoading } = useDownloadPath()
-  const { selectedPlatform, setSelectedPlatform, setShowMediaDetails } = useAppStore()
+  const { selectedPlatform, setSelectedPlatform, setShowMediaDetails } =
+    useAppStore()
   const [isOpen, setIsOpen] = useState(false)
 
   const config = PLATFORM_REGISTRY[platform]
-  const currentPlatform = PLATFORM_LIST.find((p) => p.id === selectedPlatform) ?? PLATFORM_LIST[0]
+  const currentPlatform =
+    PLATFORM_LIST.find((p) => p.id === selectedPlatform) ?? PLATFORM_LIST[0]
   const urlValue = watch("url")
   const hasError = !!errors.url
   const hasValue = urlValue && urlValue.length > 0
@@ -133,12 +144,15 @@ export function URLInput({ form, onFocusChange, isLoading, platform }: URLInputP
               "focus:outline-none"
             )}
           >
-            {folderLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Folder className="w-4 h-4" />}
+            {folderLoading ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <Folder className="w-4 h-4" />
+            )}
           </button>
 
           {/* right: platform picker + send */}
           <div className="flex items-center gap-2">
-
             {/* Platform dropdown */}
             <div
               data-testid="platform-picker"
@@ -169,7 +183,9 @@ export function URLInput({ form, onFocusChange, isLoading, platform }: URLInputP
                   className={cn(
                     "text-xs dark:text-slate-300 text-slate-600",
                     "transition-all duration-500 ease-[cubic-bezier(0.4,0,0.2,1)]",
-                    isOpen ? "opacity-0 max-w-0 overflow-hidden" : "opacity-100 max-w-[80px]"
+                    isOpen
+                      ? "opacity-0 max-w-0 overflow-hidden"
+                      : "opacity-100 max-w-[80px]"
                   )}
                   style={{ fontFamily: MONO }}
                 >
@@ -188,7 +204,9 @@ export function URLInput({ form, onFocusChange, isLoading, platform }: URLInputP
               <div
                 className={cn(
                   "grid transition-all duration-500 ease-[cubic-bezier(0.4,0,0.2,1)]",
-                  isOpen ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0"
+                  isOpen
+                    ? "grid-rows-[1fr] opacity-100"
+                    : "grid-rows-[0fr] opacity-0"
                 )}
               >
                 <div className="overflow-hidden">
@@ -196,11 +214,16 @@ export function URLInput({ form, onFocusChange, isLoading, platform }: URLInputP
                     {PLATFORM_LIST.map((p, index) => (
                       <div
                         key={p.id}
-                        onClick={(e) => { e.stopPropagation(); handlePlatformSelect(p.id) }}
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          handlePlatformSelect(p.id)
+                        }}
                         className={cn(
                           "flex items-center gap-2 rounded-lg px-2 py-1.5 cursor-pointer",
                           "transition-all duration-500 ease-[cubic-bezier(0.4,0,0.2,1)]",
-                          isOpen ? "translate-y-0 opacity-100" : "translate-y-2 opacity-0",
+                          isOpen
+                            ? "translate-y-0 opacity-100"
+                            : "translate-y-2 opacity-0",
                           p.id === selectedPlatform
                             ? "dark:bg-slate-700/80 bg-slate-100 dark:text-white text-slate-900"
                             : "dark:text-slate-400 text-slate-500 dark:hover:bg-slate-700/50 hover:bg-slate-50"
@@ -236,7 +259,11 @@ export function URLInput({ form, onFocusChange, isLoading, platform }: URLInputP
                 "focus:outline-none"
               )}
             >
-              {isLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+              {isLoading ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <Send className="w-4 h-4" />
+              )}
             </button>
           </div>
         </div>
@@ -249,7 +276,10 @@ export function URLInput({ form, onFocusChange, isLoading, platform }: URLInputP
           animate={{ opacity: 1, y: 0 }}
           className="px-4"
         >
-          <p className="text-sm text-red-600 dark:text-red-400 font-medium" style={{ fontFamily: MONO }}>
+          <p
+            className="text-sm text-red-600 dark:text-red-400 font-medium"
+            style={{ fontFamily: MONO }}
+          >
             {/* the form carries a translation key, put there by zod's schema
                 or by the search hook */}
             {errors.url?.message && t(errors.url.message as Key)}
@@ -270,14 +300,21 @@ export function URLInput({ form, onFocusChange, isLoading, platform }: URLInputP
               {t(config.loadingText)}
               <motion.span
                 animate={{ opacity: [0, 1, 0] }}
-                transition={{ duration: 1, repeat: Infinity, ease: "easeInOut" }}
+                transition={{
+                  duration: 1,
+                  repeat: Infinity,
+                  ease: "easeInOut"
+                }}
                 className="ml-1"
               >
                 ...
               </motion.span>
             </motion.p>
           ) : (
-            <p className="text-sm text-slate-600 dark:text-slate-500 text-center" style={{ fontFamily: MONO }}>
+            <p
+              className="text-sm text-slate-600 dark:text-slate-500 text-center"
+              style={{ fontFamily: MONO }}
+            >
               {t(config.helperText)}
               {/* only youtube's line ends in a link, because youtube is the
                   only platform here with playlists to offer. the word keeps

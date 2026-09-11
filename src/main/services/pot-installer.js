@@ -277,7 +277,6 @@ async function writeVersionMarker(stagingDir, asset) {
 module.exports = {
   PotInstaller,
   payloadAssetFor,
-  POT_VERSION,
   VERSION_MARKER,
   // exported for tests - "an asset nobody vouched for is refused" has no seam
   // once every shipping platform has a digest, and it is the guard that keeps

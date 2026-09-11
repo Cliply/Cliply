@@ -14,7 +14,7 @@ const {
   parseDestinationLine,
   parseStreamCountLine,
   normalizeUrl,
-  isYouTubeUrl,
+  isYouTubeCookieHost,
   YtdlpEngine,
   OperationGate,
   redactLogLine,
@@ -1365,7 +1365,7 @@ describe("which operations get the cookie jar", () => {
     ["https://youtube.com.evil.example/watch", false],
     ["not a url at all", false]
   ])("%s -> youtube jar attached: %s", (url, expected) => {
-    expect(isYouTubeUrl(url)).toBe(expected)
+    expect(isYouTubeCookieHost(url)).toBe(expected)
   })
 
   // the seam run() actually calls, so this is the gate rather than a

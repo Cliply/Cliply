@@ -12,7 +12,7 @@ import type { PlaylistEntry, PlaylistInfoResponse } from "@/lib/api"
 import type { PlaylistDownloadState } from "@/lib/hooks/usePlaylistDownload"
 import { useLocale } from "@/lib/i18n"
 import { en } from "@/lib/i18n/en"
-import { usePlaylistStore } from "@/lib/playlistStore"
+import { usePlaylistStore } from "@/lib/stores/playlistStore"
 import { PlaylistSummary } from "./PlaylistSummary"
 
 const entry = (index: number, title: string): PlaylistEntry => ({
@@ -76,7 +76,9 @@ function markSaved(indices: number[], state: "saved" | "reused" = "saved") {
 
 beforeEach(() => {
   usePlaylistStore.getState().reset()
-  usePlaylistStore.getState().setLoadedPlaylist("https://youtube.com/playlist?list=PL123", NINE)
+  usePlaylistStore
+    .getState()
+    .setLoadedPlaylist("https://youtube.com/playlist?list=PL123", NINE)
 })
 afterEach(cleanup)
 
@@ -93,7 +95,9 @@ describe("a partial run", () => {
 
     expect(screen.getByText("8 of 9 videos saved, 1 skipped.")).toBeDefined()
     expect(screen.queryByText(en["playlist.failed"])).toBeNull()
-    expect(screen.getByRole("button", { name: en["toast.openFolder"] })).toBeDefined()
+    expect(
+      screen.getByRole("button", { name: en["toast.openFolder"] })
+    ).toBeDefined()
   })
 
   test("names the video that did not make it", () => {
@@ -137,10 +141,15 @@ describe("a partial run", () => {
     const on = handlers()
 
     render(
-      <PlaylistSummary state={finished({ itemsSaved: 7, itemsSkipped: 2 })} {...on} />
+      <PlaylistSummary
+        state={finished({ itemsSaved: 7, itemsSkipped: 2 })}
+        {...on}
+      />
     )
 
-    fireEvent.click(screen.getByRole("button", { name: "Retry the 2 that failed" }))
+    fireEvent.click(
+      screen.getByRole("button", { name: "Retry the 2 that failed" })
+    )
 
     expect(on.onRetry).toHaveBeenCalledWith([3, 9])
   })
@@ -155,7 +164,9 @@ describe("a partial run", () => {
       />
     )
 
-    expect(screen.getByRole("button", { name: "Retry the 1 that failed" })).toBeDefined()
+    expect(
+      screen.getByRole("button", { name: "Retry the 1 that failed" })
+    ).toBeDefined()
   })
 })
 
@@ -277,7 +288,9 @@ describe("getting back to the list", () => {
     const on = handlers()
     render(<PlaylistSummary state={finished()} {...on} />)
 
-    fireEvent.click(screen.getByRole("button", { name: en["playlist.pickAgain"] }))
+    fireEvent.click(
+      screen.getByRole("button", { name: en["playlist.pickAgain"] })
+    )
 
     expect(on.onPickAgain).toHaveBeenCalled()
   })
@@ -317,7 +330,9 @@ describe("in russian", () => {
       />
     )
 
-    expect(screen.getByText("сохранено 8 из 9 видео, пропущено 1.")).toBeDefined()
+    expect(
+      screen.getByText("сохранено 8 из 9 видео, пропущено 1.")
+    ).toBeDefined()
     // «» rather than "", which is the quote russian uses
     expect(
       screen.getByText(

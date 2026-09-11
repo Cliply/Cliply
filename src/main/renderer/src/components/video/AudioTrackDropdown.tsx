@@ -1,7 +1,7 @@
 import type { AudioTrack } from "@/lib/api"
 import { languageName } from "@/lib/api"
 import { useT } from "@/lib/i18n"
-import { useYouTubeStore } from "@/lib/youtubeStore"
+import { useYouTubeStore } from "@/lib/stores/youtubeStore"
 import { Languages } from "lucide-react"
 import { useEffect } from "react"
 import { SelectionDropdown } from "./SelectionDropdown"

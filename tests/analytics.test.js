@@ -1079,7 +1079,8 @@ describe("Analytics", () => {
           "unsupported-platform", "up-to-date", "version-mismatch",
           "missing", "corrupt", "bundled-newer",
           // written as a ternary arm rather than a `reason:` literal
-          // (ytdlp-updater.js:567), so a grep for the keyword walks past it
+          // (downloadAndUnpack in ytdlp-updater.js), so a grep for the keyword
+          // walks past it
           "download-failed"
         ]) {
           const properties = await captureOne("engine_seeded", { reason: value })
@@ -1155,8 +1156,8 @@ describe("Analytics", () => {
 
         const supported = [
           ...Object.keys(SUPPORTED_PLATFORMS).map((k) => k.toLowerCase()),
-          // ipc-handlers.js:43 - the engine's own download list, which is not
-          // the same set. pinterest lives only here
+          // SUPPORTED_DOWNLOAD_PLATFORMS in ipc/validators.js - the engine's own
+          // download list, which is not the same set. pinterest lives only here
           "youtube",
           "pinterest",
           "tiktok"
@@ -2032,7 +2033,7 @@ describe("Analytics", () => {
       })
 
       it("leaves the engine's own wording exactly as it is", async () => {
-        // ERROR_METADATA and TERMINAL_ERRORS in ytdlp-engine.js. a sample
+        // ERROR_METADATA and TERMINAL_ERRORS in ytdlp/errors.js. a sample
         // rather than the whole table, chosen for the shapes that could trip
         // a pattern: an apostrophe, sentence periods, a bare hyphenated word
         for (const wording of [

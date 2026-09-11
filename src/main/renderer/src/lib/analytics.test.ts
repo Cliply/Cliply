@@ -187,8 +187,8 @@ describe("urlKind", () => {
 
 describe("quality", () => {
   test("a video is reported by the height the user picked", () => {
-    // the same value main derives for download_completed (ipc-handlers.js:514),
-    // so the two halves of one download can be joined on it
+    // the same value main derives for download_completed (trackDownloadEvent in
+    // ipc-handlers.js), so the two halves of one download can be joined on it
     expect(videoQuality(1080)).toBe("1080p")
     expect(videoQuality(144)).toBe("144p")
     expect(videoQuality(2160)).toBe("2160p")
@@ -197,14 +197,24 @@ describe("quality", () => {
   test("says nothing about a height that is not one", () => {
     // the validator takes two to four digits and a p. anything else is dropped
     // behind a warning, so it is left out here instead
-    for (const value of [0, -1, 5, 12345, NaN, Infinity, 1080.5, null, undefined]) {
+    for (const value of [
+      0,
+      -1,
+      5,
+      12345,
+      NaN,
+      Infinity,
+      1080.5,
+      null,
+      undefined
+    ]) {
       expect(videoQuality(value)).toBeNull()
     }
   })
 
   test("an audio mode is reported the way main reports it", () => {
     // extractQuality maps the "original" mode to "original_audio"
-    // (analytics-helpers.js:26), and a pass-through would split one download's
+    // (analytics-helpers.js), and a pass-through would split one download's
     // two events across two different values
     expect(audioQuality("mp3")).toBe("mp3")
     expect(audioQuality("m4a")).toBe("m4a")
@@ -215,7 +225,7 @@ describe("quality", () => {
 
 describe("isTrimmedRange", () => {
   test("agrees with what main will actually do with the range", () => {
-    // normalizeTimeRange (ipc-handlers.js:55) throws away a range that is not a
+    // normalizeTimeRange (ipc/validators.js) throws away a range that is not a
     // segment, so a download reported as trimmed here and untrimmed there would
     // be one download disagreeing with itself
     expect(isTrimmedRange({ start: 10, end: 30 })).toBe(true)
@@ -261,14 +271,10 @@ describe("track", () => {
 
   test("never throws when the bridge is missing", () => {
     // the browser dev server has no preload at all
-    expect(() =>
-      track("url_submitted", { platform: "youtube" })
-    ).not.toThrow()
+    expect(() => track("url_submitted", { platform: "youtube" })).not.toThrow()
 
     vi.stubGlobal("window", {})
-    expect(() =>
-      track("url_submitted", { platform: "youtube" })
-    ).not.toThrow()
+    expect(() => track("url_submitted", { platform: "youtube" })).not.toThrow()
   })
 
   test("never throws when the bridge does", () => {
@@ -280,13 +286,14 @@ describe("track", () => {
       }
     }
 
-    expect(() => track("download_started", { platform: "youtube" })).not.toThrow()
+    expect(() =>
+      track("download_started", { platform: "youtube" })
+    ).not.toThrow()
   })
 
   test("a rejected send is not an unhandled rejection", async () => {
     const unhandled = vi.fn()
     process.on("unhandledRejection", unhandled)
-
     ;(window as unknown as { electronAPI: unknown }).electronAPI = {
       analytics: { track: () => Promise.reject(new Error("no main process")) }
     }

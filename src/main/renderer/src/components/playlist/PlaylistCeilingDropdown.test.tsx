@@ -10,7 +10,7 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, test } from "vitest"
 
-import { usePlaylistStore } from "@/lib/playlistStore"
+import { usePlaylistStore } from "@/lib/stores/playlistStore"
 import { PlaylistCeilingDropdown } from "./PlaylistCeilingDropdown"
 
 const openMenu = () => fireEvent.click(screen.getAllByRole("button")[0])
@@ -38,7 +38,9 @@ describe("the six rows", () => {
     render(<PlaylistCeilingDropdown />)
     openMenu()
 
-    const menu = rows().map((row) => row.textContent).join(" ")
+    const menu = rows()
+      .map((row) => row.textContent)
+      .join(" ")
 
     expect(menu).not.toMatch(/\bMB\b/)
     expect(menu).not.toMatch(/\bGB\b/)
@@ -49,7 +51,9 @@ describe("the six rows", () => {
     render(<PlaylistCeilingDropdown />)
     openMenu()
 
-    expect(rows().filter((row) => row.textContent?.includes("MP4"))).toHaveLength(6)
+    expect(
+      rows().filter((row) => row.textContent?.includes("MP4"))
+    ).toHaveLength(6)
     expect(screen.queryByText(/MKV/)).toBeNull()
   })
 })
@@ -59,7 +63,9 @@ describe("the default", () => {
     render(<PlaylistCeilingDropdown />)
 
     expect(usePlaylistStore.getState().selectedCeiling).toBe(1080)
-    expect(screen.getAllByRole("button")[0].textContent).toContain("Up to 1080p")
+    expect(screen.getAllByRole("button")[0].textContent).toContain(
+      "Up to 1080p"
+    )
   })
 
   test("a click sends the height that row promised", () => {

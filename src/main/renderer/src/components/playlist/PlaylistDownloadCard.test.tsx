@@ -14,11 +14,14 @@ import type {
   PlaylistDownloadState,
   usePlaylistDownload
 } from "@/lib/hooks/usePlaylistDownload"
-import { usePlaylistStore } from "@/lib/playlistStore"
-import { useYouTubeStore } from "@/lib/youtubeStore"
+import { usePlaylistStore } from "@/lib/stores/playlistStore"
+import { useYouTubeStore } from "@/lib/stores/youtubeStore"
 import { PlaylistDownloadCard } from "./PlaylistDownloadCard"
 
-const entry = (index: number, overrides: Partial<PlaylistEntry> = {}): PlaylistEntry => ({
+const entry = (
+  index: number,
+  overrides: Partial<PlaylistEntry> = {}
+): PlaylistEntry => ({
   index,
   id: `video${index}`,
   title: `video ${index}`,
@@ -85,7 +88,9 @@ describe("picking", () => {
     const { playlist } = fakePlaylist()
     render(<PlaylistDownloadCard playlist={playlist} phase="picking" />)
 
-    expect(screen.getByRole("button", { name: "Download 2 videos" })).toBeDefined()
+    expect(
+      screen.getByRole("button", { name: "Download 2 videos" })
+    ).toBeDefined()
   })
 
   test("one video is downloaded in the singular", () => {
@@ -94,7 +99,9 @@ describe("picking", () => {
     const { playlist } = fakePlaylist()
     render(<PlaylistDownloadCard playlist={playlist} phase="picking" />)
 
-    expect(screen.getByRole("button", { name: "Download 1 video" })).toBeDefined()
+    expect(
+      screen.getByRole("button", { name: "Download 1 video" })
+    ).toBeDefined()
   })
 
   test("nothing ticked disables the button rather than sending an empty spec", () => {
@@ -105,7 +112,9 @@ describe("picking", () => {
     const { playlist } = fakePlaylist()
     render(<PlaylistDownloadCard playlist={playlist} phase="picking" />)
 
-    const button = screen.getByRole("button", { name: en["playlist.pickVideosFirst"] })
+    const button = screen.getByRole("button", {
+      name: en["playlist.pickVideosFirst"]
+    })
     expect((button as HTMLButtonElement).disabled).toBe(true)
   })
 
@@ -124,11 +133,15 @@ describe("picking", () => {
 
     selectAudioTab()
 
-    expect(screen.getByRole("button", { name: "Download 2 tracks" })).toBeDefined()
+    expect(
+      screen.getByRole("button", { name: "Download 2 tracks" })
+    ).toBeDefined()
 
     // the same three-mode menu the video screen uses, writing to the
     // playlist's own selection rather than to the single-video store
-    fireEvent.click(screen.getAllByRole("button", { name: /plays everywhere/ })[0])
+    fireEvent.click(
+      screen.getAllByRole("button", { name: /plays everywhere/ })[0]
+    )
     fireEvent.click(screen.getByRole("button", { name: /Original/ }))
 
     expect(usePlaylistStore.getState().selectedAudioMode).toBe("original")
@@ -199,9 +212,7 @@ describe("what each tab says about a run", () => {
 
     selectAudioTab()
 
-    expect(
-      screen.getByText(en["playlist.audioNote"])
-    ).toBeDefined()
+    expect(screen.getByText(en["playlist.audioNote"])).toBeDefined()
   })
 
   /**
@@ -276,7 +287,9 @@ describe("downloading", () => {
     const { playlist, calls } = running()
     render(<PlaylistDownloadCard playlist={playlist} phase="running" />)
 
-    fireEvent.click(screen.getByRole("button", { name: en["playlist.cancelRemaining"] }))
+    fireEvent.click(
+      screen.getByRole("button", { name: en["playlist.cancelRemaining"] })
+    )
 
     expect(calls.cancelDownload).toHaveBeenCalled()
     expect(screen.getByText(/Videos already saved are kept/)).toBeDefined()
@@ -286,7 +299,9 @@ describe("downloading", () => {
     const { playlist } = fakePlaylist({ status: "starting", progress: 0 })
     render(<PlaylistDownloadCard playlist={playlist} phase="running" />)
 
-    const button = screen.getByRole("button", { name: en["playlist.cancelRemaining"] })
+    const button = screen.getByRole("button", {
+      name: en["playlist.cancelRemaining"]
+    })
     expect((button as HTMLButtonElement).disabled).toBe(true)
     expect(screen.getByText(en["progress.startingUp"])).toBeDefined()
   })
@@ -315,19 +330,28 @@ describe("finished", () => {
     })
     render(<PlaylistDownloadCard playlist={playlist} phase="finished" />)
 
-    fireEvent.click(screen.getByRole("button", { name: "Retry the 1 that failed" }))
+    fireEvent.click(
+      screen.getByRole("button", { name: "Retry the 1 that failed" })
+    )
 
     expect([...usePlaylistStore.getState().selectedIndices]).toEqual([2])
     expect(calls.mutateAsync).toHaveBeenCalledWith({})
   })
 
   test("picking again puts the checkboxes back", () => {
-    usePlaylistStore.getState().setItemStatus(1, { state: "saved", progress: 100 })
+    usePlaylistStore
+      .getState()
+      .setItemStatus(1, { state: "saved", progress: 100 })
 
-    const { playlist, calls } = fakePlaylist({ status: "completed", progress: 100 })
+    const { playlist, calls } = fakePlaylist({
+      status: "completed",
+      progress: 100
+    })
     render(<PlaylistDownloadCard playlist={playlist} phase="finished" />)
 
-    fireEvent.click(screen.getByRole("button", { name: en["playlist.pickAgain"] }))
+    fireEvent.click(
+      screen.getByRole("button", { name: en["playlist.pickAgain"] })
+    )
 
     expect(usePlaylistStore.getState().itemStatus.size).toBe(0)
     expect(calls.reset).toHaveBeenCalled()

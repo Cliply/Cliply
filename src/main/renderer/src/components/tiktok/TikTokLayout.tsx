@@ -2,22 +2,22 @@ import { ModeToggle } from "@/components/ui/mode-toggle"
 import { FeedbackCard, UnifiedDownloadCard } from "@/components/video"
 import { useDownloadPath } from "@/lib/hooks/useDownloadPath"
 import { useT } from "@/lib/i18n"
-import { useTikTokStore } from "@/lib/tiktokStore"
-import { useAppStore } from "@/lib/store"
+import { useTikTokStore } from "@/lib/stores/tiktokStore"
+import { useAppStore } from "@/lib/stores/store"
 import { motion } from "framer-motion"
 import { CompactSearch } from "../video/CompactSearch"
 import { TikTokDetailsCard } from "./TikTokDetailsCard"
 import { TikTokThumbnail } from "./TikTokThumbnail"
 
 export function TikTokLayout() {
-  const { videoInfo, url } = useTikTokStore()
+  const { info, url } = useTikTokStore()
   const { setShowMediaDetails } = useAppStore()
   const t = useT()
   // the folder the user actually chose, rather than the default this
   // line named whether or not it was still true
   const { downloadPath } = useDownloadPath()
 
-  if (!videoInfo) return null
+  if (!info) return null
 
   const handleReset = () => {
     const { reset } = useTikTokStore.getState()
@@ -117,14 +117,14 @@ export function TikTokLayout() {
             )}
 
             <div className="flex-shrink-0">
-              <TikTokDetailsCard videoInfo={videoInfo} />
+              <TikTokDetailsCard videoInfo={info} />
             </div>
 
             <div className="flex-1 min-h-[250px] sm:min-h-[300px] lg:min-h-[350px]">
               <TikTokThumbnail
-                thumbnailUrl={videoInfo.thumbnail}
+                thumbnailUrl={info.thumbnail}
                 videoUrl={url}
-                title={videoInfo.title}
+                title={info.title}
               />
             </div>
           </motion.div>
@@ -135,7 +135,7 @@ export function TikTokLayout() {
           <div className="flex-1 xl:overflow-y-auto">
             <div className="p-4 lg:p-6 space-y-4 lg:space-y-6">
               <FeedbackCard />
-              <UnifiedDownloadCard platform="tiktok" tikTokInfo={videoInfo} />
+              <UnifiedDownloadCard platform="tiktok" tikTokInfo={info} />
             </div>
           </div>
         </div>

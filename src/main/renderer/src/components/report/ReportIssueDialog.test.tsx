@@ -4,7 +4,7 @@ import { cleanup, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
 
 import { buildIssueBody, environmentFields } from "@/lib/report"
-import { useReportStore } from "@/lib/reportStore"
+import { useReportStore } from "@/lib/stores/reportStore"
 
 const DIAGNOSTICS = {
   appVersion: "0.3.3",
@@ -52,9 +52,7 @@ describe("what the report says about your machine", () => {
   test("shows the engine version the report is about to attach", async () => {
     await openDialog()
 
-    await waitFor(() =>
-      expect(screen.getByText("2026.08.19")).toBeDefined()
-    )
+    await waitFor(() => expect(screen.getByText("2026.08.19")).toBeDefined())
   })
 
   test("shows every field the issue body carries, so nothing rides along unseen", async () => {

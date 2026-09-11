@@ -10,7 +10,7 @@
 import { cleanup, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
 
-import { useCookieStore } from "@/lib/cookieStore"
+import { useCookieStore } from "@/lib/stores/cookieStore"
 import { useLocale } from "@/lib/i18n"
 
 const getStatus = vi.fn()
@@ -98,13 +98,21 @@ describe("CookieDialog", () => {
     getStatus.mockResolvedValue(
       status({
         hasValidCookies: true,
-        fileInfo: { ...status().fileInfo, cookieCount: 22, youtubeCookieCount: 22, signedIn: true, valid: true }
+        fileInfo: {
+          ...status().fileInfo,
+          cookieCount: 22,
+          youtubeCookieCount: 22,
+          signedIn: true,
+          valid: true
+        }
       })
     )
 
     await open()
 
-    await waitFor(() => expect(screen.getByText(/signed in · 22 cookies/)).toBeTruthy())
+    await waitFor(() =>
+      expect(screen.getByText(/signed in · 22 cookies/)).toBeTruthy()
+    )
     // the recipe is the empty state, not permanent furniture
     expect(screen.queryByText(/close that youtube tab/i)).toBeNull()
     expect(screen.getByText(/replace/)).toBeTruthy()
@@ -115,7 +123,9 @@ describe("CookieDialog", () => {
 
     await open()
 
-    await waitFor(() => expect(screen.getByText("here's how to import them")).toBeTruthy())
+    await waitFor(() =>
+      expect(screen.getByText("here's how to import them")).toBeTruthy()
+    )
     expect(screen.getByText(/close that youtube tab/i)).toBeTruthy()
     // the account warning moved onto the step it is about, rather than sitting
     // apart with an amber bar down its side
@@ -132,8 +142,15 @@ describe("CookieDialog", () => {
     getStatus.mockResolvedValue(
       status({
         problem: "youtube ended this session, export your cookies again",
-        status: { lastImport: new Date(Date.now() - 2 * 86400000).toISOString() },
-        fileInfo: { ...status().fileInfo, cookieCount: 12, youtubeCookieCount: 12, hasSid: true }
+        status: {
+          lastImport: new Date(Date.now() - 2 * 86400000).toISOString()
+        },
+        fileInfo: {
+          ...status().fileInfo,
+          cookieCount: 12,
+          youtubeCookieCount: 12,
+          hasSid: true
+        }
       })
     )
 
@@ -153,13 +170,19 @@ describe("CookieDialog", () => {
   // the two failures that look identical to a user and mean different things.
   // both come from main word for word
   test.each([
-    ["these cookies aren't from a signed-in session, sign in first then export"],
+    [
+      "these cookies aren't from a signed-in session, sign in first then export"
+    ],
     ["your cookies expired, grab a fresh export"]
   ])("renders main's sentence: %s", async (problem) => {
     getStatus.mockResolvedValue(
       status({
         problem,
-        fileInfo: { ...status().fileInfo, cookieCount: 8, youtubeCookieCount: 8 }
+        fileInfo: {
+          ...status().fileInfo,
+          cookieCount: 8,
+          youtubeCookieCount: 8
+        }
       })
     )
 
@@ -177,35 +200,48 @@ describe("CookieDialog", () => {
 describe("a file that isn't a cookie jar", () => {
   test("says so, with main's reason", async () => {
     importFile.mockRejectedValue(
-      new Error("there are no cookies in that file. export cookies.txt with the extension, then pick that one.")
+      new Error(
+        "there are no cookies in that file. export cookies.txt with the extension, then pick that one."
+      )
     )
     getStatus.mockResolvedValue(status())
 
     await open()
-    await waitFor(() => expect(screen.getByText("here's how to import them")).toBeTruthy())
+    await waitFor(() =>
+      expect(screen.getByText("here's how to import them")).toBeTruthy()
+    )
     screen.getByText("import cookies…").click()
 
     await waitFor(() => expect(toastError).toHaveBeenCalled())
-    expect(toastError.mock.calls[0][1].description).toMatch(/no cookies in that file/)
+    expect(toastError.mock.calls[0][1].description).toMatch(
+      /no cookies in that file/
+    )
   })
 
   test("a jar that imports but isn't a login is not silent either", async () => {
     importFile.mockResolvedValue({ imported: false, hasValidCookies: false })
-    getStatus
-      .mockResolvedValueOnce(status())
-      .mockResolvedValue(
-        status({
-          problem: "these cookies aren't from a signed-in session, sign in first then export",
-          fileInfo: { ...status().fileInfo, cookieCount: 4, youtubeCookieCount: 4 }
-        })
-      )
+    getStatus.mockResolvedValueOnce(status()).mockResolvedValue(
+      status({
+        problem:
+          "these cookies aren't from a signed-in session, sign in first then export",
+        fileInfo: {
+          ...status().fileInfo,
+          cookieCount: 4,
+          youtubeCookieCount: 4
+        }
+      })
+    )
 
     await open()
-    await waitFor(() => expect(screen.getByText("here's how to import them")).toBeTruthy())
+    await waitFor(() =>
+      expect(screen.getByText("here's how to import them")).toBeTruthy()
+    )
     screen.getByText("import cookies…").click()
 
     await waitFor(() => expect(toastWarning).toHaveBeenCalled())
-    expect(toastWarning.mock.calls[0][1].description).toMatch(/signed-in session/)
+    expect(toastWarning.mock.calls[0][1].description).toMatch(
+      /signed-in session/
+    )
   })
 })
 
@@ -219,7 +255,13 @@ describe("testing the cookies", () => {
   const signedInStatus = () =>
     status({
       hasValidCookies: true,
-      fileInfo: { ...status().fileInfo, cookieCount: 22, youtubeCookieCount: 22, signedIn: true, valid: true }
+      fileInfo: {
+        ...status().fileInfo,
+        cookieCount: 22,
+        youtubeCookieCount: 22,
+        signedIn: true,
+        valid: true
+      }
     })
 
   test("a rejection is not called fine", async () => {
@@ -266,7 +308,13 @@ describe("removing the cookies", () => {
     getStatus.mockResolvedValue(
       status({
         hasValidCookies: true,
-        fileInfo: { ...status().fileInfo, cookieCount: 22, youtubeCookieCount: 22, signedIn: true, valid: true }
+        fileInfo: {
+          ...status().fileInfo,
+          cookieCount: 22,
+          youtubeCookieCount: 22,
+          signedIn: true,
+          valid: true
+        }
       })
     )
     clearCookies.mockRejectedValue(
@@ -278,7 +326,9 @@ describe("removing the cookies", () => {
     screen.getByText("remove").click()
 
     await waitFor(() => expect(toastError).toHaveBeenCalled())
-    expect(toastError.mock.calls[0][1].description).toMatch(/still on this machine/)
+    expect(toastError.mock.calls[0][1].description).toMatch(
+      /still on this machine/
+    )
     // and it is a button again rather than a permanent spinner
     await waitFor(() =>
       expect(screen.getByText("remove").closest("button")?.disabled).toBe(false)
@@ -312,13 +362,21 @@ describe("what the dialog promises about the file", () => {
     getStatus.mockResolvedValue(
       status({
         hasValidCookies: true,
-        fileInfo: { ...status().fileInfo, cookieCount: 22, youtubeCookieCount: 22, signedIn: true, valid: true }
+        fileInfo: {
+          ...status().fileInfo,
+          cookieCount: 22,
+          youtubeCookieCount: 22,
+          signedIn: true,
+          valid: true
+        }
       })
     )
 
     await open()
 
-    await waitFor(() => expect(screen.getByText(/stays on this device/i)).toBeTruthy())
+    await waitFor(() =>
+      expect(screen.getByText(/stays on this device/i)).toBeTruthy()
+    )
     expect(screen.getByText(/never to cliply/i)).toBeTruthy()
   })
 })
@@ -338,25 +396,33 @@ describe("the robots.txt address", () => {
     getStatus.mockResolvedValue(status())
 
     await open()
-    await waitFor(() => expect(screen.getByText("youtube.com/robots.txt")).toBeTruthy())
+    await waitFor(() =>
+      expect(screen.getByText("youtube.com/robots.txt")).toBeTruthy()
+    )
     screen.getByText("youtube.com/robots.txt").click()
 
     await waitFor(() =>
-      expect(writeText).toHaveBeenCalledWith("https://www.youtube.com/robots.txt")
+      expect(writeText).toHaveBeenCalledWith(
+        "https://www.youtube.com/robots.txt"
+      )
     )
     // the whole point: no browser was opened
     expect(openExternal).not.toHaveBeenCalled()
   })
 
   test("and says so, so the click does not look like it did nothing", async () => {
-    Object.assign(navigator, { clipboard: { writeText: vi.fn(async () => undefined) } })
+    Object.assign(navigator, {
+      clipboard: { writeText: vi.fn(async () => undefined) }
+    })
     getStatus.mockResolvedValue(status())
 
     await open()
     await waitFor(() => expect(screen.getByText("click to copy")).toBeTruthy())
     screen.getByText("youtube.com/robots.txt").click()
 
-    await waitFor(() => expect(screen.getByText(/copied, paste it there/)).toBeTruthy())
+    await waitFor(() =>
+      expect(screen.getByText(/copied, paste it there/)).toBeTruthy()
+    )
   })
 
   // the extension links are the opposite case, and must still open a browser
@@ -364,7 +430,9 @@ describe("the robots.txt address", () => {
     getStatus.mockResolvedValue(status())
 
     await open()
-    await waitFor(() => expect(screen.getByText("get cookies.txt LOCALLY")).toBeTruthy())
+    await waitFor(() =>
+      expect(screen.getByText("get cookies.txt LOCALLY")).toBeTruthy()
+    )
     screen.getByText("get cookies.txt LOCALLY").click()
 
     await waitFor(() => expect(openExternal).toHaveBeenCalled())
@@ -396,7 +464,8 @@ describe("the row above the steps", () => {
   test("but reports the problem when a file is there and unreadable", async () => {
     getStatus.mockResolvedValue(
       status({
-        problem: "that file is malformed, export a fresh one instead of editing it",
+        problem:
+          "that file is malformed, export a fresh one instead of editing it",
         fileInfo: {
           ...status().fileInfo,
           cookieCount: 0,
@@ -416,13 +485,21 @@ describe("the row above the steps", () => {
     getStatus.mockResolvedValue(
       status({
         hasValidCookies: true,
-        fileInfo: { ...status().fileInfo, cookieCount: 22, youtubeCookieCount: 22, signedIn: true, valid: true }
+        fileInfo: {
+          ...status().fileInfo,
+          cookieCount: 22,
+          youtubeCookieCount: 22,
+          signedIn: true,
+          valid: true
+        }
       })
     )
 
     await open()
 
-    await waitFor(() => expect(screen.getByText(/signed in · 22 cookies/)).toBeTruthy())
+    await waitFor(() =>
+      expect(screen.getByText(/signed in · 22 cookies/)).toBeTruthy()
+    )
     expect(screen.queryByText("here's how to import them")).toBeNull()
   })
 })
@@ -456,7 +533,12 @@ describe("in russian", () => {
       status({
         problem: "youtube ended this session, export your cookies again",
         problemCode: "JAR_SESSION_ENDED",
-        fileInfo: { ...status().fileInfo, cookieCount: 12, youtubeCookieCount: 12, hasSid: true }
+        fileInfo: {
+          ...status().fileInfo,
+          cookieCount: 12,
+          youtubeCookieCount: 12,
+          hasSid: true
+        }
       })
     )
 
@@ -464,7 +546,9 @@ describe("in russian", () => {
 
     await waitFor(() =>
       expect(
-        screen.getByText("YouTube завершил эту сессию, экспортируйте cookies заново")
+        screen.getByText(
+          "YouTube завершил эту сессию, экспортируйте cookies заново"
+        )
       ).toBeTruthy()
     )
   })
@@ -475,7 +559,11 @@ describe("in russian", () => {
       status({
         problem: "something new main learned to say",
         problemCode: "JAR_SOMETHING_NEW",
-        fileInfo: { ...status().fileInfo, cookieCount: 12, youtubeCookieCount: 12 }
+        fileInfo: {
+          ...status().fileInfo,
+          cookieCount: 12,
+          youtubeCookieCount: 12
+        }
       })
     )
 
@@ -492,7 +580,13 @@ describe("in russian", () => {
     getStatus.mockResolvedValue(
       status({
         hasValidCookies: true,
-        fileInfo: { ...status().fileInfo, cookieCount: 22, youtubeCookieCount: 22, signedIn: true, valid: true }
+        fileInfo: {
+          ...status().fileInfo,
+          cookieCount: 22,
+          youtubeCookieCount: 22,
+          signedIn: true,
+          valid: true
+        }
       })
     )
 
@@ -511,7 +605,12 @@ test("under english the status row is main's own text", async () => {
     status({
       problem: "youtube ended this session, export your cookies again",
       problemCode: "JAR_SESSION_ENDED",
-      fileInfo: { ...status().fileInfo, cookieCount: 12, youtubeCookieCount: 12, hasSid: true }
+      fileInfo: {
+        ...status().fileInfo,
+        cookieCount: 12,
+        youtubeCookieCount: 12,
+        hasSid: true
+      }
     })
   )
 
@@ -531,7 +630,9 @@ test("the export step names the icon and the button", async () => {
 
   await open()
 
-  await waitFor(() => expect(screen.getByText(/click the extension/i)).toBeTruthy())
+  await waitFor(() =>
+    expect(screen.getByText(/click the extension/i)).toBeTruthy()
+  )
   expect(screen.getByText("export")).toBeTruthy()
   expect(screen.getByText(/up by your address bar/i)).toBeTruthy()
 })

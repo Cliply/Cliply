@@ -8,7 +8,8 @@ import type { Key } from "@/lib/i18n"
  * whoever renders or toasts it calls `t()` on it then.
  */
 
-const YOUTUBE_URL_REGEX = /^(https?:\/\/)?(www\.)?(youtube\.com\/(watch\?v=|embed\/|v\/|shorts\/)|youtu\.be\/)[\w-]+/
+const YOUTUBE_URL_REGEX =
+  /^(https?:\/\/)?(www\.)?(youtube\.com\/(watch\?v=|embed\/|v\/|shorts\/)|youtu\.be\/)[\w-]+/
 /**
  * pinterest sends people to their own country's domain, so `www.pinterest.com`
  * is the shape in the documentation rather than the shape in a clipboard -
@@ -25,7 +26,8 @@ const YOUTUBE_URL_REGEX = /^(https?:\/\/)?(www\.)?(youtube\.com\/(watch\?v=|embe
  */
 const PINTEREST_URL_REGEX =
   /^(?:https?:\/\/)?(?:(?:[a-z0-9-]+\.)*pinterest\.[a-z]{2,3}(?:\.[a-z]{2})?\/pin\/[\w-]+|pin\.it\/[\w-]+)/i
-const TIKTOK_URL_REGEX = /^https?:\/\/(?:(?:www\.)?tiktok\.com\/@[\w.-]+\/video\/\d+|vm\.tiktok\.com\/[\w-]+|vt\.tiktok\.com\/[\w-]+|(?:www\.)?tiktok\.com\/t\/[\w-]+|(?:www\.)?tiktok\.com\/embed\/\d+)/
+const TIKTOK_URL_REGEX =
+  /^https?:\/\/(?:(?:www\.)?tiktok\.com\/@[\w.-]+\/video\/\d+|vm\.tiktok\.com\/[\w-]+|vt\.tiktok\.com\/[\w-]+|(?:www\.)?tiktok\.com\/t\/[\w-]+|(?:www\.)?tiktok\.com\/embed\/\d+)/
 /**
  * a link to a playlist rather than to a video in one.
  *
@@ -44,8 +46,7 @@ const PLAYLIST_URL_REGEX =
 
 /**
  * the video id inside a youtube link, with the host read as strictly as the
- * validators above read it. `extractVideoId` below is the older, laxer reader
- * that predates this and is left alone.
+ * validators above read it.
  */
 const YOUTUBE_VIDEO_ID_REGEX =
   /^(?:https?:\/\/)?(?:[a-z0-9-]+\.)*(?:youtube\.com\/(?:watch\?(?:[^#]*&)?v=|embed\/|v\/|shorts\/)|youtu\.be\/)([\w-]+)/i
@@ -58,7 +59,8 @@ export const youtubeUrlSchema = z.object({
     .string()
     .min(1, "validation.youtubeRequired" satisfies Key)
     .refine(
-      (url: string) => YOUTUBE_URL_REGEX.test(url) || PLAYLIST_URL_REGEX.test(url),
+      (url: string) =>
+        YOUTUBE_URL_REGEX.test(url) || PLAYLIST_URL_REGEX.test(url),
       "validation.youtubeInvalid" satisfies Key
     )
 })
@@ -123,7 +125,9 @@ export interface YouTubeTarget {
 export const detectYouTubeTarget = (url: string): YouTubeTarget => {
   const videoId = url.match(YOUTUBE_VIDEO_ID_REGEX)?.[1] ?? null
   const isYouTube = videoId !== null || PLAYLIST_URL_REGEX.test(url)
-  const listId = isYouTube ? (url.match(YOUTUBE_LIST_ID_REGEX)?.[1] ?? null) : null
+  const listId = isYouTube
+    ? (url.match(YOUTUBE_LIST_ID_REGEX)?.[1] ?? null)
+    : null
 
   if (videoId && listId) {
     return { kind: "both", videoId, listId }
@@ -164,10 +168,6 @@ export const tiktokUrlSchema = z.object({
 
 export type TikTokUrlFormData = z.infer<typeof tiktokUrlSchema>
 
-export const isValidTikTokUrl = (url: string): boolean => {
-  return TIKTOK_URL_REGEX.test(url)
-}
-
 export const detectPlatform = (
   url: string
 ): "youtube" | "pinterest" | "tiktok" | null => {
@@ -181,9 +181,4 @@ export const detectPlatform = (
     return "tiktok"
   }
   return null
-}
-
-export const extractVideoId = (url: string): string | null => {
-  const match = url.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/|youtube\.com\/shorts\/)([^&\n?#]+)/)
-  return match ? match[1] : null
 }

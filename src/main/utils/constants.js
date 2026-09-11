@@ -6,18 +6,13 @@ const os = require("os")
 // app config
 const APP_CONFIG = {
   // download settings
+  // nothing reads this yet - it is reserved for the download queue, which is
+  // where the cap on simultaneous downloads will be enforced
   MAX_CONCURRENT_DOWNLOADS: 4,
-  DOWNLOAD_TIMEOUT: 30 * 60 * 1000, // 30 minutes
 
   // file paths
   DOWNLOADS_DIR: path.join(os.homedir(), "Downloads", "Cliply"),
   COOKIES_DIR: path.join(os.homedir(), ".config", "app-data-7c4f", "cookies"),
-  TEMP_DIR: path.join(os.tmpdir(), "cliply"),
-
-  // binary paths
-  BINARIES: {
-    FFMPEG: process.platform === "win32" ? "ffmpeg.exe" : "ffmpeg"
-  },
 
   // update config - all updates are treated as important
   UPDATE_CONFIG: {
@@ -108,19 +103,11 @@ const SUPPORTED_PLATFORMS = {
   }
 }
 
-// file formats
-const FORMATS = {
-  VIDEO: ["mp4", "webm", "mkv", "avi", "mov"],
-  AUDIO: ["mp3", "m4a", "wav", "opus", "aac", "flac"],
-  SUBTITLE: ["srt", "vtt", "ass"]
-}
-
 // error codes live in utils/error-taxonomy.js - this file used to carry a
 // six-entry copy of them that nothing kept in step
 
 module.exports = {
   APP_CONFIG,
   IPC_CHANNELS,
-  SUPPORTED_PLATFORMS,
-  FORMATS
+  SUPPORTED_PLATFORMS
 }

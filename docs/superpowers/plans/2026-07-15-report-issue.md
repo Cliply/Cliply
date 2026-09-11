@@ -1,5 +1,12 @@
 # One-Click Issue Reporting Implementation Plan
 
+> **Superseded. Historical record only.** This document was written when Cliply
+> had a separate Python FastAPI backend that the Electron main process talked to
+> over HTTP. That backend no longer exists: the main process now spawns yt-dlp
+> directly. Everything below describes the architecture and the plan as they
+> stood at the time, so read it as a record of what was intended then, not as a
+> description of how Cliply behaves today.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** A "Report" button on failed downloads that opens a prefilled GitHub issue at `github.com/Cliply/Cliply/issues/new` with error details, redacted logs, and system info.

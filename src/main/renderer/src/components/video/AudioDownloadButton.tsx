@@ -7,7 +7,7 @@ import {
 import { formatDuration, languageName, validateTimeRange } from "@/lib/api"
 import { useAudioDownload } from "@/lib/hooks/useAudioDownload"
 import { useT } from "@/lib/i18n"
-import { useYouTubeStore } from "@/lib/youtubeStore"
+import { useYouTubeStore } from "@/lib/stores/youtubeStore"
 import { isTerminalReason } from "@/lib/downloadOutcome"
 import { cn } from "@/lib/utils"
 import { DownloadProgressBar } from "./DownloadProgressBar"
@@ -60,7 +60,6 @@ export function AudioDownloadButton({
     if (audioDownloadMutation.isPending) return
 
     // Check server status before attempting download
-
 
     try {
       setIsDownloadingAudio(true)

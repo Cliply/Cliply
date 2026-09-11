@@ -8,8 +8,9 @@
 // is invisible in the field rather than loud.
 //
 // the value sets below are therefore mirrors of specific main-process code, and
-// each is noted with what it mirrors. src/main/services/analytics.js is where
-// they are enforced.
+// each is noted with what it mirrors. src/main/services/analytics/schema.js is
+// where they are declared, and src/main/services/analytics.js is the boundary
+// that enforces them.
 
 import type { AudioMode, PlaylistInfoResponse, TimeRange } from "@/lib/api"
 
@@ -29,7 +30,10 @@ export type AnalyticsProperties = Record<
  * @param event - one of the four events the main handler accepts
  * @param properties - the bag; an absent value is left out rather than nulled
  */
-export function track(event: string, properties: AnalyticsProperties = {}): void {
+export function track(
+  event: string,
+  properties: AnalyticsProperties = {}
+): void {
   try {
     const sendable: Record<string, AnalyticsValue> = {}
 
@@ -78,7 +82,11 @@ export function durationBucket(
   // a live stream, a pin with no duration, a mapper that returned nothing.
   // "unknown" is not a bucket label - the validator's grammar wants a digit or
   // a comparison first - so absence is reported by leaving the property out
-  if (typeof seconds !== "number" || !Number.isFinite(seconds) || seconds <= 0) {
+  if (
+    typeof seconds !== "number" ||
+    !Number.isFinite(seconds) ||
+    seconds <= 0
+  ) {
     return null
   }
 
@@ -128,13 +136,16 @@ export function playlistSizeBucket(
   info: Pick<PlaylistInfoResponse, "count" | "listed">
 ): string | null {
   const reported = typeof info.count === "number" ? info.count : 0
-  const size = Number.isFinite(reported) && reported > 0 ? reported : info.listed
+  const size =
+    Number.isFinite(reported) && reported > 0 ? reported : info.listed
 
   if (typeof size !== "number" || !Number.isFinite(size) || size <= 0) {
     return null
   }
 
-  return PLAYLIST_SIZE_BUCKETS.find((bucket) => size <= bucket.upTo)?.label ?? null
+  return (
+    PLAYLIST_SIZE_BUCKETS.find((bucket) => size <= bucket.upTo)?.label ?? null
+  )
 }
 
 /**
@@ -147,7 +158,7 @@ export function playlistSizeBucket(
  * answer is a separate measurement, and not one this property can make.
  *
  * every value must also appear in PROPERTY_VOCABULARIES.url_kind
- * (services/analytics.js) or it is dropped on arrival.
+ * (services/analytics/schema.js) or it is dropped on arrival.
  */
 export const URL_KINDS = {
   playlist: "playlist",
@@ -188,7 +199,7 @@ export function urlKind(url: string): string {
  * the quality of a video download, as the height the user picked
  *
  * main derives the same value for the same download's later events
- * (ipc-handlers.js:514), so the two can be joined on it.
+ * (trackDownloadEvent in ipc-handlers.js), so the two can be joined on it.
  *
  * @param height - the menu row's height
  * @returns "1080p" and the like, or null for a height no row could produce
@@ -205,7 +216,7 @@ export function videoQuality(height: number | null | undefined): string | null {
  * the quality of an audio download.
  *
  * extractQuality maps the "original" mode to "original_audio"
- * (analytics-helpers.js:26) for the same download's later events, so passing
+ * (analytics-helpers.js) for the same download's later events, so passing
  * the mode through unmapped would split one download across two values.
  */
 export const AUDIO_QUALITIES: Record<AudioMode, string> = {
@@ -223,7 +234,7 @@ export function audioQuality(mode: AudioMode): string {
  *
  * pinterest and tiktok send no format id, so main's own falls back to the
  * platform name and extractQuality maps both of those to "best_available"
- * (analytics-helpers.js:23-32). the same download's later events say that, so
+ * (analytics-helpers.js). the same download's later events say that, so
  * this one says it too.
  */
 export const SIMPLE_QUALITY = "best_available"
@@ -231,7 +242,7 @@ export const SIMPLE_QUALITY = "best_available"
 /**
  * whether this download is really a segment
  *
- * mirrors normalizeTimeRange (ipc-handlers.js:55), which throws away a range
+ * mirrors normalizeTimeRange (ipc/validators.js), which throws away a range
  * that covers nothing: the store opens on {start: 0, end: 0}, and a truthiness
  * check here would report a trimmed download that main will run whole.
  */

@@ -47,10 +47,10 @@ vi.mock("sonner", () => ({
 }))
 
 import { useMediaSearch } from "./useMediaSearch"
-import { useMixedLinkStore } from "@/lib/mixedLinkStore"
-import { usePlaylistStore } from "@/lib/playlistStore"
-import { useAppStore } from "@/lib/store"
-import { useYouTubeStore } from "@/lib/youtubeStore"
+import { useMixedLinkStore } from "@/lib/stores/mixedLinkStore"
+import { usePlaylistStore } from "@/lib/stores/playlistStore"
+import { useAppStore } from "@/lib/stores/store"
+import { useYouTubeStore } from "@/lib/stores/youtubeStore"
 
 const MIXED = "https://www.youtube.com/watch?v=dQw4w9WgXcQ&list=PL123"
 const MIXED_SHORT = "https://youtu.be/dQw4w9WgXcQ?list=PL123"
@@ -220,7 +220,9 @@ describe("what the two answers do", () => {
 
 describe("a listing that does not arrive", () => {
   test("degrades to the video rather than blocking on it", async () => {
-    mocks.getPlaylistInfo.mockRejectedValueOnce(new Error("This playlist is private."))
+    mocks.getPlaylistInfo.mockRejectedValueOnce(
+      new Error("This playlist is private.")
+    )
 
     await submit(MIXED)
 
@@ -232,7 +234,9 @@ describe("a listing that does not arrive", () => {
   })
 
   test("says nothing about a lookup the user never asked for", async () => {
-    mocks.getPlaylistInfo.mockRejectedValueOnce(new Error("This playlist is private."))
+    mocks.getPlaylistInfo.mockRejectedValueOnce(
+      new Error("This playlist is private.")
+    )
 
     await submit(MIXED)
 

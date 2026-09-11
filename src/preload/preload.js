@@ -247,15 +247,3 @@ contextBridge.exposeInMainWorld("electronAPI", {
   }
 })
 
-// expose version information
-contextBridge.exposeInMainWorld("appInfo", {
-  name: "Cliply Desktop",
-  version: "1.0.0",
-  description:
-    "Desktop YouTube downloader with segment support and Pro licensing",
-  author: "Cliply Team",
-  electronVersion: process.versions.electron,
-  nodeVersion: process.versions.node,
-  chromeVersion: process.versions.chrome
-})
-

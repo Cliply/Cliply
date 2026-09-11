@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, test } from "vitest"
 
 import type { QualityTier, VideoInfoResponse } from "@/lib/api"
-import { useYouTubeStore } from "@/lib/youtubeStore"
+import { useYouTubeStore } from "@/lib/stores/youtubeStore"
 
 const tier = (height: number, filesize: number): QualityTier => ({
   height,
@@ -32,10 +32,13 @@ describe("setVideoInfo", () => {
    * original without anything on screen saying so.
    */
   test("drops the previous video's tier and language", () => {
-    const first = videoInfo([tier(1080, 270_000_000)], [
-      { code: "en", is_original: true },
-      { code: "hi", is_original: false }
-    ])
+    const first = videoInfo(
+      [tier(1080, 270_000_000)],
+      [
+        { code: "en", is_original: true },
+        { code: "hi", is_original: false }
+      ]
+    )
 
     useYouTubeStore.getState().setVideoInfo(first)
     useYouTubeStore.getState().setSelectedTier(first.quality_tiers[0])

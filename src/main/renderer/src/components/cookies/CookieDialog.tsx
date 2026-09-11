@@ -1,8 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { toast } from "sonner"
 import { Check, Cookie, Copy, KeyRound } from "lucide-react"
-import { CookieError, cookiesApi, systemApi, type CookieStatus } from "@/lib/api"
-import { useCookieStore } from "@/lib/cookieStore"
+import {
+  CookieError,
+  cookiesApi,
+  systemApi,
+  type CookieStatus
+} from "@/lib/api"
+import { useCookieStore } from "@/lib/stores/cookieStore"
 import { localizeCode, t, useLocale } from "@/lib/i18n"
 import {
   Dialog,
@@ -146,9 +151,12 @@ export function CookieDialog() {
       if (result.rejected) {
         toast.warning(t("cookies.turnedDown"), { description: note })
       } else {
-        toast(t(result.cookiesLoaded ? "cookies.lookFine" : "cookies.notUsable"), {
-          description: note
-        })
+        toast(
+          t(result.cookiesLoaded ? "cookies.lookFine" : "cookies.notUsable"),
+          {
+            description: note
+          }
+        )
       }
     } catch (error) {
       toast.error(t("cookies.testFailed"), {
@@ -239,7 +247,10 @@ export function CookieDialog() {
                 documented way the tool underneath asks for them */}
             <p className="text-xs text-slate-400 dark:text-slate-500">
               {t("cookies.ytdlpCredit")}{" "}
-              <button className={linkClass} onClick={openLink(YTDLP_COOKIE_GUIDE)}>
+              <button
+                className={linkClass}
+                onClick={openLink(YTDLP_COOKIE_GUIDE)}
+              >
                 {t("cookies.readGuide")}
               </button>
             </p>
@@ -259,7 +270,9 @@ export function CookieDialog() {
               <span
                 className={cn(
                   "h-1.5 w-1.5 shrink-0 rounded-full",
-                  signedIn ? "bg-cyan-500 ring-4 ring-cyan-500/15" : "bg-amber-500"
+                  signedIn
+                    ? "bg-cyan-500 ring-4 ring-cyan-500/15"
+                    : "bg-amber-500"
                 )}
               />
             )}
@@ -306,7 +319,10 @@ export function CookieDialog() {
               <ol className="space-y-3 text-sm">
                 <Step n={1}>
                   {t("cookies.step1")}{" "}
-                  <button className={linkClass} onClick={openLink(CHROME_EXTENSION)}>
+                  <button
+                    className={linkClass}
+                    onClick={openLink(CHROME_EXTENSION)}
+                  >
                     get cookies.txt LOCALLY
                   </button>{" "}
                   {t("cookies.step1or")}{" "}
@@ -363,7 +379,11 @@ export function CookieDialog() {
           )}
 
           <div className="flex items-center gap-2">
-            <Button ref={importRef} onClick={handleImport} disabled={busy !== null}>
+            <Button
+              ref={importRef}
+              onClick={handleImport}
+              disabled={busy !== null}
+            >
               {t(
                 busy === "import"
                   ? "cookies.importing"
@@ -440,6 +460,8 @@ function Step({
 
 function Em({ children }: { children: React.ReactNode }) {
   return (
-    <span className="font-medium text-slate-900 dark:text-white">{children}</span>
+    <span className="font-medium text-slate-900 dark:text-white">
+      {children}
+    </span>
   )
 }

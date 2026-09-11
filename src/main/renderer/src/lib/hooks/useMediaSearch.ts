@@ -15,15 +15,12 @@ import {
 } from "@/lib/api"
 import { en } from "@/lib/i18n/en"
 import { localizeError, t } from "@/lib/i18n"
-import { mixedLinkKey, useMixedLinkStore } from "@/lib/mixedLinkStore"
-import {
-  PLATFORM_REGISTRY,
-  type PlatformConfig
-} from "@/lib/platform-config"
-import { usePinterestStore } from "@/lib/pinterestStore"
-import { usePlaylistStore } from "@/lib/playlistStore"
-import { useAppStore, type Platform } from "@/lib/store"
-import { useTikTokStore } from "@/lib/tiktokStore"
+import { mixedLinkKey, useMixedLinkStore } from "@/lib/stores/mixedLinkStore"
+import { PLATFORM_REGISTRY, type PlatformConfig } from "@/lib/platform-config"
+import { usePinterestStore } from "@/lib/stores/pinterestStore"
+import { usePlaylistStore } from "@/lib/stores/playlistStore"
+import { useAppStore, type Platform } from "@/lib/stores/store"
+import { useTikTokStore } from "@/lib/stores/tiktokStore"
 import {
   showBotDetectionToast,
   showServerOverwhelmedToast
@@ -33,7 +30,7 @@ import {
   ensureHttpScheme,
   type YouTubeTarget
 } from "@/lib/validation"
-import { useYouTubeStore } from "@/lib/youtubeStore"
+import { useYouTubeStore } from "@/lib/stores/youtubeStore"
 
 interface MediaSearchOptions {
   onSearch?: (url: string) => void
@@ -65,9 +62,9 @@ export function useMediaSearch(
   const ytUrl = useYouTubeStore((s) => s.url)
   const ytIsLoading = useYouTubeStore((s) => s.isLoadingVideoInfo)
   const ptUrl = usePinterestStore((s) => s.url)
-  const ptIsLoading = usePinterestStore((s) => s.isLoadingPinInfo)
+  const ptIsLoading = usePinterestStore((s) => s.isLoadingInfo)
   const ttUrl = useTikTokStore((s) => s.url)
-  const ttIsLoading = useTikTokStore((s) => s.isLoadingVideoInfo)
+  const ttIsLoading = useTikTokStore((s) => s.isLoadingInfo)
   // a playlist is the second thing the youtube box can hold, and listing one is
   // a request like any other - the box has to say it is working
   const plIsLoading = usePlaylistStore((s) => s.isLoadingPlaylistInfo)
@@ -359,7 +356,7 @@ function commitPlaylist(
    * both routes to a loaded playlist come through here, so the pure playlist
    * link and the ambiguous one answered "the playlist" report the same thing.
    * playlists are a youtube feature and this is the only platform that reaches
-   * it (isPlaylistPlatform, ipc-handlers.js).
+   * it (isPlaylistPlatform, ipc/validators.js).
    */
   track("media_info_loaded", {
     platform: "youtube",
@@ -436,11 +433,11 @@ async function loadPlaylist(url: string, token: number, reveal: () => void) {
  * report a failed lookup
  *
  * the category is main's own answer, computed there by the taxonomy and carried
- * across on the error (ipc-handlers.js:421). the `code` next to it in the same
- * payload is not one - it is the engine's code or a "GENERAL_ERROR" placeholder
- * - and classifying the message instead would collapse almost every failure
- * into UNKNOWN_ERROR, because the wording is written for the user rather than
- * for a pattern.
+ * across on the error (infoFailure in ipc-handlers.js). the `code` next to it
+ * in the same payload is not one - it is the engine's code or a "GENERAL_ERROR"
+ * placeholder - and classifying the message instead would collapse almost every
+ * failure into UNKNOWN_ERROR, because the wording is written for the user
+ * rather than for a pattern.
  *
  * the message travels raw. it is the one free-text property, it is scrubbed and
  * re-checked at the boundary before it can leave the machine, and a second,
@@ -477,10 +474,7 @@ function handleSearchError(
   // failure here the user can actually fix, and main already decided which it
   // is. matching on text would put it behind whichever generic branch happened
   // to catch the sentence first
-  if (
-    error instanceof DownloadError &&
-    error.category === "BOT_DETECTION"
-  ) {
+  if (error instanceof DownloadError && error.category === "BOT_DETECTION") {
     // the platform decides which action the toast offers: BOT_DETECTION also
     // catches tiktok and pinterest, and the cookie dialog is youtube's alone
     showBotDetectionToast(shown, config.id)

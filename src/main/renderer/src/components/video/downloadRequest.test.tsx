@@ -4,11 +4,17 @@
 // user was shown, or the audio mode the row promised - and nothing about
 // format ids, which no longer exist on either side
 
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor
+} from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
 
 import type { QualityTier } from "@/lib/api"
-import { useYouTubeStore } from "@/lib/youtubeStore"
+import { useYouTubeStore } from "@/lib/stores/youtubeStore"
 
 const mocks = vi.hoisted(() => ({
   downloadVideo: vi.fn(),

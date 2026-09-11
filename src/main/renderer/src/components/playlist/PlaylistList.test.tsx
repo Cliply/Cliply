@@ -17,10 +17,13 @@ import { afterEach, beforeEach, describe, expect, test } from "vitest"
 import type { PlaylistEntry, PlaylistInfoResponse } from "@/lib/api"
 import { useLocale } from "@/lib/i18n"
 import { en } from "@/lib/i18n/en"
-import { usePlaylistStore } from "@/lib/playlistStore"
+import { usePlaylistStore } from "@/lib/stores/playlistStore"
 import { PlaylistList } from "./PlaylistList"
 
-const entry = (index: number, overrides: Partial<PlaylistEntry> = {}): PlaylistEntry => ({
+const entry = (
+  index: number,
+  overrides: Partial<PlaylistEntry> = {}
+): PlaylistEntry => ({
   index,
   id: `video${index}`,
   title: `video ${index}`,
@@ -68,10 +71,13 @@ const ELEVEN = listing([
 ])
 
 const load = (info: PlaylistInfoResponse = ELEVEN) =>
-  usePlaylistStore.getState().setLoadedPlaylist("https://youtube.com/playlist?list=PL123", info)
+  usePlaylistStore
+    .getState()
+    .setLoadedPlaylist("https://youtube.com/playlist?list=PL123", info)
 
 const checkboxes = () => screen.getAllByRole("checkbox")
-const checkboxFor = (title: string) => screen.getByRole("checkbox", { name: title })
+const checkboxFor = (title: string) =>
+  screen.getByRole("checkbox", { name: title })
 const rowFor = (index: number) =>
   document.querySelector(`[data-index="${index}"]`) as HTMLElement
 
@@ -86,9 +92,12 @@ describe("what starts ticked", () => {
     render(<PlaylistList phase="picking" />)
 
     expect(checkboxes()).toHaveLength(11)
-    expect(checkboxes().filter((box) => box.getAttribute("aria-checked") === "true"))
-      .toHaveLength(9)
-    expect(checkboxFor("[Private video]").getAttribute("aria-checked")).toBe("false")
+    expect(
+      checkboxes().filter((box) => box.getAttribute("aria-checked") === "true")
+    ).toHaveLength(9)
+    expect(checkboxFor("[Private video]").getAttribute("aria-checked")).toBe(
+      "false"
+    )
   })
 
   test("the count is out of what can be picked, not out of what is listed", () => {
@@ -191,11 +200,15 @@ describe("once the run starts", () => {
     // never announced yet
     expect(within(rowFor(5)).getByText(en["playlist.rowQueued"])).toBeDefined()
     // and the one that never could be
-    expect(within(rowFor(3)).getByText(en["playlist.rowUnavailable"])).toBeDefined()
+    expect(
+      within(rowFor(3)).getByText(en["playlist.rowUnavailable"])
+    ).toBeDefined()
   })
 
   test("a video the archive already had is not called saved", () => {
-    usePlaylistStore.getState().setItemStatus(1, { state: "reused", progress: 100 })
+    usePlaylistStore
+      .getState()
+      .setItemStatus(1, { state: "reused", progress: 100 })
 
     render(<PlaylistList phase="running" />)
 
@@ -223,11 +236,15 @@ describe("once the run starts", () => {
    * being stopped, and its last percentage would read as one still going
    */
   test("a row still in flight when the run ended reads as stopping", () => {
-    usePlaylistStore.getState().setItemStatus(4, { state: "downloading", progress: 62 })
+    usePlaylistStore
+      .getState()
+      .setItemStatus(4, { state: "downloading", progress: 62 })
 
     render(<PlaylistList phase="finished" />)
 
-    expect(within(rowFor(4)).getByText(en["playlist.rowStopping"])).toBeDefined()
+    expect(
+      within(rowFor(4)).getByText(en["playlist.rowStopping"])
+    ).toBeDefined()
     expect(within(rowFor(4)).queryByText("62%")).toBeNull()
   })
 
@@ -239,9 +256,13 @@ describe("once the run starts", () => {
     render(<PlaylistList phase="finished" />)
 
     expect(within(rowFor(1)).getByText("saved · 480p")).toBeDefined()
-    expect(within(rowFor(2)).getByText(en["playlist.rowNotSaved"])).toBeDefined()
+    expect(
+      within(rowFor(2)).getByText(en["playlist.rowNotSaved"])
+    ).toBeDefined()
     // nothing is queued once there is nothing left to wait for
-    expect(within(rowFor(5)).getByText(en["playlist.rowNotSaved"])).toBeDefined()
+    expect(
+      within(rowFor(5)).getByText(en["playlist.rowNotSaved"])
+    ).toBeDefined()
     expect(screen.queryByText(en["playlist.rowQueued"])).toBeNull()
   })
 })
@@ -272,10 +293,14 @@ describe("the rows the run was never asked for", () => {
 
     expect(within(rowFor(1)).getByText("saved · 1080p")).toBeDefined()
     // ticked but never reached: this one is a real miss and still says so
-    expect(within(rowFor(2)).getByText(en["playlist.rowNotSaved"])).toBeDefined()
+    expect(
+      within(rowFor(2)).getByText(en["playlist.rowNotSaved"])
+    ).toBeDefined()
 
     for (const index of [4, 5, 6, 7, 9, 10, 11]) {
-      expect(within(rowFor(index)).queryByText(en["playlist.rowNotSaved"])).toBeNull()
+      expect(
+        within(rowFor(index)).queryByText(en["playlist.rowNotSaved"])
+      ).toBeNull()
       // and fall back to the duration, exactly as they do while picking
       expect(within(rowFor(index)).getByText("1:00")).toBeDefined()
     }
@@ -303,8 +328,12 @@ describe("the rows the run was never asked for", () => {
 
     render(<PlaylistList phase="finished" />)
 
-    expect(within(rowFor(3)).getByText(en["playlist.rowUnavailable"])).toBeDefined()
-    expect(within(rowFor(8)).getByText(en["playlist.rowUnavailable"])).toBeDefined()
+    expect(
+      within(rowFor(3)).getByText(en["playlist.rowUnavailable"])
+    ).toBeDefined()
+    expect(
+      within(rowFor(8)).getByText(en["playlist.rowUnavailable"])
+    ).toBeDefined()
   })
 })
 

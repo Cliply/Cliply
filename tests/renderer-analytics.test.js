@@ -7,7 +7,7 @@
  * on this side are what make forwarding it safe. so these drive the real
  * handler and the real Analytics against a fake posthog client, and the bags
  * they drive are the ones the renderer suite records off the real hooks
- * (src/main/renderer/src/lib/hooks/analyticsCallSites.test.tsx) - a
+ * (src/main/renderer/src/lib/analyticsCallSites.test.tsx) - a
  * hand-written bag would only prove this file's own arithmetic.
  *
  * silence on console.warn is the assertion for a payload that must survive:
@@ -31,7 +31,7 @@ const { IPC_CHANNELS } = require("../src/main/utils/constants")
 // accepts. neither half means much without the other.
 const payloads = require("../src/main/renderer/src/lib/analytics-payloads.fixture.json")
 
-// requireActual on purpose: a suite that mocks services/ytdlp-engine takes
+// requireActual on purpose: a suite that mocks utils/log-redaction takes
 // redactLogLine down with it, and every text-bearing event then dies inside
 // capture()'s catch - a replay that passes having sent nothing
 const { Analytics: RealAnalytics } = jest.requireActual(
