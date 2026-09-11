@@ -96,7 +96,7 @@ const {
   SHUTDOWN_WAIT_MS,
   PROBE_TIMEOUT_MS
 } = require("./ytdlp/primitives")
-const { redactLogLine } = require("./ytdlp/redaction")
+const { redactLogLine } = require("../utils/log-redaction")
 
 class YtdlpEngine {
   /**

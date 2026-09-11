@@ -36,7 +36,7 @@ const {
   FFMPEG_PROGRESS_PATTERN,
   KILL_GRACE_MS
 } = require("./primitives")
-const { redactLogLine } = require("./redaction")
+const { redactLogLine } = require("../../utils/log-redaction")
 
 /**
  * kill a child process, taking its descendants with it on windows

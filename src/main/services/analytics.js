@@ -10,7 +10,7 @@
 // only export surface any of it has.
 
 const { APP_CONFIG } = require("../utils/constants")
-const { redactLogLine } = require("./ytdlp-engine")
+const { redactLogLine } = require("../utils/log-redaction")
 const { describeError, getAppVersion } = require("../utils/analytics-helpers")
 const {
   ALLOWED_BY_EVENT,
