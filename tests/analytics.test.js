@@ -1079,7 +1079,8 @@ describe("Analytics", () => {
           "unsupported-platform", "up-to-date", "version-mismatch",
           "missing", "corrupt", "bundled-newer",
           // written as a ternary arm rather than a `reason:` literal
-          // (ytdlp-updater.js:567), so a grep for the keyword walks past it
+          // (downloadAndUnpack in ytdlp-updater.js), so a grep for the keyword
+          // walks past it
           "download-failed"
         ]) {
           const properties = await captureOne("engine_seeded", { reason: value })
@@ -1155,8 +1156,8 @@ describe("Analytics", () => {
 
         const supported = [
           ...Object.keys(SUPPORTED_PLATFORMS).map((k) => k.toLowerCase()),
-          // ipc-handlers.js:43 - the engine's own download list, which is not
-          // the same set. pinterest lives only here
+          // SUPPORTED_DOWNLOAD_PLATFORMS in ipc-handlers.js - the engine's own
+          // download list, which is not the same set. pinterest lives only here
           "youtube",
           "pinterest",
           "tiktok"

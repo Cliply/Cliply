@@ -462,14 +462,15 @@ const PROPERTY_VOCABULARIES = {
   media_type: new Set(["video", "audio"]),
 
   // the keys of AUDIO_MODE_PRESETS - normalizeAudioMode returns the key, not
-  // the codec it maps to (ytdlp-engine.js:536, :617)
+  // the codec it maps to (both in ytdlp-engine.js)
   audio_format: new Set(["mp3", "m4a", "original"]),
 
   // every reason ytdlp-updater can report: its `reason:` literals, the three
   // passed positionally to installDirectory(), and "download-failed", which is
-  // written as a ternary arm (ytdlp-updater.js:567) and so is invisible to a
-  // grep for the keyword. engine_seeded only ever sends the three positional
-  // ones - the rest are here because this set claims to be the whole list
+  // written as a ternary arm in downloadAndUnpack (ytdlp-updater.js) and so is
+  // invisible to a grep for the keyword. engine_seeded only ever sends the
+  // three positional ones - the rest are here because this set claims to be
+  // the whole list
   reason: new Set([
     "asset-layout-unexpected",
     "bundled-newer",
@@ -606,7 +607,7 @@ const PLATFORM_UNSUPPORTED = "unsupported"
  *
  * SUPPORTED_PLATFORMS is imported rather than copied, but it is not the whole
  * set: it lists youtube, instagram and tiktok, while the engine's own
- * download list (SUPPORTED_DOWNLOAD_PLATFORMS, ipc-handlers.js:43) lists
+ * download list (SUPPORTED_DOWNLOAD_PLATFORMS in ipc-handlers.js) lists
  * youtube, pinterest and tiktok. the two are not mirrors. pinterest is fully
  * supported - it has dedicated handling in ipc-handlers and its own
  * extractQuality mapping - so validating against SUPPORTED_PLATFORMS alone

@@ -3,10 +3,10 @@
 // what an info failure carries once it has crossed ipc.
 //
 // main classifies the failure itself and puts the answer in `category`
-// (ipc-handlers.js:421) - `code` beside it is the engine's own code or the
-// "GENERAL_ERROR" placeholder, which is not a taxonomy value at all. throwing a
-// bare Error here discarded both, so every media_info_failed the renderer could
-// report was UNKNOWN_ERROR.
+// (infoFailure in ipc-handlers.js) - `code` beside it is the engine's own
+// code or the "GENERAL_ERROR" placeholder, which is not a taxonomy value at
+// all. throwing a bare Error here discarded both, so every media_info_failed
+// the renderer could report was UNKNOWN_ERROR.
 
 import { afterEach, describe, expect, test, vi } from "vitest"
 

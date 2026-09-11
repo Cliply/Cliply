@@ -157,9 +157,9 @@ function extractQuality(formatId) {
  * the three audio modes the audio flow can ask for.
  *
  * they are the format id for an audio download: handleDownloadAudio passes
- * `data.audio_mode` straight through as `formatId` (ipc-handlers.js:782), and
+ * `data.audio_mode` straight through as `formatId` (ipc-handlers.js), and
  * the renderer sends that same string as download_started's `audio_format`
- * (renderer/src/lib/hooks/useAudioDownload.ts:169). so a terminal event reading
+ * (useAudioDownload in renderer/src/lib/hooks). so a terminal event reading
  * the format id back reports the value the start event already sent, rather
  * than one derived to look like it.
  */

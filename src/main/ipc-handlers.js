@@ -570,13 +570,14 @@ class IPCHandlers {
        * one place further along.
        *
        * `payload.fileSize` is the size of the file the result named, and for a
-       * playlist that is whichever video happened to land LAST (ytdlp-engine.js
-       * :2218) - not the run. so `file_size_mb` would report one video out of
-       * eleven, and `speed_bucket` would divide that one file's bytes by the
-       * time all eleven took, which is not a speed anything experienced. both
-       * land on the same properties the single-video funnel is measured by, so
-       * sending them would not merely be unreadable - it would drag the average
-       * every existing chart already reads.
+       * playlist that is whichever video happened to land LAST (the result
+       * YtdlpOperation assembles in ytdlp-engine.js) - not the run. so
+       * `file_size_mb` would report one video out of eleven, and `speed_bucket`
+       * would divide that one file's bytes by the time all eleven took, which
+       * is not a speed anything experienced. both land on the same properties
+       * the single-video funnel is measured by, so sending them would not
+       * merely be unreadable - it would drag the average every existing chart
+       * already reads.
        *
        * `elapsed_bucket` is kept: how long the run took is the same question
        * whether the run held one video or eleven, and the answer is measured

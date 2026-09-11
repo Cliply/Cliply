@@ -436,11 +436,11 @@ async function loadPlaylist(url: string, token: number, reveal: () => void) {
  * report a failed lookup
  *
  * the category is main's own answer, computed there by the taxonomy and carried
- * across on the error (ipc-handlers.js:421). the `code` next to it in the same
- * payload is not one - it is the engine's code or a "GENERAL_ERROR" placeholder
- * - and classifying the message instead would collapse almost every failure
- * into UNKNOWN_ERROR, because the wording is written for the user rather than
- * for a pattern.
+ * across on the error (infoFailure in ipc-handlers.js). the `code` next to it
+ * in the same payload is not one - it is the engine's code or a "GENERAL_ERROR"
+ * placeholder - and classifying the message instead would collapse almost every
+ * failure into UNKNOWN_ERROR, because the wording is written for the user
+ * rather than for a pattern.
  *
  * the message travels raw. it is the one free-text property, it is scrubbed and
  * re-checked at the boundary before it can leave the machine, and a second,

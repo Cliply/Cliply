@@ -188,7 +188,7 @@ export function urlKind(url: string): string {
  * the quality of a video download, as the height the user picked
  *
  * main derives the same value for the same download's later events
- * (ipc-handlers.js:514), so the two can be joined on it.
+ * (trackDownloadEvent in ipc-handlers.js), so the two can be joined on it.
  *
  * @param height - the menu row's height
  * @returns "1080p" and the like, or null for a height no row could produce
@@ -205,7 +205,7 @@ export function videoQuality(height: number | null | undefined): string | null {
  * the quality of an audio download.
  *
  * extractQuality maps the "original" mode to "original_audio"
- * (analytics-helpers.js:26) for the same download's later events, so passing
+ * (analytics-helpers.js) for the same download's later events, so passing
  * the mode through unmapped would split one download across two values.
  */
 export const AUDIO_QUALITIES: Record<AudioMode, string> = {
@@ -223,7 +223,7 @@ export function audioQuality(mode: AudioMode): string {
  *
  * pinterest and tiktok send no format id, so main's own falls back to the
  * platform name and extractQuality maps both of those to "best_available"
- * (analytics-helpers.js:23-32). the same download's later events say that, so
+ * (analytics-helpers.js). the same download's later events say that, so
  * this one says it too.
  */
 export const SIMPLE_QUALITY = "best_available"
@@ -231,7 +231,7 @@ export const SIMPLE_QUALITY = "best_available"
 /**
  * whether this download is really a segment
  *
- * mirrors normalizeTimeRange (ipc-handlers.js:55), which throws away a range
+ * mirrors normalizeTimeRange (ipc-handlers.js), which throws away a range
  * that covers nothing: the store opens on {start: 0, end: 0}, and a truthiness
  * check here would report a trimmed download that main will run whole.
  */
