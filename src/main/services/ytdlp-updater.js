@@ -1132,7 +1132,5 @@ module.exports = {
   // exported for tests - the address fallback has no seam through the client
   httpGet,
   resolveAddresses,
-  withAddressFallback,
-  UPDATE_TIMEOUT_MS,
-  STAGED_PROBE_TIMEOUT_MS
+  withAddressFallback
 }

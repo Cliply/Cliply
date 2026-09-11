@@ -108,19 +108,11 @@ const SUPPORTED_PLATFORMS = {
   }
 }
 
-// file formats
-const FORMATS = {
-  VIDEO: ["mp4", "webm", "mkv", "avi", "mov"],
-  AUDIO: ["mp3", "m4a", "wav", "opus", "aac", "flac"],
-  SUBTITLE: ["srt", "vtt", "ass"]
-}
-
 // error codes live in utils/error-taxonomy.js - this file used to carry a
 // six-entry copy of them that nothing kept in step
 
 module.exports = {
   APP_CONFIG,
   IPC_CHANNELS,
-  SUPPORTED_PLATFORMS,
-  FORMATS
+  SUPPORTED_PLATFORMS
 }

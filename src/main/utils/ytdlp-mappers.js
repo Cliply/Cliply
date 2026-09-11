@@ -772,7 +772,6 @@ module.exports = {
   sanitizeFilename,
   formatDuration,
   escapeTemplateLiteral,
-  filenameTimestamp,
   extractQualityTiers,
   extractAudioTracks,
   mapVideoInfo,
