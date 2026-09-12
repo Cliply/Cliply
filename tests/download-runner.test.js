@@ -1172,6 +1172,112 @@ describe("queue", () => {
     await b
     log.mockRestore()
   })
+
+  /**
+   * the other half of the queued event
+   *
+   * a trimmed download is one ffmpeg pass that reports nothing until the end,
+   * so between taking a slot and finishing there is no progress line to move
+   * the row off `queued` - the panel would offer Remove on a download that is
+   * writing its file. the transition is announced instead of inferred.
+   */
+  test("a download that waited says so the moment it takes a slot", async () => {
+    const { runner, events } = createRunner({ maxConcurrent: 1 })
+    const handles = [new FakeHandle(), new FakeHandle()]
+
+    const a = runner.run({ ...BASE, downloadId: "a", createHandle: () => handles[0] })
+    const b = runner.run({
+      ...BASE,
+      downloadId: "b",
+      trimmed: true,
+      createHandle: () => handles[1]
+    })
+    await settle()
+
+    handles[0].resolve(completion)
+    await a
+    await settle()
+
+    // b holds the slot and has emitted nothing of its own yet: this is the
+    // whole of what the renderer has been told about it
+    expect(events.filter((event) => event.downloadId === "b")).toEqual([
+      { downloadId: "b", status: "queued", progress: 0 },
+      {
+        downloadId: "b",
+        status: "downloading",
+        progress: 0,
+        indeterminate: true
+      }
+    ])
+
+    // and a, which never waited, still says nothing until the engine does: it
+    // was never drawn as queued, so there is nothing to correct
+    expect(
+      events.filter(
+        (event) => event.downloadId === "a" && event.status === "downloading"
+      )
+    ).toEqual([])
+
+    handles[1].resolve(completion)
+    await b
+  })
+
+  /**
+   * the quit, which is where the queue and the engine's shutdown wait meet
+   *
+   * `freeze` is the half of the teardown that can run before the history
+   * marking: it settles nothing, so the rows are still live to be marked, and
+   * no slot can change hands while that write is in flight.
+   */
+  test("a frozen queue hands a freed slot to nobody", async () => {
+    const { runner } = createRunner({ maxConcurrent: 1 })
+    const spawned = []
+    const first = new FakeHandle()
+    const second = new FakeHandle()
+
+    const a = runner.run({ ...BASE, downloadId: "a", createHandle: spawner(first, spawned, "a") })
+    const b = runner.run({ ...BASE, downloadId: "b", createHandle: spawner(second, spawned, "b") })
+    await settle()
+
+    expect(spawned).toEqual(["a"])
+
+    runner.freeze()
+
+    // the cancel that was already in flight when the quit began, landing now
+    const cancelled = new Error("cancelled")
+    cancelled.code = ERROR_CODES.CANCELLED
+    first.reject(cancelled)
+    await a
+    await settle()
+
+    // b is still where it was: a freeze is not a cancel, and the row has not
+    // been settled behind the user's back either
+    expect(spawned).toEqual(["a"])
+    expect(runner.size).toBe(1)
+
+    // and the cancelAll that follows the freeze is what ends it, with nothing
+    // ever spawned for it
+    expect(runner.cancelAll()).toBe(1)
+    expect((await b).cancelled).toBe(true)
+    expect(spawned).toEqual(["a"])
+  })
+
+  test("a run reaching a frozen queue settles instead of spawning", async () => {
+    // the reservation was accepted before the quit and its run() is one
+    // setImmediate behind it. parking it would wait on a promise nobody is
+    // left to resolve, and starting it is the thing the freeze exists to stop
+    const { runner } = createRunner({ maxConcurrent: 3 })
+    const spawned = []
+    const handle = new FakeHandle()
+
+    runner.freeze()
+
+    const a = runner.run({ ...BASE, downloadId: "a", createHandle: spawner(handle, spawned, "a") })
+
+    expect((await a).cancelled).toBe(true)
+    expect(spawned).toEqual([])
+    expect(runner.size).toBe(0)
+  })
 })
 
 // =============================================================================

@@ -109,7 +109,10 @@ jest.mock("../src/main/utils/analytics-helpers", () => ({
   extractQuality: jest.fn()
 }))
 
+const { EventEmitter } = require("events")
+
 const CliplyApp = require("../src/main/index")
+const { DownloadRunner } = require("../src/main/services/download-runner")
 const { Analytics } = require("../src/main/services/analytics")
 const { SettingsStore } = require("../src/main/services/settings-store")
 const IPCHandlers = require("../src/main/ipc-handlers")
@@ -1541,5 +1544,96 @@ describe("quitting", () => {
 
     expect(order[0]).toBe("shutdown-start")
     expect(order[1]).toBe("flush-start")
+  })
+
+  /**
+   * the queue and the shutdown wait, which only fit together in one order
+   *
+   * driven against the real DownloadRunner: the bug was in how its queue and
+   * the engine's shutdown wait meet, and a stand-in for the queue would be a
+   * stand-in for the thing under test.
+   */
+  describe("with downloads still in flight", () => {
+    /**
+     * an engine handle, as much of one as the runner touches
+     *
+     * `cancel` settles the operation rather than rejecting it, because the
+     * runner reads the cancelled code off a rejection through the engine
+     * barrel and this suite mocks that barrel away. which terminal path a
+     * download takes is not what this is about: every one of them frees the
+     * slot (tests/download-runner.test.js pins that), and the slot is the
+     * whole question here.
+     */
+    class FakeHandle extends EventEmitter {
+      constructor() {
+        super()
+        this.promise = new Promise((resolve) => {
+          this.finish = resolve
+        })
+      }
+
+      cancel() {
+        this.finish({})
+        return true
+      }
+    }
+
+    it("never starts a queued download on the way out", async () => {
+      const spawned = []
+      const handles = []
+      const runner = new DownloadRunner({
+        engine: {},
+        sendEvent: () => {},
+        maxConcurrent: 3
+      })
+
+      const runs = ["a", "b", "c", "d", "e"].map((downloadId) =>
+        runner.run({
+          downloadId,
+          type: "combined",
+          platform: "youtube",
+          title: downloadId,
+          createHandle: () => {
+            spawned.push(downloadId)
+            const handle = new FakeHandle()
+            handles.push(handle)
+            return handle
+          }
+        })
+      )
+      await settle()
+
+      // three running, two waiting behind the cap
+      expect(spawned).toEqual(["a", "b", "c"])
+
+      app.ipcHandlers.runner = runner
+
+      // the engine's shutdown as it really works: it cancels the handles that
+      // exist when it starts and waits for those. a process spawned after this
+      // snapshot is a process nothing waits for
+      let spawnedAtShutdown = null
+
+      mockEngine.awaitShutdown.mockImplementation(async () => {
+        spawnedAtShutdown = [...spawned]
+
+        const cancelling = [...handles]
+        for (const handle of cancelling) handle.cancel()
+        await Promise.all(cancelling.map((handle) => handle.promise))
+
+        return cancelling.length
+      })
+
+      await app.onBeforeQuit(quitEvent())
+      await settle()
+
+      // d and e never became processes, so the wait above covered every one
+      // that existed
+      expect(spawnedAtShutdown).toEqual(["a", "b", "c"])
+      expect(spawned).toEqual(["a", "b", "c"])
+
+      // ...and every reservation settled rather than being left behind
+      await Promise.all(runs)
+      expect(runner.size).toBe(0)
+    })
   })
 })

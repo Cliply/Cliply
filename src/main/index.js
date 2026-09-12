@@ -549,10 +549,25 @@ class CliplyApp {
       if (!installing) {
         this.updateState.isCheckingForUpdates = false
 
+        // no slot may change hands from here on, and nothing is settled by
+        // saying so: the marking below still finds every live row as it was.
+        // without it, a cancel already in flight settles while the history is
+        // being written, its slot goes to the first queued download, and a
+        // fresh process spawns into a quit that has already decided which
+        // processes it is waiting for
+        this.freezeDownloadQueue()
+
         // an install quit skips this with the rest of the teardown: nothing is
         // being cancelled there, so there is nothing to get in front of, and
         // the rows are marked at the next launch by load() instead
         await this.markDownloadsInterrupted()
+
+        // and now the rows themselves, before the engine shutdown rather than
+        // in cleanup() after it. the queued ones settle with nothing spawned;
+        // the running ones have their handles cancelled here, which is the same
+        // kill the shutdown would have sent, and every process that exists by
+        // then is in the snapshot awaitShutdown waits on below
+        this.cancelDownloads()
 
         // kill any running yt-dlp process and actually wait for the tree to
         // exit - partial .part files stay resumable either way, but a wait
@@ -606,6 +621,45 @@ class CliplyApp {
 
     // outside the try: whatever went wrong above, the app still has to quit
     app.quit()
+  }
+
+  /**
+   * close the download queue, before anything else about the quit happens
+   *
+   * see freeze in services/download-runner.js for what it does and does not
+   * do: no slot is handed on and no new run takes one, and not a single row
+   * changes status, so the marking that follows still describes what the user
+   * was actually in the middle of.
+   */
+  freezeDownloadQueue() {
+    const runner = this.ipcHandlers && this.ipcHandlers.runner
+
+    if (runner) {
+      runner.freeze()
+    }
+  }
+
+  /**
+   * stop every download this app still has, queued ones included
+   *
+   * ahead of the engine shutdown rather than in the ipc teardown after it. the
+   * shutdown wait snapshots the handles that exist when it starts and waits for
+   * those to die; a download cancelled later - or, before the freeze above,
+   * started later - is a process nothing waits for, which is the orphan the
+   * wait was written to prevent.
+   */
+  cancelDownloads() {
+    const runner = this.ipcHandlers && this.ipcHandlers.runner
+
+    if (!runner) {
+      return
+    }
+
+    const cancelled = runner.cancelAll()
+
+    if (cancelled > 0) {
+      console.log(`stopped ${cancelled} download(s) on quit`)
+    }
   }
 
   /**

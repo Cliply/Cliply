@@ -179,6 +179,29 @@ class DownloadHistory {
   }
 
   /**
+   * every row, once everything already written down has been applied
+   *
+   * a row's status changes inside the same chained work that writes the file
+   * (see upsert), so a download that completed while an earlier write was still
+   * in flight is a row that says `downloading` until the chain reaches it. for
+   * most readers that is a few milliseconds of nothing; for the renderer's one
+   * hydration read it is the whole session, because its snapshot is taken once
+   * and no push channel corrects it - the completion event it would have
+   * repaired the row with was emitted before it subscribed.
+   *
+   * so the read waits for the writes that were recorded before it. the chain is
+   * fifo, which is what makes "before it" mean anything: whatever is queued
+   * after this call was never part of the answer.
+   *
+   * @returns {Promise<Object[]>} copies, newest first
+   */
+  async snapshot() {
+    await this.flush()
+
+    return this.list()
+  }
+
+  /**
    * every row, newest first
    * @returns {Object[]} copies, so a caller cannot edit the history in place
    */

@@ -221,6 +221,68 @@ describe("the hydration read", () => {
     expect(response.data).toHaveLength(1)
     expect(response.data[0].download_id).toBe("combined_old")
   })
+
+  /**
+   * the other half of "the load barrier is not enough"
+   *
+   * a row's status is written inside the same chained work that persists it, so
+   * a terminal upsert queued behind an earlier write has not touched the rows
+   * in memory yet. the renderer reloading in that window would hydrate a
+   * download that is already over as a live row - and it is a row nothing can
+   * repair: the completion event went out before the new subscription existed,
+   * the runner has already forgotten the id, and draining the write later emits
+   * nothing. Stop would find nothing, Retry would not be offered, and the live
+   * duplicate rule would refuse to download it again.
+   */
+  test("includes a completion that is still queued behind an earlier write", async () => {
+    const workspace = createWorkspace()
+
+    const history = new DownloadHistory({
+      filePath: historyFile(workspace.userDataPath)
+    })
+
+    // the first write to the file, held open: everything the download does
+    // after it is recorded but not yet applied
+    let releaseWrite
+    const held = new Promise((resolve) => {
+      releaseWrite = resolve
+    })
+    const persist = history.persist.bind(history)
+    let first = true
+
+    history.persist = async () => {
+      if (first) {
+        first = false
+        await held
+      }
+
+      return persist()
+    }
+
+    const { handlers, handles } = createHandlers(workspace, { history })
+
+    await handlers.handleDownloadCombined(null, request())
+    await settle()
+
+    handles[0].resolve({ filePath: path.join(workspace.outputDir, "a.mp4") })
+    await settle()
+
+    // the runner has let go of it, so the history is the only thing left that
+    // knows this download ever happened
+    expect(handlers.runner.list()).toEqual([])
+
+    const answering = handlers.handleGetHistory(null)
+    releaseWrite()
+
+    const response = await answering
+
+    expect(response.data).toHaveLength(1)
+    expect(response.data[0]).toMatchObject({
+      download_id: "combined_1",
+      status: "completed",
+      filename: "a.mp4"
+    })
+  })
 })
 
 describe("across two launches", () => {

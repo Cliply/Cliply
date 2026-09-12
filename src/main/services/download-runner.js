@@ -70,6 +70,34 @@ class DownloadRunner {
     this.running = 0
     this.waiting = []
     this.reservations = 0
+
+    // whether the queue has been closed for good. see freeze(), which the quit
+    // path calls before anything is cancelled
+    this.frozen = false
+  }
+
+  /**
+   * stop handing out slots, without settling anything
+   *
+   * the quit path is the caller, and the order it needs is the reason this
+   * exists at all: the history has to mark the live rows *before* they are
+   * cancelled (see markDownloadsInterrupted in index.js), and that marking is a
+   * file write with awaits in it. a cancel that was already in flight when the
+   * quit began settles during exactly that window, releaseSlot hands its slot
+   * to the first waiter, and a fresh yt-dlp process spawns while the app is
+   * closing - one the engine's shutdown wait has already taken its snapshot
+   * without, and which nothing then waits for.
+   *
+   * so this is cancelAll's half that can run first: it settles nothing, writes
+   * nothing and changes no row's status, so the marking still finds every live
+   * row exactly as it was. from here a released slot goes nowhere, a run that
+   * reaches the queue is refused one, and run() settles it as cancelled rather
+   * than spawning without one.
+   *
+   * there is no way back. a frozen runner belongs to a process that is going.
+   */
+  freeze() {
+    this.frozen = true
   }
 
   /**
@@ -123,6 +151,10 @@ class DownloadRunner {
       status: STATUS.QUEUED,
       handle: null,
       cancelled: false,
+      // whether this run ever actually waited for a slot, which is the same
+      // question as whether the renderer was shown a queued row that now has
+      // to be told otherwise. see the announcement in run()
+      parked: false,
       // how far the engine got, kept for the two terminal states that report
       // it. a cancel arrives from another call stack entirely, so there is
       // nowhere else it could be read from by then
@@ -182,10 +214,12 @@ class DownloadRunner {
 
     try {
       // a cancel landing while this was parked wakes it without handing it a
-      // slot, and the flag is what it wakes up to read
+      // slot, and the flag is what it wakes up to read. a freeze is the quit's
+      // version of the same answer, for a run that had not reached the queue
+      // yet when it landed: no slot, and nothing may spawn without one
       const parked = this.active.get(downloadId)
 
-      if (!parked || parked.cancelled) {
+      if (!parked || parked.cancelled || this.frozen) {
         return this.settleCancelled(downloadId)
       }
 
@@ -215,6 +249,32 @@ class DownloadRunner {
         // process now. progress does not write - a percentage is not worth a
         // file rewrite, and the panel is watching the events for that anyway
         this.record(downloadId, entry, { status: STATUS.DOWNLOADING })
+
+        /**
+         * ...and the row that was drawn as queued hears that it is not any more
+         *
+         * nothing else says so until the engine's first progress line, and a
+         * trimmed download is one ffmpeg pass that reports nothing until the
+         * end: the panel would read "Queued" with a Remove beside it for the
+         * whole of a download that holds a slot and is writing its file. an
+         * ordinary extraction delay is the same thing, briefer.
+         *
+         * only for a run that actually waited. one that never parked was never
+         * drawn as queued - the renderer's own `starting` row is what is on
+         * screen, and it already draws an indeterminate bar.
+         *
+         * indeterminate because there is no percentage yet and a made-up 0%
+         * would sit there looking stalled. the first real progress event
+         * replaces the flag rather than merging with it, so nothing has to
+         * clear it afterwards.
+         */
+        if (entry.parked) {
+          this.sendEvent(downloadId, {
+            status: STATUS.DOWNLOADING,
+            progress: 0,
+            indeterminate: true
+          })
+        }
 
         handle.on("progress", (update) => {
           if (Number.isFinite(update.progress)) {
@@ -296,9 +356,17 @@ class DownloadRunner {
    *
    * @param {string} downloadId - the id handed to the renderer
    * @returns {Promise<boolean>} whether a slot is now held. false means a
-   *   cancel woke this waiter rather than a slot coming free
+   *   cancel woke this waiter rather than a slot coming free, or that the
+   *   queue is frozen and there are no more slots to be had
    */
   async acquireSlot(downloadId) {
+    // refused rather than parked: a waiter added after the queue froze is one
+    // nothing will ever wake, and run() answers a refusal by settling the
+    // download as cancelled - which is what a quit does to it anyway
+    if (this.frozen) {
+      return false
+    }
+
     if (this.running < this.maxConcurrent) {
       this.running += 1
       return true
@@ -344,6 +412,12 @@ class DownloadRunner {
     // impossible state from sorting to the front of everyone else's queue
     const sequence = entry ? entry.sequence : this.reservations
 
+    // this row is about to be drawn as queued, which is what run() reads to
+    // decide whether it owes the renderer a correction when the slot arrives
+    if (entry) {
+      entry.parked = true
+    }
+
     let index = this.waiting.length
 
     while (index > 0 && this.waiting[index - 1].sequence > sequence) {
@@ -363,7 +437,11 @@ class DownloadRunner {
    * would find room and jump the whole queue.
    */
   releaseSlot() {
-    const next = this.waiting.shift()
+    // ...unless the queue is frozen, in which case the slot goes nowhere: the
+    // cancel that freed it is part of a quit, and handing it on would start a
+    // download the app is in the middle of closing down. the waiters are woken
+    // by the cancelAll that follows the freeze, with no slot and nothing spawned
+    const next = this.frozen ? null : this.waiting.shift()
 
     if (next) {
       next.resolve(true)

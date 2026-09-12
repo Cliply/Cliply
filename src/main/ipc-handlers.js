@@ -1513,16 +1513,17 @@ class IPCHandlers {
    * the array is the data, as it is for download:get-all: the renderer reads
    * response.data straight as the rows it hydrates from.
    *
-   * the file has to have been read first. this is the renderer's one hydration
-   * read and nothing pushes a correction afterwards, so answering it from an
-   * in-memory list the pending read is about to replace would tell an install
-   * with a hundred rows that it has never downloaded anything.
+   * the file has to have been read first, and so does every status already
+   * written down. this is the renderer's one hydration read and nothing pushes
+   * a correction afterwards: answering from a list the pending read is about to
+   * replace would tell an install with a hundred rows that it has never
+   * downloaded anything, and answering before a terminal write that is queued
+   * behind an earlier one would hand back a finished download as a live row
+   * that can never be settled, stopped or retried. `snapshot` waits for both.
    */
   async handleGetHistory(_event) {
     try {
-      await this.history.ready
-
-      return this.createSuccess(this.history.list())
+      return this.createSuccess(await this.history.snapshot())
     } catch (error) {
       console.error("Get download history failed:", error.message)
       return this.createError("Failed to get the download history")
