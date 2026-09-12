@@ -151,10 +151,10 @@ class DownloadRunner {
       status: STATUS.QUEUED,
       handle: null,
       cancelled: false,
-      // whether this run ever actually waited for a slot, which is the same
-      // question as whether the renderer was shown a queued row that now has
-      // to be told otherwise. see the announcement in run()
-      parked: false,
+      // whether the renderer has been shown a queued row for this run that
+      // nothing else will correct. raised by park() and spent by the
+      // announcement in run(), which owes it exactly once
+      owesSlotNotice: false,
       // how far the engine got, kept for the two terminal states that report
       // it. a cancel arrives from another call stack entirely, so there is
       // nowhere else it could be read from by then
@@ -228,6 +228,20 @@ class DownloadRunner {
       for (let attempt = 0; attempt < 2; attempt++) {
         let handle
 
+        /**
+         * asked again on every pass, not only before the first one.
+         *
+         * the repair attempt is the case: a run whose first attempt broke waits
+         * in `updater.updateNow()`, which can be the length of a download of its
+         * own, and a quit landing in that window finds this run holding a slot
+         * with no handle. the check above has already been and gone, so without
+         * this the update resolving mid-quit starts a second yt-dlp process
+         * while the app is closing.
+         */
+        if (this.frozen) {
+          return this.settleCancelled(downloadId)
+        }
+
         try {
           handle = createHandle()
         } catch (error) {
@@ -267,8 +281,16 @@ class DownloadRunner {
          * would sit there looking stalled. the first real progress event
          * replaces the flag rather than merging with it, so nothing has to
          * clear it afterwards.
+         *
+         * said once and then spent: there is one transition out of the queue,
+         * and the repair pass is not another one. it holds the same slot it was
+         * given here (see the update branch below), so repeating this would
+         * throw away whatever progress the first attempt had drawn and put the
+         * row back on an indeterminate bar it has already left.
          */
-        if (entry.parked) {
+        if (entry.owesSlotNotice) {
+          entry.owesSlotNotice = false
+
           this.sendEvent(downloadId, {
             status: STATUS.DOWNLOADING,
             progress: 0,
@@ -412,10 +434,10 @@ class DownloadRunner {
     // impossible state from sorting to the front of everyone else's queue
     const sequence = entry ? entry.sequence : this.reservations
 
-    // this row is about to be drawn as queued, which is what run() reads to
-    // decide whether it owes the renderer a correction when the slot arrives
+    // this row is about to be drawn as queued, which is the debt run() settles
+    // when the slot arrives
     if (entry) {
-      entry.parked = true
+      entry.owesSlotNotice = true
     }
 
     let index = this.waiting.length

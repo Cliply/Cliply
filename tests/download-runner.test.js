@@ -1262,6 +1262,102 @@ describe("queue", () => {
     expect(spawned).toEqual(["a"])
   })
 
+  /**
+   * the one window where a run holds a slot and no handle
+   *
+   * `updateNow()` can take as long as a download, and a quit landing inside it
+   * finds this run past every check the freeze relies on. the update resolving
+   * would then start a second process into a closing app.
+   */
+  test("a repair attempt does not spawn into a quit", async () => {
+    const log = jest.spyOn(console, "log").mockImplementation(() => {})
+    let finishUpdate
+    const updater = {
+      updateNow: () =>
+        new Promise((resolve) => {
+          finishUpdate = () => resolve({ updated: true, from: "1", to: "2" })
+        })
+    }
+    const { runner } = createRunner({ maxConcurrent: 1, updater })
+
+    const spawned = []
+    const first = new FakeHandle()
+
+    const a = runner.run({
+      ...BASE,
+      downloadId: "a",
+      createHandle: spawner(first, spawned, "a")
+    })
+    await settle()
+
+    const error = new Error("YouTube changed something.")
+    error.code = ERROR_CODES.EXTRACTION_FAILED
+    error.updateMayFix = true
+    first.reject(error)
+    await settle()
+
+    // the run is now waiting on the update, holding its slot with no process
+    expect(spawned).toEqual(["a"])
+
+    runner.freeze()
+    finishUpdate()
+
+    expect((await a).cancelled).toBe(true)
+    expect(spawned).toEqual(["a"])
+    log.mockRestore()
+  })
+
+  test("the slot is announced once, repair pass included", async () => {
+    const log = jest.spyOn(console, "log").mockImplementation(() => {})
+    const updater = {
+      updateNow: async () => ({ updated: true, from: "1", to: "2" })
+    }
+    const { runner, events } = createRunner({ maxConcurrent: 1, updater })
+
+    const attempts = [new FakeHandle(), new FakeHandle()]
+    let index = 0
+    const holding = new FakeHandle()
+
+    const a = runner.run({ ...BASE, downloadId: "a", createHandle: () => holding })
+    const b = runner.run({
+      ...BASE,
+      downloadId: "b",
+      createHandle: () => attempts[index++]
+    })
+    await settle()
+
+    holding.resolve(completion)
+    await a
+    await settle()
+
+    const error = new Error("YouTube changed something.")
+    error.code = ERROR_CODES.EXTRACTION_FAILED
+    error.updateMayFix = true
+    attempts[0].reject(error)
+    await settle()
+    await settle()
+
+    // b is on its second attempt, holding the slot it was given once. the
+    // transition out of the queue happened once and is not re-announced: a
+    // repaired run picks up where the first attempt's progress left off
+    expect(
+      events.filter(
+        (event) => event.downloadId === "b" && event.status === "downloading"
+      )
+    ).toEqual([
+      {
+        downloadId: "b",
+        status: "downloading",
+        progress: 0,
+        indeterminate: true
+      }
+    ])
+
+    attempts[1].resolve(completion)
+    await b
+    log.mockRestore()
+  })
+
   test("a run reaching a frozen queue settles instead of spawning", async () => {
     // the reservation was accepted before the quit and its run() is one
     // setImmediate behind it. parking it would wait on a promise nobody is
