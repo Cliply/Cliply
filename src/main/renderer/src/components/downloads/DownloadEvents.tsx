@@ -85,8 +85,8 @@ export function DownloadEvents() {
      */
     const announced = new Set<string>()
 
-    let reading = false
-    let failures = 0
+    /** the ids a read is out asking about right now */
+    const awaiting = new Set<string>()
 
     /** apply an event, and say the outcome if this is where it lands */
     const take = (event: DownloadProgress) => {
@@ -140,10 +140,20 @@ export function DownloadEvents() {
     const remember = (event: DownloadProgress) => {
       if (concluded.has(event.downloadId)) return
 
+      // a download the user has cleared is not one to ask main about: the row
+      // is gone on purpose, and `adopt` would leave it out anyway
+      if (downloadsActions.isForgotten(event.downloadId)) return
+
       const held = pending.get(event.downloadId)
 
       if (held) held.events.push(event)
-      else pending.set(event.downloadId, { events: [event], misses: 0 })
+      else {
+        pending.set(event.downloadId, {
+          events: [event],
+          misses: 0,
+          failures: 0
+        })
+      }
 
       read()
     }
@@ -158,35 +168,32 @@ export function DownloadEvents() {
      * it had ever heard of it.
      */
     const read = () => {
-      if (reading || pending.size === 0) return
+      // the ids nobody is asking about yet. an id discovered while a read was
+      // in flight is not one that read can answer for, so it gets its own
+      // rather than waiting for an answer that was built before main had heard
+      // of it
+      const covered = new Set(
+        [...pending.keys()].filter((downloadId) => !awaiting.has(downloadId))
+      )
 
-      reading = true
+      if (covered.size === 0) return
 
-      const covered = new Set(pending.keys())
-      // the generation the read is issued under: a "clear history" between the
-      // question and the answer makes the history half of the answer describe a
-      // list that no longer exists
-      const generation = downloadsActions.generation()
+      for (const downloadId of covered) awaiting.add(downloadId)
 
       Promise.all([downloadApi.getAllDownloads(), downloadApi.getHistory()])
         .then(([active, history]) => {
           if (!mounted) return
 
-          failures = 0
-          reconcile(covered, () =>
-            downloadsActions.adopt(active, history, generation)
-          )
+          reconcile(covered, () => downloadsActions.adopt(active, history))
         })
         .catch((error: unknown) => {
           if (!mounted) return
 
-          failures += 1
-
-          // one retry, and then these ids are let go: a bridge that is refusing
+          // one retry per id, and then it is let go: a bridge that is refusing
           // reads is not something to ask a third time on every progress line
           console.error("Failed to re-read the downloads list:", error)
 
-          reconcile(covered, null, failures > 1)
+          reconcile(covered, null)
         })
     }
 
@@ -202,13 +209,14 @@ export function DownloadEvents() {
      * an id the read did not cover is not answered either way: it was admitted
      * after the answer was built, which is precisely the case this whole
      * mechanism exists for, and it waits for the next read.
+     *
+     * both budgets belong to the id rather than to the subscription. A shared
+     * count let one download spend another's: an id discovered while an earlier
+     * retry was in flight was concluded by the first failure it ever saw, and
+     * never got the read that would have found it.
      */
-    const reconcile = (
-      covered: Set<string>,
-      merge: (() => void) | null,
-      giveUp = false
-    ) => {
-      reading = false
+    const reconcile = (covered: Set<string>, merge: (() => void) | null) => {
+      for (const downloadId of covered) awaiting.delete(downloadId)
 
       merge?.()
 
@@ -225,10 +233,12 @@ export function DownloadEvents() {
           continue
         }
 
-        // a read that began after we heard of this id came back without it
+        // a read that began after we heard of this id came back without it, or
+        // did not come back at all
         if (merge) held.misses += 1
+        else held.failures += 1
 
-        if (giveUp || held.misses > 1) {
+        if (held.misses > 1 || held.failures > 1) {
           pending.delete(downloadId)
           concluded.add(downloadId)
         }
@@ -276,8 +286,6 @@ export function DownloadEvents() {
     // remembers, and the lifetime count the panel shows above them. the count
     // is its own channel because the history reply is the rows array itself
     // (see handleGetHistory in ipc-handlers.js)
-    const generation = downloadsActions.generation()
-
     Promise.all([
       downloadApi.getAllDownloads(),
       downloadApi.getHistory(),
@@ -285,9 +293,7 @@ export function DownloadEvents() {
     ])
       .then(([active, history, lifetime]) => {
         if (mounted) {
-          settle(() =>
-            downloadsActions.hydrate(active, history, lifetime, generation)
-          )
+          settle(() => downloadsActions.hydrate(active, history, lifetime))
         }
       })
       .catch((error: unknown) => {
@@ -314,6 +320,8 @@ interface PendingEvents {
   events: DownloadProgress[]
   /** how many reads that knew to ask about this id came back without it */
   misses: number
+  /** ...and how many of them did not come back at all */
+  failures: number
 }
 
 /**

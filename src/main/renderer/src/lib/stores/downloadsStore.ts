@@ -153,29 +153,31 @@ interface DownloadsState {
    */
   admittedIds: string[]
   /**
-   * which version of "what this install has downloaded" the list describes
+   * the downloads this window has been told to forget
    *
-   * bumped whenever the rows are thrown away wholesale - a clear, a reset - so
-   * a snapshot of main's that was asked for before it can be recognised as
-   * describing a history that no longer exists. Every read passes the
-   * generation it was issued under; a reply from an older one is dropped rather
-   * than restoring the rows the user just cleared.
+   * "clear history" and a removed row take their ids out of the list, and a
+   * snapshot of main's taken before either of those still names them: a read
+   * issued while a download was running, answered after it finished and was
+   * cleared, would otherwise put it back as running, with a Stop that stops
+   * nothing and no event left to ever settle it.
+   *
+   * a tombstone rather than a version number, because the question a late reply
+   * raises is about rows and not about time: everything else in that reply is
+   * still true, and throwing it all away cost the session its count, its live
+   * rows and the flag that lets the panel say it is empty. Ids are never reused
+   * - a retry is a new download with a new id - so this only ever grows by what
+   * the user has cleared, and it goes with the rest of the list on a reset.
    */
-  generation: number
+  forgotten: string[]
 
   add: (row: DownloadRow) => void
   applyEvent: (event: DownloadProgress) => void
   hydrate: (
     active: DownloadStatus[],
     history: DownloadHistoryRow[],
-    lifetimeCompleted?: number,
-    generation?: number
+    lifetimeCompleted?: number
   ) => void
-  adopt: (
-    active: DownloadStatus[],
-    history: DownloadHistoryRow[],
-    generation?: number
-  ) => void
+  adopt: (active: DownloadStatus[], history: DownloadHistoryRow[]) => void
   remove: (downloadId: string) => void
   clearFinished: () => void
   setHighlighted: (downloadId: string | null) => void
@@ -197,7 +199,7 @@ export const useDownloadsStore = create<DownloadsState>((set, get) => ({
   highlightedId: null,
   cancelIntents: [],
   admittedIds: [],
-  generation: 0,
+  forgotten: [],
 
   // newest first, which is the order the panel lists them in and the order the
   // history keeps them in
@@ -276,20 +278,21 @@ export const useDownloadsStore = create<DownloadsState>((set, get) => ({
    * by now are ones a hook added in the window between subscribing and this
    * landing. those are kept, because main has not heard of them yet.
    *
-   * a "clear history" while this read was in flight invalidates the history
-   * half of the answer and nothing else (see `isStale`): the count is a number
-   * the clear never touches, the active rows are downloads that are still
-   * running and so were never cleared, and the flag has to be set either way or
-   * the panel spends the session unable to say it is empty.
+   * a download the user has cleared since this read was issued is left out of
+   * it, whichever half of the answer it arrives in (see `forgotten`).
+   * Everything else lands: the count, the flag, and every row main still knows.
    */
-  hydrate: (active, history, lifetimeCompleted, generation) =>
+  hydrate: (active, history, lifetimeCompleted) =>
     set((state) => {
-      const cleared = isStale(state, generation)
-      const rows = [...active.map(rowFromStatus)]
+      const forgotten = new Set(state.forgotten)
+      const rows = active
+        .filter((status) => !forgotten.has(status.downloadId))
+        .map(rowFromStatus)
       const seen = new Set(rows.map((row) => row.downloadId))
 
-      for (const entry of cleared ? [] : history) {
+      for (const entry of history) {
         if (seen.has(entry.download_id)) continue
+        if (forgotten.has(entry.download_id)) continue
         seen.add(entry.download_id)
         rows.push(rowFromHistory(entry))
       }
@@ -325,26 +328,28 @@ export const useDownloadsStore = create<DownloadsState>((set, get) => ({
    * loses here because every row it already holds has been kept current by the
    * events since.
    *
-   * a "clear history" while the read was in flight drops the history half of
-   * the answer, which is the half that would put the rows the user just cleared
-   * straight back. The active rows are kept: a clear never removes a download
-   * that is still running, so they are not what was cleared - and one of them
-   * is usually the reason this read was asked for.
+   * a download the user cleared while the read was in flight is left out, in
+   * the active half as much as in the history half: it was running when the
+   * snapshot was taken and it is not any more, and adopting it would put a
+   * download back on screen that has already finished, been counted, and been
+   * cleared - with a Stop on it and no event left to settle it.
    */
-  adopt: (active, history, generation) =>
+  adopt: (active, history) =>
     set((state) => {
-      const cleared = isStale(state, generation)
+      const forgotten = new Set(state.forgotten)
       const seen = new Set(state.rows.map((row) => row.downloadId))
       const added: DownloadRow[] = []
 
       for (const status of active) {
         if (seen.has(status.downloadId)) continue
+        if (forgotten.has(status.downloadId)) continue
         seen.add(status.downloadId)
         added.push(rowFromStatus(status))
       }
 
-      for (const entry of cleared ? [] : history) {
+      for (const entry of history) {
         if (seen.has(entry.download_id)) continue
+        if (forgotten.has(entry.download_id)) continue
         seen.add(entry.download_id)
         added.push(rowFromHistory(entry))
       }
@@ -369,6 +374,9 @@ export const useDownloadsStore = create<DownloadsState>((set, get) => ({
   remove: (downloadId) => {
     set((state) => ({
       rows: state.rows.filter((row) => row.downloadId !== downloadId),
+      // ...and it stays forgotten: a snapshot taken before this landed still
+      // names it, and a read in flight would bring it back
+      forgotten: remember(state.forgotten, [downloadId]),
       highlightedId:
         state.highlightedId === downloadId ? null : state.highlightedId
     }))
@@ -393,9 +401,10 @@ export const useDownloadsStore = create<DownloadsState>((set, get) => ({
    * a row that arrived after the clear was sent is kept whatever the answer
    * says: main had not heard of it when it built that list.
    *
-   * the generation is bumped for the reads, not for this: a snapshot asked for
-   * before the clear describes a history that no longer exists, and landing it
-   * afterwards would restore every row the user just cleared.
+   * every id this removes is written down in `forgotten`, both here and when
+   * main answers: a snapshot asked for before the clear still names those
+   * downloads, sometimes as running, and landing it afterwards would put them
+   * all back.
    *
    * `lifetimeCompleted` is deliberately untouched. the number counts downloads
    * this install finished, not rows it still keeps, so emptying the list is not
@@ -406,24 +415,39 @@ export const useDownloadsStore = create<DownloadsState>((set, get) => ({
     // younger than the request and cannot be something main meant to remove
     const sent = new Set(get().rows.map((row) => row.downloadId))
 
-    set((state) => withHighlight(state, state.rows.filter(isLiveRow), true))
+    set((state) => {
+      const kept = state.rows.filter(isLiveRow)
+
+      return {
+        ...withHighlight(state, kept),
+        forgotten: remember(
+          state.forgotten,
+          dropped(state.rows, kept).map((row) => row.downloadId)
+        )
+      }
+    })
 
     downloadApi
       .clearHistory()
       .then((remaining) => {
         const kept = new Set(remaining.map((entry) => entry.download_id))
 
-        set((state) =>
-          withHighlight(
-            state,
-            state.rows.filter(
-              (row) =>
-                !sent.has(row.downloadId) ||
-                isLiveRow(row) ||
-                kept.has(row.downloadId)
-            )
+        set((state) => {
+          const survivors = state.rows.filter(
+            (row) =>
+              !sent.has(row.downloadId) ||
+              isLiveRow(row) ||
+              kept.has(row.downloadId)
           )
-        )
+
+          return {
+            ...withHighlight(state, survivors),
+            forgotten: remember(
+              state.forgotten,
+              dropped(state.rows, survivors).map((row) => row.downloadId)
+            )
+          }
+        })
       })
       .catch((error: unknown) => {
         // the rows are already gone from the panel and main either cleared its
@@ -512,10 +536,11 @@ export const useDownloadsStore = create<DownloadsState>((set, get) => ({
   },
 
   reset: () =>
-    set((state) => ({
-      // a read in flight describes the list this is throwing away
-      generation: state.generation + 1,
+    set(() => ({
       rows: [],
+      // the tombstones go with the list they belong to: nothing that comes back
+      // after this belongs to the session that wrote them
+      forgotten: [],
       hydrated: false,
       lifetimeCompleted: 0,
       panelOpen: false,
@@ -533,19 +558,13 @@ export const downloadsActions = {
   hydrate: (
     active: DownloadStatus[],
     history: DownloadHistoryRow[],
-    lifetimeCompleted?: number,
-    generation?: number
-  ) =>
-    useDownloadsStore
-      .getState()
-      .hydrate(active, history, lifetimeCompleted, generation),
-  adopt: (
-    active: DownloadStatus[],
-    history: DownloadHistoryRow[],
-    generation?: number
-  ) => useDownloadsStore.getState().adopt(active, history, generation),
-  /** the generation a read is issued under, so its reply can be judged later */
-  generation: () => useDownloadsStore.getState().generation,
+    lifetimeCompleted?: number
+  ) => useDownloadsStore.getState().hydrate(active, history, lifetimeCompleted),
+  adopt: (active: DownloadStatus[], history: DownloadHistoryRow[]) =>
+    useDownloadsStore.getState().adopt(active, history),
+  /** whether this window has been told to forget this download */
+  isForgotten: (downloadId: string) =>
+    useDownloadsStore.getState().forgotten.includes(downloadId),
   findLive: (candidate: DownloadIdentity) =>
     useDownloadsStore.getState().findLive(candidate),
   setHighlighted: (downloadId: string | null) =>
@@ -591,23 +610,22 @@ export const useActiveCount = (): number =>
     (state) => state.rows.filter((row) => isLiveRow(row)).length
   )
 
-/**
- * whether the history in this reply describes a list that has since been
- * thrown away
- *
- * what a stale reply loses is its history rows, and only those: they are the
- * rows a clear removed, and putting them back is the bug. The rest of the same
- * reply is still true - the lifetime count is a number no clear touches, and a
- * download that is still running was never cleared - so it is kept rather than
- * thrown away with them, which is how a clear during startup used to cost the
- * session its count, its live rows and the flag that lets the panel say it is
- * empty.
- *
- * a read with no generation is a caller that is not reading main at all - the
- * tests, and anything that builds the list itself - and is always current.
- */
-const isStale = (state: DownloadsState, generation?: number): boolean =>
-  typeof generation === "number" && generation !== state.generation
+/** the ids this list held and no longer does */
+const dropped = (
+  before: DownloadRow[],
+  after: DownloadRow[]
+): DownloadRow[] => {
+  const kept = new Set(after.map((row) => row.downloadId))
+
+  return before.filter((row) => !kept.has(row.downloadId))
+}
+
+/** the tombstones, plus these, without repeating any */
+const remember = (forgotten: string[], ids: string[]): string[] => {
+  const added = ids.filter((id) => !forgotten.includes(id))
+
+  return added.length === 0 ? forgotten : [...forgotten, ...added]
+}
 
 /**
  * the rows, and the highlight only if it still names one of them
@@ -617,15 +635,13 @@ const isStale = (state: DownloadsState, generation?: number): boolean =>
  */
 function withHighlight(
   state: DownloadsState,
-  rows: DownloadRow[],
-  bumpGeneration = false
+  rows: DownloadRow[]
 ): Partial<DownloadsState> {
   return {
     rows,
     highlightedId: rows.some((row) => row.downloadId === state.highlightedId)
       ? state.highlightedId
-      : null,
-    ...(bumpGeneration ? { generation: state.generation + 1 } : null)
+      : null
   }
 }
 

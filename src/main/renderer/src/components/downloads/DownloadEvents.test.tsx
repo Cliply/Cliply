@@ -468,11 +468,11 @@ describe("a download admitted after the list was read", () => {
     })
 
     await hydration.landed([
-      { download_id: "old", status: "completed" } as DownloadHistoryRow
+      { download_id: "refused", status: "failed" } as DownloadHistoryRow
     ])
     await settled()
 
-    // the cleared rows stay gone, and everything else the answer carried lands
+    // the cleared row stays gone, and everything else the answer carried lands
     expect(store().rows.map((r) => r.downloadId)).toEqual(["running"])
     expect(store().lifetimeCompleted).toBe(128)
     expect(store().hydrated).toBe(true)
@@ -640,9 +640,13 @@ describe("a download admitted after the list was read", () => {
     expect(store().rows.map((r) => r.downloadId)).toEqual(["late"])
   })
 
-  // a run reports four times a second: a read per event would be a read per
-  // percent, and two unknown ids at once are still one question
-  test("everything that arrives during the read shares it", async () => {
+  /**
+   * a run reports four times a second, and a read per event would be a read per
+   * percent. What shares a read is what was already waiting when it was issued:
+   * an id discovered afterwards gets its own, because this one's answer was
+   * built before main had heard of it.
+   */
+  test("everything already waiting shares one read, and a newcomer gets its own", async () => {
     await mount()
     const reads = mocks.getHistory.mock.calls.length
 
@@ -654,13 +658,21 @@ describe("a download admitted after the list was read", () => {
     )
 
     await emit({ downloadId: "late", status: "downloading", progress: 1 })
-    await emit({ downloadId: "later", status: "downloading", progress: 1 })
+    // more of the same download: nothing new to ask
     await emit({ downloadId: "late", status: "downloading", progress: 2 })
+    await emit({ downloadId: "late", status: "downloading", progress: 3 })
 
     expect(mocks.getHistory).toHaveBeenCalledTimes(reads + 1)
 
+    // a second unknown id, discovered after that read went out
+    mocks.getAllDownloads.mockResolvedValue([live({ downloadId: "later" })])
+    await emit({ downloadId: "later", status: "downloading", progress: 1 })
+
+    expect(mocks.getHistory).toHaveBeenCalledTimes(reads + 2)
+
+    mocks.getAllDownloads.mockResolvedValue([live({ downloadId: "late" })])
     await act(async () => {
-      answer([live({ downloadId: "late" }), live({ downloadId: "later" })])
+      answer([live({ downloadId: "late" })])
     })
     await settled()
 
@@ -669,6 +681,130 @@ describe("a download admitted after the list was read", () => {
         .rows.map((r) => r.downloadId)
         .sort()
     ).toEqual(["late", "later"])
+  })
+
+  /**
+   * a read issued while a download was running, answered after it finished and
+   * was cleared: the answer still calls it active. Keeping stale active rows on
+   * the grounds that "a clear never removes a live row" put a completed,
+   * counted, cleared download back on screen as running at 40%, with a Stop
+   * that stops nothing and no event left to ever settle it.
+   */
+  test("a row cleared while the read was out does not come back", async () => {
+    await mount()
+    store().add(row({ downloadId: "done" }))
+
+    let answer!: (rows: DownloadStatus[]) => void
+    mocks.getAllDownloads.mockReturnValue(
+      new Promise<DownloadStatus[]>((resolve) => {
+        answer = resolve
+      })
+    )
+
+    await emit({ downloadId: "late", status: "downloading", progress: 1 })
+
+    // it finishes, is announced, and the user clears the list
+    await emit({ downloadId: "done", status: "completed", progress: 100 })
+
+    await act(async () => {
+      store().clearFinished()
+    })
+
+    // ...and the answer, built before any of that, still calls it active
+    await act(async () => {
+      answer([live({ downloadId: "done" }), live({ downloadId: "late" })])
+    })
+    await settled()
+
+    expect(store().rows.map((r) => r.downloadId)).toEqual(["late"])
+  })
+
+  test("and neither does one cleared while the startup read was out", async () => {
+    const hydration = mountMidRead([live({ downloadId: "done" })])
+
+    store().add(row({ downloadId: "done" }))
+    await emit({ downloadId: "done", status: "completed", progress: 100 })
+
+    await act(async () => {
+      store().clearFinished()
+    })
+
+    await hydration.landed([])
+    await settled()
+
+    expect(store().rows).toEqual([])
+    expect(store().hydrated).toBe(true)
+  })
+
+  /**
+   * the budget for a read that never answered belongs to the download, not to
+   * the subscription: a shared count let one id spend another's, so an id
+   * discovered while an earlier retry was in flight was concluded by the first
+   * failure it ever saw.
+   */
+  test("an id discovered after another was let go keeps its own retry", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {})
+    await mount()
+    mocks.getAllDownloads.mockRejectedValue(new Error("no list for you"))
+
+    // a spends its own budget: two refused reads, and then it is let go
+    await emit({ downloadId: "a", status: "downloading", progress: 1 })
+    await settled()
+    await settled()
+
+    // b arrives afterwards. its first read is refused too - and that is its
+    // first failure, not its second
+    mocks.getAllDownloads.mockRejectedValueOnce(new Error("no list for you"))
+    mocks.getAllDownloads.mockResolvedValue([])
+    mocks.getHistory.mockResolvedValue([
+      {
+        download_id: "b",
+        status: "completed",
+        kind: "video",
+        platform: "youtube",
+        title: "Found on the retry",
+        started_at: 3
+      } as DownloadHistoryRow
+    ])
+
+    await emit({ downloadId: "b", status: "completed", progress: 100 })
+    await settled()
+    await settled()
+
+    expect(store().rows.map((r) => r.downloadId)).toEqual(["b"])
+    expect(mocks.successToast).toHaveBeenCalledTimes(1)
+  })
+
+  /**
+   * ...and the same when the two overlap: b joins while a's retry is still in
+   * flight, so it is not covered by it and cannot be charged for it.
+   */
+  test("and one discovered while another's retry is in flight", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {})
+    await mount()
+
+    let refuse!: (error: Error) => void
+    mocks.getAllDownloads.mockRejectedValueOnce(new Error("no list for you"))
+    mocks.getAllDownloads.mockReturnValueOnce(
+      new Promise<DownloadStatus[]>((_resolve, reject) => {
+        refuse = reject
+      })
+    )
+
+    await emit({ downloadId: "a", status: "downloading", progress: 1 })
+    await settled()
+
+    // a's retry is out. b turns up now, and gets a read of its own
+    mocks.getAllDownloads.mockResolvedValue([live({ downloadId: "b" })])
+    await emit({ downloadId: "b", status: "downloading", progress: 1 })
+    await settled()
+
+    await act(async () => {
+      refuse(new Error("no list for you"))
+    })
+    await settled()
+
+    expect(store().rows.map((r) => r.downloadId)).toEqual(["b"])
   })
 
   // the read is one more thing that can fail, and a panel missing a row is not

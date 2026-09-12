@@ -615,39 +615,102 @@ describe("clearing and removing", () => {
   })
 
   /**
-   * a snapshot asked for before the clear describes a history that no longer
-   * exists. Landing it afterwards put every cleared row back.
+   * a snapshot asked for before the clear still names what the clear removed,
+   * and landing it afterwards put every one of those rows back.
    */
   test("a snapshot read before the clear cannot restore what it removed", async () => {
-    const generation = store().generation
     store().add(row({ downloadId: "old", status: "completed" }))
     mocks.clearHistory.mockResolvedValue([])
 
     store().clearFinished()
+    await flush()
+
     store().hydrate(
       [],
       [{ download_id: "old", status: "completed" } as DownloadHistoryRow],
-      0,
-      generation
+      0
     )
+
+    expect(store().rows).toEqual([])
+  })
+
+  test("and neither can a re-read that was in flight", async () => {
+    store().add(row({ downloadId: "old", status: "completed" }))
+    mocks.clearHistory.mockResolvedValue([])
+
+    store().clearFinished()
     await flush()
+
+    store().adopt(
+      [],
+      [{ download_id: "old", status: "completed" } as DownloadHistoryRow]
+    )
 
     expect(store().rows).toEqual([])
   })
 
   /**
-   * ...but only the history half of that reply is wrong. The count is a number
-   * no clear touches, a download that is still running was never cleared, and
+   * the case the tombstones exist for: the snapshot was taken while the
+   * download was still running, so it comes back in the *active* half. Keeping
+   * it because "a clear never removes a live row" put a finished, counted,
+   * cleared download back on screen with a Stop on it and no event left to
+   * settle it.
+   */
+  test("even when the stale snapshot still calls it active", async () => {
+    store().add(row({ downloadId: "done", status: "downloading" }))
+    mocks.clearHistory.mockResolvedValue([])
+
+    store().applyEvent(
+      event({ downloadId: "done", status: "completed", progress: 100 })
+    )
+    store().clearFinished()
+    await flush()
+
+    store().adopt(
+      [
+        {
+          downloadId: "done",
+          status: "downloading",
+          progress: 40,
+          type: "combined",
+          platform: "youtube",
+          title: "My Holiday Video",
+          label: "1080p mp4"
+        } as DownloadStatus
+      ],
+      []
+    )
+
+    expect(store().rows).toEqual([])
+  })
+
+  // ...and the same for one row forgotten on its own
+  test("a removed row is not brought back by a reply that still names it", async () => {
+    store().add(row({ downloadId: "done", status: "completed" }))
+
+    store().remove("done")
+    store().adopt(
+      [],
+      [{ download_id: "done", status: "completed" } as DownloadHistoryRow]
+    )
+
+    expect(store().rows).toEqual([])
+  })
+
+  /**
+   * ...and everything else in that reply is still true. The count is a number
+   * no clear touches, a download the user did not clear is still theirs, and
    * the flag has to be set either way: throwing the whole answer away left the
    * session with no count, no live rows and a panel that could never say it was
    * empty.
    */
-  test("a stale hydration still brings its count, its live rows and the flag", async () => {
-    const generation = store().generation
+  test("a late hydration still brings its count, its live rows and the flag", async () => {
     store().add(row({ downloadId: "old", status: "completed" }))
     mocks.clearHistory.mockResolvedValue([])
 
     store().clearFinished()
+    await flush()
+
     store().hydrate(
       [
         {
@@ -661,22 +724,21 @@ describe("clearing and removing", () => {
         } as DownloadStatus
       ],
       [{ download_id: "old", status: "completed" } as DownloadHistoryRow],
-      128,
-      generation
+      128
     )
-    await flush()
 
     expect(store().rows.map((known) => known.downloadId)).toEqual(["running"])
     expect(store().lifetimeCompleted).toBe(128)
     expect(store().hydrated).toBe(true)
   })
 
-  test("and a stale re-read still brings the live row it was asked for", async () => {
-    const generation = store().generation
+  test("and a late re-read still brings the live row it was asked for", async () => {
     store().add(row({ downloadId: "old", status: "completed" }))
     mocks.clearHistory.mockResolvedValue([])
 
     store().clearFinished()
+    await flush()
+
     store().adopt(
       [
         {
@@ -689,28 +751,10 @@ describe("clearing and removing", () => {
           label: "1080p mp4"
         } as DownloadStatus
       ],
-      [{ download_id: "old", status: "completed" } as DownloadHistoryRow],
-      generation
+      [{ download_id: "old", status: "completed" } as DownloadHistoryRow]
     )
-    await flush()
 
     expect(store().rows.map((known) => known.downloadId)).toEqual(["late"])
-  })
-
-  test("and neither can a re-read that was in flight", async () => {
-    const generation = store().generation
-    store().add(row({ downloadId: "old", status: "completed" }))
-    mocks.clearHistory.mockResolvedValue([])
-
-    store().clearFinished()
-    store().adopt(
-      [],
-      [{ download_id: "old", status: "completed" } as DownloadHistoryRow],
-      generation
-    )
-    await flush()
-
-    expect(store().rows).toEqual([])
   })
 
   test("a history write that fails costs nothing", async () => {
