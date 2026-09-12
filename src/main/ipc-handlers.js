@@ -182,6 +182,23 @@ class IPCHandlers {
     this.history.load()
 
     /**
+     * which side of the user's clears a snapshot was read on
+     *
+     * an integer that moves every time a row leaves the history - a clear, a
+     * removal - and rides out on every answer about it: the two snapshot reads
+     * and the two replies that do the removing. It is the one thing the renderer
+     * cannot work out for itself, and every attempt to (a version counter of its
+     * own, a set of the ids it happened to be holding, a comparison of clocks)
+     * missed an ordering, because only this process knows whether a snapshot was
+     * taken before a clear or after it.
+     *
+     * it counts clears rather than downloads, so it stays small, and it lives
+     * for the session: the renderer only ever compares two numbers from the same
+     * run, and a reload re-reads everything anyway.
+     */
+    this.historyEpoch = 0
+
+    /**
      * how many downloads this install has ever finished
      *
      * one number, owned here: `noteCompletedDownload` increments it, the
@@ -1654,10 +1671,13 @@ class IPCHandlers {
   // get all active downloads
   async handleGetAllDownloads(_event) {
     try {
-      // getAllDownloads() on the renderer side reads response.data straight
-      // as the array the DownloadStatus[] contract promises - wrapping it in
-      // an object here was handing back something that is not that array
-      return this.createSuccess(this.runner.list())
+      // {epoch, rows} rather than the bare array it used to be: the rows alone
+      // do not say when they were read, and the renderer cannot tell a snapshot
+      // taken before a "clear history" from one taken after it. see historyEpoch
+      return this.createSuccess({
+        epoch: this.historyEpoch,
+        rows: this.runner.list()
+      })
     } catch (error) {
       console.error("Get all downloads failed:", error.message)
       return this.createError("Failed to get downloads")
@@ -1667,8 +1687,9 @@ class IPCHandlers {
   /**
    * the downloads this install remembers, newest first
    *
-   * the array is the data, as it is for download:get-all: the renderer reads
-   * response.data straight as the rows it hydrates from.
+   * {epoch, rows}, as download:get-all answers: the rows are what the renderer
+   * hydrates from, and the epoch is which side of the user's clears they were
+   * read on (see historyEpoch).
    *
    * the file has to have been read first, and so does every status already
    * written down. this is the renderer's one hydration read and nothing pushes
@@ -1680,20 +1701,37 @@ class IPCHandlers {
    */
   async handleGetHistory(_event) {
     try {
-      return this.createSuccess(await this.history.snapshot())
+      const rows = await this.history.snapshot()
+
+      // read after the snapshot, not before: a clear that lands while the
+      // snapshot is being taken is a clear these rows predate, and the epoch
+      // has to say so
+      return this.createSuccess({ epoch: this.historyEpoch, rows })
     } catch (error) {
       console.error("Get download history failed:", error.message)
       return this.createError("Failed to get the download history")
     }
   }
 
-  // "clear finished": the rows with nothing left to happen to them go, and the
-  // ones still queued or running stay. answers with what is left, so the panel
-  // does not have to guess which of the two each of its rows was
+  /**
+   * "clear finished": the rows with nothing left to happen to them go, and the
+   * ones still queued or running stay. answers with what is left, and with the
+   * epoch it happened at, so the panel does not have to guess which of its rows
+   * this covered.
+   *
+   * the epoch moves before the history does. A snapshot read taken between the
+   * two would otherwise carry the new number over rows this clear is about to
+   * delete, and the renderer would keep them for the rest of the session.
+   */
   async handleClearHistory(_event) {
     try {
+      this.historyEpoch += 1
       await this.history.clear()
-      return this.createSuccess(this.history.list())
+
+      return this.createSuccess({
+        epoch: this.historyEpoch,
+        rows: this.history.list()
+      })
     } catch (error) {
       console.error("Clear download history failed:", error.message)
       return this.createError("Failed to clear the download history")
@@ -1701,13 +1739,19 @@ class IPCHandlers {
   }
 
   // forget one row. it says nothing about the download itself - a row removed
-  // while it is still running keeps running, and cancel is the channel for that
+  // while it is still running keeps running, and cancel is the channel for that.
+  // the epoch moves for the same reason it does on a clear: this is the other
+  // way a row leaves the history
   async handleRemoveHistory(_event, data) {
     try {
       this.validateRequest(data, ["downloadId"])
+      this.historyEpoch += 1
       await this.history.remove(data.downloadId)
 
-      return this.createSuccess(this.history.list())
+      return this.createSuccess({
+        epoch: this.historyEpoch,
+        rows: this.history.list()
+      })
     } catch (error) {
       console.error("Remove download history failed:", error.message)
       return this.createError("Failed to remove that download")

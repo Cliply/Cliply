@@ -421,8 +421,10 @@ describe("what a pinterest/tiktok download hands the renderer", () => {
     const { handle } = await startSimpleDownload(harness)
 
     const all = await handlers.handleGetAllDownloads()
-    expect(Array.isArray(all.data)).toBe(true)
-    expect(all.data).toEqual([
+    // {epoch, rows}: the rows are the contract, and the epoch says which side
+    // of the user's clears they were read on
+    expect(all.data.epoch).toBe(0)
+    expect(all.data.rows).toEqual([
       expect.objectContaining({
         downloadId: "download_1",
         status: "downloading",
@@ -475,7 +477,7 @@ describe("the request a reservation keeps", () => {
   async function rowFor(handlers) {
     await settle()
     const all = await handlers.handleGetAllDownloads()
-    return all.data[0]
+    return all.data.rows[0]
   }
 
   it("a video keeps its quality, its container and everything optional it was sent", async () => {

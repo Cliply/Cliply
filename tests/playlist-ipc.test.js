@@ -540,8 +540,8 @@ describe("what a downloads list would see", () => {
 
     const rows = await handlers.handleGetAllDownloads(null)
 
-    expect(rows.data).toHaveLength(1)
-    expect(rows.data[0]).toMatchObject({
+    expect(rows.data.rows).toHaveLength(1)
+    expect(rows.data.rows[0]).toMatchObject({
       downloadId: "playlist_1",
       // still "combined": what this fetches is the same thing one video does,
       // and analytics and the audit log read that field
@@ -584,11 +584,11 @@ describe("what a downloads list would see", () => {
 
     const rows = await handlers.handleGetAllDownloads(null)
 
-    expect(rows.data[0]).toMatchObject({
+    expect(rows.data.rows[0]).toMatchObject({
       label: "1 video",
       request: { type: "audio", audio_mode: "mp3" }
     })
-    expect(rows.data[0].request.height).toBeUndefined()
+    expect(rows.data.rows[0].request.height).toBeUndefined()
   })
 })
 
