@@ -1791,6 +1791,133 @@ describe("history", () => {
     expect(history.rows[0].kind).toBe(kind)
   })
 
+  test("a playlist row knows how many videos it is waiting on", () => {
+    // before anything has run there is no tally to read, and the selection the
+    // request carries is the only denominator a queued or interrupted playlist
+    // row will ever have
+    const history = createHistory()
+    const { runner } = createRunner({ history })
+
+    runner.reserve("playlist_1", {
+      type: "combined",
+      platform: "youtube",
+      playlist: true,
+      label: "12 videos",
+      request: {
+        url: "https://youtube.com/playlist?list=PL",
+        entries: Array.from({ length: 12 }, (_, index) => ({
+          index: index + 1,
+          id: `id_${index}`
+        }))
+      }
+    })
+
+    expect(history.rows[0]).toMatchObject({
+      kind: "playlist",
+      status: "queued",
+      items_total: 12
+    })
+  })
+
+  test("a finished playlist row says what the run really did", async () => {
+    const history = createHistory()
+    const { runner } = createRunner({ history })
+    const handle = new FakeHandle()
+
+    const running = runner.run({ ...PLAYLIST, createHandle: () => handle })
+    await settle()
+    handle.resolve(
+      playlistResult({
+        files: ["/downloads/PL/001 - One [aaa] 1080p.mp4"],
+        itemsSaved: 9,
+        itemsReused: 1,
+        itemsSkipped: 2,
+        itemsTotal: 12
+      })
+    )
+    await running
+
+    expect(history.row("playlist_1")).toMatchObject({
+      status: "completed",
+      items_saved: 9,
+      items_reused: 1,
+      items_skipped: 2,
+      items_total: 12
+    })
+  })
+
+  test("a playlist that broke partway keeps what it saved", async () => {
+    const history = createHistory()
+    const { runner } = createRunner({ history })
+    const handle = new FakeHandle()
+
+    const running = runner.run({ ...PLAYLIST, createHandle: () => handle })
+    await settle()
+
+    const error = new Error("Download stalled.")
+    error.code = ERROR_CODES.NETWORK_ERROR
+    Object.assign(error, {
+      files: ["/downloads/PL/001 - One [aaa] 1080p.mp4"],
+      itemsSaved: 1,
+      itemsReused: 0,
+      itemsSkipped: 0,
+      itemsTotal: 12
+    })
+    handle.reject(error)
+    await running
+
+    // "one of twelve saved" is the difference between a row worth retrying and
+    // a row that reads as a total loss
+    expect(history.row("playlist_1")).toMatchObject({
+      status: "failed",
+      items_saved: 1,
+      items_total: 12
+    })
+  })
+
+  test("a run refused before it could count keeps the number it had", async () => {
+    // the reservation wrote items_total; a rejection carrying no tally must not
+    // blank it, which is what writing the counts as undefined would do
+    const history = createHistory()
+    const { runner } = createRunner({ history })
+    const handle = new FakeHandle()
+
+    const running = runner.run({
+      ...PLAYLIST,
+      createHandle: () => handle
+    })
+    runner.active.get("playlist_1").request = {
+      entries: [{ index: 1, id: "a" }, { index: 2, id: "b" }]
+    }
+    await settle()
+
+    handle.reject(new Error("could not write the records file"))
+    await running
+
+    const row = history.row("playlist_1")
+    expect(row.status).toBe("failed")
+    expect(row.items_total).toBe(2)
+    expect(row).not.toHaveProperty("items_saved")
+  })
+
+  test("a single video row carries no counts at all", async () => {
+    // a row shape widened for everybody is a row shape every consumer has to
+    // re-learn: the counts are a playlist's, and only a playlist's
+    const history = createHistory()
+    const { runner } = createRunner({ history })
+    const handle = new FakeHandle()
+
+    const running = runner.run({ ...BASE, createHandle: () => handle })
+    await settle()
+    handle.resolve({ filePath: "/downloads/a.mp4" })
+    await running
+
+    const row = history.row()
+    expect(row).not.toHaveProperty("items_total")
+    expect(row).not.toHaveProperty("items_saved")
+    expect(row).not.toHaveProperty("files")
+  })
+
   test("a history that throws does not fail the download", async () => {
     // the collaborator is injected, and every one of these calls sits where a
     // throw would be caught as the download itself breaking

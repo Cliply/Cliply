@@ -466,6 +466,70 @@ describe("remove", () => {
   })
 })
 
+describe("a playlist row", () => {
+  // one row covering n videos: the counts are what it is drawn from, because a
+  // playlist's file_path names whichever video landed last rather than the run
+  function playlistRow(overrides = {}) {
+    return row({
+      download_id: "playlist_1",
+      kind: "playlist",
+      label: "12 videos",
+      request: { url: "https://youtube.com/playlist?list=PL", entries: [] },
+      items_total: 12,
+      ...overrides
+    })
+  }
+
+  test("reads back with its counts after a restart", async () => {
+    await history.upsert(playlistRow())
+    await history.upsert({
+      download_id: "playlist_1",
+      status: "completed",
+      finished_at: 2000,
+      items_saved: 9,
+      items_reused: 1,
+      items_skipped: 2,
+      items_total: 12
+    })
+
+    const next = await relaunch()
+
+    expect(next.list()[0]).toMatchObject({
+      kind: "playlist",
+      status: "completed",
+      items_saved: 9,
+      items_reused: 1,
+      items_skipped: 2,
+      items_total: 12
+    })
+  })
+
+  test("keeps the total it was reserved with when a settle counts nothing", async () => {
+    // a playlist refused before the engine could count still knows how many
+    // videos the user picked, and that number is the row's whole denominator
+    await history.upsert(playlistRow())
+    await history.upsert({
+      download_id: "playlist_1",
+      status: "failed",
+      error: "could not write the records file"
+    })
+
+    expect(history.list()[0].items_total).toBe(12)
+  })
+
+  test("an interrupted playlist still says how many it was for", async () => {
+    await history.upsert(playlistRow({ status: "downloading", items_saved: 3 }))
+
+    await history.interruptLive()
+
+    expect(stored()[0]).toMatchObject({
+      status: "interrupted",
+      items_saved: 3,
+      items_total: 12
+    })
+  })
+})
+
 describe("list", () => {
   test("hands out copies, so a caller cannot edit the history in place", async () => {
     await history.upsert(row())

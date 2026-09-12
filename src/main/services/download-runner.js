@@ -484,13 +484,14 @@ class DownloadRunner {
      *
      * a playlist's `filePath` is whichever video landed last, so on a playlist
      * row these two describe that one file rather than the run. they are kept
-     * anyway - the folder they name is the right folder to open - and a
-     * playlist row is drawn from its item counts instead
+     * anyway - the folder they name is the right folder to open - and what a
+     * playlist row actually reads is the counts beside them
      */
     this.record(downloadId, entry, {
       status: STATUS.COMPLETED,
       finished_at: Date.now(),
-      ...(filePath ? { filename, file_path: filePath, file_size: fileSize } : null)
+      ...(filePath ? { filename, file_path: filePath, file_size: fileSize } : null),
+      ...historyCounts(tally)
     })
 
     this.sendEvent(downloadId, {
@@ -563,7 +564,10 @@ class DownloadRunner {
     // cancelled everything on their way out
     this.record(downloadId, entry, {
       status: STATUS.CANCELLED,
-      finished_at: Date.now()
+      finished_at: Date.now(),
+      // a cancelled playlist keeps the videos it had already finished, and the
+      // row is the only place the user will see how many those were
+      ...historyCounts(tally)
     })
 
     this.sendEvent(downloadId, {
@@ -602,7 +606,11 @@ class DownloadRunner {
       status: STATUS.FAILED,
       finished_at: Date.now(),
       error: message,
-      category: (error && error.code) || "DOWNLOAD_FAILED"
+      category: (error && error.code) || "DOWNLOAD_FAILED",
+      // a stalled playlist rejects with the files it did save attached, and
+      // "three of twelve saved" is the difference between a row worth retrying
+      // and a row that reads as a total loss
+      ...historyCounts(tally)
     })
 
     this.sendEvent(downloadId, {
@@ -756,8 +764,66 @@ function reservationRow(entry) {
     // cap belongs where they put it in the list, and the cap drops the oldest
     // by this too
     started_at: entry.started,
-    request: entry.request
+    request: entry.request,
+    ...reservedItemsTotal(entry)
   }
+}
+
+/**
+ * how many videos a playlist row is waiting on, before anything has run
+ *
+ * the same number the acknowledgement answers with, read from the selection
+ * the request carries. without it a playlist row that was queued or
+ * interrupted has no denominator at all: the engine never got far enough to
+ * count, and "12 videos" is the one thing the user already knows about it.
+ *
+ * a settle overwrites this with what the run really found (see historyCounts),
+ * which is the same key because it is the same fact, better known.
+ *
+ * @param {Object} entry - the reservation
+ * @returns {Object|null} {items_total}, or null for anything but a playlist
+ */
+function reservedItemsTotal(entry) {
+  if (!entry.playlist) return null
+
+  const entries = entry.request && entry.request.entries
+
+  return Array.isArray(entries) ? { items_total: entries.length } : null
+}
+
+/**
+ * what a playlist run actually did, for the row rather than for the event
+ *
+ * four counts and not the fifth: `files` is a list of paths that grows with the
+ * playlist, and a hundred rows each holding one would be a history file
+ * measured in megabytes. the row says how many landed, and the folder is one
+ * click away.
+ *
+ * a count that is not a number is left out rather than written as undefined,
+ * because a merge would otherwise blank the `items_total` the reservation put
+ * there - a run refused before it could count would erase the only number the
+ * row had.
+ *
+ * @param {Object|null} tally - what itemTally read off the result or rejection
+ * @returns {Object|null} the counts, or null when this was not a playlist
+ */
+function historyCounts(tally) {
+  if (!tally) return null
+
+  const counts = {}
+
+  for (const key of [
+    "items_saved",
+    "items_reused",
+    "items_skipped",
+    "items_total"
+  ]) {
+    if (Number.isFinite(tally[key])) {
+      counts[key] = tally[key]
+    }
+  }
+
+  return counts
 }
 
 /**
