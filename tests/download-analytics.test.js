@@ -285,7 +285,14 @@ describe("what a pinterest/tiktok failure hands the renderer", () => {
     const all = await handlers.handleGetAllDownloads()
     expect(Array.isArray(all.data)).toBe(true)
     expect(all.data).toEqual([
-      expect.objectContaining({ downloadId: "download_1", status: "downloading" })
+      expect.objectContaining({
+        downloadId: "download_1",
+        status: "downloading",
+        // a row also carries what it would take to describe and retry it, so a
+        // renderer that reloaded mid-download can rebuild the whole list
+        label: "pinterest",
+        request: { url: "https://www.pinterest.com/pin/1/", platform: "pinterest", title: "video" }
+      })
     ])
 
     const one = await handlers.handleGetDownloadStatus(null, {
@@ -318,6 +325,129 @@ describe("what a pinterest/tiktok failure hands the renderer", () => {
     expect(handlers.engine.downloadSimple).toHaveBeenCalledWith(
       expect.objectContaining({ formatSelector: "b" })
     )
+  })
+})
+
+/**
+ * what a reservation carries for a downloads list
+ *
+ * `label` is the words beside the title, and `request` is what a retry
+ * re-sends: the payload as the renderer spelled it, so it goes back through the
+ * same validator rather than through a shape main invented. these are read off
+ * download:get-all, which is how a renderer that reloaded mid-download rebuilds
+ * its rows.
+ */
+describe("the request a reservation keeps", () => {
+  async function rowFor(handlers) {
+    await settle()
+    const all = await handlers.handleGetAllDownloads()
+    return all.data[0]
+  }
+
+  it("a video keeps its quality, its container and everything optional it was sent", async () => {
+    const { handlers } = createHandlers()
+    const handle = new FakeHandle()
+    handlers.engine.downloadCombined = jest.fn(() => handle)
+
+    await handlers.handleDownloadCombined(null, {
+      url: "https://youtu.be/abc",
+      platform: "youtube",
+      download_id: "download_1",
+      height: 1080,
+      container: "mp4",
+      title: "A Video",
+      audio_language: "hi",
+      time_range: { start: 5, end: 65 },
+      precise_cut: true
+    })
+
+    expect(await rowFor(handlers)).toMatchObject({
+      label: "1080p mp4",
+      request: {
+        url: "https://youtu.be/abc",
+        title: "A Video",
+        platform: "youtube",
+        height: 1080,
+        container: "mp4",
+        audio_language: "hi",
+        time_range: { start: 5, end: 65 },
+        precise_cut: true
+      }
+    })
+
+    handle.resolve({})
+  })
+
+  it("a video that was sent none of the optional fields keeps none of them", async () => {
+    // a retry has to re-send the request the user made, not a wider one: a key
+    // that was never there must not come back as an explicit undefined
+    const { handlers } = createHandlers()
+    const handle = new FakeHandle()
+    handlers.engine.downloadCombined = jest.fn(() => handle)
+
+    await handlers.handleDownloadCombined(null, {
+      url: "https://youtu.be/abc",
+      platform: "youtube",
+      download_id: "download_1",
+      height: 720
+    })
+
+    const row = await rowFor(handlers)
+
+    expect(row.label).toBe("720p mp4")
+    expect(Object.keys(row.request).sort()).toEqual(["height", "platform", "title", "url"])
+
+    handle.resolve({})
+  })
+
+  it("a container we never offered is labelled as the one that gets downloaded", async () => {
+    // buildArgs falls back to mp4 for anything outside TIER_CONTAINERS, so a
+    // label read straight off the payload would name a file that never existed
+    const { handlers } = createHandlers()
+    const handle = new FakeHandle()
+    handlers.engine.downloadCombined = jest.fn(() => handle)
+
+    await handlers.handleDownloadCombined(null, {
+      url: "https://youtu.be/abc",
+      platform: "youtube",
+      download_id: "download_1",
+      height: 1080,
+      container: "webm"
+    })
+
+    const row = await rowFor(handlers)
+
+    expect(row.label).toBe("1080p mp4")
+    // the request is still what the renderer sent: a retry re-sends it and it
+    // is normalised again on the way in, exactly as it was this time
+    expect(row.request.container).toBe("webm")
+
+    handle.resolve({})
+  })
+
+  it("audio keeps the mode, which is also its label", async () => {
+    const { handlers } = createHandlers()
+    const handle = new FakeHandle()
+    handlers.engine.downloadAudio = jest.fn(() => handle)
+
+    await handlers.handleDownloadAudio(null, {
+      url: "https://youtu.be/abc",
+      download_id: "download_1",
+      audio_mode: "mp3",
+      title: "A Song"
+    })
+
+    expect(await rowFor(handlers)).toMatchObject({
+      label: "mp3",
+      request: {
+        url: "https://youtu.be/abc",
+        title: "A Song",
+        platform: "youtube",
+        audio_mode: "mp3"
+      }
+    })
+
+    handle.resolve({})
   })
 })
 

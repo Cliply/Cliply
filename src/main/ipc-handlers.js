@@ -36,7 +36,8 @@ const { SettingsStore } = require("./services/settings-store")
 const {
   ERROR_CODES,
   PLAYLIST_CONTAINER,
-  RECORDS_UNWRITABLE
+  RECORDS_UNWRITABLE,
+  normalizeQualityTier
 } = require("./services/ytdlp-engine")
 
 const {
@@ -61,6 +62,24 @@ const {
   playlistProperties,
   shortErrorMessage
 } = require("./ipc/analytics-translation")
+
+/**
+ * the request a download row would be retried from
+ *
+ * kept in the renderer's own snake_case spelling, because it is the wire
+ * payload rather than a shape of ours: a retry hands it straight back to the
+ * same channel and it is validated again on the way in. fields that were never
+ * sent are dropped rather than carried as undefined, so a re-send is the same
+ * request the user made and not a wider one.
+ *
+ * @param {Object} fields - the validated payload fields, snake_case
+ * @returns {Object} the same, minus anything absent
+ */
+function retryRequest(fields) {
+  return Object.fromEntries(
+    Object.entries(fields).filter(([, value]) => value !== undefined)
+  )
+}
 
 class IPCHandlers {
   constructor(services, autoUpdater = null) {
@@ -826,7 +845,23 @@ class IPCHandlers {
           !this.runner.reserve(downloadId, {
             type: "combined",
             platform: targetPlatform,
-            title
+            title,
+            // what a downloads list shows beside the title, and what a retry
+            // re-sends. the label is built from the tier the engine will
+            // really use rather than from the raw payload, so a container we
+            // never offered cannot put a word on the row that disagrees with
+            // the file it produces
+            label: `${height}p ${normalizeQualityTier({ height, container }).container}`,
+            request: retryRequest({
+              url,
+              title,
+              platform: targetPlatform,
+              height,
+              container,
+              audio_language: audioLanguage,
+              time_range: rawTimeRange,
+              precise_cut: preciseCut
+            })
           })
         ) {
           return this.duplicateDownloadError(downloadId)
@@ -878,7 +913,11 @@ class IPCHandlers {
         !this.runner.reserve(downloadId, {
           type: "combined",
           platform: targetPlatform,
-          title
+          title,
+          // a simple platform offers no choice at all, so the platform is the
+          // only thing there is to say about what this download is
+          label: targetPlatform,
+          request: retryRequest({ url, title, platform: targetPlatform })
         })
       ) {
         return this.duplicateDownloadError(downloadId)
@@ -981,7 +1020,17 @@ class IPCHandlers {
         !this.runner.reserve(downloadId, {
           type: "audio",
           platform: "youtube",
-          title
+          title,
+          // the mode is the whole choice an audio download offers
+          label: audioMode,
+          request: retryRequest({
+            url,
+            title,
+            platform: "youtube",
+            audio_mode: audioMode,
+            audio_language: audioLanguage,
+            time_range: rawTimeRange
+          })
         })
       ) {
         return this.duplicateDownloadError(downloadId)
@@ -1229,7 +1278,26 @@ class IPCHandlers {
           platform: "youtube",
           title,
           // one row in a downloads list, covering n videos - see list()
-          playlist: true
+          playlist: true,
+          // the count is what a playlist row has instead of a quality: the
+          // ceiling applies per video and says nothing about the size of the
+          // job, which is the number the user is waiting on
+          label: `${entries.length} ${entries.length === 1 ? "video" : "videos"}`,
+          // the selection travels with it, so a retry downloads the videos
+          // that were picked rather than the whole playlist. `type` here is
+          // the wire spelling the renderer sends, which is not the runner's:
+          // a playlist of videos is "video" on the wire and "combined" to the
+          // runner, and this field is the one that gets re-sent
+          request: retryRequest({
+            url,
+            title,
+            platform: "youtube",
+            playlist_id: playlistId,
+            entries,
+            type: audioOnly ? "audio" : "video",
+            ...(audioOnly ? { audio_mode: audio } : { height: ceiling }),
+            ...(ignoreArchive === true ? { ignore_archive: true } : {})
+          })
         })
       ) {
         return this.duplicateDownloadError(downloadId)

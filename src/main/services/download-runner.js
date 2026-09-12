@@ -10,9 +10,14 @@ const fs = require("fs")
 const { ERROR_CODES } = require("./ytdlp-engine")
 const { describeError } = require("../utils/analytics-helpers")
 const { classify, ERROR_STAGES } = require("../utils/error-taxonomy")
+const { APP_CONFIG } = require("../utils/constants")
 
-// the statuses the renderer hooks already understand
+// the statuses the renderer hooks already understand, plus `queued`, which is
+// new: a download that has been accepted and is waiting for a slot. it is a
+// state the renderer has never had to draw before, and an older consumer that
+// only knows the other four writes it into `status` and carries on
 const STATUS = {
+  QUEUED: "queued",
   DOWNLOADING: "downloading",
   COMPLETED: "completed",
   FAILED: "failed",
@@ -21,17 +26,38 @@ const STATUS = {
 
 class DownloadRunner {
   /**
-   * @param {Object} options - {engine, updater, sendEvent, trackEvent, logAudit}
+   * @param {Object} options - {engine, updater, sendEvent, trackEvent,
+   *   logAudit, maxConcurrent}
    */
-  constructor({ engine, updater, sendEvent, trackEvent = () => {}, logAudit = () => {} }) {
+  constructor({
+    engine,
+    updater,
+    sendEvent,
+    trackEvent = () => {},
+    logAudit = () => {},
+    maxConcurrent = APP_CONFIG.MAX_CONCURRENT_DOWNLOADS
+  }) {
     this.engine = engine
     this.updater = updater
     this.sendEvent = sendEvent
     this.trackEvent = trackEvent
     this.logAudit = logAudit
 
-    // downloadId -> {handle, type, title, platform, started}
+    // downloadId -> {handle, type, title, platform, started, request, label}
     this.active = new Map()
+
+    /**
+     * the slot semaphore
+     *
+     * `running` counts downloads that hold a slot, which is not the same as
+     * `active.size`: a reservation exists from the moment the ipc layer claims
+     * the id, and a queued one is very much active without running. `waiting`
+     * holds one `{downloadId, resolve}` per parked run, oldest first, which is
+     * what makes the queue FIFO by reservation time.
+     */
+    this.maxConcurrent = maxConcurrent
+    this.running = 0
+    this.waiting = []
   }
 
   /**
@@ -46,7 +72,7 @@ class DownloadRunner {
    * overwriting bookkeeping the first one is still using.
    *
    * @param {string} downloadId - the id handed to the renderer
-   * @param {Object} details - {type, platform, title, playlist}
+   * @param {Object} details - {type, platform, title, playlist, request, label}
    * @returns {boolean} false when this id is already running
    */
   reserve(downloadId, details = {}) {
@@ -58,13 +84,27 @@ class DownloadRunner {
       type: details.type,
       title: details.title,
       platform: details.platform,
+      /**
+       * the request this download was started from, stored exactly as the
+       * renderer sent it, and a short human label for the row.
+       *
+       * main is the only place that knows the whole list, so a renderer that
+       * reloads mid-download rebuilds its rows from list() - and a row it
+       * cannot describe is a row with no retry. snake_case throughout, because
+       * this is the wire payload kept rather than a shape of our own.
+       */
+      request: details.request,
+      label: details.label,
       // one row covering n files rather than one covering a file. `type` stays
       // what it always was - "combined" or "audio" is still what this download
       // fetches, and analytics and the audit log read it - so the difference
       // lives in its own field instead of as a fifth media type
       playlist: Boolean(details.playlist),
       started: Date.now(),
-      status: STATUS.DOWNLOADING,
+      // every reservation begins queued, whether or not it ever waits: run()
+      // moves it on where it takes a handle, so there is one place the status
+      // changes rather than one per caller
+      status: STATUS.QUEUED,
       handle: null,
       cancelled: false,
       // how far the engine got, kept for the two terminal states that report
@@ -109,89 +149,180 @@ class DownloadRunner {
       return this.settleCancelled(downloadId)
     }
 
+    // and here is where a download waits its turn. nothing has spawned yet, so
+    // a queued row costs one entry in a map and a pending promise
+    const holdsSlot = await this.acquireSlot(downloadId)
+
     let lastError = null
     let repaired = false
 
-    // at most two passes: the second only happens when an update actually
-    // changed the binary version (repair-on-failure)
-    for (let attempt = 0; attempt < 2; attempt++) {
-      let handle
+    try {
+      // a cancel landing while this was parked wakes it without handing it a
+      // slot, and the flag is what it wakes up to read
+      const parked = this.active.get(downloadId)
 
-      try {
-        handle = createHandle()
-      } catch (error) {
-        lastError = error
-        break
-      }
-
-      const entry = this.active.get(downloadId)
-
-      // cancelled while we were creating the handle
-      if (!entry || entry.cancelled) {
-        handle.cancel()
+      if (!parked || parked.cancelled) {
         return this.settleCancelled(downloadId)
       }
 
-      entry.handle = handle
+      // at most two passes: the second only happens when an update actually
+      // changed the binary version (repair-on-failure)
+      for (let attempt = 0; attempt < 2; attempt++) {
+        let handle
 
-      handle.on("progress", (update) => {
-        if (Number.isFinite(update.progress)) {
-          entry.progress = update.progress
+        try {
+          handle = createHandle()
+        } catch (error) {
+          lastError = error
+          break
         }
 
-        // a trimmed download is one ffmpeg pass that only reports at the end,
-        // so a percentage would sit at 0 and then jump - say "working" instead
-        this.sendEvent(downloadId, {
-          status: STATUS.DOWNLOADING,
-          progress: trimmed ? undefined : update.progress,
-          indeterminate: trimmed || undefined,
-          speed: update.speed || undefined,
-          eta: update.eta || undefined,
-          ...(playlist ? itemProgressFields(update) : null)
+        const entry = this.active.get(downloadId)
+
+        // cancelled while we were creating the handle
+        if (!entry || entry.cancelled) {
+          handle.cancel()
+          return this.settleCancelled(downloadId)
+        }
+
+        entry.handle = handle
+        entry.status = STATUS.DOWNLOADING
+
+        handle.on("progress", (update) => {
+          if (Number.isFinite(update.progress)) {
+            entry.progress = update.progress
+          }
+
+          // a trimmed download is one ffmpeg pass that only reports at the end,
+          // so a percentage would sit at 0 and then jump - say "working" instead
+          this.sendEvent(downloadId, {
+            status: STATUS.DOWNLOADING,
+            progress: trimmed ? undefined : update.progress,
+            indeterminate: trimmed || undefined,
+            speed: update.speed || undefined,
+            eta: update.eta || undefined,
+            ...(playlist ? itemProgressFields(update) : null)
+          })
         })
-      })
 
-      try {
-        const result = await handle.promise
-        return this.settleCompleted({ downloadId, type, platform, formatId, trimmed, result })
-      } catch (error) {
-        lastError = error
+        try {
+          const result = await handle.promise
+          return this.settleCompleted({ downloadId, type, platform, formatId, trimmed, result })
+        } catch (error) {
+          lastError = error
 
-        if (error.code === ERROR_CODES.CANCELLED) {
-          // the engine attaches the tally to the rejection, so a cancel can
-          // still say which files it left on disk
-          return this.settleCancelled(downloadId, error)
-        }
-
-        // an extraction-signature break is exactly what a newer yt-dlp fixes.
-        //
-        // a playlist retry re-runs the whole operation rather than resuming
-        // where it broke, which sounds worse than it is: --download-archive
-        // holds every item that already landed, so the second pass skips them
-        // and picks up at the one that failed
-        if (error.updateMayFix && !repaired && this.updater) {
-          repaired = true
-          const update = await this.updater.updateNow().catch(() => null)
-
-          const stillWanted = this.active.get(downloadId)
-
-          if (stillWanted && stillWanted.cancelled) {
-            return this.settleCancelled(downloadId)
+          if (error.code === ERROR_CODES.CANCELLED) {
+            // the engine attaches the tally to the rejection, so a cancel can
+            // still say which files it left on disk
+            return this.settleCancelled(downloadId, error)
           }
 
-          if (update && update.updated) {
-            console.log(
-              `[${downloadId}] retrying after yt-dlp update ${update.from} -> ${update.to}`
-            )
-            continue
-          }
-        }
+          // an extraction-signature break is exactly what a newer yt-dlp fixes.
+          //
+          // a playlist retry re-runs the whole operation rather than resuming
+          // where it broke, which sounds worse than it is: --download-archive
+          // holds every item that already landed, so the second pass skips them
+          // and picks up at the one that failed
+          if (error.updateMayFix && !repaired && this.updater) {
+            repaired = true
+            // the slot is held across this, on purpose. it is still one
+            // download, and freeing it for the length of an update would let a
+            // fourth process start beside the three already running
+            const update = await this.updater.updateNow().catch(() => null)
 
-        break
+            const stillWanted = this.active.get(downloadId)
+
+            if (stillWanted && stillWanted.cancelled) {
+              return this.settleCancelled(downloadId)
+            }
+
+            if (update && update.updated) {
+              console.log(
+                `[${downloadId}] retrying after yt-dlp update ${update.from} -> ${update.to}`
+              )
+              continue
+            }
+          }
+
+          break
+        }
+      }
+
+      return this.settleFailed({ downloadId, type, platform, formatId, trimmed, error: lastError })
+    } finally {
+      // completion, failure, cancel and a throw out of any of them all come
+      // through here, which is the only way the next download in line is ever
+      // certain to start
+      if (holdsSlot) {
+        this.releaseSlot()
       }
     }
+  }
 
-    return this.settleFailed({ downloadId, type, platform, formatId, trimmed, error: lastError })
+  /**
+   * wait until this download may run
+   *
+   * the one emission: a row that parks says so once, and a row that never
+   * waited says nothing at all, so the renderer sees `queued` only when there
+   * is really something to show.
+   *
+   * @param {string} downloadId - the id handed to the renderer
+   * @returns {Promise<boolean>} whether a slot is now held. false means a
+   *   cancel woke this waiter rather than a slot coming free
+   */
+  async acquireSlot(downloadId) {
+    if (this.running < this.maxConcurrent) {
+      this.running += 1
+      return true
+    }
+
+    this.sendEvent(downloadId, { status: STATUS.QUEUED, progress: 0 })
+
+    return new Promise((resolve) => {
+      this.waiting.push({ downloadId, resolve })
+    })
+  }
+
+  /**
+   * give up a slot, and start whatever was waiting for it
+   *
+   * the slot is handed straight to the oldest waiter rather than freed and
+   * re-taken: between a decrement and that waiter's continuation actually
+   * running there is a turn of the event loop in which a fresh run() would find
+   * room and jump the whole queue.
+   */
+  releaseSlot() {
+    const next = this.waiting.shift()
+
+    if (next) {
+      next.resolve(true)
+      return
+    }
+
+    this.running -= 1
+  }
+
+  /**
+   * take a download out of the queue without giving anyone its slot
+   *
+   * a cancelled waiter still has to be woken, or run() would sit on a promise
+   * nothing will ever resolve and the reservation would never settle. it wakes
+   * with `false`, so it settles as cancelled and releases nothing.
+   *
+   * @param {string} downloadId - the id handed to the renderer
+   * @returns {boolean} whether this download was queued
+   */
+  dropWaiter(downloadId) {
+    const index = this.waiting.findIndex((waiter) => waiter.downloadId === downloadId)
+
+    if (index === -1) {
+      return false
+    }
+
+    const [waiter] = this.waiting.splice(index, 1)
+    waiter.resolve(false)
+
+    return true
   }
 
   /**
@@ -382,10 +513,17 @@ class DownloadRunner {
       return false
     }
 
-    // the flag covers every phase: reserved-but-not-started, waiting on an
-    // update, and between retry attempts. the handle may not exist yet.
+    // the flag covers every phase: reserved-but-not-started, queued behind the
+    // cap, waiting on an update, and between retry attempts. the handle may not
+    // exist yet.
     const alreadyCancelled = entry.cancelled
     entry.cancelled = true
+
+    // a queued download has no process to kill, so cancelling one is only ever
+    // waking it: run() re-reads the flag it was just given and settles through
+    // settleCancelled, which emits the same `cancelled` event a running
+    // download's would. nothing spawns, and no slot changes hands
+    this.dropWaiter(downloadId)
 
     if (entry.handle) {
       return entry.handle.cancel() || !alreadyCancelled
@@ -421,7 +559,11 @@ class DownloadRunner {
    * status, progress) plus the extra bookkeeping fields a caller building a
    * downloads list would also want - `playlist` among them, because a playlist
    * is one row that expands into n videos and a single video is one row that
-   * does not, and nothing else in here says which of the two this is
+   * does not, and nothing else in here says which of the two this is.
+   *
+   * `status` now includes `queued`, and `request` and `label` are what a
+   * renderer that reloaded mid-download rebuilds a complete row from: the
+   * request it would re-send to retry, and the words to put beside the title.
    * @returns {Object[]}
    */
   list() {
@@ -433,7 +575,9 @@ class DownloadRunner {
       title: entry.title,
       platform: entry.platform,
       playlist: entry.playlist,
-      startTime: entry.started
+      startTime: entry.started,
+      request: entry.request,
+      label: entry.label
     }))
   }
 }

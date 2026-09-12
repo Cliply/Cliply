@@ -26,7 +26,11 @@ class FakeHandle extends EventEmitter {
   }
 }
 
-function createRunner({ updater = null } = {}) {
+// maxConcurrent defaults to APP_CONFIG.MAX_CONCURRENT_DOWNLOADS, and every
+// test outside describe("queue") runs fewer downloads than that, so the cap is
+// invisible to them. the queue tests set it to 1 or 2 rather than starting four
+// downloads to reach the real one
+function createRunner({ updater = null, maxConcurrent } = {}) {
   const events = []
   const tracked = []
 
@@ -34,7 +38,8 @@ function createRunner({ updater = null } = {}) {
     engine: {},
     updater,
     sendEvent: (downloadId, payload) => events.push({ downloadId, ...payload }),
-    trackEvent: (name, payload) => tracked.push({ name, ...payload })
+    trackEvent: (name, payload) => tracked.push({ name, ...payload }),
+    ...(maxConcurrent === undefined ? null : { maxConcurrent })
   })
 
   return { runner, events, tracked }
@@ -664,6 +669,332 @@ describe("concurrent downloads", () => {
 
     expect((await a).cancelled).toBe(true)
     expect((await b).success).toBe(true)
+  })
+})
+
+/**
+ * the queue
+ *
+ * the runner starts at most MAX_CONCURRENT_DOWNLOADS downloads at once and
+ * holds the rest in the order they were reserved. everything above this line
+ * runs two downloads at most, which is under the real cap, so none of it ever
+ * meets the queue - these set maxConcurrent to 1 or 2 instead of starting four
+ * downloads to reach it.
+ */
+describe("queue", () => {
+  // a createHandle that records the moment it was called, which is the only
+  // way to say how many processes the runner was actually willing to start:
+  // a reservation exists whether or not anything spawned
+  function spawner(handle, log, id) {
+    return () => {
+      log.push(id)
+      return handle
+    }
+  }
+
+  const completion = { filePath: "/downloads/a.mp4" }
+
+  test("only maxConcurrent downloads hold a process at once", async () => {
+    const { runner } = createRunner({ maxConcurrent: 2 })
+    const spawned = []
+    const handles = [new FakeHandle(), new FakeHandle(), new FakeHandle()]
+
+    const runs = ["a", "b", "c"].map((id, index) =>
+      runner.run({
+        ...BASE,
+        downloadId: id,
+        createHandle: spawner(handles[index], spawned, id)
+      })
+    )
+    await settle()
+
+    expect(spawned).toEqual(["a", "b"])
+    // the third is waiting, not refused: every one of them is reserved, which
+    // is what system:health counts and what a downloads list draws
+    expect(runner.size).toBe(3)
+
+    handles[0].resolve(completion)
+    await runs[0]
+    await settle()
+
+    expect(spawned).toEqual(["a", "b", "c"])
+
+    handles[1].resolve(completion)
+    handles[2].resolve(completion)
+    await Promise.all(runs)
+
+    expect(runner.size).toBe(0)
+  })
+
+  test("a freed slot goes to whichever download has waited longest", async () => {
+    const { runner } = createRunner({ maxConcurrent: 1 })
+    const spawned = []
+    const handles = [new FakeHandle(), new FakeHandle(), new FakeHandle()]
+
+    const runs = ["a", "b", "c"].map((id, index) =>
+      runner.run({
+        ...BASE,
+        downloadId: id,
+        createHandle: spawner(handles[index], spawned, id)
+      })
+    )
+    await settle()
+
+    expect(spawned).toEqual(["a"])
+
+    handles[0].resolve(completion)
+    await runs[0]
+    await settle()
+
+    // b, not c: the queue is fifo by reservation, so pasting a fourth link does
+    // not push the third one further down the list
+    expect(spawned).toEqual(["a", "b"])
+
+    handles[1].resolve(completion)
+    await runs[1]
+    await settle()
+
+    expect(spawned).toEqual(["a", "b", "c"])
+
+    handles[2].resolve(completion)
+    await runs[2]
+  })
+
+  test("a parked download announces itself once, and one that never waits says nothing", async () => {
+    const { runner, events } = createRunner({ maxConcurrent: 1 })
+    const handles = [new FakeHandle(), new FakeHandle(), new FakeHandle()]
+
+    const runs = ["a", "b", "c"].map((id, index) =>
+      runner.run({
+        ...BASE,
+        downloadId: id,
+        createHandle: () => handles[index]
+      })
+    )
+    await settle()
+
+    // the exact payload the renderer draws a queued row from
+    expect(events).toEqual([
+      { downloadId: "b", status: "queued", progress: 0 },
+      { downloadId: "c", status: "queued", progress: 0 }
+    ])
+
+    handles[0].resolve(completion)
+    await runs[0]
+    await settle()
+
+    // b started: it does not repeat the queued event on the way out of the
+    // queue, and the run it is now in emits its own progress
+    expect(events.filter((event) => event.status === "queued")).toHaveLength(2)
+
+    handles[1].resolve(completion)
+    await runs[1]
+    await settle()
+    handles[2].resolve(completion)
+    await runs[2]
+  })
+
+  // every terminal path has to free the slot, or the queue stops draining and
+  // the app is stuck at however many downloads happened to be running
+  const SETTLEMENTS = [
+    ["a completion", (handle) => handle.resolve(completion)],
+    ["a failure", (handle) => handle.reject(new Error("Download failed"))],
+    [
+      "a cancellation",
+      (handle) => {
+        const error = new Error("cancelled")
+        error.code = ERROR_CODES.CANCELLED
+        handle.reject(error)
+      }
+    ]
+  ]
+
+  test.each(SETTLEMENTS)("the slot is freed by %s", async (_name, finish) => {
+    const { runner } = createRunner({ maxConcurrent: 1 })
+    const spawned = []
+    const first = new FakeHandle()
+    const second = new FakeHandle()
+
+    const a = runner.run({ ...BASE, downloadId: "a", createHandle: spawner(first, spawned, "a") })
+    const b = runner.run({ ...BASE, downloadId: "b", createHandle: spawner(second, spawned, "b") })
+    await settle()
+
+    expect(spawned).toEqual(["a"])
+
+    finish(first)
+    await a
+    await settle()
+
+    expect(spawned).toEqual(["a", "b"])
+
+    second.resolve(completion)
+    await b
+  })
+
+  test("a handle that could not even be created frees the slot too", async () => {
+    const { runner } = createRunner({ maxConcurrent: 1 })
+    const spawned = []
+    const second = new FakeHandle()
+
+    const a = runner.run({
+      ...BASE,
+      downloadId: "a",
+      createHandle: () => {
+        const error = new Error("That doesn't look like a valid link.")
+        error.code = "INVALID_URL"
+        throw error
+      }
+    })
+    const b = runner.run({ ...BASE, downloadId: "b", createHandle: spawner(second, spawned, "b") })
+
+    expect((await a).success).toBe(false)
+    await settle()
+
+    expect(spawned).toEqual(["b"])
+
+    second.resolve(completion)
+    await b
+  })
+
+  test("cancelling a queued download settles it without spawning anything", async () => {
+    const { runner, events } = createRunner({ maxConcurrent: 1 })
+    const spawned = []
+    const first = new FakeHandle()
+    const second = new FakeHandle()
+
+    const a = runner.run({ ...BASE, downloadId: "a", createHandle: spawner(first, spawned, "a") })
+    const b = runner.run({ ...BASE, downloadId: "b", createHandle: spawner(second, spawned, "b") })
+    await settle()
+
+    expect(runner.cancel("b")).toBe(true)
+    expect((await b).cancelled).toBe(true)
+
+    // no process was ever made for it, and the running download still holds
+    // the only slot: a cancel gives nothing away
+    expect(spawned).toEqual(["a"])
+    expect(events.filter((event) => event.downloadId === "b").map((event) => event.status)).toEqual(
+      ["queued", "cancelled"]
+    )
+    expect(runner.size).toBe(1)
+
+    first.resolve(completion)
+    await a
+
+    expect(runner.size).toBe(0)
+  })
+
+  test("cancelAll clears the queued rows along with the running one", async () => {
+    const { runner } = createRunner({ maxConcurrent: 1 })
+    const spawned = []
+    const handles = [new FakeHandle(), new FakeHandle(), new FakeHandle()]
+
+    const runs = ["a", "b", "c"].map((id, index) =>
+      runner.run({
+        ...BASE,
+        downloadId: id,
+        createHandle: spawner(handles[index], spawned, id)
+      })
+    )
+    await settle()
+
+    expect(runner.cancelAll()).toBe(3)
+
+    const error = new Error("cancelled")
+    error.code = ERROR_CODES.CANCELLED
+    handles[0].reject(error)
+
+    const results = await Promise.all(runs)
+
+    expect(results.every((result) => result.cancelled)).toBe(true)
+    // the two that were queued never became processes
+    expect(spawned).toEqual(["a"])
+    expect(runner.size).toBe(0)
+  })
+
+  test("a queued row is listed, with what a retry would need", async () => {
+    const { runner } = createRunner({ maxConcurrent: 1 })
+    const handles = [new FakeHandle(), new FakeHandle()]
+
+    const a = runner.run({ ...BASE, downloadId: "a", createHandle: () => handles[0] })
+
+    // the ipc handlers reserve with the request and the label before they
+    // acknowledge, exactly as this does
+    runner.reserve("b", {
+      type: "combined",
+      platform: "youtube",
+      title: "Another Video",
+      label: "1080p mp4",
+      request: { url: "https://youtu.be/b", title: "Another Video", height: 1080 }
+    })
+    const b = runner.run({ ...BASE, downloadId: "b", createHandle: () => handles[1] })
+    await settle()
+
+    const rows = runner.list()
+
+    expect(rows.find((row) => row.downloadId === "a").status).toBe("downloading")
+    expect(rows.find((row) => row.downloadId === "b")).toMatchObject({
+      status: "queued",
+      progress: 0,
+      title: "Another Video",
+      label: "1080p mp4",
+      request: { url: "https://youtu.be/b", height: 1080 }
+    })
+
+    handles[0].resolve(completion)
+    await a
+    await settle()
+    handles[1].resolve(completion)
+    await b
+  })
+
+  test("the repair-on-failure retry never gives its slot away mid-run", async () => {
+    const log = jest.spyOn(console, "log").mockImplementation(() => {})
+    const updater = {
+      updateNow: async () => ({ updated: true, from: "2026.08.01", to: "2026.09.01" })
+    }
+    const { runner } = createRunner({ maxConcurrent: 1, updater })
+
+    const spawned = []
+    const attempts = [new FakeHandle(), new FakeHandle()]
+    let index = 0
+    const queuedHandle = new FakeHandle()
+
+    const a = runner.run({
+      ...BASE,
+      downloadId: "a",
+      createHandle: () => {
+        spawned.push("a")
+        return attempts[index++]
+      }
+    })
+    const b = runner.run({
+      ...BASE,
+      downloadId: "b",
+      createHandle: spawner(queuedHandle, spawned, "b")
+    })
+    await settle()
+
+    const error = new Error("YouTube changed something.")
+    error.code = ERROR_CODES.EXTRACTION_FAILED
+    error.updateMayFix = true
+    attempts[0].reject(error)
+    await settle()
+    await settle()
+
+    // the second attempt of the same download, and still no fourth process:
+    // freeing the slot for the length of an update is how a cap of three ends
+    // up running four
+    expect(spawned).toEqual(["a", "a"])
+
+    attempts[1].resolve(completion)
+    await a
+    await settle()
+
+    expect(spawned).toEqual(["a", "a", "b"])
+
+    queuedHandle.resolve(completion)
+    await b
+    log.mockRestore()
   })
 })
 

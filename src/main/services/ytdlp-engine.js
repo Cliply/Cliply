@@ -28,11 +28,13 @@ const {
   buildArgs,
   normalizeAudioMode,
   normalizeAudioLanguage,
+  normalizeQualityTier,
   expectedStreamCount,
   normalizeUrl,
   isYouTubeCookieHost,
   PLAYLIST_ERROR_BUDGET,
   PLAYLIST_SLEEP_REQUESTS,
+  CONCURRENT_FRAGMENTS,
   PLAYLIST_FRAGMENTS,
   PLAYLIST_CONTAINER
 } = require("./ytdlp/args")
@@ -794,6 +796,9 @@ module.exports = {
   normalizePlaylistIndices,
   normalizeAudioMode,
   normalizeAudioLanguage,
+  // the tier a request really produces, which is what a downloads list has to
+  // label a row with: the whitelist and the mp4 fallback both live in there
+  normalizeQualityTier,
   expectedStreamCount,
   parseProgressLine,
   parseDestinationLine,
@@ -837,6 +842,7 @@ module.exports = {
   PLAYLIST_MAX_ITEMS,
   PLAYLIST_ERROR_BUDGET,
   PLAYLIST_SLEEP_REQUESTS,
+  CONCURRENT_FRAGMENTS,
   PLAYLIST_FRAGMENTS,
   PLAYLIST_CONTAINER,
   STDERR_BUFFER_LINES
