@@ -30,7 +30,10 @@ jobs:
       - name: Lint main
         run: npm run lint
 
+      # The main suite asserts posix file modes and process-group signals
+      # (the win32 code paths have their own branches), so it runs on macOS only.
       - name: Test main
+        if: runner.os != 'Windows'
         run: npm test
 
       - name: Test renderer
