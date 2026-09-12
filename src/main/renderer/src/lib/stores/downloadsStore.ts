@@ -120,6 +120,19 @@ interface DownloadsState {
    * the panel's, for every kind of row.
    */
   cancelIntents: string[]
+  /**
+   * the downloads main has acknowledged, which their rows cannot say
+   *
+   * a row stays `starting` from the click until main's first event, and for a
+   * download that takes a free slot and then says nothing - a trimmed one is
+   * one ffmpeg pass, silent until it finishes - that first event is the
+   * completion. so `starting` covers both "main has never heard of this id" and
+   * "main has it and has not spoken yet", and the reply to a Stop cannot tell
+   * those apart from the row alone. this is the difference, written down at the
+   * acknowledgement, and it is why a Stop whose reply comes back after it is
+   * not left waiting for an event that may never arrive.
+   */
+  admittedIds: string[]
 
   add: (row: DownloadRow) => void
   applyEvent: (event: DownloadProgress) => void
@@ -130,6 +143,9 @@ interface DownloadsState {
   setPanelOpen: (open: boolean) => void
   rememberCancelIntent: (downloadId: string) => void
   takeCancelIntent: (downloadId: string) => boolean
+  markAdmitted: (downloadId: string) => void
+  isAdmitted: (downloadId: string) => boolean
+  forgetAdmitted: (downloadId: string) => void
   findLive: (candidate: DownloadIdentity) => DownloadRow | undefined
   reset: () => void
 }
@@ -140,6 +156,7 @@ export const useDownloadsStore = create<DownloadsState>((set, get) => ({
   panelOpen: false,
   highlightedId: null,
   cancelIntents: [],
+  admittedIds: [],
 
   // newest first, which is the order the panel lists them in and the order the
   // history keeps them in
@@ -278,6 +295,26 @@ export const useDownloadsStore = create<DownloadsState>((set, get) => ({
     return held
   },
 
+  // written down once, at the acknowledgement, and read by the reply to a Stop
+  // that was still in flight then. `lib/cancelIntent.ts` owns all three
+  markAdmitted: (downloadId) =>
+    set((state) =>
+      state.admittedIds.includes(downloadId)
+        ? state
+        : { admittedIds: [...state.admittedIds, downloadId] }
+    ),
+
+  isAdmitted: (downloadId) => get().admittedIds.includes(downloadId),
+
+  // an id nothing will ask about again. dropped when its download ends, so a
+  // long session does not carry every id it ever started
+  forgetAdmitted: (downloadId) =>
+    set((state) =>
+      state.admittedIds.includes(downloadId)
+        ? { admittedIds: state.admittedIds.filter((id) => id !== downloadId) }
+        : state
+    ),
+
   /**
    * the download already in flight that this one would duplicate
    *
@@ -312,7 +349,8 @@ export const useDownloadsStore = create<DownloadsState>((set, get) => ({
       hydrated: false,
       panelOpen: false,
       highlightedId: null,
-      cancelIntents: []
+      cancelIntents: [],
+      admittedIds: []
     })
 }))
 
@@ -333,6 +371,12 @@ export const downloadsActions = {
     useDownloadsStore.getState().rememberCancelIntent(downloadId),
   takeCancelIntent: (downloadId: string) =>
     useDownloadsStore.getState().takeCancelIntent(downloadId),
+  markAdmitted: (downloadId: string) =>
+    useDownloadsStore.getState().markAdmitted(downloadId),
+  isAdmitted: (downloadId: string) =>
+    useDownloadsStore.getState().isAdmitted(downloadId),
+  forgetAdmitted: (downloadId: string) =>
+    useDownloadsStore.getState().forgetAdmitted(downloadId),
   rowOf: (downloadId?: string) =>
     downloadId
       ? useDownloadsStore

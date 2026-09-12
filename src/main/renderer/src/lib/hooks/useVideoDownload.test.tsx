@@ -65,6 +65,7 @@ vi.mock("sonner", () => ({
   }
 }))
 
+import { requestStop } from "@/lib/cancelIntent"
 import { en } from "@/lib/i18n/en"
 import { useDownloadsStore } from "@/lib/stores/downloadsStore"
 
@@ -352,6 +353,50 @@ describe("a Stop the panel kept while main was preparing", () => {
     await flush()
 
     expect(cancelDownload).toHaveBeenCalledWith(sentDownloadId())
+    expect(store().cancelIntents).toEqual([])
+    expect((await settled).ok).toBe(true)
+  })
+
+  /**
+   * the same Stop, pressed through the panel's own helper, with main's two
+   * replies arriving in the order that hides it: the start is acknowledged
+   * first, and the Stop's `false` lands afterwards on a row that still says
+   * `starting` - a free-slot trimmed download says nothing until it finishes,
+   * so no event will ever come to reconcile against.
+   */
+  test("survives its reply arriving after the acknowledgement", async () => {
+    const ack = deferredAck()
+    let answerStop!: (cancelled: boolean) => void
+    cancelDownload.mockReturnValueOnce(
+      new Promise<boolean>((resolve) => {
+        answerStop = resolve
+      })
+    )
+
+    const { result } = renderHook(() => useVideoDownload(), { wrapper })
+
+    const { settled } = await startDownload(result)
+    await waitFor(() => expect(downloadVideo).toHaveBeenCalled())
+
+    // the panel's Stop, main still preparing the download folder
+    const stopping = requestStop(sentDownloadId())
+
+    await act(async () => {
+      ack.resolve({ downloadId: "ignored" })
+    })
+    await flush()
+
+    // the row has heard nothing from main and looks exactly as it did
+    expect(result.current.row?.status).toBe("starting")
+
+    await act(async () => {
+      answerStop(false)
+      await stopping
+    })
+    await flush()
+
+    expect(cancelDownload).toHaveBeenCalledTimes(2)
+    expect(cancelDownload).toHaveBeenLastCalledWith(sentDownloadId())
     expect(store().cancelIntents).toEqual([])
     expect((await settled).ok).toBe(true)
   })

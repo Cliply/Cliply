@@ -169,6 +169,47 @@ describe("a Stop main was not ready for", () => {
   })
 
   /**
+   * the ordering the row cannot see.
+   *
+   * main reserves the id and answers the start before it answers the Stop, and
+   * the renderer processes them in that order too: `stopIfRequested` runs while
+   * the `false` is still in flight, and finds nothing to carry out. the reply
+   * then lands on a row that still says `starting`, because a download that
+   * took a free slot and is trimmed says nothing at all until it is finished -
+   * no queued notice, no progress line. without the admission being written
+   * down, the ask waits for an event that never comes and the completion
+   * quietly throws it away.
+   */
+  test("is asked again at once when the acknowledgement overtook the reply", async () => {
+    const { answer } = deferredReply()
+    store().add(row())
+
+    const stopping = requestStop("d1")
+
+    // main took the start while the Stop's reply was still in flight
+    stopIfRequested("d1")
+    expect(mocks.cancelDownload).toHaveBeenCalledTimes(1)
+
+    answer(false)
+    await stopping
+    await settle()
+
+    expect(mocks.cancelDownload).toHaveBeenCalledTimes(2)
+    expect(mocks.cancelDownload).toHaveBeenLastCalledWith("d1")
+    expect(store().cancelIntents).toEqual([])
+
+    // ...and nothing asks a third time when the run finally says something
+    reconcileCancelIntent({
+      downloadId: "d1",
+      status: "completed",
+      progress: 100
+    })
+    await settle()
+
+    expect(mocks.cancelDownload).toHaveBeenCalledTimes(2)
+  })
+
+  /**
    * `false` means two things and the row separates them: this one is "the
    * download finished while your click was in flight", and asking again would
    * be asking main to stop a file that is on disk.
@@ -225,6 +266,23 @@ describe("a download nobody stopped", () => {
     await settle()
 
     expect(mocks.cancelDownload).not.toHaveBeenCalled()
+  })
+})
+
+describe("what is remembered about an admission", () => {
+  test("is forgotten once the download is over", async () => {
+    store().add(row())
+
+    stopIfRequested("d1")
+    expect(store().admittedIds).toEqual(["d1"])
+
+    reconcileCancelIntent({
+      downloadId: "d1",
+      status: "completed",
+      progress: 100
+    })
+
+    expect(store().admittedIds).toEqual([])
   })
 })
 

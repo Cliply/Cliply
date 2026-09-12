@@ -23,8 +23,12 @@ import {
  * - the first event that says main has the id (`reconcileCancelIntent`), for a
  *   row this window's own acknowledgement never reaches - a panel Retry the
  *   user navigated away from, a reload
- * - the reply to the Stop itself, when a `queued` or `downloading` event beat
- *   it home and proved the id exists (`keepCancelIntent`)
+ * - the reply to the Stop itself, when the acknowledgement or one of main's
+ *   own events beat it home and proved the id exists (`keepCancelIntent`)
+ *
+ * which is why the acknowledgement is written down rather than only acted on:
+ * two of those three can happen in either order, and the row says `starting`
+ * through both of them.
  *
  * waiting for engine progress is what none of them does. a trimmed download is
  * one ffmpeg pass that reports nothing until it finishes, and a Stop that waits
@@ -56,15 +60,21 @@ export async function requestStop(downloadId: string): Promise<void> {
 /**
  * hold on to a Stop main would not take, or ask again if it can be taken now
  *
- * `false` has two meanings and the row is what separates them. a row that is no
- * longer live means the download finished while the click was in flight, and
- * asking again would be asking main to stop a file that is on disk. a row that
- * is queued or downloading means main *has* reserved the id since we asked - its
- * own event says so - and the ask is repeated at once rather than kept for an
- * event that may never come: a queued row emits nothing until it takes a slot,
- * and a trimmed one nothing until it is finished.
+ * `false` has two meanings and this is where they are told apart. a row that is
+ * no longer live means the download finished while the click was in flight, and
+ * asking again would be asking main to stop a file that is on disk. anything
+ * else means main has the id by now, and the ask is repeated at once rather
+ * than kept for an event that may never come: a queued row emits nothing until
+ * it takes a slot, and a trimmed one nothing until it is finished.
  *
- * only `starting` is kept, which is the one state main has not heard of yet.
+ * "main has the id by now" is two different observations, and both are needed:
+ * the row's own status, when an event has arrived, and `isAdmitted` when the
+ * start acknowledgement was processed while this reply was in flight. that
+ * second case leaves the row at `starting` with nothing wrong with it, which is
+ * exactly the shape of the download this whole file exists for.
+ *
+ * so only a `starting` row main has not acknowledged is kept, which is the one
+ * state where there is genuinely nothing to cancel yet.
  *
  * @param downloadId the row's id
  */
@@ -73,13 +83,14 @@ export function keepCancelIntent(downloadId: string): void {
 
   if (!isLiveRow(row)) return
 
-  if (row?.status === "starting") {
+  if (row?.status === "starting" && !downloadsActions.isAdmitted(downloadId)) {
     downloadsActions.rememberCancelIntent(downloadId)
     return
   }
 
   // asked once more and not re-examined: this is the answer to a `false` that
-  // raced an event, not a loop that keeps asking until main says yes
+  // raced an acknowledgement or an event, not a loop that keeps asking until
+  // main says yes
   void issueStop(downloadId)
 }
 
@@ -87,12 +98,19 @@ export function keepCancelIntent(downloadId: string): void {
  * main has taken this download: a Stop that was waiting for it can go now
  *
  * called by every start path at its acknowledgement, which is the first moment
- * the id is certainly reserved. does nothing when nobody pressed Stop, which is
- * almost always.
+ * the id is certainly reserved.
+ *
+ * the admission is written down whether or not anybody has pressed Stop, and
+ * that is the point of it rather than an aside: a Stop pressed a moment ago may
+ * still be waiting on a reply that lands after this, and the row it will read
+ * then says `starting` either way. there is nothing to carry out here in almost
+ * every download, and one id is what it costs.
  *
  * @param downloadId the id the start was sent under
  */
 export function stopIfRequested(downloadId: string): void {
+  downloadsActions.markAdmitted(downloadId)
+
   if (!downloadsActions.takeCancelIntent(downloadId)) return
 
   void issueStop(downloadId)
@@ -109,6 +127,8 @@ export function stopIfRequested(downloadId: string): void {
 export function reconcileCancelIntent(event: DownloadProgress): void {
   if (isTerminalStatus(event.status)) {
     downloadsActions.takeCancelIntent(event.downloadId)
+    // nothing will ask about this id again, so the session stops carrying it
+    downloadsActions.forgetAdmitted(event.downloadId)
     return
   }
 
