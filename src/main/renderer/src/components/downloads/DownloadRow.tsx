@@ -1,4 +1,4 @@
-import { FolderOpen, RotateCcw, Trash2, X } from "lucide-react"
+import { FolderOpen, RotateCcw, X } from "lucide-react"
 
 import {
   ProgressBar,
@@ -7,23 +7,11 @@ import {
   ProgressBarTrack,
   ProgressBarValue
 } from "@/components/ui/progress-bar"
-import {
-  systemApi,
-  type AudioDownloadRequest,
-  type AudioMode,
-  type PlaylistDownloadRequest,
-  type VideoDownloadRequest
-} from "@/lib/api"
+import { systemApi } from "@/lib/api"
 import { requestStop } from "@/lib/cancelIntent"
 import { canRetry, retryDownload } from "@/lib/downloadRetry"
-import { videoLabel } from "@/lib/downloadKinds"
-import { MONO } from "@/lib/fonts"
-import { formatFileSize } from "@/lib/format"
 import { localizeError, useT, type Key } from "@/lib/i18n"
-import {
-  useDownloadsStore,
-  type DownloadRow as Row
-} from "@/lib/stores/downloadsStore"
+import { type DownloadRow as Row } from "@/lib/stores/downloadsStore"
 import { cn } from "@/lib/utils"
 
 interface DownloadRowProps {
@@ -33,34 +21,36 @@ interface DownloadRowProps {
 }
 
 /**
- * one download in the panel, whatever state it is in
+ * one download in the panel: what it is called, and the one thing to do with it
  *
- * three lines at most: the title, then the chip and where the download stands,
- * then the actions. a running download puts the bar between the second and the
- * third, and a failed one its sentence.
+ * the second pass cut the row to those two lines (the owner's decisions, in the
+ * downloads-panel-v2 spec). A finished download is a name and "open folder"; a
+ * running one adds its bar; a queued one says so and offers the stop that drops
+ * it; one that did not make it says why in a line and offers Retry. No chip, no
+ * size, no Remove: a list of forty rows is read by its titles, and everything
+ * else on the row was competing with them.
  *
- * the chip is assembled here rather than read off `row.label`, which main wrote
- * in english at reserve. the row has the request main built that label from, so
- * the panel can say the same thing in the reader's language - and falls back to
- * main's when the request is missing, which is any row read from a history file
- * an older version wrote.
+ * the quality, the mode and the platform that used to ride in the chip are the
+ * words `chipOf` built from the request. they are gone rather than moved: the
+ * title already names the media, and the panel is a list of what was downloaded
+ * rather than a record of how.
  */
 export function DownloadRow({ row, highlighted = false }: DownloadRowProps) {
   const t = useT()
-  const remove = useDownloadsStore((state) => state.remove)
 
   const live = row.status === "starting" || row.status === "downloading"
   const title = row.title || t("downloads.untitled")
+  const standing = live ? "" : standingOf(row, t)
 
   return (
     <div
       data-download-id={row.downloadId}
       className={cn(
-        // a card, drawn the way every card in the app is: the radius, the
-        // two-pixel slate border and the white-80 blur off `PlaylistHeader`
-        "flex flex-col gap-2 rounded-xl border-2 px-3 py-2.5",
-        "border-slate-300/50 bg-white/80 backdrop-blur-sm shadow-lg",
-        "dark:border-slate-700/50 dark:bg-slate-800/60",
+        // the app's card, in the panel's width: the same radius, the same
+        // two-pixel slate border and blur as `PlaylistHeader`
+        "flex flex-col gap-2 rounded-xl border-2 px-3.5 py-3",
+        "border-slate-300/50 bg-white/70 backdrop-blur-sm",
+        "dark:border-slate-700/50 dark:bg-slate-800/50",
         "transition-shadow duration-200",
         // the ring is the answer to "you already asked for this one": it says
         // which row, and then stops, because a permanent marker on a row the
@@ -68,108 +58,102 @@ export function DownloadRow({ row, highlighted = false }: DownloadRowProps) {
         highlighted && "ring-2 ring-cyan-500/60 ring-offset-0"
       )}
     >
-      <span
-        className="truncate text-[13px] font-medium text-slate-900 dark:text-white"
-        title={row.title || undefined}
-      >
-        {title}
-      </span>
-
-      <div className="flex items-baseline justify-between gap-2">
-        {/* the same pill `PlaylistRow` gives a video that has landed, down to
-            the cyan it is drawn in */}
+      <div className="flex items-center justify-between gap-3">
         <span
-          className={cn(
-            "shrink-0 rounded-full px-2 py-0.5 text-[10.5px] leading-4",
-            "bg-cyan-100 text-cyan-700 dark:bg-cyan-950/60 dark:text-cyan-300"
-          )}
-          style={{ fontFamily: MONO }}
+          className="min-w-0 flex-1 truncate text-[13px] text-slate-900 dark:text-white"
+          title={row.title || undefined}
         >
-          {chipOf(row, t)}
+          {title}
         </span>
 
-        <span
-          className="truncate text-[11px] leading-4 tabular-nums text-slate-600 dark:text-slate-400"
-          style={{ fontFamily: MONO }}
-        >
-          {standingOf(row, t)}
-        </span>
+        <RowAction row={row} live={live} />
       </div>
 
       {live && <LiveProgress row={row} label={title} />}
 
-      {row.status === "failed" && (
-        <p className="text-[11px] leading-4 text-red-600 dark:text-red-400">
-          {
-            localizeError({
-              message: row.error || t("download.wentWrong"),
-              category: row.category
-            }).message
-          }
+      {/* one line, whatever it was: the word for a state that has no bar, or
+          main's reason for a failure in the reader's language */}
+      {standing && (
+        <p
+          className={cn(
+            "truncate font-mono text-[11px] leading-4",
+            row.status === "failed"
+              ? "text-red-600 dark:text-red-400"
+              : "text-slate-500 dark:text-slate-400"
+          )}
+        >
+          {standing}
         </p>
       )}
-
-      <div className="flex items-center justify-end gap-1.5">
-        {row.status === "queued" && (
-          // nothing has spawned yet, so "stopping" it is dropping the
-          // reservation. main answers the same cancel either way and the
-          // `cancelled` event it sends is what settles the row
-          <RowAction
-            icon={<X className="h-3 w-3" />}
-            label={t("downloads.remove")}
-            tone="danger"
-            onClick={() => stopDownload(row.downloadId)}
-          />
-        )}
-
-        {live && (
-          <RowAction
-            icon={<X className="h-3 w-3" />}
-            label={t("progress.stop")}
-            tone="danger"
-            title={t("progress.stopTitle")}
-            onClick={() => stopDownload(row.downloadId)}
-          />
-        )}
-
-        {row.status === "completed" && (
-          // the row keeps a size, not a path (see the Q4 notes), so this is the
-          // download folder rather than the file. it is also the one action the
-          // completion toast offers, so the two agree
-          <RowAction
-            icon={<FolderOpen className="h-3 w-3" />}
-            label={t("toast.openFolder")}
-            onClick={() => {
-              systemApi.openDownloadFolder().catch((error: unknown) => {
-                console.error("Failed to open the download folder:", error)
-              })
-            }}
-          />
-        )}
-
-        {(row.status === "failed" ||
-          row.status === "cancelled" ||
-          row.status === "interrupted") && (
-          <RowAction
-            icon={<RotateCcw className="h-3 w-3" />}
-            label={t("downloads.retry")}
-            tone="accent"
-            disabled={!canRetry(row)}
-            title={canRetry(row) ? undefined : t("downloads.retryUnavailable")}
-            onClick={() => void retryDownload(row)}
-          />
-        )}
-
-        {isFinished(row) && (
-          <RowAction
-            icon={<Trash2 className="h-3 w-3" />}
-            label={t("downloads.remove")}
-            onClick={() => remove(row.downloadId)}
-          />
-        )}
-      </div>
     </div>
   )
+}
+
+/**
+ * the one control on a row, whichever one this row's state earns
+ *
+ * they are all the same small outline button (`StopButton` in
+ * `DownloadProgressBar` is the same control on the inline card), and the tone
+ * is what separates them: the app's error red under a Stop, its cyan under the
+ * Retry that is the only thing to do with a download that failed.
+ */
+function RowAction({ row, live }: { row: Row; live: boolean }) {
+  const t = useT()
+
+  if (row.status === "queued" || live) {
+    // nothing has spawned for a queued row, so "stopping" it is dropping the
+    // reservation. main answers the same cancel either way and the `cancelled`
+    // event it sends is what settles the row
+    return (
+      <ActionButton
+        icon={<X className="h-3 w-3" />}
+        label={t("progress.stop")}
+        tone="danger"
+        title={t("progress.stopTitle")}
+        onClick={() => void requestStop(row.downloadId)}
+      />
+    )
+  }
+
+  if (row.status === "completed") {
+    return (
+      <ActionButton
+        icon={<FolderOpen className="h-3 w-3" />}
+        label={t("toast.openFolder")}
+        onClick={() => void revealDownload(row)}
+      />
+    )
+  }
+
+  return (
+    <ActionButton
+      icon={<RotateCcw className="h-3 w-3" />}
+      label={t("downloads.retry")}
+      tone="accent"
+      disabled={!canRetry(row)}
+      title={canRetry(row) ? undefined : t("downloads.retryUnavailable")}
+      onClick={() => void retryDownload(row)}
+    />
+  )
+}
+
+/**
+ * show the file where it landed, or failing that the folder it landed in
+ *
+ * `showInFolder` answers false rather than throwing for a file that has been
+ * moved, deleted or was never on the row (a history file an older version
+ * wrote keeps no path), and main refuses any path outside the download folder.
+ * every one of those ends at the folder itself, which is what the completion
+ * toast offers too, so the two agree.
+ */
+async function revealDownload(row: Row): Promise<void> {
+  try {
+    if (row.filePath && (await systemApi.showInFolder(row.filePath))) return
+
+    await systemApi.openDownloadFolder()
+  } catch (error: unknown) {
+    console.error("Failed to open the download folder:", error)
+  }
 }
 
 /**
@@ -185,34 +169,21 @@ function LiveProgress({ row, label }: { row: Row; label: string }) {
   const starting = row.status === "starting"
   const indeterminate = Boolean(row.indeterminate) || starting
 
-  const meta = indeterminate
-    ? starting
-      ? t("progress.startingUp")
-      : t("progress.trimming")
-    : [row.speed, row.eta && `ETA ${row.eta}`].filter(Boolean).join("  ·  ")
+  const meta = liveMeta(row, t, indeterminate, starting)
 
   return (
     <ProgressBar value={row.progress} isIndeterminate={indeterminate}>
       <ProgressBarLabel className="sr-only">{label}</ProgressBarLabel>
       <ProgressBarTrack />
-      {/*
-        the family is set here rather than left to the slot: `ProgressBarMeta`
-        and `ProgressBarValue` ask for `font-mono`, which resolves to an
-        undefined `--font-mono` and so inherits the panel's Space Grotesk. the
-        speed, the eta and the percentage are numbers that should not reflow as
-        they tick, so they get the real monospace stack
-      */}
       <div className="flex items-baseline justify-between gap-2">
-        <ProgressBarMeta className="truncate" style={{ fontFamily: MONO }}>
-          {meta}
-        </ProgressBarMeta>
-        <ProgressBarValue style={{ fontFamily: MONO }} />
+        <ProgressBarMeta className="truncate">{meta}</ProgressBarMeta>
+        <ProgressBarValue />
       </div>
     </ProgressBar>
   )
 }
 
-interface RowActionProps {
+interface ActionButtonProps {
   icon: React.ReactNode
   label: string
   onClick: () => void
@@ -221,35 +192,23 @@ interface RowActionProps {
   tone?: "neutral" | "danger" | "accent"
 }
 
-/**
- * one of the small pill buttons along the bottom of a row
- *
- * the same shape as the stop control on the inline card (`StopButton` in
- * `DownloadProgressBar`), because it is the same control in a narrower place:
- * neutral until you reach for it, then either the app's error red or its slate.
- *
- * retry is the exception, and takes the `accent` tone: it is the one thing to
- * do with a row that failed, so it wears the cyan the app gives a primary
- * action (`VideoDownloadButton`) rather than waiting to be hovered.
- */
-function RowAction({
+function ActionButton({
   icon,
   label,
   onClick,
   disabled = false,
   title,
   tone = "neutral"
-}: RowActionProps) {
+}: ActionButtonProps) {
   return (
     <button
       type="button"
       onClick={onClick}
       disabled={disabled}
       title={title}
-      style={{ fontFamily: MONO }}
       className={cn(
         "flex shrink-0 items-center gap-1 rounded-lg border px-2 py-0.5",
-        "text-[11px] leading-4 transition-colors duration-200 ease-out",
+        "font-mono text-[11px] leading-4 transition-colors duration-200 ease-out",
         tone === "accent"
           ? "border-cyan-300/80 text-cyan-700 hover:bg-cyan-100/70 dark:border-cyan-500/40 dark:text-cyan-300 dark:hover:bg-cyan-950/50"
           : "border-slate-200/70 text-slate-500 dark:border-slate-700/60 dark:text-slate-400",
@@ -267,116 +226,47 @@ function RowAction({
   )
 }
 
-/** whether there is nothing left to happen to this row */
-const isFinished = (row: Row): boolean =>
-  row.status === "completed" ||
-  row.status === "failed" ||
-  row.status === "cancelled" ||
-  row.status === "interrupted"
-
-// stopping a download is more than one ipc call - main may not have the id yet
-// - so the whole of it lives in `lib/cancelIntent.ts`, where the start paths
-// and the event listener can reach the other half of it
-const stopDownload = (downloadId: string) => {
-  void requestStop(downloadId)
-}
-
-/** the mode an audio download was asked for, in the dropdown's own words */
-const AUDIO_MODE_KEYS: Record<AudioMode, Key> = {
-  mp3: "format.mp3",
-  m4a: "format.m4a",
-  original: "dropdown.original"
-}
-
-const SIMPLE_PLATFORM_KEYS: Record<"tiktok" | "pinterest", Key> = {
-  tiktok: "downloads.platformTiktok",
-  pinterest: "downloads.platformPinterest"
-}
-
 type Translate = (key: Key, params?: Record<string, string | number>) => string
 
 /**
- * the words beside the title: "1080p mp4", "MP3", "12 videos", "TikTok"
+ * what the bar says underneath itself while the download runs
  *
- * read from the request, which is what main built its own english label from,
- * so the two say the same thing in two languages. a row with no request keeps
- * main's, which is the only thing there is to show.
+ * a playlist counts videos rather than bytes: the percentage beside it is the
+ * item in flight, and how far through the run it is is the one thing the bar
+ * cannot show.
  */
-function chipOf(row: Row, t: Translate): string {
-  if (row.kind === "playlist") {
-    const playlist = row.request as PlaylistDownloadRequest | undefined
-    const count = row.itemsTotal ?? playlist?.entries?.length
-
-    return typeof count === "number"
-      ? t("playlist.videoCount", { n: count })
-      : row.label
+function liveMeta(
+  row: Row,
+  t: Translate,
+  indeterminate: boolean,
+  starting: boolean
+): string {
+  if (row.kind === "playlist" && typeof row.itemsTotal === "number") {
+    return t("downloads.itemsProgress", {
+      done: row.itemsCompleted ?? 0,
+      total: row.itemsTotal
+    })
   }
 
-  if (row.kind === "audio") {
-    const mode = (row.request as AudioDownloadRequest | undefined)?.audio_mode
-    const key = mode && AUDIO_MODE_KEYS[mode]
-
-    return key ? t(key) : row.label
+  if (indeterminate) {
+    return starting ? t("progress.startingUp") : t("progress.trimming")
   }
 
-  if (row.kind === "simple") {
-    const key =
-      row.platform === "tiktok" || row.platform === "pinterest"
-        ? SIMPLE_PLATFORM_KEYS[row.platform]
-        : undefined
-
-    return key ? t(key) : row.label
-  }
-
-  const video = row.request as VideoDownloadRequest | undefined
-
-  if (typeof video?.height !== "number") return row.label
-
-  return video.container
-    ? videoLabel(video.height, video.container)
-    : `${video.height}p`
+  return [row.speed, row.eta && `ETA ${row.eta}`].filter(Boolean).join("  ·  ")
 }
 
 /**
- * where this download stands, in the line opposite the chip
+ * the one line under a row that is not running
  *
- * a running one says nothing here: the bar underneath already carries the
- * speed, the eta and the percentage, and the one thing it cannot say is how far
- * through a playlist the run is.
- *
- * a finished playlist counts videos rather than bytes. `file_size` on a
- * playlist's completed event describes the last file that landed, not the run
- * (noted on Q2), so the honest number is what it saved out of what it was
- * given.
+ * a completed row says nothing: its name and "open folder" are the whole row,
+ * which is what the second pass was for. the three that stopped early say which
+ * of the three it was, and a failure says what main said, in the reader's
+ * language, cut to the line it has room for.
  */
 function standingOf(row: Row, t: Translate): string {
   switch (row.status) {
     case "queued":
       return t("downloads.queued")
-
-    case "starting":
-    case "downloading":
-      return row.kind === "playlist" && typeof row.itemsTotal === "number"
-        ? t("downloads.itemsProgress", {
-            done: row.itemsCompleted ?? 0,
-            total: row.itemsTotal
-          })
-        : ""
-
-    case "completed":
-      if (row.kind === "playlist") {
-        return typeof row.itemsSaved === "number" &&
-          typeof row.itemsTotal === "number"
-          ? t("playlist.summarySaved", {
-              saved: row.itemsSaved,
-              n: row.itemsTotal
-            })
-          : t("downloads.done")
-      }
-
-      return row.fileSize
-        ? `${t("downloads.done")} · ${formatFileSize(row.fileSize)}`
-        : t("downloads.done")
 
     case "cancelled":
       return t("downloads.cancelled")
@@ -384,7 +274,12 @@ function standingOf(row: Row, t: Translate): string {
     case "interrupted":
       return t("downloads.interrupted")
 
-    // the sentence on its own line below says what happened
+    case "failed":
+      return localizeError({
+        message: row.error || t("download.wentWrong"),
+        category: row.category
+      }).message
+
     default:
       return ""
   }

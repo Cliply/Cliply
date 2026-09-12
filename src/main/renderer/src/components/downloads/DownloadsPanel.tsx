@@ -1,14 +1,12 @@
 import { AnimatePresence, motion } from "framer-motion"
-import { X } from "lucide-react"
 import { useEffect, useRef } from "react"
 
-import { MONO } from "@/lib/fonts"
 import { useT } from "@/lib/i18n"
 import {
   isLiveRow,
-  useActiveCount,
   useDownloadRows,
-  useDownloadsStore
+  useDownloadsStore,
+  useLifetimeCompleted
 } from "@/lib/stores/downloadsStore"
 import { cn } from "@/lib/utils"
 
@@ -23,13 +21,14 @@ const HIGHLIGHT_MS = 2000
  * mounted once in `App`, outside the routes, for the same reason
  * `DownloadEvents` is mounted once in `Providers`: the list has to outlive the
  * screen that started any of it. All the state it needs is in `downloadsStore`
- * already (the rows, `panelOpen`, `highlightedId`), so there is no provider and
- * no context - the hooks can open the panel on a duplicate click by calling the
- * store, from anywhere, without a tree of providers agreeing about it first.
+ * already (the rows, the lifetime count, `panelOpen`, `highlightedId`), so
+ * there is no provider and no context - the hooks can open the panel on a
+ * duplicate click by calling the store, from anywhere, without a tree of
+ * providers agreeing about it first.
  *
  * no scrim, on purpose: the panel is something to keep an eye on while working,
- * not a modal to answer. which is also why Escape closes it but nothing traps
- * focus inside it.
+ * not a modal to answer. which is also why nothing traps focus inside it, and
+ * why a click outside closes it and still reaches whatever was clicked.
  */
 export function DownloadsPanel() {
   const t = useT()
@@ -40,8 +39,9 @@ export function DownloadsPanel() {
   const clearFinished = useDownloadsStore((state) => state.clearFinished)
   const hydrated = useDownloadsStore((state) => state.hydrated)
   const rows = useDownloadRows()
-  const activeCount = useActiveCount()
+  const lifetime = useLifetimeCompleted()
   const listRef = useRef<HTMLDivElement | null>(null)
+  const panelRef = useRef<HTMLElement | null>(null)
 
   const hasFinished = rows.some((row) => !isLiveRow(row))
 
@@ -55,6 +55,38 @@ export function DownloadsPanel() {
     window.addEventListener("keydown", onKeyDown)
 
     return () => window.removeEventListener("keydown", onKeyDown)
+  }, [open, setPanelOpen])
+
+  /**
+   * a click anywhere else closes it, which is what the close button used to be
+   *
+   * on `mousedown` rather than `click`, so the panel is out of the way by the
+   * time the button or link underneath receives its own event: nothing is
+   * swallowed, and the user does not have to dismiss the panel before using
+   * what they were reaching for.
+   *
+   * the toggle is the one exception. It sets `panelOpen` to the opposite of
+   * what it reads, so closing here first would leave its click reading a closed
+   * panel and opening it again - the panel would refuse to close from the one
+   * control whose whole job is closing it. It marks itself with
+   * `data-downloads-toggle` (see `DownloadsToggle`) and is left alone.
+   */
+  useEffect(() => {
+    if (!open) return
+
+    const onMouseDown = (event: MouseEvent) => {
+      const target = event.target
+
+      if (!(target instanceof Element)) return
+      if (panelRef.current?.contains(target)) return
+      if (target.closest("[data-downloads-toggle]")) return
+
+      setPanelOpen(false)
+    }
+
+    document.addEventListener("mousedown", onMouseDown)
+
+    return () => document.removeEventListener("mousedown", onMouseDown)
   }, [open, setPanelOpen])
 
   /**
@@ -111,6 +143,7 @@ export function DownloadsPanel() {
       {open && (
         <motion.aside
           key="downloads-panel"
+          ref={panelRef}
           aria-label={t("downloads.title")}
           initial={{ x: "100%" }}
           animate={{ x: 0 }}
@@ -118,68 +151,57 @@ export function DownloadsPanel() {
           transition={{ duration: 0.25, ease: "easeInOut" }}
           className={cn(
             "fixed inset-y-0 right-0 z-50 flex w-[340px] flex-col",
-            // the app's card surface, standing on its edge: the same white-80
-            // blur, slate border and shadow `PlaylistHeader` and
-            // `VideoDownloadButton` draw, minus the radius a full-height drawer
-            // has no use for
+            // the app's card surface, standing on its edge
             "border-l-2 border-slate-300/50 bg-white/80 backdrop-blur-sm",
             "shadow-2xl shadow-black/10",
             "dark:border-slate-700/50 dark:bg-slate-800/60",
-            // the family every card sets on its own container. the panel is
-            // mounted in `App` outside the routes, so there is no card above it
-            // to inherit from, and the body's `font-sans` resolves to an
-            // undefined `--font-sans` and leaves the browser's serif behind
             "font-space-grotesk"
           )}
         >
-          <header className="flex-shrink-0 border-b border-slate-300/50 px-4 py-3 dark:border-slate-700/50">
-            <div className="flex items-center justify-between gap-2">
-              <h2 className="text-sm font-medium text-slate-900 dark:text-white">
-                {t("downloads.title")}
-              </h2>
+          {/* no border under the header and none anywhere else: the spacing
+              separates the three parts, which is the whole of the chrome */}
+          <header className="flex flex-shrink-0 items-baseline justify-between gap-3 px-5 pt-5">
+            {/* the app's own section label, letter for letter: the same
+                spelling `ReportIssueDialog` gives the headings over its fields.
+                smaller and quieter than the heading this used to be, which is
+                what the second pass asked for */}
+            <h2 className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">
+              {t("downloads.title")}
+            </h2>
 
-              <button
-                type="button"
-                onClick={() => setPanelOpen(false)}
-                className={cn(
-                  "-mr-1 rounded-lg p-1 text-slate-500 transition-colors duration-200",
-                  "hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-100",
-                  "focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-400/40"
-                )}
-              >
-                <X className="h-4 w-4" />
-                <span className="sr-only">{t("downloads.close")}</span>
-              </button>
-            </div>
-
-            <div className="mt-1 flex items-baseline justify-between gap-2">
-              <span
-                className="text-[11px] leading-4 tabular-nums text-slate-600 dark:text-slate-400"
-                style={{ fontFamily: MONO }}
-              >
-                {activeCount > 0
-                  ? t("downloads.active", { n: activeCount })
-                  : ""}
-              </span>
-
-              <button
-                type="button"
-                onClick={() => clearFinished()}
-                disabled={!hasFinished}
-                style={{ fontFamily: MONO }}
-                className={cn(
-                  "text-[11px] leading-4 text-slate-600 transition-colors duration-200",
-                  "hover:text-cyan-700 dark:text-slate-400 dark:hover:text-cyan-300",
-                  "disabled:pointer-events-none disabled:opacity-40",
-                  "focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-400/40"
-                )}
-              >
-                {t("downloads.clearFinished")}
-              </button>
-            </div>
+            <button
+              type="button"
+              onClick={() => clearFinished()}
+              disabled={!hasFinished}
+              className={cn(
+                "font-mono text-[11px] leading-4 text-slate-500 transition-colors duration-200",
+                "hover:text-cyan-700 dark:text-slate-400 dark:hover:text-cyan-300",
+                "disabled:pointer-events-none disabled:opacity-40",
+                "focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-400/40"
+              )}
+            >
+              {t("downloads.clearHistory")}
+            </button>
           </header>
 
-          <div className="flex-1 overflow-y-auto px-3 py-3">
+          {/*
+            the one number, and what it counts
+
+            it is the lifetime count from `settings.json`, not the length of the
+            list below it: clearing the history empties the list and leaves this
+            where it was. a fresh install reads zero, which is a true thing to
+            say and needs no empty state of its own.
+          */}
+          <div className="flex-shrink-0 px-5 pb-5 pt-3">
+            <p className="font-mono text-[34px] font-medium leading-none tabular-nums text-slate-900 dark:text-white">
+              {lifetime}
+            </p>
+            <p className="mt-2 text-[11px] leading-4 text-slate-500 dark:text-slate-400">
+              {t("downloads.mediaDownloaded", { n: lifetime })}
+            </p>
+          </div>
+
+          <div className="flex-1 overflow-y-auto px-4 pb-5">
             {rows.length > 0 ? (
               <div ref={listRef} className="flex flex-col gap-2">
                 {rows.map((row) => (
@@ -207,12 +229,9 @@ function EmptyState() {
   const t = useT()
 
   return (
-    <div className="px-2 py-8 text-center">
-      <p className="text-[13px] font-medium text-slate-900 dark:text-white">
+    <div className="px-1 py-6">
+      <p className="text-[13px] text-slate-500 dark:text-slate-400">
         {t("downloads.emptyTitle")}
-      </p>
-      <p className="mt-1.5 text-[11px] leading-4 text-slate-600 dark:text-slate-400">
-        {t("downloads.emptyBody")}
       </p>
     </div>
   )

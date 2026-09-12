@@ -1,7 +1,12 @@
 import { useEffect } from "react"
 import { toast } from "sonner"
 
-import { downloadApi, systemApi, type DownloadProgress } from "@/lib/api"
+import {
+  downloadApi,
+  settingsApi,
+  systemApi,
+  type DownloadProgress
+} from "@/lib/api"
 import { reconcileCancelIntent } from "@/lib/cancelIntent"
 import { DOWNLOAD_WORDING } from "@/lib/downloadKinds"
 import { localizeError, t } from "@/lib/i18n"
@@ -106,9 +111,19 @@ export function DownloadEvents() {
     // that window would otherwise be lost, and nothing pushes a correction
     const stopListening = downloadApi.onProgress(handleProgress)
 
-    Promise.all([downloadApi.getAllDownloads(), downloadApi.getHistory()])
-      .then(([active, history]) => {
-        if (mounted) settle(() => downloadsActions.hydrate(active, history))
+    // three reads, one window: the rows main has in flight, the rows it
+    // remembers, and the lifetime count the panel shows above them. the count
+    // is its own channel because the history reply is the rows array itself
+    // (see handleGetHistory in ipc-handlers.js)
+    Promise.all([
+      downloadApi.getAllDownloads(),
+      downloadApi.getHistory(),
+      settingsApi.getDownloadCount()
+    ])
+      .then(([active, history, lifetime]) => {
+        if (mounted) {
+          settle(() => downloadsActions.hydrate(active, history, lifetime))
+        }
       })
       .catch((error: unknown) => {
         // a list we could not read is an empty panel, not a broken app: every

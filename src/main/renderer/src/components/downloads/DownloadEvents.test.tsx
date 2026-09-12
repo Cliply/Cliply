@@ -23,6 +23,7 @@ const mocks = vi.hoisted(() => ({
   listenersAtRead: -1,
   getAllDownloads: vi.fn(),
   getHistory: vi.fn(),
+  getDownloadCount: vi.fn(),
   cancelDownload: vi.fn(),
   openDownloadFolder: vi.fn(),
   stage: vi.fn(),
@@ -49,7 +50,10 @@ vi.mock("@/lib/api", () => ({
     clearHistory: vi.fn(),
     removeHistory: vi.fn()
   },
-  systemApi: { openDownloadFolder: mocks.openDownloadFolder }
+  systemApi: { openDownloadFolder: mocks.openDownloadFolder },
+  // the lifetime number the panel shows, read in the same window as the two
+  // lists (see the Promise.all in DownloadEvents)
+  settingsApi: { getDownloadCount: () => mocks.getDownloadCount() }
 }))
 
 vi.mock("@/lib/stores/reportStore", () => ({
@@ -153,6 +157,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   mocks.getAllDownloads.mockResolvedValue([])
   mocks.getHistory.mockResolvedValue([])
+  mocks.getDownloadCount.mockResolvedValue(0)
   mocks.cancelDownload.mockResolvedValue(true)
   store().reset()
 })

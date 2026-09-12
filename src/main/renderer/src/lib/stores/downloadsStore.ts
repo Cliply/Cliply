@@ -42,6 +42,15 @@ export interface DownloadRow {
   itemsReused?: number
   itemsSkipped?: number
   filename?: string
+  /**
+   * where the file landed, when main reported one
+   *
+   * kept so a finished row can reveal that file rather than only open the
+   * download folder (`system:show-in-folder`). absent on a row read from a
+   * history file an older version wrote, and on a playlist it names whichever
+   * video landed last - which is still the right folder to open.
+   */
+  filePath?: string
   fileSize?: number
   error?: string
   category?: string
@@ -103,6 +112,16 @@ interface DownloadsState {
   /** whether the one hydration read has landed. the panel has nothing to say
    * about an empty list until it has */
   hydrated: boolean
+  /**
+   * how many downloads this install has ever finished
+   *
+   * main's counter (`downloads_completed` in settings.json), read once beside
+   * the history and then kept moving here: a completion bumps it locally so the
+   * number at the top of the panel changes as the download lands, without a
+   * second read. it never goes down, and clearing the history leaves it alone -
+   * it counts downloads, not rows.
+   */
+  lifetimeCompleted: number
   /** the panel's own chrome, session-only: nothing about it is worth keeping */
   panelOpen: boolean
   highlightedId: string | null
@@ -136,7 +155,11 @@ interface DownloadsState {
 
   add: (row: DownloadRow) => void
   applyEvent: (event: DownloadProgress) => void
-  hydrate: (active: DownloadStatus[], history: DownloadHistoryRow[]) => void
+  hydrate: (
+    active: DownloadStatus[],
+    history: DownloadHistoryRow[],
+    lifetimeCompleted?: number
+  ) => void
   remove: (downloadId: string) => void
   clearFinished: () => void
   setHighlighted: (downloadId: string | null) => void
@@ -153,6 +176,7 @@ interface DownloadsState {
 export const useDownloadsStore = create<DownloadsState>((set, get) => ({
   rows: [],
   hydrated: false,
+  lifetimeCompleted: 0,
   panelOpen: false,
   highlightedId: null,
   cancelIntents: [],
@@ -185,9 +209,27 @@ export const useDownloadsStore = create<DownloadsState>((set, get) => ({
       if (index === -1) return state
 
       const rows = [...state.rows]
-      rows[index] = mergeEvent(rows[index], event)
+      const previous = rows[index]
+      rows[index] = mergeEvent(previous, event)
 
-      return { rows }
+      /**
+       * ...and the lifetime number moves with it.
+       *
+       * main has already written its own counter by the time this event is
+       * sent (`noteCompletedDownload` in ipc-handlers.js), so this is the same
+       * download counted on this side rather than a second read of the file.
+       *
+       * only on the step into `completed`, which is what makes it safe to
+       * replay: `DownloadEvents` applies every event that landed during
+       * hydration a second time, and a row that was already completed is not a
+       * download that completed twice.
+       */
+      const landed =
+        event.status === "completed" && previous.status !== "completed"
+
+      return landed
+        ? { rows, lifetimeCompleted: state.lifetimeCompleted + 1 }
+        : { rows }
     }),
 
   /**
@@ -198,7 +240,7 @@ export const useDownloadsStore = create<DownloadsState>((set, get) => ({
    * by now are ones a hook added in the window between subscribing and this
    * landing. those are kept, because main has not heard of them yet.
    */
-  hydrate: (active, history) =>
+  hydrate: (active, history, lifetimeCompleted) =>
     set((state) => {
       const rows = [...active.map(rowFromStatus)]
       const seen = new Set(rows.map((row) => row.downloadId))
@@ -215,7 +257,19 @@ export const useDownloadsStore = create<DownloadsState>((set, get) => ({
 
       return {
         rows: rows.sort((a, b) => b.startedAt - a.startedAt),
-        hydrated: true
+        hydrated: true,
+        /**
+         * the larger of the two, because the number only ever goes up
+         *
+         * a download that finished while these three reads were in flight has
+         * already been counted here, and main's answer was taken before its own
+         * write landed. adopting it flatly would show the user's total going
+         * backwards a second after a download they just watched finish.
+         */
+        lifetimeCompleted: Math.max(
+          state.lifetimeCompleted,
+          lifetimeCompleted ?? 0
+        )
       }
     }),
 
@@ -240,11 +294,15 @@ export const useDownloadsStore = create<DownloadsState>((set, get) => ({
   },
 
   /**
-   * "clear finished": the rows with nothing left to happen to them go
+   * "clear history": the rows with nothing left to happen to them go
    *
    * main answers with what is left, which is the same set this keeps, so the
    * answer is not read back: adopting it would overwrite a row a hook added a
    * moment ago and main has not heard of yet.
+   *
+   * `lifetimeCompleted` is deliberately untouched. the number counts downloads
+   * this install finished, not rows it still keeps, so emptying the list is not
+   * a reason for it to move.
    */
   clearFinished: () => {
     set((state) => {
@@ -347,6 +405,7 @@ export const useDownloadsStore = create<DownloadsState>((set, get) => ({
     set({
       rows: [],
       hydrated: false,
+      lifetimeCompleted: 0,
       panelOpen: false,
       highlightedId: null,
       cancelIntents: [],
@@ -359,8 +418,11 @@ export const downloadsActions = {
   add: (row: DownloadRow) => useDownloadsStore.getState().add(row),
   applyEvent: (event: DownloadProgress) =>
     useDownloadsStore.getState().applyEvent(event),
-  hydrate: (active: DownloadStatus[], history: DownloadHistoryRow[]) =>
-    useDownloadsStore.getState().hydrate(active, history),
+  hydrate: (
+    active: DownloadStatus[],
+    history: DownloadHistoryRow[],
+    lifetimeCompleted?: number
+  ) => useDownloadsStore.getState().hydrate(active, history, lifetimeCompleted),
   findLive: (candidate: DownloadIdentity) =>
     useDownloadsStore.getState().findLive(candidate),
   setHighlighted: (downloadId: string | null) =>
@@ -396,6 +458,10 @@ export const useDownloadRow = (downloadId?: string): DownloadRow | undefined =>
 export const useDownloadRows = (): DownloadRow[] =>
   useDownloadsStore((state) => state.rows)
 
+/** the one number at the top of the panel: downloads finished since install */
+export const useLifetimeCompleted = (): number =>
+  useDownloadsStore((state) => state.lifetimeCompleted)
+
 /** how many downloads the user is still waiting on, for the toggle's badge */
 export const useActiveCount = (): number =>
   useDownloadsStore(
@@ -427,6 +493,7 @@ function mergeEvent(row: DownloadRow, event: DownloadProgress): DownloadRow {
     itemsReused: event.items_reused ?? row.itemsReused,
     itemsSkipped: event.items_skipped ?? row.itemsSkipped,
     filename: event.filename ?? row.filename,
+    filePath: event.file_path ?? row.filePath,
     fileSize: event.file_size ?? row.fileSize,
     error: event.error,
     category: event.category,
@@ -484,6 +551,7 @@ function rowFromHistory(entry: DownloadHistoryRow): DownloadRow {
     itemsReused: entry.items_reused,
     itemsSkipped: entry.items_skipped,
     filename: entry.filename,
+    filePath: entry.file_path,
     fileSize: entry.file_size,
     error: entry.error,
     category: entry.category,

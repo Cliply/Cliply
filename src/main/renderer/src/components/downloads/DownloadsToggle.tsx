@@ -2,7 +2,6 @@ import { motion } from "framer-motion"
 import { Download } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
-import { MONO } from "@/lib/fonts"
 import { useT } from "@/lib/i18n"
 import { useActiveCount, useDownloadsStore } from "@/lib/stores/downloadsStore"
 import { cn } from "@/lib/utils"
@@ -37,6 +36,10 @@ export function DownloadsToggle() {
         size="icon"
         onClick={() => setPanelOpen(!open)}
         aria-expanded={open}
+        // the panel closes on a click anywhere outside itself, and this is the
+        // exception it looks for: without the mark, closing on mousedown would
+        // leave this click reading a closed panel and opening it straight back
+        data-downloads-toggle=""
         className={cn(
           "relative w-11 h-11 rounded-xl transition-all duration-200 border",
           "dark:bg-slate-800/60 dark:border-slate-700/50 dark:hover:bg-slate-700/70",
@@ -50,11 +53,10 @@ export function DownloadsToggle() {
 
         {count > 0 && (
           <span
-            style={{ fontFamily: MONO }}
             className={cn(
               "absolute -right-1 -top-1 flex h-[18px] min-w-[18px]",
               "items-center justify-center rounded-full px-1",
-              "bg-cyan-600 text-[10px] leading-none tabular-nums text-white",
+              "bg-cyan-600 font-mono text-[10px] leading-none tabular-nums text-white",
               "shadow-sm"
             )}
           >

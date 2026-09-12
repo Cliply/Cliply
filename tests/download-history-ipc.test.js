@@ -408,7 +408,11 @@ describe("the three channels", () => {
     expect(removed).toEqual([
       "download:get-history",
       "download:clear-history",
-      "download:remove-history"
+      "download:remove-history",
+      // the panel's second pass added these two, and they are unregistered on
+      // the same path for the same reason
+      "system:show-in-folder",
+      "settings:get-download-count"
     ])
   })
 })

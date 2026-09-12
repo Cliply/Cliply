@@ -682,12 +682,20 @@ class IPCHandlers {
       this.handleOpenDownloadFolder.bind(this)
     )
     ipcMain.handle(
+      "system:show-in-folder",
+      this.handleShowInFolder.bind(this)
+    )
+    ipcMain.handle(
       "system:select-download-folder",
       this.handleSelectDownloadFolder.bind(this)
     )
     ipcMain.handle(
       "settings:get-download-path",
       this.handleGetDownloadPath.bind(this)
+    )
+    ipcMain.handle(
+      "settings:get-download-count",
+      this.handleGetDownloadCount.bind(this)
     )
     ipcMain.handle(
       "settings:set-download-path",
@@ -1896,6 +1904,77 @@ class IPCHandlers {
     }
   }
 
+  /**
+   * show one downloaded file where it landed
+   *
+   * the panel's "open folder" on a finished row: the file manager opens on its
+   * folder with the file selected, which is the difference between this and
+   * `handleOpenDownloadFolder` above, and the reason a path has to travel over
+   * ipc at all.
+   *
+   * **which is why the path is checked before anything is revealed.** the
+   * renderer is the only caller today and it sends back a `file_path` main
+   * itself wrote, but a channel that reveals whatever it is handed is a channel
+   * that reveals anything a compromised renderer names. So the path is resolved
+   * and compared against the download folder the same way: `path.relative`
+   * between the two, refused when it climbs out (`..`) or when it turns out to
+   * be absolute, which is what a different drive on windows looks like.
+   * `realpath` is deliberately not used - a file that has since been moved or
+   * deleted would fail the check rather than fall back to its folder, and the
+   * fallback is the whole reason the row still works when the file is gone.
+   */
+  async handleShowInFolder(_event, data) {
+    try {
+      this.validateRequest(data, ["path"])
+
+      const target = path.resolve(data.path)
+      const root = path.resolve(await this.settings.ensureDownloadPath())
+      const inside = path.relative(root, target)
+
+      if (
+        !inside ||
+        inside.startsWith("..") ||
+        path.isAbsolute(inside)
+      ) {
+        return this.createError("That file is not in the download folder")
+      }
+
+      const { shell } = require("electron")
+      shell.showItemInFolder(target)
+
+      return this.createSuccess({ shown: true, path: target })
+    } catch (error) {
+      console.error("Show in folder failed:", error.message)
+      return this.createError("Failed to show that file")
+    }
+  }
+
+  /**
+   * how many downloads this install has finished, ever
+   *
+   * the same counter `noteCompletedDownload` writes, read back for the number
+   * at the top of the downloads panel. Its own channel rather than a field on
+   * `download:get-history`, whose reply is the rows array itself (see
+   * handleGetHistory) - and a lifetime count is not a row, does not belong in a
+   * list "clear history" empties, and is read at exactly the same moment, so
+   * the second invoke costs nothing worth the change of shape.
+   */
+  async handleGetDownloadCount(_event) {
+    try {
+      const settings =
+        this.settings && typeof this.settings.readAll === "function"
+          ? await this.settings.readAll()
+          : {}
+
+      return this.createSuccess({
+        count: Number(settings.downloads_completed) || 0
+      })
+    } catch (error) {
+      console.error("Get download count failed:", error.message)
+      return this.createError("Failed to read the download count")
+    }
+  }
+
   // select download folder
   async handleSelectDownloadFolder(_event) {
     try {
@@ -2100,8 +2179,10 @@ class IPCHandlers {
       "download:get-status",
       "download:get-all",
       "system:open-download-folder",
+      "system:show-in-folder",
       "system:select-download-folder",
       "settings:get-download-path",
+      "settings:get-download-count",
       "settings:set-download-path"
     ]
 
@@ -2116,14 +2197,16 @@ class IPCHandlers {
      * `handle` for it throws, and until then the old closure - holding the old
      * history and the old runner - is what answers the renderer.
      *
-     * the three history channels only. every channel above has the same
-     * problem and has had it since before this branch; fixing them is its own
-     * change, with its own test for each.
+     * the three history channels, and the two the panel's second pass added.
+     * every channel above has the same problem and has had it since before
+     * this branch; fixing them is its own change, with its own test for each.
      */
     const invokeChannels = [
       "download:get-history",
       "download:clear-history",
-      "download:remove-history"
+      "download:remove-history",
+      "system:show-in-folder",
+      "settings:get-download-count"
     ]
 
     invokeChannels.forEach((channel) => {

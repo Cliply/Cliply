@@ -4,7 +4,30 @@
 
 :root {
   --radius: 0.625rem;
-  
+
+  /*
+   * the two families tailwind's `font-sans` and `font-mono` are built on
+   *
+   * both utilities resolve to `var(--font-sans)` / `var(--font-mono)` (see
+   * fontFamily in tailwind.config.js), and neither variable existed: the
+   * declarations were invalid, so every `font-mono` in the app silently
+   * inherited its parent's family instead of a monospace one, and `font-sans`
+   * on the body left the browser's serif behind. Defined here, once, so the
+   * call sites that already assume them - PlaylistRow's index and durations,
+   * PlaylistHeader's path, progress-bar.tsx's meta and value - mean what they
+   * say.
+   *
+   * --font-sans is the Space Grotesk stack from the same config, so the body
+   * and the cards that set `font-space-grotesk` agree, and ru falls through to
+   * the system sans in both (Space Grotesk has no Cyrillic). --font-mono is
+   * the stack in lib/fonts.ts, which the inline call sites use.
+   */
+  --font-sans: "Space Grotesk", ui-sans-serif, system-ui, -apple-system,
+    BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial,
+    "Noto Sans", sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, SFMono-Regular, "SF Mono", Consolas,
+    "Liberation Mono", Menlo, monospace;
+
   /* Light mode colors */
   --background: 0 0% 100%;
   --foreground: 0 0% 3.9%;

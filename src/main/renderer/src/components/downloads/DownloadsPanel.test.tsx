@@ -131,37 +131,81 @@ describe("opening and closing", () => {
     expect(store().panelOpen).toBe(true)
   })
 
-  test("the close button closes it", () => {
+  /**
+   * the close button is gone: a click anywhere else is what closes the panel
+   * now. it is taken on mousedown so that whatever was clicked still receives
+   * its own event - the panel is not a modal and nothing is swallowed.
+   */
+  test("a click outside closes it", () => {
     render(<DownloadsPanel />)
     open()
 
-    fireEvent.click(
-      within(panel()).getByRole("button", { name: en["downloads.close"] })
-    )
+    fireEvent.mouseDown(document.body)
 
+    expect(store().panelOpen).toBe(false)
+  })
+
+  test("a click inside it does not", () => {
+    store().add(row())
+
+    render(<DownloadsPanel />)
+    open()
+
+    fireEvent.mouseDown(within(panel()).getByText(en["downloads.title"]))
+
+    expect(store().panelOpen).toBe(true)
+  })
+
+  /**
+   * the toggle sets the opposite of what it reads, so a panel that closed on
+   * its mousedown would be reopened by its own click - and the one control
+   * whose job is closing the panel would never close it.
+   */
+  test("and a click on the toggle is left to the toggle", () => {
+    render(
+      <>
+        <button type="button" data-downloads-toggle="">
+          toggle
+        </button>
+        <DownloadsPanel />
+      </>
+    )
+    open()
+
+    fireEvent.mouseDown(screen.getByRole("button", { name: "toggle" }))
+
+    expect(store().panelOpen).toBe(true)
+  })
+
+  // the listener goes with the panel: a click anywhere while it is closed must
+  // not be something this is still listening for
+  test("and nothing is listening while it is closed", () => {
+    render(<DownloadsPanel />)
+
+    expect(() => fireEvent.mouseDown(document.body)).not.toThrow()
     expect(store().panelOpen).toBe(false)
   })
 })
 
 describe("the header", () => {
-  test("counts what the user is still waiting on", () => {
-    store().add(row({ downloadId: "a", status: "queued" }))
-    store().add(row({ downloadId: "b" }))
-    store().add(row({ downloadId: "c", status: "completed" }))
+  test("shows the lifetime count and what it counts", () => {
+    act(() => store().hydrate([], [], 128))
 
     render(<DownloadsPanel />)
     open()
 
-    expect(within(panel()).getByText("2 active")).toBeTruthy()
+    expect(within(panel()).getByText("128")).toBeTruthy()
+    expect(
+      within(panel()).getByText(en["downloads.mediaDownloaded"].split("|")[1])
+    ).toBeTruthy()
   })
 
-  test("says nothing about a count of zero", () => {
-    store().add(row({ status: "completed" }))
-
+  // a fresh install has a true thing to say, and says it rather than hiding
+  test("reads zero on an install that has downloaded nothing", () => {
     render(<DownloadsPanel />)
     open()
 
-    expect(within(panel()).queryByText(/active/)).toBeNull()
+    expect(within(panel()).getByText("0")).toBeTruthy()
   })
 
   test("offers nothing to clear while everything is still running", () => {
@@ -172,7 +216,7 @@ describe("the header", () => {
 
     expect(
       within(panel())
-        .getByRole("button", { name: en["downloads.clearFinished"] })
+        .getByRole("button", { name: en["downloads.clearHistory"] })
         .hasAttribute("disabled")
     ).toBe(true)
   })
@@ -186,12 +230,33 @@ describe("the header", () => {
 
     fireEvent.click(
       within(panel()).getByRole("button", {
-        name: en["downloads.clearFinished"]
+        name: en["downloads.clearHistory"]
       })
     )
 
     expect(store().rows.map((entry) => entry.downloadId)).toEqual(["live"])
     expect(mocks.clearHistory).toHaveBeenCalled()
+  })
+
+  /**
+   * the number counts downloads this install finished, not rows it still
+   * keeps, so emptying the list is not a reason for it to move.
+   */
+  test("and the count stays where it was", () => {
+    act(() => store().hydrate([], [], 12))
+    store().add(row({ downloadId: "done", status: "completed" }))
+
+    render(<DownloadsPanel />)
+    open()
+
+    fireEvent.click(
+      within(panel()).getByRole("button", {
+        name: en["downloads.clearHistory"]
+      })
+    )
+
+    expect(store().lifetimeCompleted).toBe(12)
+    expect(within(panel()).getByText("12")).toBeTruthy()
   })
 })
 
@@ -217,7 +282,9 @@ describe("the body", () => {
    */
   test("gives each status the action that belongs to it", () => {
     const statuses: [DownloadRow["status"], string][] = [
-      ["queued", en["downloads.remove"]],
+      // a queued row's Stop is the cancel that drops the reservation: there is
+      // no Remove on any row any more
+      ["queued", en["progress.stop"]],
       ["starting", en["progress.stop"]],
       ["downloading", en["progress.stop"]],
       ["completed", en["toast.openFolder"]],

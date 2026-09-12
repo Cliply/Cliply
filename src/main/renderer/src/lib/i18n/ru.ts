@@ -252,27 +252,22 @@ export const ru: Record<Key, string> = {
 
   "downloads.title": "загрузки",
   "downloads.toggle": "показать загрузки",
-  "downloads.close": "закрыть загрузки",
-  // «активно: 2» rather than a declined adjective: the noun it would agree
-  // with is not in the sentence, so any form here would be a guess
-  "downloads.active": "активно: {n}",
-  "downloads.clearFinished": "очистить завершённые",
+  // the label under the number, in the three forms russian counts in: «1
+  // медиафайл скачан», «2 медиафайла скачано», «5 медиафайлов скачано». the
+  // number itself is drawn above it, so the label carries no {n}
+  "downloads.mediaDownloaded":
+    "медиафайл скачан|медиафайла скачано|медиафайлов скачано",
+  "downloads.clearHistory": "очистить историю",
   "downloads.emptyTitle": "пока ничего не скачано",
-  "downloads.emptyBody":
-    "всё, что вы скачиваете, попадает сюда и остаётся, даже если вы уйдёте с экрана, откуда начали.",
   "downloads.untitled": "без названия",
   "downloads.queued": "в очереди",
-  "downloads.done": "готово",
   "downloads.cancelled": "отменено",
   "downloads.interrupted": "прервано",
   "downloads.itemsProgress": "{done} из {total}",
-  "downloads.remove": "убрать",
   "downloads.retry": "повторить",
   "downloads.retryUnavailable":
     "об этой загрузке сохранилось слишком мало, чтобы начать её заново",
   "downloads.retryFailed": "не удалось запустить загрузку заново",
-  "downloads.platformTiktok": "TikTok",
-  "downloads.platformPinterest": "Pinterest",
 
   "card.tabVideo": "видео",
   "card.tabAudio": "только аудио",

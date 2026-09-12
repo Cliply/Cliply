@@ -410,6 +410,23 @@ export const systemApi = {
   },
 
   /**
+   * Reveal one downloaded file in its folder. Answers false rather than
+   * throwing when the file is gone, has been moved out of the download folder,
+   * or the preload is too old to carry the channel - the caller's fallback is
+   * `openDownloadFolder`, which is what the row offers anyway.
+   * @param path Absolute path main itself reported for the download
+   * @returns Promise<boolean> whether the file was revealed
+   */
+  async showInFolder(path: string): Promise<boolean> {
+    const electronAPI = getElectronAPI()
+
+    if (!electronAPI.system.showInFolder) return false
+
+    const response = await electronAPI.system.showInFolder(path)
+    return response.success === true
+  },
+
+  /**
    * Open external URL in system browser
    * @param url External URL
    * @returns Promise<boolean>
@@ -464,6 +481,23 @@ export const settingsApi = {
     return unwrap(response, "Failed to get download path", {
       makeError: plainError
     })
+  },
+
+  /**
+   * How many downloads this install has ever finished. Never decreases, and
+   * clearing the history does not touch it: it is a counter in settings.json,
+   * not a count of the rows kept (see `handleGetDownloadCount` in
+   * `ipc-handlers.js`). Zero on a preload too old to answer.
+   * @returns Promise<number>
+   */
+  async getDownloadCount(): Promise<number> {
+    const electronAPI = getElectronAPI()
+
+    if (!electronAPI.settings.getDownloadCount) return 0
+
+    const response = await electronAPI.settings.getDownloadCount()
+
+    return response.success && response.data ? response.data.count : 0
   },
 
   /**

@@ -157,6 +157,11 @@ contextBridge.exposeInMainWorld("electronAPI", {
     openExternal: (url) => invoke(IPC_CHANNELS.SYSTEM_OPEN_EXTERNAL, { url }),
     getDiagnostics: () => invoke(IPC_CHANNELS.SYSTEM_GET_DIAGNOSTICS),
     openDownloadFolder: () => invoke("system:open-download-folder"),
+    // the folder a file landed in, with the file selected. main refuses any
+    // path outside the download folder (see handleShowInFolder in
+    // ipc-handlers.js), so a row whose file has moved falls back to
+    // openDownloadFolder rather than revealing something else
+    showInFolder: (path) => invoke("system:show-in-folder", { path }),
     selectDownloadFolder: () => invoke("system:select-download-folder")
   },
 
@@ -170,6 +175,9 @@ contextBridge.exposeInMainWorld("electronAPI", {
   // settings operations
   settings: {
     getDownloadPath: () => invoke("settings:get-download-path"),
+    // how many downloads this install has ever finished, for the number at the
+    // top of the panel. the same counter the support milestones are counted by
+    getDownloadCount: () => invoke("settings:get-download-count"),
     setDownloadPath: (path) => invoke("settings:set-download-path", { path })
   },
 

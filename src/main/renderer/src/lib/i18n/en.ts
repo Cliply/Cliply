@@ -288,28 +288,28 @@ export const en = {
    */
   "downloads.title": "Downloads",
   "downloads.toggle": "Show downloads",
-  "downloads.close": "Close downloads",
-  "downloads.active": "{n} active",
-  "downloads.clearFinished": "Clear finished",
+  /**
+   * the label under the one number at the top of the panel
+   *
+   * both forms are the same sentence in english, and it is still written as a
+   * plural: `ru.ts` is typed against this file, so the russian - which does
+   * decline - only gets its three forms if the key is plural here.
+   */
+  "downloads.mediaDownloaded": "media downloaded|media downloaded",
+  "downloads.clearHistory": "Clear history",
   "downloads.emptyTitle": "No downloads yet",
-  "downloads.emptyBody":
-    "Whatever you download lands here and stays, even after you leave the screen that started it.",
   // a row whose title main never learned, which is any download started from a
   // link that failed before the lookup answered
   "downloads.untitled": "Untitled",
   "downloads.queued": "Queued",
-  "downloads.done": "Done",
   "downloads.cancelled": "Cancelled",
   "downloads.interrupted": "Interrupted",
   // a playlist's position inside its own run: "3 of 12"
   "downloads.itemsProgress": "{done} of {total}",
-  "downloads.remove": "Remove",
   "downloads.retry": "Retry",
   "downloads.retryUnavailable":
     "We didn't keep enough about this one to start it again",
   "downloads.retryFailed": "Couldn't start that download again",
-  "downloads.platformTiktok": "TikTok",
-  "downloads.platformPinterest": "Pinterest",
 
   "card.tabVideo": "Video Download",
   "card.tabAudio": "Audio Only",

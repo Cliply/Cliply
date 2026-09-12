@@ -1,11 +1,12 @@
 // @vitest-environment jsdom
 //
 // one row per download, and the row is where the seven statuses become
-// something to read and something to press. two things in particular are worth
-// asserting rather than eyeballing: that every status offers the action that
-// belongs to it (a finished row with a Stop is a button main cannot answer),
-// and that the chip and the finished line are built from the request rather
-// than from main's english label.
+// something to read and something to press. after the second pass a row is its
+// title and one action, so what is worth asserting rather than eyeballing is
+// that every status offers the action that belongs to it (a finished row with a
+// Stop is a button main cannot answer), and that "open folder" reveals the file
+// when the row knows where it went and falls back to the folder when it does
+// not.
 
 import {
   cleanup,
@@ -21,6 +22,7 @@ const mocks = vi.hoisted(() => ({
   removeHistory: vi.fn(),
   clearHistory: vi.fn(),
   openDownloadFolder: vi.fn(),
+  showInFolder: vi.fn(),
   downloadVideo: vi.fn(),
   downloadAudio: vi.fn(),
   downloadPlaylist: vi.fn(),
@@ -40,7 +42,10 @@ vi.mock("@/lib/api", () => {
       removeHistory: mocks.removeHistory,
       clearHistory: mocks.clearHistory
     },
-    systemApi: { openDownloadFolder: mocks.openDownloadFolder },
+    systemApi: {
+      openDownloadFolder: mocks.openDownloadFolder,
+      showInFolder: mocks.showInFolder
+    },
     videoApi: {
       downloadVideo: mocks.downloadVideo,
       downloadAudio: mocks.downloadAudio
@@ -85,6 +90,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   mocks.cancelDownload.mockResolvedValue(true)
   mocks.openDownloadFolder.mockResolvedValue(true)
+  mocks.showInFolder.mockResolvedValue(true)
   mocks.removeHistory.mockResolvedValue([])
   mocks.downloadVideo.mockResolvedValue({ downloadId: "new" })
 })
@@ -92,14 +98,14 @@ beforeEach(() => {
 afterEach(cleanup)
 
 describe("what each status offers", () => {
-  test("queued says so, and offers to drop it", () => {
+  test("queued says so, and its stop drops the reservation", () => {
     render(<DownloadRow row={row({ status: "queued" })} />)
 
     expect(screen.getByText(en["downloads.queued"])).toBeTruthy()
     // parked behind the cap, so there is no bar to draw: nothing has started
     expect(screen.queryByRole("progressbar")).toBeNull()
 
-    fireEvent.click(action(en["downloads.remove"]))
+    fireEvent.click(action(en["progress.stop"]))
 
     // dropping a reservation is the same cancel as stopping a process
     expect(mocks.cancelDownload).toHaveBeenCalledWith("d1")
@@ -129,24 +135,65 @@ describe("what each status offers", () => {
     expect(screen.getByText(en["progress.startingUp"])).toBeTruthy()
   })
 
-  test("completed says how big the file was, and opens the folder", () => {
+  /**
+   * a finished row is its name and one button, which is what the second pass
+   * was for: no chip, no size, no "Done" beside them.
+   */
+  test("completed is a name and one action", async () => {
     render(
       <DownloadRow
-        row={row({ status: "completed", progress: 100, fileSize: 39845888 })}
+        row={row({
+          status: "completed",
+          progress: 100,
+          fileSize: 39845888,
+          filePath: "/Users/me/Downloads/sourdough.mp4"
+        })}
       />
     )
 
-    expect(screen.getByText(/Done · 38 MB/)).toBeTruthy()
+    expect(screen.queryByText(/38 MB/)).toBeNull()
+    expect(screen.getAllByRole("button").length).toBe(1)
 
     fireEvent.click(action(en["toast.openFolder"]))
 
-    expect(mocks.openDownloadFolder).toHaveBeenCalled()
+    // the file itself, in the folder it landed in
+    await waitFor(() =>
+      expect(mocks.showInFolder).toHaveBeenCalledWith(
+        "/Users/me/Downloads/sourdough.mp4"
+      )
+    )
+    expect(mocks.openDownloadFolder).not.toHaveBeenCalled()
   })
 
-  test("completed with no size known still says it is done", () => {
+  test("and opens the folder when the row kept no path", async () => {
+    // a history file an older version wrote knows the download but not where
+    // it went
     render(<DownloadRow row={row({ status: "completed", progress: 100 })} />)
 
-    expect(screen.getByText(en["downloads.done"])).toBeTruthy()
+    fireEvent.click(action(en["toast.openFolder"]))
+
+    await waitFor(() => expect(mocks.openDownloadFolder).toHaveBeenCalled())
+    expect(mocks.showInFolder).not.toHaveBeenCalled()
+  })
+
+  // main refuses a path outside the download folder, and a file that has been
+  // moved or deleted cannot be revealed either. both end at the folder
+  test("and falls back to the folder when the file cannot be revealed", async () => {
+    mocks.showInFolder.mockResolvedValue(false)
+
+    render(
+      <DownloadRow
+        row={row({
+          status: "completed",
+          progress: 100,
+          filePath: "/somewhere/else/gone.mp4"
+        })}
+      />
+    )
+
+    fireEvent.click(action(en["toast.openFolder"]))
+
+    await waitFor(() => expect(mocks.openDownloadFolder).toHaveBeenCalled())
   })
 
   test("failed reads main's sentence and offers to try again", () => {
@@ -201,29 +248,23 @@ describe("what each status offers", () => {
     expect(retry.getAttribute("title")).toBe(en["downloads.retryUnavailable"])
   })
 
+  /**
+   * one action per row, whatever the status: the Remove that used to sit beside
+   * it is gone, and a row is forgotten by "clear history" rather than one at a
+   * time.
+   */
   test.each([
     ["queued" as const],
     ["starting" as const],
-    ["downloading" as const]
-  ])("%s has nothing to forget yet", (status) => {
+    ["downloading" as const],
+    ["completed" as const],
+    ["failed" as const],
+    ["cancelled" as const],
+    ["interrupted" as const]
+  ])("%s draws exactly one button", (status) => {
     render(<DownloadRow row={row({ status })} />)
 
-    // removing a live row would leave main downloading something the panel no
-    // longer shows, and main refuses to forget one anyway
-    expect(
-      screen.queryAllByRole("button", { name: en["downloads.remove"] }).length
-    ).toBe(status === "queued" ? 1 : 0)
-  })
-
-  test("a finished row is forgotten here and on disk", () => {
-    store().add(row({ status: "completed" }))
-
-    render(<DownloadRow row={row({ status: "completed" })} />)
-
-    fireEvent.click(action(en["downloads.remove"]))
-
-    expect(store().rows).toEqual([])
-    expect(mocks.removeHistory).toHaveBeenCalledWith("d1")
+    expect(screen.getAllByRole("button").length).toBe(1)
   })
 })
 
@@ -316,11 +357,11 @@ describe("a playlist row", () => {
 
   /**
    * the size on a playlist's completed event describes the last file that
-   * landed rather than the run (noted on Q2), so a finished playlist counts
-   * videos: eight of nine saved is a success, and saying "Done · 4 MB" over it
-   * would be describing one video out of eight.
+   * landed rather than the run (noted on Q2), so a finished playlist says
+   * nothing about bytes. after the second pass it says nothing at all beyond
+   * its name: the run is over and the folder is the one thing left to offer.
    */
-  test("says what it saved rather than how big the last file was", () => {
+  test("says nothing about bytes once it is done", () => {
     render(
       <DownloadRow
         row={playlist({
@@ -333,103 +374,9 @@ describe("a playlist row", () => {
       />
     )
 
-    expect(screen.getByText("8 of 9 videos saved")).toBeTruthy()
     expect(screen.queryByText(/3\.81 MB/)).toBeNull()
-  })
-
-  test("falls back to done when the run counted nothing", () => {
-    render(
-      <DownloadRow
-        row={playlist({
-          status: "completed",
-          progress: 100,
-          itemsTotal: undefined
-        })}
-      />
-    )
-
-    expect(screen.getByText(en["downloads.done"])).toBeTruthy()
-  })
-})
-
-/**
- * main writes a label at reserve and it is english by design, so the chip is
- * rebuilt here from the request main built that label from. the fallback is
- * main's own, which is all a row read from an older history file has.
- */
-describe("the chip beside the title", () => {
-  test.each([
-    [row(), "1080p mp4"],
-    [
-      row({
-        kind: "audio",
-        label: "mp3",
-        request: { url: "https://youtu.be/abc", audio_mode: "mp3" }
-      }),
-      en["format.mp3"]
-    ],
-    [
-      row({
-        kind: "audio",
-        label: "original",
-        request: { url: "https://youtu.be/abc", audio_mode: "original" }
-      }),
-      en["dropdown.original"]
-    ],
-    [
-      row({
-        kind: "simple",
-        platform: "tiktok",
-        label: "tiktok",
-        request: { url: "https://tiktok.com/@a/video/1" }
-      }),
-      "TikTok"
-    ],
-    [
-      row({
-        kind: "simple",
-        platform: "pinterest",
-        label: "pinterest",
-        request: { url: "https://pin.it/abc" }
-      }),
-      "Pinterest"
-    ],
-    [
-      row({
-        kind: "playlist",
-        label: "12 videos",
-        itemsTotal: 12,
-        request: {
-          url: "https://youtube.com/playlist?list=PL1",
-          playlist_id: "PL1",
-          entries: []
-        }
-      }),
-      "12 videos"
-    ]
-  ])("reads $1 for the request it was started from", (given, expected) => {
-    render(<DownloadRow row={given} />)
-
-    expect(screen.getByText(expected)).toBeTruthy()
-  })
-
-  test("keeps main's label when the request is gone", () => {
-    render(<DownloadRow row={row({ request: undefined })} />)
-
-    expect(screen.getByText("1080p mp4")).toBeTruthy()
-  })
-
-  test("and when the request kept no height", () => {
-    render(
-      <DownloadRow
-        row={row({
-          label: "720p mkv",
-          request: { url: "https://youtu.be/abc" } as never
-        })}
-      />
-    )
-
-    expect(screen.getByText("720p mkv")).toBeTruthy()
+    expect(screen.getByText("Lo-fi beats to study to")).toBeTruthy()
+    expect(action(en["toast.openFolder"])).toBeTruthy()
   })
 })
 

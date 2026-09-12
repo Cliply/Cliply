@@ -571,6 +571,127 @@ describe("clearing and removing", () => {
   })
 })
 
+/**
+ * the one number at the top of the panel: downloads finished since install.
+ *
+ * main owns the counter (`downloads_completed`, written by
+ * `noteCompletedDownload` in ipc-handlers.js) and this side keeps it moving, so
+ * what matters here is that it is read once, bumped once per download, and
+ * never walked backwards by anything else the panel does.
+ */
+describe("the lifetime count", () => {
+  test("comes in with the hydration read", () => {
+    store().hydrate([], [], 128)
+
+    expect(store().lifetimeCompleted).toBe(128)
+  })
+
+  test("moves with a completion, without a second read", () => {
+    store().add(row({ downloadId: "d1", status: "downloading" }))
+
+    store().applyEvent(event({ status: "completed", progress: 100 }))
+
+    expect(store().lifetimeCompleted).toBe(1)
+  })
+
+  /**
+   * `DownloadEvents` replays every event that landed during the hydration
+   * window, so the same completion is applied twice. a row that was already
+   * completed is not a download that completed twice.
+   */
+  test("and not twice for the same download", () => {
+    store().add(row({ downloadId: "d1", status: "downloading" }))
+    const completed = event({ status: "completed", progress: 100 })
+
+    store().applyEvent(completed)
+    store().applyEvent(completed)
+
+    expect(store().lifetimeCompleted).toBe(1)
+  })
+
+  test("a failure or a cancel does not count", () => {
+    store().add(row({ downloadId: "d1", status: "downloading" }))
+
+    store().applyEvent(event({ status: "failed", error: "no" }))
+    store().applyEvent(event({ status: "cancelled" }))
+
+    expect(store().lifetimeCompleted).toBe(0)
+  })
+
+  /**
+   * a download that finished while the three hydration reads were in flight has
+   * already been counted here, and main's answer was taken before its own write
+   * landed. the number must not go backwards under the user.
+   */
+  test("a late read cannot walk it back", () => {
+    store().add(row({ downloadId: "d1", status: "downloading" }))
+    store().applyEvent(event({ status: "completed", progress: 100 }))
+
+    store().hydrate([], [], 0)
+
+    expect(store().lifetimeCompleted).toBe(1)
+  })
+
+  test("clearing the history leaves it alone", () => {
+    store().hydrate([], [], 12)
+    store().add(row({ downloadId: "done", status: "completed" }))
+
+    store().clearFinished()
+
+    expect(store().rows).toEqual([])
+    expect(store().lifetimeCompleted).toBe(12)
+  })
+})
+
+/**
+ * a finished row reveals the file it made rather than only opening the folder,
+ * which it can only do while it still knows where the file went. main sends the
+ * path on the completion and writes it into the history, so both paths in are
+ * pinned here.
+ */
+describe("where the file landed", () => {
+  test("is kept off the completion event", () => {
+    store().add(row({ downloadId: "d1" }))
+
+    store().applyEvent(
+      event({
+        status: "completed",
+        progress: 100,
+        file_path: "/Users/me/Downloads/holiday.mp4"
+      })
+    )
+
+    expect(rowOf("d1")?.filePath).toBe("/Users/me/Downloads/holiday.mp4")
+  })
+
+  test("and read back from the history", () => {
+    store().hydrate(
+      [],
+      [
+        {
+          download_id: "old",
+          status: "completed",
+          file_path: "/Users/me/Downloads/old.mp4"
+        } as DownloadHistoryRow
+      ]
+    )
+
+    expect(rowOf("old")?.filePath).toBe("/Users/me/Downloads/old.mp4")
+  })
+
+  // a row from a history file written before the path was kept: the panel falls
+  // back to opening the download folder, which is why this stays undefined
+  // rather than becoming an empty string
+  test("and is absent when the row never had one", () => {
+    store().hydrate(
+      [],
+      [{ download_id: "old", status: "completed" } as DownloadHistoryRow]
+    )
+
+    expect(rowOf("old")?.filePath).toBeUndefined()
+  })
+})
+
 describe("the panel's own state", () => {
   test("open and highlighted are session-only flags", () => {
     store().setPanelOpen(true)
