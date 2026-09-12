@@ -9,7 +9,11 @@
 import { act, render } from "@testing-library/react"
 import { beforeEach, describe, expect, test, vi } from "vitest"
 
-import type { DownloadProgress } from "@/lib/api"
+import type {
+  DownloadHistoryRow,
+  DownloadProgress,
+  DownloadStatus
+} from "@/lib/api"
 
 type ProgressListener = (payload: DownloadProgress) => void
 
@@ -100,6 +104,47 @@ async function mount() {
   return view
 }
 
+/**
+ * mount with the history read left hanging, so the hydration window is open
+ *
+ * the window is a couple of milliseconds in the app and every event that lands
+ * inside it is one main will never send again, so it is held open here on
+ * purpose. `landed` closes it with the rows a real answer would have carried.
+ */
+function mountMidRead(active: Partial<DownloadStatus>[] = []) {
+  let resolveHistory!: (rows: DownloadHistoryRow[]) => void
+  let rejectHistory!: (error: Error) => void
+
+  mocks.getAllDownloads.mockResolvedValue(active)
+  mocks.getHistory.mockReturnValue(
+    new Promise<DownloadHistoryRow[]>((resolve, reject) => {
+      resolveHistory = resolve
+      rejectHistory = reject
+    })
+  )
+
+  const view = render(<DownloadEvents />)
+
+  return {
+    view,
+    landed: (history: DownloadHistoryRow[] = []) =>
+      act(async () => resolveHistory(history)),
+    refused: () => act(async () => rejectHistory(new Error("no list for you")))
+  }
+}
+
+const live = (overrides: Partial<DownloadStatus> = {}): DownloadStatus => ({
+  downloadId: "d1",
+  status: "downloading",
+  progress: 40,
+  type: "combined",
+  platform: "youtube",
+  title: "My Holiday Video",
+  label: "1080p mp4",
+  request: { url: "https://youtu.be/abc", height: 1080, container: "mp4" },
+  ...overrides
+})
+
 beforeEach(() => {
   mocks.listeners.length = 0
   mocks.listenersAtRead = -1
@@ -137,6 +182,128 @@ describe("mounting", () => {
     store().add(row())
     await emit({ status: "downloading", progress: 70 })
     expect(store().rows[0].progress).toBe(70)
+  })
+})
+
+/**
+ * the window between subscribing and the list arriving
+ *
+ * subscribing first is only half of it. after a reload the store knows nothing,
+ * so every download in flight is an id `applyEvent` would drop - and hydration
+ * then writes main's snapshot, which that dropped event has already made out of
+ * date. a download that failed in the window would sit at "downloading" for the
+ * rest of the session, counted as active, its failure never reported.
+ */
+describe("events that arrive while the list is still loading", () => {
+  test("a download that fails in the window keeps its failure, reported once", async () => {
+    const { view, landed } = mountMidRead([live()])
+
+    try {
+      await emit({ status: "failed", progress: 0, error: "Disk full" })
+
+      // nothing to apply it to yet, and nothing to say about it yet
+      expect(store().rows).toEqual([])
+      expect(mocks.showDownloadErrorToast).not.toHaveBeenCalled()
+
+      await landed([
+        {
+          download_id: "d1",
+          status: "failed",
+          kind: "video",
+          error: "Disk full"
+        }
+      ])
+
+      // ...and main's "downloading" snapshot does not win over it
+      expect(store().rows[0]).toMatchObject({
+        status: "failed",
+        error: "Disk full"
+      })
+      expect(mocks.showDownloadErrorToast).toHaveBeenCalledTimes(1)
+      expect(mocks.stage).toHaveBeenCalledTimes(1)
+    } finally {
+      view.unmount()
+    }
+  })
+
+  test("hydration does not undo a completion that already landed", async () => {
+    store().add(row({ status: "starting" }))
+    const { view, landed } = mountMidRead([live()])
+
+    try {
+      await emit({ status: "completed", filename: "clip.mp4" })
+
+      // the row was already there, so this was applied and announced on arrival
+      expect(store().rows[0].status).toBe("completed")
+      expect(mocks.successToast).toHaveBeenCalledTimes(1)
+
+      await landed()
+
+      expect(store().rows[0]).toMatchObject({
+        status: "completed",
+        filename: "clip.mp4"
+      })
+      // the replay must not announce it a second time
+      expect(mocks.successToast).toHaveBeenCalledTimes(1)
+    } finally {
+      view.unmount()
+    }
+  })
+
+  test("the window's events are replayed in the order they arrived", async () => {
+    const { view, landed } = mountMidRead([live({ progress: 5 })])
+
+    try {
+      await emit({ status: "downloading", progress: 60, speed: "2.1MiB/s" })
+      await emit({ status: "completed", progress: 100, filename: "clip.mp4" })
+      await landed()
+
+      expect(store().rows[0]).toMatchObject({
+        status: "completed",
+        progress: 100,
+        filename: "clip.mp4"
+      })
+      expect(mocks.successToast).toHaveBeenCalledTimes(1)
+    } finally {
+      view.unmount()
+    }
+  })
+
+  test("an id neither the list nor the store knows is still dropped", async () => {
+    const { view, landed } = mountMidRead([live()])
+
+    try {
+      await emit({ downloadId: "from-a-previous-life", status: "completed" })
+      await landed()
+
+      expect(store().rows.map((r) => r.downloadId)).toEqual(["d1"])
+      expect(mocks.successToast).not.toHaveBeenCalled()
+    } finally {
+      view.unmount()
+    }
+  })
+
+  /**
+   * the window closes on a read that never answers too, and closing it replays
+   * what it held - so an event already announced on arrival must not be
+   * announced again by the replay
+   */
+  test("a read that failed closes the window without repeating itself", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {})
+    store().add(row({ status: "downloading" }))
+    const { view, refused } = mountMidRead([live()])
+
+    try {
+      await emit({ status: "completed", filename: "clip.mp4" })
+      expect(mocks.successToast).toHaveBeenCalledTimes(1)
+
+      await refused()
+
+      expect(store().rows[0].status).toBe("completed")
+      expect(mocks.successToast).toHaveBeenCalledTimes(1)
+    } finally {
+      view.unmount()
+    }
   })
 })
 

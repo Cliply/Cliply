@@ -857,6 +857,88 @@ describe("cancel inside the start window", () => {
   })
 })
 
+/**
+ * the row the panel draws is added before main is asked, so the hook owns one
+ * case the global listener cannot cover: a start main refuses never reserved the
+ * id, so no event will ever arrive to settle that row.
+ */
+describe("the panel's row when nothing started", () => {
+  const panelRow = () => useDownloadsStore.getState().rows[0]
+
+  test("a refused start settles the row rather than leaving it starting", async () => {
+    const ack = deferredAck()
+
+    const { result } = renderHook(() => usePlaylistDownload(), { wrapper })
+    const { settled } = await startDownload(result)
+    expect(panelRow().status).toBe("starting")
+
+    await act(async () => {
+      ack.reject(new DownloadError("the download folder is read-only"))
+    })
+    await flush()
+    expect((await settled).ok).toBe(false)
+
+    // a row left starting is counted as active forever, survives "clear
+    // finished", and offers a Stop main has nothing to match
+    expect(panelRow()).toMatchObject({
+      status: "failed",
+      error: "the download folder is read-only"
+    })
+    // ...and the hook's own onError is still the only thing that said so
+    expect(showDownloadErrorToast).toHaveBeenCalledTimes(1)
+  })
+
+  test("a refusal that lands after a reset still settles its own row", async () => {
+    const ack = deferredAck()
+
+    const { result } = renderHook(() => usePlaylistDownload(), { wrapper })
+    const { settled } = await startDownload(result)
+
+    // the user pasted another playlist; this view has let go of the run
+    await act(async () => {
+      result.current.reset()
+    })
+
+    await act(async () => {
+      ack.reject(new Error("the download folder is read-only"))
+    })
+    await flush()
+    expect((await settled).ok).toBe(false)
+
+    expect(panelRow().status).toBe("failed")
+    // the view moved on, so nothing was said to the user about it
+    expect(showDownloadErrorToast).not.toHaveBeenCalled()
+  })
+
+  /**
+   * the hook rejects its own promise when a view is swapped out, purely to
+   * unblock whoever was awaiting it. the download is still running, and calling
+   * its row failed would be a lie the panel then shows a Retry for
+   */
+  test("an abandoned view is not a download that failed", async () => {
+    const ack = deferredAck()
+
+    const { result, unmount } = renderHook(() => usePlaylistDownload(), {
+      wrapper
+    })
+    const { settled } = await startDownload(result)
+
+    await act(async () => {
+      ack.resolve({ downloadId: "ignored", itemsTotal: 2 })
+    })
+    unmount()
+
+    expect(await settled).toMatchObject({
+      ok: false,
+      value: { outcome: "abandoned" }
+    })
+    await flush()
+
+    expect(panelRow().status).toBe("starting")
+    expect(panelRow().error).toBeUndefined()
+  })
+})
+
 describe("unmount, reset and cancellation", () => {
   test("unmount settles the mutation and does not cancel the engine", async () => {
     const { result, unmount } = renderHook(() => usePlaylistDownload(), {

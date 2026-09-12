@@ -430,11 +430,22 @@ export const usePlaylistDownload = () => {
             })
       })
 
+      /**
+       * whether main took this run at all, as opposed to refusing to start it.
+       *
+       * a local rather than `ackedRef`, because the question is about this run
+       * and this catch: everything below rejects for reasons the run's own
+       * terminal event has already accounted for, and only a refused start
+       * leaves a row nothing will ever come back for.
+       */
+      let accepted = false
+
       try {
         // resolves once the process is running; the run itself is followed
         // through the progress events above
         await playlistApi.download({ ...request, download_id: downloadId })
 
+        accepted = true
         // the id is reserved from here on, so a cancel now has something to
         // find. main reserves it only after preparing the download directory,
         // which is the window the retry below exists for
@@ -451,6 +462,22 @@ export const usePlaylistDownload = () => {
 
         return await finished
       } catch (error) {
+        /**
+         * main refused the start, so it never reserved the id: no terminal
+         * event is coming, and the panel's row would sit at `starting` for the
+         * rest of the session - counted as active, surviving "clear finished",
+         * and offering a Stop main cannot find.
+         *
+         * settled by the id this run captured rather than by whatever the view
+         * is following, so a refusal landing after a reset or an unmount still
+         * lands on its own row. nothing is said about it here: the hook's
+         * `onError` already toasts and stages this failure, and the store never
+         * toasts at all.
+         */
+        if (!accepted) {
+          failPlaylistRow(downloadId, error)
+        }
+
         // a start failure means no terminal event is ever coming
         if (isCurrentRun()) {
           outcomeSettledRef.current = true
@@ -621,6 +648,23 @@ export const usePlaylistDownload = () => {
     isFailed: downloadState.status === "failed",
     isCancelled: downloadState.status === "cancelled"
   }
+}
+
+/**
+ * settle the panel's row for a run main would not start
+ *
+ * written through the store's own event path, so the row ends up saying exactly
+ * what a row settled by a real `failed` event says. it is not an event and
+ * nothing is subscribed to it, so no toast follows.
+ */
+function failPlaylistRow(downloadId: string, error: unknown): void {
+  downloadsActions.applyEvent({
+    downloadId,
+    status: "failed",
+    progress: 0,
+    error: error instanceof Error ? error.message : "Playlist download failed",
+    category: error instanceof DownloadError ? error.category : undefined
+  })
 }
 
 /**
