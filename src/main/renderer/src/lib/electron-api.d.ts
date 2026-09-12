@@ -3,7 +3,6 @@
 import type { ReportEnvironment } from "@/lib/report"
 
 import type {
-  ActiveSnapshot,
   ApiError,
   AudioDownloadRequest,
   CookieImportResult,
@@ -11,8 +10,8 @@ import type {
   CookieTestResult,
   DownloadPathInfo,
   DownloadProgress,
+  DownloadListSnapshot,
   DownloadStatus,
-  HistorySnapshot,
   PinterestDownloadRequest,
   PinterestVideoInfoResponse,
   PlaylistDownloadRequest,
@@ -99,19 +98,20 @@ declare global {
           downloadId: string
         ) => Promise<IPCResponse<{ cancelled: boolean }>>
         getStatus: (downloadId: string) => Promise<IPCResponse<DownloadStatus>>
-        getAll: () => Promise<IPCResponse<ActiveSnapshot>>
         /**
-         * the rows this install remembers, read once at startup.
-         *
-         * all three answer with the history as it stands afterwards, so the
-         * panel never has to guess which of its rows survived a clear.
+         * the whole list, read once at startup and for a re-sync. all three
+         * answer with the list as it stands afterwards, and main pushes the
+         * same shape on `onList` whenever it changes.
          */
-        getHistory: () => Promise<IPCResponse<HistorySnapshot>>
-        clearHistory: () => Promise<IPCResponse<HistorySnapshot>>
+        getList: () => Promise<IPCResponse<DownloadListSnapshot>>
+        clearHistory: () => Promise<IPCResponse<DownloadListSnapshot>>
         removeHistory: (
           downloadId: string
-        ) => Promise<IPCResponse<HistorySnapshot>>
+        ) => Promise<IPCResponse<DownloadListSnapshot>>
         onProgress: (callback: (data: DownloadProgress) => void) => () => void
+        onList: (
+          callback: (snapshot: DownloadListSnapshot) => void
+        ) => () => void
       }
       // optional: an older preload has no support bridge, and the dialog has
       // to be able to mount against one

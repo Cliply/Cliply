@@ -201,25 +201,23 @@ export type DownloadRequest =
   }
 
 /**
- * an answer about the history, and which side of the user's clears it was read
- * on
+ * the whole download list, as main built it
  *
- * `epoch` is main's counter (`historyEpoch` in `ipc-handlers.js`): it moves
- * every time a row leaves the history, and it rides out on both snapshot reads
- * and on the two replies that do the removing. The renderer cannot decide for
- * itself whether a snapshot predates a clear - it has tried a counter of its
- * own, a set of the ids it was holding and a comparison of clocks, and each
- * missed an ordering - so main says it.
+ * one shape for the push on `downloads:list`, for the reply to
+ * `download:get-list`, and for what a clear or a removal answers with. Main
+ * builds it from its own memory after every change to the list, so the renderer
+ * replaces what it has rather than merging: there is no interleaving to reason
+ * about, which is what four rounds of review taught about merging pulled
+ * snapshots against live events.
+ *
+ * `seq` counts snapshots and only goes up, so a push that overtakes a reply
+ * costs nothing. `rows` are history rows - the reservations main still holds are
+ * written in the same spelling - newest first.
  */
-export interface HistorySnapshot {
-  epoch: number
+export interface DownloadListSnapshot {
+  seq: number
+  lifetimeCompleted: number
   rows: DownloadHistoryRow[]
-}
-
-/** the same, for the downloads main still has in flight */
-export interface ActiveSnapshot {
-  epoch: number
-  rows: DownloadStatus[]
 }
 
 /**

@@ -5,12 +5,11 @@ import { create } from "zustand"
 import {
   downloadApi,
   type DownloadHistoryRow,
-  type HistorySnapshot,
+  type DownloadListSnapshot,
   type DownloadKind,
   type DownloadProgress,
   type DownloadRequest,
   type DownloadRowStatus,
-  type DownloadStatus,
   type TimeRange
 } from "@/lib/api"
 import type { Platform } from "@/lib/stores/store"
@@ -58,17 +57,15 @@ export interface DownloadRow {
   startedAt: number
   finishedAt?: number
   /**
-   * which of main's snapshots this row came out of
+   * a row this window drew that main has not listed yet
    *
-   * `historyEpoch` in `ipc-handlers.js`: the number main moves every time a row
-   * leaves the history. A row built from an event or by a hook has none, which
-   * reads as `Infinity` - it is newer than any snapshot, and no reply about a
-   * clear can be describing it.
-   *
-   * it is what lets a reply say which rows it covered without the panel having
-   * to guess from its own clock or from the ids it happened to be holding.
+   * the hooks draw a row from the click rather than from the acknowledgement,
+   * so for a moment there is a row main has never heard of. It is kept through
+   * the pushes until one names the id, and a start main refused stays as the
+   * failed row that refusal made: no list of main's will ever name a download
+   * it did not accept.
    */
-  epoch?: number
+  local?: boolean
   /**
    * what a retry re-sends, typed per kind.
    *
@@ -166,36 +163,35 @@ interface DownloadsState {
    */
   admittedIds: string[]
   /**
-   * the newest epoch a clear or a removal has answered with
+   * the last list main sent, by main's own count of them
    *
-   * main moves `historyEpoch` whenever a row leaves the history and stamps it on
-   * every answer about it, so a snapshot below this number was read before a
-   * clear the user has since made: its rows describe a history that no longer
-   * exists. Everything else in such a reply is still true, so it still lands -
-   * the lifetime count, and at startup the flag - and only its rows are left
-   * out, with a fresh read taking their place.
-   *
-   * this is the fourth attempt at the question and the first that does not
-   * guess: a version counter of this window's own, a set of the ids it happened
-   * to be holding, and a comparison of two clocks each missed an ordering,
-   * because only main knows whether a snapshot was taken before its clear or
-   * after it.
+   * it pushes the whole list after every change to it and answers a read with
+   * the same thing, each stamped with a number that only goes up. Anything at or
+   * below this has been seen already, so a push that overtakes the reply to a
+   * read - or a reply that lands after the push it provoked - changes nothing.
    */
-  clearedEpoch: number
+  lastSeq: number
+  /**
+   * what the events know and a snapshot cannot
+   *
+   * main pushes the list when it changes - a reservation, a slot, a settle, a
+   * clear, a removal - and never four times a second for a percentage. The bar,
+   * the speed, the eta and the item counts arrive on `download:progress`
+   * instead and are kept here, by id, so replacing the rows with a newer
+   * snapshot does not send every bar back to where the download was accepted.
+   *
+   * a terminal event writes its outcome here too, so a row settles the moment
+   * its download ends rather than when the push confirms it. An entry goes when
+   * a snapshot lists that row as finished or stops listing it at all; an id no
+   * snapshot has named yet keeps its overlay against the push that will,
+   * bounded so a window that hears about downloads it has no rows for cannot
+   * grow without end.
+   */
+  overlay: Record<string, DownloadOverlay>
 
   add: (row: DownloadRow) => void
   applyEvent: (event: DownloadProgress) => void
-  hydrate: (
-    active: DownloadStatus[],
-    history: DownloadHistoryRow[],
-    lifetimeCompleted?: number,
-    epoch?: number
-  ) => void
-  adopt: (
-    active: DownloadStatus[],
-    history: DownloadHistoryRow[],
-    epoch?: number
-  ) => void
+  applySnapshot: (snapshot: DownloadListSnapshot) => void
   remove: (downloadId: string) => void
   clearFinished: () => void
   setHighlighted: (downloadId: string | null) => void
@@ -217,40 +213,40 @@ export const useDownloadsStore = create<DownloadsState>((set, get) => ({
   highlightedId: null,
   cancelIntents: [],
   admittedIds: [],
-  clearedEpoch: 0,
+  lastSeq: 0,
+  overlay: {},
 
   // newest first, which is the order the panel lists them in and the order the
   // history keeps them in
   add: (row) =>
     set((state) => ({
       rows: [
-        row,
+        { ...row, local: true },
         ...state.rows.filter((known) => known.downloadId !== row.downloadId)
       ]
     })),
 
   /**
-   * fold one progress event into the row it names
+   * fold one progress event into what this window knows
    *
-   * an event for an id we do not have creates nothing. it is a download from
-   * before a reload, or one started by a window that is gone, and hydration is
-   * what restores those - inventing a row here would give it no title, no
-   * label and no request, which is a row that can be neither read nor retried.
+   * the event is the fast half of the truth: main pushes the list when it
+   * changes, and a bar moves far more often than that. So an event writes the
+   * overlay for its id and the row it names takes what the overlay holds - and
+   * the next push, which knows nothing about percentages, can replace the rows
+   * without a single bar starting again.
    *
-   * the lifetime number it carries is taken even then: a download this window
-   * never had a row for is still a download this install finished, and the
-   * count read at hydration may have been taken before it landed.
+   * an event for an id this window has no row for is kept too: a window that
+   * reloaded mid-download hears the progress before main's push arrives, and
+   * the row it belongs to is the one that push brings.
    *
-   * **a row that has finished is finished.** events are replayed - over the
-   * hydration snapshot, and over a row a re-read of main's list has just
-   * brought in - and the row they are replayed onto is sometimes newer than
-   * they are. A `downloading` applied to a completed row puts a Stop back on a
-   * file that is already on disk and a bar back on a download nobody is
-   * waiting for, and a second completion is not a second download. So a
-   * terminal row takes nothing from an event but the count.
+   * **a row that has finished is finished.** the outcome is written the moment
+   * it arrives, so the toast and the inline bar do not wait for the push that
+   * confirms it, and nothing later walks it back: a `downloading` after a
+   * completion is an event its own download has overtaken.
    */
   applyEvent: (event) =>
     set((state) => {
+      const overlay = mergeOverlay(state.overlay, event)
       const lifetimeCompleted = adoptCount(
         state.lifetimeCompleted,
         event.lifetimeCompleted
@@ -260,121 +256,60 @@ export const useDownloadsStore = create<DownloadsState>((set, get) => ({
         (row) => row.downloadId === event.downloadId
       )
 
-      const settled = index >= 0 && isTerminalStatus(state.rows[index].status)
-
-      if (index === -1 || settled) {
-        return lifetimeCompleted === state.lifetimeCompleted
-          ? state
-          : { lifetimeCompleted }
-      }
+      if (index === -1) return { overlay, lifetimeCompleted }
 
       const rows = [...state.rows]
-      rows[index] = mergeEvent(rows[index], event)
+      rows[index] = withOverlay(rows[index], overlay[event.downloadId])
 
-      /**
-       * ...and the lifetime number is whatever main says it is.
-       *
-       * main counts the completion before it sends the event and stamps the
-       * new total onto it (`sendDownloadEvent` in ipc-handlers.js), so nothing
-       * here has to work out whether this download has been counted already.
-       * Counting on this side was the bug: hydration replaces a row's status
-       * with a snapshot older than the completion and `DownloadEvents` replays
-       * the event over it, so any tally derived from the rows ends the session
-       * one too high or one too low.
-       *
-       * the larger of the two, because main's number only goes up: a replay of
-       * an older event cannot walk the panel's total backwards.
-       */
-      return { rows, lifetimeCompleted }
+      return { rows, overlay, lifetimeCompleted }
     }),
 
   /**
-   * build the list from what main knows, once, at startup
+   * take main's list, whole
    *
-   * main's answer wins for every id it mentions: it knows whether a download is
-   * queued, running or long finished, and the only rows the renderer can have
-   * by now are ones a hook added in the window between subscribing and this
-   * landing. those are kept, because main has not heard of them yet.
+   * this is the whole of the reconciliation. Main builds the list from its own
+   * memory after every change to it and pushes it, so these rows replace what is
+   * here rather than merging into it: there is no interleaving left to reason
+   * about, and no question about which of two views of a download is the newer
+   * one. Four rounds of review found one more ordering each time this was a
+   * merge.
    *
-   * a reply read before a clear the user has since made brings no rows at all,
-   * active or history: they describe a history that is gone. What it does bring
-   * is the count and this flag, which no clear touches and which the panel
-   * cannot do without - and `DownloadEvents` asks again straight away.
+   * what this side adds back is what main's list does not carry: the progress
+   * the events have supplied, and the rows this window drew for a click main has
+   * not answered for yet.
+   *
+   * an older snapshot is ignored outright, because a push can overtake the reply
+   * to a read and both carry main's own count.
    */
-  hydrate: (active, history, lifetimeCompleted, epoch) =>
+  applySnapshot: (snapshot) =>
     set((state) => {
-      const stale = staleEpoch(state, epoch)
-      const rows = stale
-        ? []
-        : active.map((status) => rowFromStatus(status, epoch))
-      const seen = new Set(rows.map((row) => row.downloadId))
+      if (snapshot.seq <= state.lastSeq) return state
 
-      for (const entry of stale ? [] : history) {
-        if (seen.has(entry.download_id)) continue
-        seen.add(entry.download_id)
-        rows.push(rowFromHistory(entry, epoch))
-      }
+      const listed = new Set(snapshot.rows.map((entry) => entry.download_id))
+      const overlay = pruneOverlay(state.overlay, snapshot)
 
+      const rows = snapshot.rows.map((entry) =>
+        withOverlay(rowFromHistory(entry), overlay[entry.download_id])
+      )
+
+      // the rows this window drew for a click main has not listed yet, and the
+      // ones whose start it refused: a download main never accepted is one no
+      // list of main's will ever name
       for (const row of state.rows) {
-        if (!seen.has(row.downloadId)) rows.push(row)
+        if (row.local && !listed.has(row.downloadId)) rows.push(row)
       }
 
       return {
-        rows: rows.sort((a, b) => b.startedAt - a.startedAt),
+        ...withHighlight(
+          state,
+          rows.sort((a, b) => b.startedAt - a.startedAt)
+        ),
+        overlay,
+        lastSeq: snapshot.seq,
         hydrated: true,
-        /**
-         * the larger of the two, for the same reason as above
-         *
-         * main answers this read from the same counter its events carry, so the
-         * two can only disagree by a download that finished between them - and
-         * whichever of the two saw it is the one to keep.
-         */
         lifetimeCompleted: adoptCount(
           state.lifetimeCompleted,
-          lifetimeCompleted
-        )
-      }
-    }),
-
-  /**
-   * take the rows main knows that this list does not, and nothing else
-   *
-   * the answer to a download admitted after hydration: main reserved it while
-   * this window was reading, or after it, so the only way its row can appear is
-   * to ask again. Add-only, which is the whole difference from `hydrate`:
-   * main's snapshot wins at startup because the store has nothing better, and
-   * loses here because every row it already holds has been kept current by the
-   * events since.
-   *
-   * a reply read before a clear the user has since made adds nothing: every row
-   * in it, running or finished, describes a history that is gone. The ids that
-   * were waiting on it stay waiting, and the next read - issued under the newer
-   * epoch - is the one that answers for them.
-   */
-  adopt: (active, history, epoch) =>
-    set((state) => {
-      if (staleEpoch(state, epoch)) return state
-
-      const seen = new Set(state.rows.map((row) => row.downloadId))
-      const added: DownloadRow[] = []
-
-      for (const status of active) {
-        if (seen.has(status.downloadId)) continue
-        seen.add(status.downloadId)
-        added.push(rowFromStatus(status, epoch))
-      }
-
-      for (const entry of history) {
-        if (seen.has(entry.download_id)) continue
-        seen.add(entry.download_id)
-        added.push(rowFromHistory(entry, epoch))
-      }
-
-      if (added.length === 0) return state
-
-      return {
-        rows: [...state.rows, ...added].sort(
-          (a, b) => b.startedAt - a.startedAt
+          snapshot.lifetimeCompleted
         )
       }
     }),
@@ -395,11 +330,12 @@ export const useDownloadsStore = create<DownloadsState>((set, get) => ({
       )
     )
 
-    // ...and main's answer says which snapshots this removal covers, exactly as
-    // a clear's does: a read still in flight would otherwise bring the row back
+    // main answers with the list as it stands afterwards and pushes the same
+    // thing to every window: the reply is applied like any other snapshot, so
+    // nothing here has to work out what it covered
     downloadApi
       .removeHistory(downloadId)
-      .then((left) => set((state) => settleRemoval(state, left)))
+      .then((snapshot) => get().applySnapshot(snapshot))
       .catch((error: unknown) => {
         console.error("Failed to forget that download:", error)
       })
@@ -408,37 +344,22 @@ export const useDownloadsStore = create<DownloadsState>((set, get) => ({
   /**
    * "clear history": the rows with nothing left to happen to them go
    *
-   * the list empties on the click rather than when main answers - the user
-   * asked for it and there is nothing to wait for - and then main's answer is
-   * read, because the two do not always agree about which rows those were. A
-   * download that finishes between the click and main handling the clear is
-   * terminal by the time main gets there and live by the time this ran: main
-   * drops it, this keeps it, and the row sits in the panel until the next
-   * launch loses it. So a row that was here when the clear was sent, is not
-   * live now, and is not in main's answer goes too.
-   *
-   * a row that arrived after the clear was sent is kept whatever the answer
-   * says: main had not heard of it when it built that list.
-   *
-   * main's answer says which snapshots this covers: it carries the epoch the
-   * clear happened at, and every row still in flight from before it describes a
-   * history that no longer exists. That is the whole of the reconciliation now -
-   * no clock, no set of ids this window happened to be holding.
+   * the list empties on the click rather than when main answers - the user asked
+   * for it and there is nothing to wait for - and main's answer is the list as
+   * it stands afterwards, applied like any other snapshot. A download that
+   * finished between the click and main handling it is terminal on main's side
+   * and absent from that answer, which is how the panel stops showing it.
    *
    * `lifetimeCompleted` is deliberately untouched. the number counts downloads
    * this install finished, not rows it still keeps, so emptying the list is not
    * a reason for it to move.
    */
   clearFinished: () => {
-    // the ids this side was holding when the clear went out. anything else is
-    // younger than the request and cannot be something main meant to remove
-    const sent = new Set(get().rows.map((row) => row.downloadId))
-
     set((state) => withHighlight(state, state.rows.filter(isLiveRow)))
 
     downloadApi
       .clearHistory()
-      .then((left) => set((state) => settleRemoval(state, left, sent)))
+      .then((snapshot) => get().applySnapshot(snapshot))
       .catch((error: unknown) => {
         // the rows are already gone from the panel and main either cleared its
         // file or did not. nothing here can put that right, and asking again
@@ -528,9 +449,10 @@ export const useDownloadsStore = create<DownloadsState>((set, get) => ({
   reset: () =>
     set(() => ({
       rows: [],
-      // the clears go with the list they belong to: nothing that comes back
-      // after this belongs to the session that counted them
-      clearedEpoch: 0,
+      // the list and what this window knew about it go together: nothing that
+      // arrives after this belongs to the session that asked for it
+      lastSeq: 0,
+      overlay: {},
       hydrated: false,
       lifetimeCompleted: 0,
       panelOpen: false,
@@ -545,23 +467,8 @@ export const downloadsActions = {
   add: (row: DownloadRow) => useDownloadsStore.getState().add(row),
   applyEvent: (event: DownloadProgress) =>
     useDownloadsStore.getState().applyEvent(event),
-  hydrate: (
-    active: DownloadStatus[],
-    history: DownloadHistoryRow[],
-    lifetimeCompleted?: number,
-    epoch?: number
-  ) =>
-    useDownloadsStore
-      .getState()
-      .hydrate(active, history, lifetimeCompleted, epoch),
-  adopt: (
-    active: DownloadStatus[],
-    history: DownloadHistoryRow[],
-    epoch?: number
-  ) => useDownloadsStore.getState().adopt(active, history, epoch),
-  /** whether a reply read at this epoch describes a history that is gone */
-  staleSnapshot: (epoch: number) =>
-    epoch < useDownloadsStore.getState().clearedEpoch,
+  applySnapshot: (snapshot: DownloadListSnapshot) =>
+    useDownloadsStore.getState().applySnapshot(snapshot),
   findLive: (candidate: DownloadIdentity) =>
     useDownloadsStore.getState().findLive(candidate),
   setHighlighted: (downloadId: string | null) =>
@@ -608,49 +515,141 @@ export const useActiveCount = (): number =>
   )
 
 /**
- * whether this reply was read before a clear the user has since made
+ * what one download's events have said that main's row does not carry
  *
- * a reply with no epoch at all is one from a build that does not stamp them, or
- * a caller that is not reading main (the tests): there is nothing to judge it
- * against, so it is current.
+ * main's list knows what a download is and how it ended; the events know where
+ * it has got to. This is the second, kept per id so a snapshot can replace the
+ * rows without the bars starting again.
  */
-const staleEpoch = (state: DownloadsState, epoch?: number): boolean =>
-  typeof epoch === "number" && epoch < state.clearedEpoch
-
-/** which snapshot a row came from, or `Infinity` for one no snapshot made */
-const epochOf = (row: DownloadRow): number =>
-  typeof row.epoch === "number" ? row.epoch : Number.POSITIVE_INFINITY
+export interface DownloadOverlay {
+  status?: DownloadRowStatus
+  progress?: number
+  speed?: string
+  eta?: string
+  indeterminate?: boolean
+  itemsCompleted?: number
+  itemsTotal?: number
+  itemsSaved?: number
+  itemsReused?: number
+  itemsSkipped?: number
+  filename?: string
+  filePath?: string
+  fileSize?: number
+  error?: string
+  category?: string
+}
 
 /**
- * what is left after a clear or a removal, given main's answer
+ * how many ids with no row of their own may keep an overlay
  *
- * the rows main still has are the rows that stay, and everything else that was
- * built from a snapshot older than this answer goes: those rows are what the
- * user removed, whether or not this window ever saw them.
- *
- * `sent` is the ids this window was holding when a clear went out. A row from
- * that set which has finished since is one main removed while the renderer
- * still thought it was running, and it goes too. Anything younger than the
- * request - a hook's row, a download admitted since - is kept whatever the
- * answer says: main had not heard of it when it built that list.
+ * events arrive for downloads this window has no row for - it reloaded
+ * mid-run, another window started them - and the push that names them is
+ * usually a moment away. A cap, because "usually" is not "always".
  */
-function settleRemoval(
-  state: DownloadsState,
-  left: HistorySnapshot,
-  sent?: Set<string>
-): Partial<DownloadsState> {
-  const kept = new Set(left.rows.map((entry) => entry.download_id))
+const OVERLAY_LIMIT = 200
 
-  const rows = state.rows.filter(
-    (row) =>
-      isLiveRow(row) ||
-      kept.has(row.downloadId) ||
-      (epochOf(row) >= left.epoch && !sent?.has(row.downloadId))
+/** what this event leaves behind, over whatever the id had already said */
+function mergeOverlay(
+  overlay: Record<string, DownloadOverlay>,
+  event: DownloadProgress
+): Record<string, DownloadOverlay> {
+  const held = overlay[event.downloadId]
+
+  // a download that has ended has ended: an event its own completion overtook
+  // cannot put the bar back
+  if (held?.status && isTerminalStatus(held.status)) return overlay
+
+  const next: DownloadOverlay = {
+    ...held,
+    status: event.status,
+    progress: event.progress || held?.progress,
+    speed: event.speed,
+    eta: event.eta,
+    indeterminate: event.indeterminate,
+    itemsCompleted: event.items_completed ?? held?.itemsCompleted,
+    itemsTotal: event.items_total ?? held?.itemsTotal,
+    itemsSaved: event.items_saved ?? held?.itemsSaved,
+    itemsReused: event.items_reused ?? held?.itemsReused,
+    itemsSkipped: event.items_skipped ?? held?.itemsSkipped,
+    filename: event.filename ?? held?.filename,
+    filePath: event.file_path ?? held?.filePath,
+    fileSize: event.file_size ?? held?.fileSize,
+    error: event.error,
+    category: event.category
+  }
+
+  const known = Object.keys(overlay)
+
+  // the oldest entry goes when the cap is reached. it is only ever reached by
+  // ids this window has no rows for, because an entry with a row on screen is
+  // dropped by the next snapshot that settles it
+  if (!held && known.length >= OVERLAY_LIMIT) {
+    const { [known[0]]: expired, ...rest } = overlay
+    void expired
+
+    return { ...rest, [event.downloadId]: next }
+  }
+
+  return { ...overlay, [event.downloadId]: next }
+}
+
+/**
+ * the overlays worth keeping once main has spoken
+ *
+ * a row main lists as finished needs none: the snapshot carries the outcome and
+ * the entry would only repeat it. What is kept is what is still running, and
+ * what main has not mentioned yet.
+ */
+function pruneOverlay(
+  overlay: Record<string, DownloadOverlay>,
+  snapshot: DownloadListSnapshot
+): Record<string, DownloadOverlay> {
+  const settled = new Set(
+    snapshot.rows
+      .filter((entry) => isTerminalStatus(entry.status))
+      .map((entry) => entry.download_id)
   )
 
+  return Object.fromEntries(
+    Object.entries(overlay).filter(([downloadId]) => !settled.has(downloadId))
+  )
+}
+
+/**
+ * one of main's rows, with what the events have added to it since
+ *
+ * main's word on a finished download wins over an overlay that was still
+ * watching it run; an overlay that has seen a download end wins over a row main
+ * wrote before it did.
+ */
+function withOverlay(row: DownloadRow, held?: DownloadOverlay): DownloadRow {
+  if (!held) return row
+
+  const settled = isTerminalStatus(row.status)
+  const status = settled ? row.status : (held.status ?? row.status)
+  const ended = isTerminalStatus(status)
+
   return {
-    ...withHighlight(state, rows),
-    clearedEpoch: Math.max(state.clearedEpoch, left.epoch)
+    ...row,
+    status,
+    progress: settled
+      ? row.progress
+      : status === "completed"
+        ? 100
+        : (held.progress ?? row.progress),
+    speed: ended ? undefined : held.speed,
+    eta: ended ? undefined : held.eta,
+    indeterminate: ended ? undefined : held.indeterminate,
+    itemsCompleted: held.itemsCompleted ?? row.itemsCompleted,
+    itemsTotal: row.itemsTotal ?? held.itemsTotal,
+    itemsSaved: row.itemsSaved ?? held.itemsSaved,
+    itemsReused: row.itemsReused ?? held.itemsReused,
+    itemsSkipped: row.itemsSkipped ?? held.itemsSkipped,
+    filename: row.filename ?? held.filename,
+    filePath: row.filePath ?? held.filePath,
+    fileSize: row.fileSize ?? held.fileSize,
+    error: row.error ?? held.error,
+    category: row.category ?? held.category
   }
 }
 
@@ -683,75 +682,9 @@ function withHighlight(
 const adoptCount = (held: number, arrived?: number): number =>
   typeof arrived === "number" ? Math.max(held, arrived) : held
 
-/**
- * merge one event into a row
- *
- * `progress` keeps what it had when the event reports none: a failure and a
- * cancel both report 0, and a download that got 60% of the way did not
- * un-download it. `error` and `category` are overwritten rather than merged,
- * because a repaired retry emits `downloading` again and the row should stop
- * carrying the failure that provoked the update.
- */
-function mergeEvent(row: DownloadRow, event: DownloadProgress): DownloadRow {
-  const terminal = isTerminalStatus(event.status)
-
-  return {
-    ...row,
-    status: event.status,
-    progress: event.progress || row.progress,
-    speed: event.speed,
-    eta: event.eta,
-    indeterminate: event.indeterminate,
-    itemsCompleted: event.items_completed ?? row.itemsCompleted,
-    itemsTotal: event.items_total ?? row.itemsTotal,
-    itemsSaved: event.items_saved ?? row.itemsSaved,
-    itemsReused: event.items_reused ?? row.itemsReused,
-    itemsSkipped: event.items_skipped ?? row.itemsSkipped,
-    filename: event.filename ?? row.filename,
-    filePath: event.file_path ?? row.filePath,
-    fileSize: event.file_size ?? row.fileSize,
-    error: event.error,
-    category: event.category,
-    finishedAt: terminal ? Date.now() : row.finishedAt
-  }
-}
-
-/**
- * a row from a download main still has in flight
- *
- * `type` says what is being fetched and is not the same question as which row
- * to draw: a playlist of audio fetches audio and is still a playlist. main
- * decides it the same way (see historyKind in services/download-runner.js).
- */
-function rowFromStatus(status: DownloadStatus, epoch?: number): DownloadRow {
-  const kind = kindOf(status)
-
-  return {
-    epoch,
-    downloadId: status.downloadId,
-    kind,
-    platform: platformOf(status.platform),
-    title: status.title || "",
-    label: status.label || "",
-    status: status.status,
-    progress: status.progress || 0,
-    filename: status.filename,
-    error: status.error,
-    startedAt: status.startTime || Date.now(),
-    request: status.request,
-    // a playlist that is still queued has run nothing and counted nothing, so
-    // the only total there is is the selection its request carries
-    ...(kind === "playlist" ? { itemsTotal: entryCount(status.request) } : null)
-  }
-}
-
 /** a row from a download that is over, or was when this install last ran */
-function rowFromHistory(
-  entry: DownloadHistoryRow,
-  epoch?: number
-): DownloadRow {
+function rowFromHistory(entry: DownloadHistoryRow): DownloadRow {
   return {
-    epoch,
     downloadId: entry.download_id,
     kind: entry.kind || "video",
     platform: platformOf(entry.platform),
@@ -779,16 +712,6 @@ function rowFromHistory(
     finishedAt: entry.finished_at,
     request: entry.request
   }
-}
-
-function kindOf(status: DownloadStatus): DownloadKind {
-  if (status.playlist) return "playlist"
-  if (status.type === "audio") return "audio"
-  if (status.platform === "tiktok" || status.platform === "pinterest") {
-    return "simple"
-  }
-
-  return "video"
 }
 
 const platformOf = (platform?: string): Platform =>

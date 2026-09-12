@@ -9,8 +9,8 @@ import { beforeEach, describe, expect, test, vi } from "vitest"
 
 import type {
   DownloadHistoryRow,
-  DownloadProgress,
-  DownloadStatus
+  DownloadListSnapshot,
+  DownloadProgress
 } from "@/lib/api"
 
 const mocks = vi.hoisted(() => ({
@@ -59,12 +59,30 @@ const event = (
 
 const store = () => useDownloadsStore.getState()
 
+/**
+ * one of main's pushes
+ *
+ * the list is main's to build and this side replaces what it has with it, so
+ * every test that used to hydrate or adopt now hands over one of these.
+ */
+let seq = 0
+const snapshot = ({
+  rows = [] as DownloadHistoryRow[],
+  lifetimeCompleted = 0,
+  at = 0
+} = {}): DownloadListSnapshot => ({
+  seq: at || (seq += 1),
+  lifetimeCompleted,
+  rows
+})
+
 /** let a reply from main, and the reconciliation behind it, land */
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0))
 const rowOf = (downloadId: string) =>
   store().rows.find((known) => known.downloadId === downloadId)
 
 beforeEach(() => {
+  seq = 0
   vi.clearAllMocks()
   mocks.clearHistory.mockResolvedValue([])
   mocks.removeHistory.mockResolvedValue([])
@@ -132,7 +150,6 @@ describe("applying events", () => {
       filename: "clip.mp4",
       fileSize: 12345
     })
-    expect(rowOf("d1")?.finishedAt).toEqual(expect.any(Number))
   })
 
   /**
@@ -182,32 +199,17 @@ describe("applying events", () => {
   })
 })
 
-describe("hydrating after a reload", () => {
-  const active: DownloadStatus[] = [
-    {
-      downloadId: "live",
-      status: "downloading",
-      progress: 30,
-      type: "combined",
-      title: "Still going",
-      platform: "youtube",
-      label: "1080p mp4",
-      startTime: 5000,
-      request: {
-        url: "https://youtu.be/live",
-        height: 1080,
-        container: "mp4"
-      }
-    }
-  ]
-
-  const history: DownloadHistoryRow[] = [
+describe("taking main's list", () => {
+  const rows: DownloadHistoryRow[] = [
     {
       download_id: "live",
       status: "downloading",
       kind: "video",
+      platform: "youtube",
       title: "Still going",
-      started_at: 5000
+      label: "1080p mp4",
+      started_at: 5000,
+      request: { url: "https://youtu.be/live", height: 1080, container: "mp4" }
     },
     {
       download_id: "done",
@@ -231,26 +233,16 @@ describe("hydrating after a reload", () => {
     }
   ]
 
-  test("a row in both lists appears once, as main has it now", () => {
-    useDownloadsStore.getState().hydrate(active, history)
-
-    expect(store().rows).toHaveLength(3)
-    expect(store().hydrated).toBe(true)
-    expect(rowOf("live")).toMatchObject({
-      status: "downloading",
-      progress: 30,
-      label: "1080p mp4"
-    })
-  })
-
-  test("rows come back newest first, with their platform and their file", () => {
-    store().hydrate(active, history)
+  test("the rows are main's, newest first, and the list is hydrated", () => {
+    store().applySnapshot(snapshot({ rows, lifetimeCompleted: 12 }))
 
     expect(store().rows.map((known) => known.downloadId)).toEqual([
       "live",
       "stopped",
       "done"
     ])
+    expect(store().hydrated).toBe(true)
+    expect(store().lifetimeCompleted).toBe(12)
     expect(rowOf("stopped")).toMatchObject({
       kind: "simple",
       platform: "tiktok",
@@ -267,75 +259,123 @@ describe("hydrating after a reload", () => {
   })
 
   /**
-   * the window between subscribing and the two reads landing is a window a
-   * click can fall into, and main has not heard of that download yet
+   * main pushes the list when it changes, not four times a second, so the bar
+   * lives on this side. A push must not send it back to where the download was
+   * accepted.
    */
-  test("a row added while the read was in flight survives it", () => {
+  test("what the events know is kept over the rows it replaces", () => {
+    store().applySnapshot(snapshot({ rows }))
+    store().applyEvent(
+      event({
+        downloadId: "live",
+        status: "downloading",
+        progress: 62,
+        speed: "4.2MiB/s",
+        eta: "00:31"
+      })
+    )
+
+    store().applySnapshot(snapshot({ rows }))
+
+    expect(rowOf("live")).toMatchObject({
+      progress: 62,
+      speed: "4.2MiB/s",
+      eta: "00:31"
+    })
+  })
+
+  test("and dropped once main lists that download as over", () => {
+    store().applySnapshot(snapshot({ rows }))
+    store().applyEvent(event({ downloadId: "live", progress: 62 }))
+
+    store().applySnapshot(
+      snapshot({
+        rows: rows.map((entry) =>
+          entry.download_id === "live"
+            ? { ...entry, status: "completed", finished_at: 6000 }
+            : entry
+        )
+      })
+    )
+
+    expect(rowOf("live")).toMatchObject({ status: "completed", progress: 100 })
+    expect(store().overlay.live).toBeUndefined()
+  })
+
+  /**
+   * the window between the click and main's first push is a window the user is
+   * looking at: the hooks draw the row, and it stays until main's list names
+   * it - or for ever, if main refused the start, because no list will.
+   */
+  test("a row this window drew survives a list that does not name it yet", () => {
     store().add(row({ downloadId: "just-clicked", startedAt: 9000 }))
-    store().hydrate(active, history)
+
+    store().applySnapshot(snapshot({ rows }))
 
     expect(rowOf("just-clicked")).toMatchObject({ status: "starting" })
     expect(store().rows[0].downloadId).toBe("just-clicked")
   })
 
-  test("a queued playlist counts the videos its request asked for", () => {
-    store().hydrate(
-      [
-        {
-          downloadId: "pl",
-          status: "queued",
-          progress: 0,
-          type: "combined",
-          playlist: true,
-          platform: "youtube",
-          title: "Short talks",
-          label: "3 videos",
-          request: {
-            url: "https://youtube.com/playlist?list=PL1",
-            playlist_id: "PL1",
-            entries: [
-              { index: 1, id: "a" },
-              { index: 2, id: "b" },
-              { index: 3, id: "c" }
-            ]
-          }
-        }
-      ],
-      []
-    )
+  test("...and gives way to main's row the moment one names it", () => {
+    store().add(row({ downloadId: "just-clicked", startedAt: 9000 }))
 
-    expect(rowOf("pl")).toMatchObject({ kind: "playlist", itemsTotal: 3 })
+    store().applySnapshot({
+      seq: 1,
+      lifetimeCompleted: 0,
+      rows: [
+        {
+          download_id: "just-clicked",
+          status: "queued",
+          kind: "video",
+          platform: "youtube",
+          title: "My Holiday Video",
+          label: "1080p mp4",
+          started_at: 9000
+        } as DownloadHistoryRow
+      ]
+    })
+
+    expect(store().rows).toHaveLength(1)
+    expect(rowOf("just-clicked")?.status).toBe("queued")
+    expect(rowOf("just-clicked")?.local).toBeUndefined()
   })
 
   /**
-   * main has written the total at reserve since the history was added, so this
-   * is a row from a file an older version wrote - and the selection it stored
-   * is the same number. it matters on the way out rather than on the way in: a
-   * Retry copies this row, and one with no total counts from nothing until the
-   * first event of the new run arrives.
+   * a push can overtake the reply to the one read a window makes, and both
+   * carry main's own count of them.
    */
+  test("an older list than the one already applied changes nothing", () => {
+    store().applySnapshot(snapshot({ rows, at: 4 }))
+
+    store().applySnapshot(snapshot({ rows: [], at: 3 }))
+
+    expect(store().rows).toHaveLength(3)
+    expect(store().lastSeq).toBe(4)
+  })
+
   test("an interrupted playlist with no stored total falls back to its selection", () => {
-    store().hydrate(
-      [],
-      [
-        {
-          download_id: "pl",
-          kind: "playlist",
-          platform: "youtube",
-          status: "interrupted",
-          title: "Short talks",
-          label: "2 videos",
-          started_at: 1000,
-          request: {
-            url: "https://youtube.com/playlist?list=PL1",
-            playlist_id: "PL1",
-            entries: [
-              { index: 1, id: "a" },
-              { index: 2, id: "b" }
-            ]
-          }
-        } as DownloadHistoryRow
-      ]
+    store().applySnapshot(
+      snapshot({
+        rows: [
+          {
+            download_id: "pl",
+            kind: "playlist",
+            platform: "youtube",
+            status: "interrupted",
+            title: "Short talks",
+            label: "2 videos",
+            started_at: 1000,
+            request: {
+              url: "https://youtube.com/playlist?list=PL1",
+              playlist_id: "PL1",
+              entries: [
+                { index: 1, id: "a" },
+                { index: 2, id: "b" }
+              ]
+            }
+          } as DownloadHistoryRow
+        ]
+      })
     )
 
     expect(rowOf("pl")).toMatchObject({ status: "interrupted", itemsTotal: 2 })
@@ -559,28 +599,56 @@ describe("clearing and removing", () => {
     expect(mocks.clearHistory).toHaveBeenCalledTimes(1)
   })
 
-  test("removing one row forgets it here and on disk", () => {
-    store().add(row({ downloadId: "done", status: "completed" }))
-    store().setHighlighted("done")
+  /**
+   * main answers with the list as it stands afterwards, and that answer is
+   * applied like any other push: whatever it does not name is not in the list,
+   * and there is nothing here that has to work out which rows it covered.
+   */
+  test("and the list becomes main's answer", async () => {
+    store().add(row({ downloadId: "running", status: "downloading" }))
+    mocks.clearHistory.mockResolvedValue(
+      snapshot({
+        rows: [
+          {
+            download_id: "running",
+            status: "downloading",
+            kind: "video",
+            title: "My Holiday Video",
+            started_at: 1000
+          } as DownloadHistoryRow
+        ]
+      })
+    )
 
-    store().remove("done")
+    store().clearFinished()
+    await flush()
 
-    expect(store().rows).toEqual([])
-    expect(store().highlightedId).toBeNull()
-    expect(mocks.removeHistory).toHaveBeenCalledWith("done")
+    expect(store().rows.map((known) => known.downloadId)).toEqual(["running"])
   })
 
   /**
-   * the clear and main's clear do not always mean the same rows: a download
-   * that finishes between the click and main handling the request is live on
-   * this side and terminal on that one, so main drops it and this keeps it -
-   * and the row sat in the panel until the next launch lost it.
+   * the ordering four rounds of renderer-side reconciliation could not settle:
+   * a download that finishes between the click and main handling the clear is
+   * live for this side and terminal for main, which removes it. Main's answer
+   * does not name it, so it goes.
    */
   test("a completion crossing the clear goes with main's answer", async () => {
-    store().hydrate([], [], 5)
     store().add(row({ downloadId: "crossing", status: "downloading" }))
-    // main saw the completion first, so its answer holds nothing at all
-    mocks.clearHistory.mockResolvedValue([])
+    // main has listed it: it is main's row now, not one this window drew
+    store().applySnapshot(
+      snapshot({
+        rows: [
+          {
+            download_id: "crossing",
+            status: "downloading",
+            kind: "video",
+            title: "My Holiday Video",
+            started_at: 1000
+          } as DownloadHistoryRow
+        ]
+      })
+    )
+    mocks.clearHistory.mockResolvedValue(snapshot({ rows: [] }))
 
     store().clearFinished()
     store().applyEvent(
@@ -598,229 +666,82 @@ describe("clearing and removing", () => {
     expect(store().lifetimeCompleted).toBe(6)
   })
 
-  test("a row that arrived after the clear was sent survives it", async () => {
+  /**
+   * a row this window drew for a click main has not answered for is not part of
+   * any list main can send, so no answer of main's can take it away.
+   */
+  test("a row this window drew after the clear survives the answer", async () => {
     store().add(row({ downloadId: "old", status: "completed" }))
-    mocks.clearHistory.mockResolvedValue([])
+    mocks.clearHistory.mockResolvedValue(snapshot({ rows: [] }))
 
     store().clearFinished()
-    // main had not heard of this one when it built that answer
     store().add(row({ downloadId: "new", status: "downloading" }))
     await flush()
 
     expect(store().rows.map((known) => known.downloadId)).toEqual(["new"])
   })
 
-  test("and a row main still has is kept", async () => {
-    store().add(row({ downloadId: "live", status: "downloading" }))
-    mocks.clearHistory.mockResolvedValue([
-      { download_id: "live", status: "downloading" } as DownloadHistoryRow
-    ])
-
-    store().clearFinished()
-    await flush()
-
-    expect(store().rows.map((known) => known.downloadId)).toEqual(["live"])
-  })
-
-  /**
-   * main stamps every answer about the history with the epoch it was read at,
-   * and moves that number whenever a row leaves. A snapshot below the epoch a
-   * clear came back with was read before it, so its rows describe a history
-   * that no longer exists - whether they arrive as finished rows or as running
-   * ones, and whether or not this window ever held them.
-   */
-  test("a snapshot read before the clear cannot restore what it removed", async () => {
-    store().add(row({ downloadId: "old", status: "completed" }))
-    mocks.clearHistory.mockResolvedValue({ epoch: 1, rows: [] })
-
-    store().clearFinished()
-    await flush()
-
-    store().hydrate(
-      [],
-      [{ download_id: "old", status: "completed" } as DownloadHistoryRow],
-      0,
-      0
-    )
-
-    expect(store().rows).toEqual([])
-  })
-
-  test("and neither can a re-read that was in flight", async () => {
-    store().add(row({ downloadId: "old", status: "completed" }))
-    mocks.clearHistory.mockResolvedValue({ epoch: 1, rows: [] })
-
-    store().clearFinished()
-    await flush()
-
-    store().adopt(
-      [],
-      [{ download_id: "old", status: "completed" } as DownloadHistoryRow],
-      0
-    )
-
-    expect(store().rows).toEqual([])
-  })
-
-  /**
-   * the ordering three rounds of renderer-side guessing could not see: the
-   * snapshot was taken while the download was still running, so it comes back
-   * in the *active* half, and this window may never have held it at all.
-   */
-  test("even when the stale snapshot still calls it active", async () => {
-    mocks.clearHistory.mockResolvedValue({ epoch: 1, rows: [] })
-
-    store().clearFinished()
-    await flush()
-
-    store().adopt(
-      [
-        {
-          downloadId: "unseen",
-          status: "downloading",
-          progress: 40,
-          type: "combined",
-          platform: "youtube",
-          title: "Never had a row here",
-          label: "1080p mp4"
-        } as DownloadStatus
-      ],
-      [],
-      0
-    )
-
-    expect(store().rows).toEqual([])
-  })
-
-  // ...and the same for one row forgotten on its own
-  test("a removed row is not brought back by a reply that still names it", async () => {
+  test("removing one row forgets it here and on disk", async () => {
     store().add(row({ downloadId: "done", status: "completed" }))
-    mocks.removeHistory.mockResolvedValue({ epoch: 1, rows: [] })
+    store().setHighlighted("done")
+    mocks.removeHistory.mockResolvedValue(snapshot({ rows: [] }))
 
     store().remove("done")
     await flush()
 
-    store().adopt(
-      [],
-      [{ download_id: "done", status: "completed" } as DownloadHistoryRow],
-      0
-    )
-
     expect(store().rows).toEqual([])
-  })
-
-  // ...and a snapshot read after the clear is as good as any other: a download
-  // that finished after the user cleared belongs on screen
-  test("a snapshot read after the clear brings its rows as usual", async () => {
-    store().add(row({ downloadId: "old", status: "completed" }))
-    mocks.clearHistory.mockResolvedValue({ epoch: 1, rows: [] })
-
-    store().clearFinished()
-    await flush()
-
-    store().adopt(
-      [],
-      [
-        {
-          download_id: "after",
-          status: "completed",
-          started_at: 10
-        } as DownloadHistoryRow
-      ],
-      1
-    )
-
-    expect(store().rows.map((known) => known.downloadId)).toEqual(["after"])
+    expect(store().highlightedId).toBeNull()
+    expect(mocks.removeHistory).toHaveBeenCalledWith("done")
   })
 
   /**
-   * a stale reply still carries what no clear touches. Throwing the whole
-   * answer away left the session with no count, no live rows and a panel that
-   * could never say it was empty; keeping its rows put cleared downloads back.
-   * So it brings the count and the flag, and `DownloadEvents` asks again for
-   * the rows.
+   * an answer from before a clear cannot put back what it removed: it is an
+   * older list, and an older list is ignored outright.
    */
-  test("a stale hydration still brings its count and the flag, and no rows", async () => {
-    store().add(row({ downloadId: "old", status: "completed" }))
-    mocks.clearHistory.mockResolvedValue({ epoch: 1, rows: [] })
-
-    store().clearFinished()
-    await flush()
-
-    store().hydrate(
-      [
-        {
-          downloadId: "running",
-          status: "downloading",
-          progress: 40,
-          type: "combined",
-          platform: "youtube",
-          title: "Still going",
-          label: "1080p mp4"
-        } as DownloadStatus
-      ],
-      [{ download_id: "old", status: "completed" } as DownloadHistoryRow],
-      128,
-      0
-    )
-
-    expect(store().rows).toEqual([])
-    expect(store().lifetimeCompleted).toBe(128)
-    expect(store().hydrated).toBe(true)
-  })
-
-  test("and the read behind it brings the live row", async () => {
-    mocks.clearHistory.mockResolvedValue({ epoch: 1, rows: [] })
-
-    store().clearFinished()
-    await flush()
-
-    store().hydrate(
-      [
-        {
-          downloadId: "running",
-          status: "downloading",
-          progress: 40,
-          type: "combined",
-          platform: "youtube",
-          title: "Still going",
-          label: "1080p mp4"
-        } as DownloadStatus
-      ],
-      [],
-      128,
-      1
-    )
-
-    expect(store().rows.map((known) => known.downloadId)).toEqual(["running"])
-    expect(store().hydrated).toBe(true)
-  })
-
-  /**
-   * the reply also settles the rows this window is holding from older
-   * snapshots: they are what the user removed. A row a hook added since is
-   * younger than the request and was never what the answer was talking about.
-   */
-  test("the clear's answer drops the snapshot rows it did not name", async () => {
-    store().hydrate(
-      [],
-      [
-        { download_id: "old", status: "completed" } as DownloadHistoryRow,
-        { download_id: "kept", status: "completed" } as DownloadHistoryRow
-      ],
-      0,
-      0
-    )
-    mocks.clearHistory.mockResolvedValue({
-      epoch: 1,
-      rows: [{ download_id: "kept", status: "completed" }]
+  test("a list read before the clear cannot restore what it removed", async () => {
+    const older = snapshot({
+      rows: [{ download_id: "old", status: "completed" } as DownloadHistoryRow],
+      at: 1
     })
 
-    store().add(row({ downloadId: "fresh", status: "downloading" }))
+    store().applySnapshot(older)
+    mocks.clearHistory.mockResolvedValue(snapshot({ rows: [], at: 2 }))
+
     store().clearFinished()
     await flush()
 
-    expect(store().rows.map((known) => known.downloadId)).toEqual(["fresh"])
+    // the read that was in flight when the clear went out, arriving late
+    store().applySnapshot(older)
+
+    expect(store().rows).toEqual([])
+  })
+
+  /**
+   * and neither can one that still calls the download active: main builds its
+   * list after the change it announces, so the newer list is the true one
+   * whatever an older one says about the same download.
+   */
+  test("even when the older list still calls it active", async () => {
+    const older = snapshot({
+      rows: [
+        {
+          download_id: "unseen",
+          status: "downloading",
+          kind: "video",
+          title: "Never had a row here",
+          started_at: 1000
+        } as DownloadHistoryRow
+      ],
+      at: 1
+    })
+
+    mocks.clearHistory.mockResolvedValue(snapshot({ rows: [], at: 2 }))
+
+    store().clearFinished()
+    await flush()
+    store().applySnapshot(older)
+
+    expect(store().rows).toEqual([])
   })
 
   test("a history write that fails costs nothing", async () => {
@@ -830,76 +751,11 @@ describe("clearing and removing", () => {
     store().add(row({ downloadId: "done", status: "completed" }))
     store().clearFinished()
 
-    await Promise.resolve()
+    await flush()
     expect(store().rows).toEqual([])
   })
 })
 
-/**
- * the one number at the top of the panel: downloads finished since install.
- *
- * main owns it outright: it counts the completion, stamps the new total onto
- * the completed event and answers the hydration read from the same number. This
- * side only ever adopts what arrives, which is what makes the replays below
- * harmless - the first pass counted here, and every ordering hydration can
- * produce was either one too many or one too few.
- */
-describe("the lifetime count", () => {
-  test("comes in with the hydration read", () => {
-    store().hydrate([], [], 128)
-
-    expect(store().lifetimeCompleted).toBe(128)
-  })
-
-  test("moves with the number on a completed event", () => {
-    store().hydrate([], [], 4)
-    store().add(row({ downloadId: "d1", status: "downloading" }))
-
-    store().applyEvent(
-      event({ status: "completed", progress: 100, lifetimeCompleted: 5 })
-    )
-
-    expect(store().lifetimeCompleted).toBe(5)
-  })
-
-  test("an event without one leaves it where it was", () => {
-    store().hydrate([], [], 4)
-    store().add(row({ downloadId: "d1", status: "downloading" }))
-
-    store().applyEvent(event({ status: "downloading", progress: 40 }))
-
-    expect(store().lifetimeCompleted).toBe(4)
-  })
-
-  test("a failure or a cancel carries none, so it does not count", () => {
-    store().hydrate([], [], 4)
-    store().add(row({ downloadId: "d1", status: "downloading" }))
-
-    store().applyEvent(event({ status: "failed", error: "no" }))
-    store().applyEvent(event({ status: "cancelled" }))
-
-    expect(store().lifetimeCompleted).toBe(4)
-  })
-
-  test("clearing the history leaves it alone", () => {
-    store().hydrate([], [], 12)
-    store().add(row({ downloadId: "done", status: "completed" }))
-
-    store().clearFinished()
-
-    expect(store().rows).toEqual([])
-    expect(store().lifetimeCompleted).toBe(12)
-  })
-})
-
-/**
- * a row that has finished is finished
- *
- * events are replayed - over the hydration snapshot, and over a row a re-read
- * has just brought in - and what they are replayed onto is sometimes newer than
- * they are. A `downloading` landing on a completed row puts a Stop back on a
- * file that is already on disk.
- */
 describe("what a terminal row accepts", () => {
   test("nothing that would make it live again", () => {
     store().add(row({ downloadId: "d1", status: "completed", progress: 100 }))
@@ -934,13 +790,15 @@ describe("what a terminal row accepts", () => {
     expect(store().lifetimeCompleted).toBe(7)
   })
 
-  test("and the list is left alone rather than rebuilt", () => {
+  // the row itself is untouched: an event that can change nothing about it
+  // leaves the object it is drawn from exactly as it was
+  test("and the row is left as it was", () => {
     store().add(row({ downloadId: "d1", status: "completed", progress: 100 }))
-    const before = store().rows
+    const before = rowOf("d1")
 
     store().applyEvent(event({ status: "downloading", progress: 1 }))
 
-    expect(store().rows).toBe(before)
+    expect(rowOf("d1")).toEqual(before)
   })
 })
 
@@ -951,74 +809,83 @@ describe("what a terminal row accepts", () => {
  * event that landed inside that window - so a completion is applied twice, with
  * a snapshot older than it in between.
  */
-describe("the lifetime count across the hydration window", () => {
-  const completion = (lifetimeCompleted: number) =>
-    event({ status: "completed", progress: 100, lifetimeCompleted })
+/**
+ * the one number at the top of the panel: downloads finished since install.
+ *
+ * main owns it outright - it counts the completion, stamps the total onto the
+ * completed event and carries it on every snapshot - and this side only ever
+ * takes the larger of what it has and what arrives.
+ */
+describe("the lifetime count", () => {
+  test("comes in with the list", () => {
+    store().applySnapshot(snapshot({ lifetimeCompleted: 128 }))
 
-  test("a completion, an older snapshot of its row, and the replay", () => {
+    expect(store().lifetimeCompleted).toBe(128)
+  })
+
+  test("moves with the number on a completed event", () => {
+    store().applySnapshot(snapshot({ lifetimeCompleted: 4 }))
     store().add(row({ downloadId: "d1", status: "downloading" }))
 
-    store().applyEvent(completion(1))
-    // main's snapshot was taken before the completion: the row goes back to
-    // running, which is exactly what used to let the replay count it again
-    store().hydrate(
-      [
-        {
-          downloadId: "d1",
-          status: "downloading",
-          progress: 40
-        } as DownloadStatus
-      ],
-      [],
-      0
+    store().applyEvent(
+      event({ status: "completed", progress: 100, lifetimeCompleted: 5 })
     )
-    store().applyEvent(completion(1))
 
-    expect(store().lifetimeCompleted).toBe(1)
+    expect(store().lifetimeCompleted).toBe(5)
   })
 
-  test("a reload whose read already includes the completion", () => {
-    store().hydrate(
-      [
-        {
-          downloadId: "d1",
-          status: "downloading",
-          progress: 40
-        } as DownloadStatus
-      ],
-      [],
-      1
-    )
-    store().applyEvent(completion(1))
+  test("even for a download this window has no row for", () => {
+    store().applySnapshot(snapshot({ lifetimeCompleted: 4 }))
 
-    expect(store().lifetimeCompleted).toBe(1)
+    store().applyEvent(
+      event({
+        downloadId: "someone-else",
+        status: "completed",
+        progress: 100,
+        lifetimeCompleted: 5
+      })
+    )
+
+    expect(store().lifetimeCompleted).toBe(5)
   })
 
-  /**
-   * the one a counted-id set could not have fixed: the download belongs to no
-   * snapshot at all, so nothing on this side can tell whether the number it
-   * read already includes it. The event says so itself.
-   */
-  test("a download neither snapshot knows, finishing during the reads", () => {
-    store().applyEvent(completion(129))
-    store().hydrate([], [], 128)
+  test("an event without one leaves it where it was", () => {
+    store().applySnapshot(snapshot({ lifetimeCompleted: 4 }))
+    store().add(row({ downloadId: "d1", status: "downloading" }))
+
+    store().applyEvent(event({ status: "downloading", progress: 40 }))
+
+    expect(store().lifetimeCompleted).toBe(4)
+  })
+
+  // a list built before the completion was counted cannot walk it back
+  test("and an older number never lowers it", () => {
+    store().applySnapshot(snapshot({ lifetimeCompleted: 129 }))
+
+    store().applySnapshot(snapshot({ lifetimeCompleted: 128 }))
 
     expect(store().lifetimeCompleted).toBe(129)
   })
 
-  test("and the same, when the event arrives after the read", () => {
-    store().hydrate([], [], 128)
-    store().applyEvent(completion(129))
+  test("clearing the history leaves it alone", async () => {
+    store().applySnapshot(snapshot({ lifetimeCompleted: 12 }))
+    store().add(row({ downloadId: "done", status: "completed" }))
+    mocks.clearHistory.mockResolvedValue(
+      snapshot({ rows: [], lifetimeCompleted: 12 })
+    )
 
-    expect(store().lifetimeCompleted).toBe(129)
+    store().clearFinished()
+    await flush()
+
+    expect(store().rows).toEqual([])
+    expect(store().lifetimeCompleted).toBe(12)
   })
 })
 
 /**
  * a finished row reveals the file it made rather than only opening the folder,
- * which it can only do while it still knows where the file went. main sends the
- * path on the completion and writes it into the history, so both paths in are
- * pinned here.
+ * which it can only do while it still knows where the file went. It arrives on
+ * the completion event and again in main's list, and either is enough.
  */
 describe("where the file landed", () => {
   test("is kept off the completion event", () => {
@@ -1035,16 +902,17 @@ describe("where the file landed", () => {
     expect(rowOf("d1")?.filePath).toBe("/Users/me/Downloads/holiday.mp4")
   })
 
-  test("and read back from the history", () => {
-    store().hydrate(
-      [],
-      [
-        {
-          download_id: "old",
-          status: "completed",
-          file_path: "/Users/me/Downloads/old.mp4"
-        } as DownloadHistoryRow
-      ]
+  test("and read back from main's list", () => {
+    store().applySnapshot(
+      snapshot({
+        rows: [
+          {
+            download_id: "old",
+            status: "completed",
+            file_path: "/Users/me/Downloads/old.mp4"
+          } as DownloadHistoryRow
+        ]
+      })
     )
 
     expect(rowOf("old")?.filePath).toBe("/Users/me/Downloads/old.mp4")
@@ -1052,115 +920,16 @@ describe("where the file landed", () => {
 
   // a row from a history file written before the path was kept: the panel falls
   // back to opening the download folder, which is why this stays undefined
-  // rather than becoming an empty string
   test("and is absent when the row never had one", () => {
-    store().hydrate(
-      [],
-      [{ download_id: "old", status: "completed" } as DownloadHistoryRow]
+    store().applySnapshot(
+      snapshot({
+        rows: [
+          { download_id: "old", status: "completed" } as DownloadHistoryRow
+        ]
+      })
     )
 
     expect(rowOf("old")?.filePath).toBeUndefined()
-  })
-})
-
-/**
- * the answer to a download main admitted after this window read its list: ask
- * again, and take only what is missing. `hydrate`'s "main wins" rule is right
- * at startup, when the store has nothing better, and wrong afterwards, when
- * every row it holds has been kept current by the events since.
- */
-describe("adopting rows main has and this list does not", () => {
-  test("adds an active row the store never heard of", () => {
-    store().adopt(
-      [
-        {
-          downloadId: "late",
-          status: "downloading",
-          progress: 12,
-          type: "combined",
-          platform: "youtube",
-          title: "Admitted after the read",
-          label: "1080p mp4"
-        } as DownloadStatus
-      ],
-      []
-    )
-
-    expect(rowOf("late")).toMatchObject({
-      title: "Admitted after the read",
-      status: "downloading"
-    })
-  })
-
-  test("and a finished one out of the history", () => {
-    store().adopt(
-      [],
-      [
-        {
-          download_id: "late",
-          status: "completed",
-          title: "Landed while we were away"
-        } as DownloadHistoryRow
-      ]
-    )
-
-    expect(rowOf("late")?.status).toBe("completed")
-  })
-
-  test("leaves every row it already has exactly as it is", () => {
-    store().add(row({ downloadId: "d1", status: "completed", progress: 100 }))
-
-    store().adopt(
-      [
-        {
-          downloadId: "d1",
-          status: "downloading",
-          progress: 5,
-          type: "combined",
-          platform: "youtube",
-          title: "An older title",
-          label: "1080p mp4"
-        } as DownloadStatus
-      ],
-      []
-    )
-
-    expect(rowOf("d1")).toMatchObject({
-      status: "completed",
-      progress: 100,
-      title: "My Holiday Video"
-    })
-  })
-
-  test("and says nothing when there is nothing to add", () => {
-    store().add(row({ downloadId: "d1" }))
-    const before = store().rows
-
-    store().adopt([], [])
-
-    // the same array, so nothing that reads the list re-renders for an answer
-    // that told it nothing
-    expect(store().rows).toBe(before)
-  })
-
-  test("the newest download is still first", () => {
-    store().add(row({ downloadId: "older", startedAt: 1 }))
-
-    store().adopt(
-      [],
-      [
-        {
-          download_id: "newer",
-          status: "completed",
-          started_at: 9
-        } as DownloadHistoryRow
-      ]
-    )
-
-    expect(store().rows.map((known) => known.downloadId)).toEqual([
-      "newer",
-      "older"
-    ])
   })
 })
 

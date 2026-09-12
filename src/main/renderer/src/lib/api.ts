@@ -5,17 +5,15 @@ import type { ReportEnvironment } from "@/lib/report"
 import {
   CookieError,
   DownloadError,
-  type ActiveSnapshot,
   type ApiError,
   type AudioDownloadRequest,
   type CookieImportResult,
   type CookieStatus,
   type CookieTestResult,
-  type DownloadHistoryRow,
   type DownloadPathInfo,
   type DownloadProgress,
+  type DownloadListSnapshot,
   type DownloadStatus,
-  type HistorySnapshot,
   type PinterestDownloadRequest,
   type PinterestVideoInfoResponse,
   type PlaylistDownloadRequest,
@@ -113,28 +111,19 @@ function unwrap<T>(
 }
 
 /**
- * a snapshot reply, whatever shape it arrived in
+ * a list reply, guarded
  *
- * main answers `{epoch, rows}` (see handleGetHistory in ipc-handlers.js). A
- * bare array is what it used to answer and what a preload from before this
- * change still would, and epoch 0 is the truthful reading of it: it is older
- * than any clear this session has seen. With no clears at all - `clearedEpoch`
- * is 0 too - nothing is ever judged stale, so such a build behaves exactly as
- * it did before the epoch existed.
+ * an answer with nothing in it is a bridge that could not read the list rather
+ * than an install with no downloads, and `seq: 0` is never newer than anything
+ * the store has applied, so it changes nothing.
  */
-const historySnapshot = (
-  data: HistorySnapshot | DownloadHistoryRow[] | undefined
-): HistorySnapshot =>
-  Array.isArray(data)
-    ? { epoch: 0, rows: data }
-    : { epoch: data?.epoch ?? 0, rows: data?.rows ?? [] }
-
-const activeSnapshot = (
-  data: ActiveSnapshot | DownloadStatus[] | undefined
-): ActiveSnapshot =>
-  Array.isArray(data)
-    ? { epoch: 0, rows: data }
-    : { epoch: data?.epoch ?? 0, rows: data?.rows ?? [] }
+const listSnapshot = (
+  data: DownloadListSnapshot | undefined
+): DownloadListSnapshot => ({
+  seq: data?.seq ?? 0,
+  lifetimeCompleted: data?.lifetimeCompleted ?? 0,
+  rows: data?.rows ?? []
+})
 
 // Video API functions
 export const videoApi = {
@@ -331,34 +320,17 @@ export const downloadApi = {
   },
 
   /**
-   * The downloads main still has in flight, and which side of the user's
-   * clears the snapshot was read on.
-   * @returns Promise<ActiveSnapshot>
+   * The whole download list, as main has it. Read once at startup and after
+   * that only for a re-sync: main pushes the same snapshot on `onList`
+   * whenever the list changes.
+   * @returns Promise<DownloadListSnapshot>
    */
-  async getAllDownloads(): Promise<ActiveSnapshot> {
+  async getList(): Promise<DownloadListSnapshot> {
     const electronAPI = getElectronAPI()
-    const response = await electronAPI.download.getAll()
+    const response = await electronAPI.download.getList()
 
-    return activeSnapshot(
-      unwrap(response, "Failed to get downloads", {
-        makeError: plainError,
-        requireData: false
-      })
-    )
-  },
-
-  /**
-   * The downloads this install remembers, newest first, with the epoch they
-   * were read at. Read once, at startup: every later change to a live row
-   * arrives on `onProgress` instead.
-   * @returns Promise<HistorySnapshot>
-   */
-  async getHistory(): Promise<HistorySnapshot> {
-    const electronAPI = getElectronAPI()
-    const response = await electronAPI.download.getHistory()
-
-    return historySnapshot(
-      unwrap(response, "Failed to get the download history", {
+    return listSnapshot(
+      unwrap(response, "Failed to get the downloads list", {
         makeError: plainError,
         requireData: false
       })
@@ -367,15 +339,15 @@ export const downloadApi = {
 
   /**
    * Forget every finished row. A download still queued or running keeps its
-   * row, because it has events still to come. The reply carries the epoch the
-   * clear happened at, which is what tells the panel which snapshots it covers.
-   * @returns Promise<HistorySnapshot> what is left
+   * row, because it has events still to come. Answers with the list as it
+   * stands afterwards, which every other window is sent too.
+   * @returns Promise<DownloadListSnapshot>
    */
-  async clearHistory(): Promise<HistorySnapshot> {
+  async clearHistory(): Promise<DownloadListSnapshot> {
     const electronAPI = getElectronAPI()
     const response = await electronAPI.download.clearHistory()
 
-    return historySnapshot(
+    return listSnapshot(
       unwrap(response, "Failed to clear the download history", {
         makeError: plainError,
         requireData: false
@@ -388,18 +360,30 @@ export const downloadApi = {
    * main ignores it for a row that is still live: cancelling one is what
    * `cancelDownload` is for.
    * @param downloadId Download ID
-   * @returns Promise<HistorySnapshot> what is left
+   * @returns Promise<DownloadListSnapshot> the list as it stands afterwards
    */
-  async removeHistory(downloadId: string): Promise<HistorySnapshot> {
+  async removeHistory(downloadId: string): Promise<DownloadListSnapshot> {
     const electronAPI = getElectronAPI()
     const response = await electronAPI.download.removeHistory(downloadId)
 
-    return historySnapshot(
+    return listSnapshot(
       unwrap(response, "Failed to remove that download", {
         makeError: plainError,
         requireData: false
       })
     )
+  },
+
+  /**
+   * Listen for the list itself. Main sends it after every change to it - a
+   * reservation, a slot taken, a settle, a clear, a removal - and never for
+   * progress.
+   * @param callback List callback
+   * @returns Cleanup function
+   */
+  onList(callback: (snapshot: DownloadListSnapshot) => void): () => void {
+    const electronAPI = getElectronAPI()
+    return electronAPI.download.onList(callback)
   },
 
   /**

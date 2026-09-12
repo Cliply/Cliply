@@ -72,9 +72,18 @@ const row = (overrides: Partial<DownloadRow> = {}): DownloadRow => ({
 
 const panel = () => screen.getByRole("complementary")
 
+/** one of main's pushes, which is the only way the list ever changes */
+let seq = 0
+const snapshot = ({ lifetimeCompleted = 0, rows = [] } = {}) => ({
+  seq: (seq += 1),
+  lifetimeCompleted,
+  rows
+})
+
 const open = () => act(() => store().setPanelOpen(true))
 
 beforeEach(() => {
+  seq = 0
   store().reset()
   vi.clearAllMocks()
   mocks.cancelDownload.mockResolvedValue(true)
@@ -189,7 +198,7 @@ describe("opening and closing", () => {
 
 describe("the header", () => {
   test("shows the lifetime count and what it counts", () => {
-    act(() => store().hydrate([], [], 128))
+    act(() => store().applySnapshot(snapshot({ lifetimeCompleted: 128 })))
 
     render(<DownloadsPanel />)
     open()
@@ -243,7 +252,7 @@ describe("the header", () => {
    * keeps, so emptying the list is not a reason for it to move.
    */
   test("and the count stays where it was", () => {
-    act(() => store().hydrate([], [], 12))
+    act(() => store().applySnapshot(snapshot({ lifetimeCompleted: 12 })))
     store().add(row({ downloadId: "done", status: "completed" }))
 
     render(<DownloadsPanel />)
@@ -321,7 +330,7 @@ describe("the body", () => {
       within(panel()).queryByText(en["downloads.nothingToShow"])
     ).toBeNull()
 
-    act(() => store().hydrate([], []))
+    act(() => store().applySnapshot(snapshot()))
 
     expect(
       within(panel()).getByText(en["downloads.nothingToShow"])
@@ -333,7 +342,7 @@ describe("the body", () => {
   test("and says it in the middle of the empty list", () => {
     render(<DownloadsPanel />)
     open()
-    act(() => store().hydrate([], []))
+    act(() => store().applySnapshot(snapshot()))
 
     const line = within(panel()).getByText(en["downloads.nothingToShow"])
 

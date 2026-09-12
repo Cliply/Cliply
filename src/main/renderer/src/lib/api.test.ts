@@ -202,7 +202,7 @@ describe("the download history client", () => {
 
     ;(window as unknown as { electronAPI: unknown }).electronAPI = {
       download: {
-        getHistory: async () => responder(),
+        getList: async () => responder(),
         clearHistory: async () => responder(),
         removeHistory: async (downloadId: unknown) => {
           sent.push(downloadId)
@@ -214,67 +214,62 @@ describe("the download history client", () => {
     return sent
   }
 
-  test("the rows come back as they were written, with their epoch", async () => {
-    historyBridge(() => ({ success: true, data: { epoch: 3, rows: [ROW] } }))
+  test("the list comes back as main built it", async () => {
+    historyBridge(() => ({
+      success: true,
+      data: { seq: 3, lifetimeCompleted: 7, rows: [ROW] }
+    }))
 
-    await expect(downloadApi.getHistory()).resolves.toEqual({
-      epoch: 3,
+    await expect(downloadApi.getList()).resolves.toEqual({
+      seq: 3,
+      lifetimeCompleted: 7,
       rows: [ROW]
     })
   })
 
-  test("clearing and removing answer with what is left", async () => {
+  test("clearing and removing answer with the list as it stands", async () => {
     const sent = historyBridge(() => ({
       success: true,
-      data: { epoch: 4, rows: [ROW] }
+      data: { seq: 4, lifetimeCompleted: 7, rows: [ROW] }
     }))
 
     await expect(downloadApi.clearHistory()).resolves.toEqual({
-      epoch: 4,
+      seq: 4,
+      lifetimeCompleted: 7,
       rows: [ROW]
     })
     await expect(downloadApi.removeHistory("d2")).resolves.toEqual({
-      epoch: 4,
+      seq: 4,
+      lifetimeCompleted: 7,
       rows: [ROW]
     })
     expect(sent).toEqual(["d2"])
   })
 
   /**
-   * a panel with no history is a panel, and this is the one read the renderer
-   * makes: throwing here would take the downloads list down with it
+   * a panel with no list is a panel, and this is the one read the renderer
+   * makes: throwing here would take the downloads list down with it. `seq: 0`
+   * is never newer than anything the store has applied, so an answer with
+   * nothing in it changes nothing either
    */
   test("an empty answer is an empty list, not a failure", async () => {
     historyBridge(() => ({ success: true }))
 
-    await expect(downloadApi.getHistory()).resolves.toEqual({
-      epoch: 0,
+    await expect(downloadApi.getList()).resolves.toEqual({
+      seq: 0,
+      lifetimeCompleted: 0,
       rows: []
-    })
-  })
-
-  /**
-   * a build from before main stamped an epoch answers with the bare array it
-   * always did. reading that as epoch 0 is the truthful version of it: older
-   * than any clear, and with no clears at all nothing is ever judged stale
-   */
-  test("and a bare array is read as a snapshot older than any clear", async () => {
-    historyBridge(() => ({ success: true, data: [ROW] }))
-
-    await expect(downloadApi.getHistory()).resolves.toEqual({
-      epoch: 0,
-      rows: [ROW]
     })
   })
 
   test("a refusal is thrown, with main's own sentence", async () => {
     historyBridge(() => ({
       success: false,
-      error: { message: "Failed to get the download history" }
+      error: { message: "Failed to get the downloads list" }
     }))
 
-    await expect(downloadApi.getHistory()).rejects.toThrow(
-      "Failed to get the download history"
+    await expect(downloadApi.getList()).rejects.toThrow(
+      "Failed to get the downloads list"
     )
   })
 })
