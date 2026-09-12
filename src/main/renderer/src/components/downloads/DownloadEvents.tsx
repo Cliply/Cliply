@@ -77,7 +77,12 @@ export function DownloadEvents() {
       const row = downloadsActions.rowOf(event.downloadId)
 
       if (!row) {
-        if (unannounced.size >= PENDING_LIMIT) {
+        // room is only ever made for a newcomer: a second ending for an id
+        // already waiting replaces its own entry and costs nothing
+        if (
+          !unannounced.has(event.downloadId) &&
+          unannounced.size >= PENDING_LIMIT
+        ) {
           unannounced.delete(unannounced.keys().next().value as string)
         }
 

@@ -294,6 +294,48 @@ describe("the list, and the events over it", () => {
     expect(mocks.successToast).toHaveBeenCalledTimes(1)
   })
 
+  /**
+   * a second ending for a download already waiting is not a newcomer: making
+   * room for it evicted the oldest ending for nothing, and that download's
+   * toast was lost when its row finally arrived.
+   */
+  test("a repeated ending does not push another out of the queue", async () => {
+    await mount()
+
+    const ids = Array.from({ length: 200 }, (_, index) => `late-${index}`)
+
+    await act(async () => {
+      for (const downloadId of ids) {
+        for (const listener of [...mocks.listeners]) {
+          listener({
+            downloadId,
+            status: "completed",
+            progress: 100
+          } as DownloadProgress)
+        }
+      }
+
+      // the newest one, said again
+      for (const listener of [...mocks.listeners]) {
+        listener({
+          downloadId: ids[ids.length - 1],
+          status: "completed",
+          progress: 100
+        } as DownloadProgress)
+      }
+    })
+
+    await push(
+      snapshot({
+        rows: ids.map((downloadId) =>
+          listed({ download_id: downloadId, status: "completed" })
+        )
+      })
+    )
+
+    expect(mocks.successToast).toHaveBeenCalledTimes(200)
+  })
+
   test("and once when the push comes first", async () => {
     await mount()
 

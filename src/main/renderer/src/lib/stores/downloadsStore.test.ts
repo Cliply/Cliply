@@ -449,6 +449,58 @@ describe("the overlay's cap", () => {
     expect(rowOf("c")?.status).toBe("downloading")
   })
 
+  /**
+   * an overlay for a row on screen does not join the set the cap counts, so it
+   * must not evict one that is in it: the orphan it pushed out was a download
+   * whose push was a moment away, and its bar started again at zero.
+   */
+  test("a visible row's event costs an orphan nothing", () => {
+    for (let index = 0; index < 200; index += 1) {
+      store().applyEvent(
+        event({
+          downloadId: `ghost-${index}`,
+          status: "downloading",
+          progress: 67
+        })
+      )
+    }
+
+    store().applySnapshot(
+      snapshot({
+        rows: [
+          {
+            download_id: "on-screen",
+            status: "downloading",
+            kind: "video",
+            title: "Visible",
+            started_at: 1000
+          } as DownloadHistoryRow
+        ]
+      })
+    )
+
+    store().applyEvent(
+      event({ downloadId: "on-screen", status: "downloading", progress: 5 })
+    )
+
+    // the oldest orphan is still waiting, and its bar with it
+    store().applySnapshot(
+      snapshot({
+        rows: [
+          {
+            download_id: "ghost-0",
+            status: "downloading",
+            kind: "video",
+            title: "Arrived at last",
+            started_at: 900
+          } as DownloadHistoryRow
+        ]
+      })
+    )
+
+    expect(rowOf("ghost-0")?.progress).toBe(67)
+  })
+
   // the ids with no row are the ones that can arrive without end
   test("and the oldest orphan is what goes when there are too many", () => {
     for (let index = 0; index < 201; index += 1) {

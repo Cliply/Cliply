@@ -593,6 +593,13 @@ function mergeOverlay(
    * flag, because a queued row's every event was a new entry.
    */
   const onScreen = new Set(rows.map((row) => row.downloadId))
+
+  // ...and only for one that joins them: an overlay for a row on screen does
+  // not grow the set this cap counts, so it costs an orphan nothing
+  if (onScreen.has(event.downloadId)) {
+    return { ...overlay, [event.downloadId]: next }
+  }
+
   const orphans = Object.keys(overlay).filter(
     (downloadId) => !onScreen.has(downloadId)
   )
