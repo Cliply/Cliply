@@ -151,10 +151,19 @@ class DownloadRunner {
       status: STATUS.QUEUED,
       handle: null,
       cancelled: false,
-      // whether the renderer has been shown a queued row for this run that
-      // nothing else will correct. raised by park() and spent by the
-      // announcement in run(), which owes it exactly once
-      owesSlotNotice: false,
+      /**
+       * whether this run still owes the renderer the news that it is running
+       *
+       * every accepted run owes it, parked or not. A run that takes a free slot
+       * and then says nothing - a trimmed download is one ffmpeg pass, silent
+       * until it finishes - was invisible to a window that hydrated before this
+       * reservation existed: no row, no Stop, nothing in the active count, until
+       * the completion arrived. The notice is the one event that says "this is
+       * running", and it is not the engine's to send.
+       *
+       * spent by the announcement in run(), which owes it exactly once.
+       */
+      owesSlotNotice: true,
       // how far the engine got, kept for the two terminal states that report
       // it. a cancel arrives from another call stack entirely, so there is
       // nowhere else it could be read from by then
@@ -265,17 +274,21 @@ class DownloadRunner {
         this.record(downloadId, entry, { status: STATUS.DOWNLOADING })
 
         /**
-         * ...and the row that was drawn as queued hears that it is not any more
+         * ...and the renderer hears that this download is running
          *
          * nothing else says so until the engine's first progress line, and a
          * trimmed download is one ffmpeg pass that reports nothing until the
-         * end: the panel would read "Queued" with a Remove beside it for the
+         * end: the panel would read "Queued" with a Stop beside it for the
          * whole of a download that holds a slot and is writing its file. an
          * ordinary extraction delay is the same thing, briefer.
          *
-         * only for a run that actually waited. one that never parked was never
-         * drawn as queued - the renderer's own `starting` row is what is on
-         * screen, and it already draws an indeterminate bar.
+         * for every accepted run, not only one that waited. the window that
+         * started a download is not always the window watching it: a reload
+         * between the request and the reservation leaves a renderer whose
+         * snapshots predate this run, and until it hears something it has no
+         * row, no Stop and nothing in its active count for a download that is
+         * writing a file. That is what this event is for, and it cannot be left
+         * to the engine, which may not speak again until the file is done.
          *
          * indeterminate because there is no percentage yet and a made-up 0%
          * would sit there looking stalled. the first real progress event
@@ -434,11 +447,8 @@ class DownloadRunner {
     // impossible state from sorting to the front of everyone else's queue
     const sequence = entry ? entry.sequence : this.reservations
 
-    // this row is about to be drawn as queued, which is the debt run() settles
-    // when the slot arrives
-    if (entry) {
-      entry.owesSlotNotice = true
-    }
+    // the notice this row is owed is raised at reserve rather than here: a run
+    // that never parks owes it too (see owesSlotNotice in reserve)
 
     let index = this.waiting.length
 

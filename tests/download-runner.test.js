@@ -59,6 +59,19 @@ const BASE = {
 
 const settle = () => new Promise((resolve) => setImmediate(resolve))
 
+/**
+ * the notice every accepted run sends the moment it has a handle
+ *
+ * it is the first thing the renderer hears about a run, before the engine has
+ * said anything, so every assertion that pins an exact payload reads past it.
+ */
+const admitted = (downloadId = "combined_1") => ({
+  downloadId,
+  status: "downloading",
+  progress: 0,
+  indeterminate: true
+})
+
 describe("progress forwarding", () => {
   test("engine progress becomes a download:progress event", async () => {
     const { runner, events } = createRunner()
@@ -71,7 +84,9 @@ describe("progress forwarding", () => {
     handle.resolve({ filePath: "/downloads/a.mp4" })
     await running
 
-    expect(events[0]).toEqual({
+    // the run announced itself first; this is the engine's own line
+    expect(events[0]).toEqual(admitted())
+    expect(events[1]).toEqual({
       downloadId: "combined_1",
       status: "downloading",
       progress: 42.5,
@@ -96,8 +111,9 @@ describe("progress forwarding", () => {
     handle.resolve({ filePath: "/downloads/a.mp4" })
     await running
 
-    expect(events[0].progress).toBeUndefined()
-    expect(events[0].indeterminate).toBe(true)
+    // [0] is the admission notice, which is indeterminate for its own reason
+    expect(events[1].progress).toBeUndefined()
+    expect(events[1].indeterminate).toBe(true)
   })
 })
 
@@ -615,8 +631,9 @@ describe("concurrent downloads", () => {
     second.emit("progress", { progress: 90 })
     await settle()
 
-    expect(events.filter((e) => e.downloadId === "id-a").map((e) => e.progress)).toEqual([10])
-    expect(events.filter((e) => e.downloadId === "id-b").map((e) => e.progress)).toEqual([90])
+    // each run announces itself once, and then reports only its own progress
+    expect(events.filter((e) => e.downloadId === "id-a").map((e) => e.progress)).toEqual([0, 10])
+    expect(events.filter((e) => e.downloadId === "id-b").map((e) => e.progress)).toEqual([0, 90])
 
     // finishing one must not disturb the other's bookkeeping
     first.resolve({ filePath: "/downloads/a.mp4" })
@@ -842,7 +859,7 @@ describe("queue", () => {
     await c
   })
 
-  test("a parked download announces itself once, and one that never waits says nothing", async () => {
+  test("every accepted run announces itself once, parked or not", async () => {
     const { runner, events } = createRunner({ maxConcurrent: 1 })
     const handles = [new FakeHandle(), new FakeHandle(), new FakeHandle()]
 
@@ -855,10 +872,13 @@ describe("queue", () => {
     )
     await settle()
 
-    // the exact payload the renderer draws a queued row from
+    // the exact payloads the renderer draws from: b and c are parked in the
+    // same tick their runs are asked for, and a says it is running once its
+    // handle exists a turn later
     expect(events).toEqual([
       { downloadId: "b", status: "queued", progress: 0 },
-      { downloadId: "c", status: "queued", progress: 0 }
+      { downloadId: "c", status: "queued", progress: 0 },
+      admitted("a")
     ])
 
     handles[0].resolve(completion)
@@ -866,8 +886,13 @@ describe("queue", () => {
     await settle()
 
     // b started: it does not repeat the queued event on the way out of the
-    // queue, and the run it is now in emits its own progress
+    // queue, and it announces itself exactly once like everything else
     expect(events.filter((event) => event.status === "queued")).toHaveLength(2)
+    expect(
+      events.filter(
+        (event) => event.downloadId === "b" && event.status === "downloading"
+      )
+    ).toEqual([admitted("b")])
 
     handles[1].resolve(completion)
     await runs[1]
@@ -1181,6 +1206,38 @@ describe("queue", () => {
    * the row off `queued` - the panel would offer Remove on a download that is
    * writing its file. the transition is announced instead of inferred.
    */
+  /**
+   * the one event a silent run sends, and the reason it is sent at all
+   *
+   * a trimmed download is one ffmpeg pass that reports nothing until it is
+   * done, and a window that reloaded between the request and the reservation
+   * has no row for it: no Stop, nothing in the active count, no identity for
+   * the duplicate check, until the completion lands. This is what that window
+   * hears instead.
+   */
+  test("a free-slot run that the engine never reports on still says it is running", async () => {
+    const { runner, events } = createRunner()
+    const handle = new FakeHandle()
+
+    const running = runner.run({
+      ...BASE,
+      downloadId: "silent-after-reload",
+      trimmed: true,
+      createHandle: () => handle
+    })
+    await settle()
+
+    expect(events).toEqual([admitted("silent-after-reload")])
+
+    handle.resolve(completion)
+    await running
+
+    expect(events.map((event) => event.status)).toEqual([
+      "downloading",
+      "completed"
+    ])
+  })
+
   test("a download that waited says so the moment it takes a slot", async () => {
     const { runner, events } = createRunner({ maxConcurrent: 1 })
     const handles = [new FakeHandle(), new FakeHandle()]
@@ -1202,21 +1259,17 @@ describe("queue", () => {
     // whole of what the renderer has been told about it
     expect(events.filter((event) => event.downloadId === "b")).toEqual([
       { downloadId: "b", status: "queued", progress: 0 },
-      {
-        downloadId: "b",
-        status: "downloading",
-        progress: 0,
-        indeterminate: true
-      }
+      admitted("b")
     ])
 
-    // and a, which never waited, still says nothing until the engine does: it
-    // was never drawn as queued, so there is nothing to correct
+    // and a, which never waited, said the same thing once: a window that
+    // hydrated after it was reserved has no other way to hear that it is
+    // running, and a trimmed run says nothing else until it is done
     expect(
       events.filter(
         (event) => event.downloadId === "a" && event.status === "downloading"
       )
-    ).toEqual([])
+    ).toEqual([admitted("a")])
 
     handles[1].resolve(completion)
     await b
@@ -1448,7 +1501,8 @@ describe("playlist progress", () => {
     handle.resolve(playlistResult())
     await running
 
-    expect(events[0]).toEqual({
+    expect(events[0]).toEqual(admitted("playlist_1"))
+    expect(events[1]).toEqual({
       downloadId: "playlist_1",
       status: "downloading",
       // the flat bar every existing consumer reads is the *run's*, unchanged
@@ -1484,7 +1538,7 @@ describe("playlist progress", () => {
     handle.resolve({ filePath: "/downloads/a.mp4" })
     await running
 
-    expect(events[0]).toEqual({
+    expect(events[1]).toEqual({
       downloadId: "combined_1",
       status: "downloading",
       progress: 42.5,

@@ -343,8 +343,11 @@ describe("what a pinterest/tiktok download hands the renderer", () => {
     const { response, handle } = await startSimpleDownload(harness)
 
     expect(response.data.status).toBe("started")
-    // nothing has finished yet: the reply went out while the process ran
-    expect(lastEvent(harness.events)).toBeUndefined()
+    // the run has announced itself and nothing else: the reply went out while
+    // the process ran
+    expect(lastEvent(harness.events)).toEqual(
+      expect.objectContaining({ status: "downloading", indeterminate: true })
+    )
 
     handle.resolve({ filePath: "/downloads/pin.mp4" })
     await settle()
