@@ -1,6 +1,6 @@
 {
   "name": "cliply-desktop",
-  "version": "0.3.6",
+  "version": "0.4.0",
   "description": "Desktop YouTube downloader with segment support",
   "main": "src/main/index.js",
   "homepage": "./",
