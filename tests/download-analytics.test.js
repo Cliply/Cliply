@@ -328,10 +328,12 @@ describe("what a pinterest/tiktok download hands the renderer", () => {
   })
 
   it("reports a finished download on the event, not in the reply", async () => {
-    // the filename the old resolved result carried is on the completed event,
-    // which is the only place the renderer will look for it once the row lives
-    // in the downloads list
+    // the three fields the old resolved result carried are on the completed
+    // event, which is the only place the renderer will look for them once the
+    // row lives in the downloads list. the reservation is deleted as that event
+    // goes out, so nothing can go back for them afterwards
     const harness = createHandlers()
+    jest.spyOn(fs, "statSync").mockReturnValue({ size: 5 })
 
     const { response, handle } = await startSimpleDownload(harness)
 
@@ -347,7 +349,9 @@ describe("what a pinterest/tiktok download hands the renderer", () => {
         downloadId: "download_1",
         status: "completed",
         progress: 100,
-        filename: "pin.mp4"
+        filename: "pin.mp4",
+        file_path: "/downloads/pin.mp4",
+        file_size: 5
       })
     )
   })

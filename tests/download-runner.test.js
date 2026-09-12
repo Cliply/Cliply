@@ -3,6 +3,8 @@
 
 const { EventEmitter } = require("events")
 
+const fs = require("fs")
+
 const { DownloadRunner } = require("../src/main/services/download-runner")
 const { ERROR_CODES } = require("../src/main/services/ytdlp-engine")
 const { ERROR_CATEGORIES } = require("../src/main/utils/error-taxonomy")
@@ -101,6 +103,7 @@ describe("terminal events", () => {
   test("completion carries the filename the renderer shows", async () => {
     const { runner, events } = createRunner()
     const handle = new FakeHandle()
+    jest.spyOn(fs, "statSync").mockReturnValue({ size: 5 * 1024 * 1024 })
 
     const running = runner.run({ ...BASE, createHandle: () => handle })
     await settle()
@@ -112,8 +115,36 @@ describe("terminal events", () => {
     expect(terminal.status).toBe("completed")
     expect(terminal.progress).toBe(100)
     expect(terminal.filename).toBe("My Video_720p_123.mp4")
+    // the reservation is deleted by now, so an event that did not say where the
+    // file is and how big it is would be the last chance to ask
+    expect(terminal.file_path).toBe("/downloads/My Video_720p_123.mp4")
+    expect(terminal.file_size).toBe(5 * 1024 * 1024)
     expect(result.success).toBe(true)
     expect(result.download_id).toBe("combined_1")
+    // the event and the result agree, because they are read off the same two
+    // values rather than each computed from the engine's
+    expect(result.file_path).toBe(terminal.file_path)
+    expect(result.file_size).toBe(terminal.file_size)
+
+    jest.restoreAllMocks()
+  })
+
+  test("a completion the engine named no file for keeps its old shape", async () => {
+    // fileSizeOf answers 0 for a stat that failed as much as for one that never
+    // happened, and "0 bytes" on a finished row is worse than no size at all
+    const { runner, events } = createRunner()
+    const handle = new FakeHandle()
+
+    const running = runner.run({ ...BASE, createHandle: () => handle })
+    await settle()
+
+    handle.resolve({})
+    await running
+
+    const terminal = events[events.length - 1]
+    expect(terminal.status).toBe("completed")
+    expect(terminal).not.toHaveProperty("file_path")
+    expect(terminal).not.toHaveProperty("file_size")
   })
 
   test("failure carries the message and the stderr detail for the report", async () => {
@@ -1291,6 +1322,10 @@ describe("playlist outcomes", () => {
     expect(terminal.files).toEqual(["/downloads/PL/001 - One [aaa] 1080p.mp4"])
     expect(result.success).toBe(true)
     expect(result.items_saved).toBe(1)
+    // a playlist has no single file, so the last one it saved is what file_path
+    // names. `files` is what a playlist row reads, and the result has always
+    // carried the same pair
+    expect(terminal.file_path).toBe(result.file_path)
   })
 
   test("archive skips are reported as reused and never counted as saved", async () => {

@@ -436,6 +436,27 @@ class DownloadRunner {
       status: STATUS.COMPLETED,
       progress: 100,
       filename,
+      /**
+       * where the file went and how big it is, in the spelling the result has
+       * always used them under.
+       *
+       * the reservation is gone by the time this event lands, so a consumer
+       * that missed them here cannot ask for them afterwards: a status lookup
+       * has nothing left to read. the ipc reply used to carry both for the
+       * simple platforms and no longer does, and a downloads panel wants a size
+       * on a finished row.
+       *
+       * only when there is a path to report. `fileSizeOf` answers 0 for a stat
+       * that failed as much as for one that never happened, and an event
+       * claiming a zero-byte file is worse than one that says nothing - so a
+       * completion the engine named no file for keeps exactly the shape it had.
+       *
+       * a playlist's `filePath` is whichever video landed last (see the result
+       * YtdlpOperation assembles), so these two describe that one file and not
+       * the run. `files` and the item counts beside them are what a playlist
+       * row is built from; analytics omits its own size for the same reason.
+       */
+      ...(filePath ? { file_path: filePath, file_size: fileSize } : null),
       ...tally,
       ...(skipped ? { category: skipped } : null)
     })
