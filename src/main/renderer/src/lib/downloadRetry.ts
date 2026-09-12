@@ -23,6 +23,7 @@ import {
 } from "@/lib/api"
 import { localizeError, t } from "@/lib/i18n"
 import { downloadsActions, type DownloadRow } from "@/lib/stores/downloadsStore"
+import { reportActions } from "@/lib/stores/reportStore"
 import { showDownloadErrorToast } from "@/lib/toast-utils"
 
 /**
@@ -124,6 +125,30 @@ export async function retryDownload(row: DownloadRow): Promise<void> {
       category
     })
 
+    /**
+     * staged before the toast, because the toast is what offers to report it
+     *
+     * without this the Report action opens a dialog with no context at all
+     * (`ReportIssueDialog` renders nothing without one), or - worse - whatever
+     * failure was staged earlier in the session, which is a different download
+     * and a different url. every other path to this toast stages first
+     * (`onError` in `useMediaDownload`, `announceFailed` in `DownloadEvents`),
+     * and this one has no progress event behind it to repair the omission.
+     *
+     * english on purpose, like every line of a report: the maintainer reading
+     * the issue is not the user who filed it.
+     */
+    reportActions.stage({
+      shortMessage: message,
+      details: error instanceof DownloadError ? error.details : undefined,
+      category,
+      platform: row.platform,
+      // the report knows two kinds of download; a playlist of audio is audio,
+      // the same answer `DownloadEvents` gives for a row of its own
+      downloadType: isAudioRequest(row, request) ? "audio" : "video",
+      videoUrl: request.url
+    })
+
     // the row carries the failure either way; this is so the user who pressed
     // Retry hears that nothing started, wherever they are looking
     showDownloadErrorToast(
@@ -134,6 +159,18 @@ export async function retryDownload(row: DownloadRow): Promise<void> {
     )
   }
 }
+
+/**
+ * whether what was asked for is audio, which is not the same as its kind
+ *
+ * a playlist of audio is a playlist row and an audio download, and the request
+ * is the only thing that knows which - the same way `usePlaylistDownload`
+ * decides what to call its own failures.
+ */
+const isAudioRequest = (row: DownloadRow, request: DownloadRequest): boolean =>
+  row.kind === "audio" ||
+  (row.kind === "playlist" &&
+    (request as PlaylistDownloadRequest).type === "audio")
 
 /**
  * send the request on the channel its kind belongs to

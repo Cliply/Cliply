@@ -311,3 +311,91 @@ describe("the highlight", () => {
     expect(store().highlightedId).toBeNull()
   })
 })
+
+/**
+ * the ring on its own is not the whole answer to a duplicate click: the list is
+ * newest first and it scrolls, so the download being pointed at is usually
+ * below the fold by the time there are enough of them for anyone to click twice
+ * - and a marker nobody sees expires in two seconds.
+ *
+ * jsdom implements no scrolling at all, so the panel calls through a guard and
+ * these stub the prototype. what is asserted is which row was revealed, which
+ * is the part jsdom can answer.
+ */
+describe("revealing the highlighted row", () => {
+  let scrollIntoView: ReturnType<typeof vi.fn>
+
+  beforeEach(() => {
+    scrollIntoView = vi.fn()
+    Object.defineProperty(Element.prototype, "scrollIntoView", {
+      value: scrollIntoView,
+      configurable: true,
+      writable: true
+    })
+
+    store().add(row({ downloadId: "older", title: "Older", startedAt: 1 }))
+    store().add(row({ downloadId: "newer", title: "Newer", startedAt: 2 }))
+  })
+
+  afterEach(() => {
+    delete (Element.prototype as { scrollIntoView?: unknown }).scrollIntoView
+  })
+
+  test("scrolls the row a duplicate click named into view", () => {
+    render(<DownloadsPanel />)
+    open()
+
+    // the panel opened on its own has nothing to reveal
+    expect(scrollIntoView).not.toHaveBeenCalled()
+
+    act(() => store().setHighlighted("older"))
+
+    expect(scrollIntoView).toHaveBeenCalledTimes(1)
+    // as little movement as it takes, rather than yanking the row to the middle
+    expect(scrollIntoView).toHaveBeenCalledWith({ block: "nearest" })
+    expect(
+      scrollIntoView.mock.instances[0].getAttribute("data-download-id")
+    ).toBe("older")
+  })
+
+  /**
+   * the duplicate rule opens the panel and highlights in one go
+   * (`findLive` in the hooks), so the highlight is usually set before the list
+   * has been rendered at all.
+   */
+  test("and reveals it when the highlight arrives before the panel does", () => {
+    render(<DownloadsPanel />)
+
+    act(() => store().setHighlighted("older"))
+
+    expect(scrollIntoView).not.toHaveBeenCalled()
+
+    open()
+
+    expect(
+      scrollIntoView.mock.instances[0].getAttribute("data-download-id")
+    ).toBe("older")
+  })
+
+  test("leaves the list alone for a row it does not know", () => {
+    render(<DownloadsPanel />)
+    open()
+
+    act(() => store().setHighlighted("never-heard-of-it"))
+
+    expect(scrollIntoView).not.toHaveBeenCalled()
+  })
+
+  // the panel must not throw where there is no scrolling to do, which is every
+  // test in this suite that did not stub the prototype
+  test("survives a dom that cannot scroll", () => {
+    delete (Element.prototype as { scrollIntoView?: unknown }).scrollIntoView
+
+    render(<DownloadsPanel />)
+
+    expect(() => {
+      open()
+      act(() => store().setHighlighted("older"))
+    }).not.toThrow()
+  })
+})

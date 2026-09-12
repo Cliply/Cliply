@@ -1,6 +1,6 @@
 import { AnimatePresence, motion } from "framer-motion"
 import { X } from "lucide-react"
-import { useEffect } from "react"
+import { useEffect, useRef } from "react"
 
 import { useT } from "@/lib/i18n"
 import {
@@ -40,6 +40,7 @@ export function DownloadsPanel() {
   const hydrated = useDownloadsStore((state) => state.hydrated)
   const rows = useDownloadRows()
   const activeCount = useActiveCount()
+  const listRef = useRef<HTMLDivElement | null>(null)
 
   const hasFinished = rows.some((row) => !isLiveRow(row))
 
@@ -70,6 +71,39 @@ export function DownloadsPanel() {
 
     return () => clearTimeout(timer)
   }, [highlightedId, setHighlighted])
+
+  /**
+   * ...and the row it names is brought to where it can be seen
+   *
+   * the ring alone is not the answer to "you already asked for this one": the
+   * list is newest first and it scrolls, so the download being pointed at is
+   * often below the fold, or above it if the user was reading their history.
+   * A marker nobody sees expires in two seconds and the duplicate click looks
+   * like it did nothing at all.
+   *
+   * `block: "nearest"` so the list moves as little as it has to, and matched by
+   * walking the rows rather than through a selector, which would have to escape
+   * an id that came off disk. jsdom implements no scrolling at all, hence the
+   * guard: the panel must not throw in a test that only renders it.
+   */
+  useEffect(() => {
+    if (!open || !highlightedId) return
+
+    const node = Array.from(listRef.current?.children ?? []).find(
+      (child) => child.getAttribute("data-download-id") === highlightedId
+    )
+
+    if (
+      node instanceof HTMLElement &&
+      typeof node.scrollIntoView === "function"
+    ) {
+      node.scrollIntoView({ block: "nearest" })
+    }
+    // the rows deliberately do not appear here: a highlight is only ever set
+    // for a row `findLive` just found, so it is on screen in the same commit,
+    // and re-running this on every progress event would drag the list back
+    // under a user who scrolled away during the two seconds the ring lasts
+  }, [open, highlightedId])
 
   return (
     <AnimatePresence>
@@ -131,7 +165,7 @@ export function DownloadsPanel() {
 
           <div className="flex-1 overflow-y-auto px-3 py-3">
             {rows.length > 0 ? (
-              <div className="flex flex-col gap-2">
+              <div ref={listRef} className="flex flex-col gap-2">
                 {rows.map((row) => (
                   <DownloadRow
                     key={row.downloadId}
