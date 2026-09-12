@@ -545,6 +545,24 @@ describe("readiness", () => {
     await expect(history.ready).resolves.toBeUndefined()
   })
 
+  /**
+   * a row a crash left `downloading` is a finished row by the time anyone can
+   * read it, so a clear that arrived while the file was still being read
+   * removed it like any other finished row.
+   */
+  test("a clear during the read covers a row the file left running", async () => {
+    write(JSON.stringify([row({ status: "downloading" })]))
+    const release = deferReadFile(history)
+    history.load()
+
+    const clearing = history.clear()
+    release(JSON.parse(fs.readFileSync(filePath, "utf8")))
+    await clearing
+
+    expect(history.list()).toEqual([])
+    expect(stored()).toEqual([])
+  })
+
   test("clear waits for the file rather than clearing an empty list", async () => {
     write(JSON.stringify([row({ status: "completed" })]))
     const release = deferReadFile(history)
@@ -570,6 +588,24 @@ describe("readiness", () => {
     release(JSON.parse(fs.readFileSync(filePath, "utf8")))
     await marking
 
+    expect(stored()[0].status).toBe("interrupted")
+  })
+
+  /**
+   * the quit path marks, then cancels. A frozen run cancels itself the moment
+   * the queue closes, and that `cancelled` reaches the rows at once now - so
+   * the marking has to reach them at once too, or the row it was meant to save
+   * is written as a download the user never stopped.
+   */
+  test("interruptLive marks the rows before a cancel that follows it can land", async () => {
+    await history.upsert(row({ status: "downloading" }))
+
+    const marking = history.interruptLive()
+    // the frozen run, settling a moment later
+    history.upsert(row({ status: "cancelled" }))
+    await marking
+
+    expect(history.list()[0].status).toBe("interrupted")
     expect(stored()[0].status).toBe("interrupted")
   })
 

@@ -230,7 +230,16 @@ class IPCHandlers {
     // how many of those landed in this session, which is how a queued write
     // works out which download it is writing about
     this.sessionCompletions = 0
-    this.lifetimeReady = this.loadLifetimeCount()
+    /**
+     * ...and the list is sent again once it lands.
+     *
+     * a window that read the list before this resolved was answered with a
+     * count of zero. The read awaits this now, but a reply can still be built
+     * on one side of it and delivered on the other, and one push costs nothing.
+     */
+    this.lifetimeReady = this.loadLifetimeCount().then(() => {
+      this.publishList()
+    })
     this.completionWrites = this.lifetimeReady
 
     // drives engine downloads and forwards their progress to the renderer
@@ -1757,10 +1766,16 @@ class IPCHandlers {
    */
   async handleGetList(_event) {
     try {
-      // the file has to have been read, or a window that opened in the first
-      // moments of the session would be told this install has no history - and
-      // the next push is a download away
-      await this.history.ready
+      /**
+       * both reads have to have landed.
+       *
+       * the history, or a window that opened in the first moments of the
+       * session would be told this install has no downloads; and the lifetime
+       * counter, or it would be told the number is zero - and nothing corrects
+       * that until the next download finishes, which on a quiet install is
+       * never. The pushes carry both, so this is only about the first answer.
+       */
+      await Promise.all([this.history.ready, this.lifetimeReady])
 
       return this.createSuccess(this.listSnapshot())
     } catch (error) {

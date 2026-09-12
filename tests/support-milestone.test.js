@@ -46,7 +46,12 @@ function harness(startingCount = 0, overrides = {}) {
     webContents: { send: (channel, payload) => sent.push({ channel, payload }) }
   }
 
-  return { handlers, sent, captured, settingsStore, read: () => stored }
+  // the coffee ask only: the handlers also push the downloads list, which has
+  // nothing to do with milestones
+  const asks = () =>
+    sent.filter(({ channel }) => channel === IPC_CHANNELS.SUPPORT_MILESTONE)
+
+  return { handlers, sent, asks, captured, settingsStore, read: () => stored }
 }
 
 // let the fire-and-forget promise chain settle
@@ -85,14 +90,13 @@ describe("when the ask appears", () => {
   test.each([[5], [15], [40], [60], [100]])(
     "the %sth download asks",
     async (n) => {
-      const { handlers, sent } = harness(n - 1)
+      const { handlers, asks } = harness(n - 1)
 
       handlers.noteCompletedDownload()
       await settle()
 
-      expect(sent).toHaveLength(1)
-      expect(sent[0].channel).toBe(IPC_CHANNELS.SUPPORT_MILESTONE)
-      expect(sent[0].payload).toEqual({ count: n })
+      expect(asks()).toHaveLength(1)
+      expect(asks()[0].payload).toEqual({ count: n })
     }
   )
 
@@ -100,25 +104,25 @@ describe("when the ask appears", () => {
   test.each([[1], [4], [6], [14], [16], [39], [41], [59], [61], [99], [101], [500]])(
     "the %sth download says nothing",
     async (n) => {
-      const { handlers, sent } = harness(n - 1)
+      const { handlers, asks } = harness(n - 1)
 
       handlers.noteCompletedDownload()
       await settle()
 
-      expect(sent).toEqual([])
+      expect(asks()).toEqual([])
     }
   )
 
   // the point of the sequence: it ends
   test("nothing is ever sent again after the last milestone", async () => {
-    const { handlers, sent } = harness(100)
+    const { handlers, asks } = harness(100)
 
     for (let i = 0; i < 200; i++) {
       handlers.noteCompletedDownload()
       await settle()
     }
 
-    expect(sent).toEqual([])
+    expect(asks()).toEqual([])
   })
 })
 
@@ -139,7 +143,7 @@ describe("when it must stay out of the way", () => {
    * must not be reported as a failed one.
    */
   test("and a counter that could not be read still counts, quietly", async () => {
-    const { handlers, sent, read } = harness(4, {
+    const { handlers, asks, read } = harness(4, {
       readAll: jest.fn().mockRejectedValue(new Error("unreadable"))
     })
 
@@ -147,7 +151,7 @@ describe("when it must stay out of the way", () => {
     handlers.noteCompletedDownload()
     await settle()
 
-    expect(sent).toEqual([])
+    expect(asks()).toEqual([])
     expect(read().downloads_completed).toBe(1)
   })
 
@@ -236,15 +240,15 @@ describe("what analytics can answer", () => {
 // one file goes uncounted and the user is asked for a coffee twice at once.
 describe("two downloads finishing together", () => {
   test("counts both, and asks only once", async () => {
-    const { handlers, sent, read } = harness(4)
+    const { handlers, asks, read } = harness(4)
 
     handlers.noteCompletedDownload()
     handlers.noteCompletedDownload()
     await settle()
 
     expect(read().downloads_completed).toBe(6)
-    expect(sent).toHaveLength(1)
-    expect(sent[0].payload).toEqual({ count: 5 })
+    expect(asks()).toHaveLength(1)
+    expect(asks()[0].payload).toEqual({ count: 5 })
   })
 
   // and the analytics half must not double count either, or the shown rate is

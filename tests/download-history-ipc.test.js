@@ -66,7 +66,10 @@ function createWorkspace() {
 }
 
 // a second launch of the app over the same userData folder
-function createHandlers({ userDataPath, outputDir }, { history = null } = {}) {
+function createHandlers(
+  { userDataPath, outputDir },
+  { history = null, settings = null } = {}
+) {
   const handles = []
 
   const engine = {
@@ -87,7 +90,9 @@ function createHandlers({ userDataPath, outputDir }, { history = null } = {}) {
     ytdlpUpdater: null,
     settingsStore: {
       ensureDownloadPath: jest.fn().mockResolvedValue(outputDir),
-      setPotEnabled: jest.fn().mockResolvedValue({ success: true })
+      setPotEnabled: jest.fn().mockResolvedValue({ success: true }),
+      writeSettings: jest.fn().mockResolvedValue(undefined),
+      ...settings
     },
     ...(history ? { downloadHistory: history } : null)
   })
@@ -314,11 +319,15 @@ describe("across two launches", () => {
 })
 
 describe("the list main pushes and answers with", () => {
-  /** every downloads:list push this window has been sent */
+  /**
+   * every downloads:list push this window has been sent, past the one the
+   * lifetime counter sends when its own read lands
+   */
   const pushes = (handlers) =>
     handlers.mainWindow.webContents.send.mock.calls
       .filter(([channel]) => channel === "downloads:list")
       .map(([, snapshot]) => snapshot)
+      .slice(1)
 
   test("get-list answers with the rows and the count", async () => {
     const workspace = createWorkspace()
@@ -460,6 +469,59 @@ describe("the list main pushes and answers with", () => {
     ]
     expect(seqs).toEqual([...seqs].sort((a, b) => a - b))
     expect(new Set(seqs).size).toBe(seqs.length)
+  })
+
+  /**
+   * the count is a second read, and the list carries it. A reply given before
+   * that read lands says this install has downloaded nothing, and on a quiet
+   * install nothing corrects it until the next download finishes.
+   */
+  test("get-list waits for the lifetime count as well as the history", async () => {
+    const workspace = createWorkspace()
+    let release
+    const held = new Promise((resolve) => {
+      release = resolve
+    })
+
+    const { handlers } = createHandlers(workspace, {
+      settings: {
+        readAll: jest.fn(async () => {
+          await held
+          return { downloads_completed: 128 }
+        })
+      }
+    })
+
+    const answering = handlers.handleGetList(null)
+    release()
+
+    expect((await answering).data.lifetimeCompleted).toBe(128)
+  })
+
+  test("...and the list is sent again once that read lands", async () => {
+    const workspace = createWorkspace()
+    let release
+    const held = new Promise((resolve) => {
+      release = resolve
+    })
+
+    const { handlers } = createHandlers(workspace, {
+      settings: {
+        readAll: jest.fn(async () => {
+          await held
+          return { downloads_completed: 128 }
+        })
+      }
+    })
+
+    release()
+    await handlers.lifetimeReady
+
+    const sent = handlers.mainWindow.webContents.send.mock.calls
+      .filter(([channel]) => channel === "downloads:list")
+      .map(([, snapshot]) => snapshot)
+
+    expect(sent.at(-1).lifetimeCompleted).toBe(128)
   })
 
   test("remove-history refuses a request with no download id", async () => {

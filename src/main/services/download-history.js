@@ -107,7 +107,6 @@ class DownloadHistory {
       // the moment they are recorded (see upsert), so the file is the older
       // half of the truth by the time it arrives, and a clear or a removal that
       // landed in the window is applied to it here rather than undone
-      const kept = this.survivors(stored)
       let interrupted = false
 
       /**
@@ -116,21 +115,30 @@ class DownloadHistory {
        * own live rows are in memory rather than in what was just read, and they
        * are genuinely running, so the marking is applied to the file's rows
        * alone.
+       *
+       * it happens before the clear below, not after: a row a crash left
+       * `downloading` is a finished row by the time anyone can read it, and a
+       * clear that arrived while this read was in flight removed it like any
+       * other finished row.
        */
-      const older = kept.map((row) => {
-        if (!LIVE_STATUSES.has(row.status)) return row
+      const older = stored
+        .filter((row) => row)
+        .map((row) => {
+          if (!LIVE_STATUSES.has(row.status)) return row
 
-        interrupted = true
-        return { ...row, status: INTERRUPTED }
-      })
+          interrupted = true
+          return { ...row, status: INTERRUPTED }
+        })
 
-      this.rows = normalizeRows([...this.rows, ...older], this.limit)
+      const kept = this.survivors(older)
+
+      this.rows = normalizeRows([...this.rows, ...kept], this.limit)
       this.loaded = true
 
       // a row of the file that did not survive is a row the file still holds:
       // the clear that dropped it had nothing in memory to write about, so this
       // is where that write happens
-      if (interrupted || kept.length !== stored.length) {
+      if (interrupted || kept.length !== older.length) {
         await this.persist()
       }
     })
@@ -222,20 +230,23 @@ class DownloadHistory {
    * was interrupted, which is true, rather than cancelled, which would name the
    * user as the one who stopped it.
    *
+   * the marking happens here and now, like every other change to these rows.
+   * Queued behind the writes ahead of it, it lost a race it must not lose: a
+   * frozen run cancels itself, its `cancelled` reaches the rows first, and the
+   * interruption that arrives afterwards is refused by its own rule.
+   *
    * @returns {Promise<void>} settles when the write has been attempted
    */
-  async interruptLive() {
-    // the rows to mark are the ones in the file, so a quit arriving while the
-    // read is still in flight has to let it land first. awaited out here rather
-    // than inside the work: the chain is fifo, and work that waits on a promise
-    // sitting further down its own chain waits forever
-    await this.ready
+  interruptLive() {
+    const changed = this.markLiveInterrupted()
 
-    return this.enqueue(async () => {
-      if (this.markLiveInterrupted()) {
-        await this.persist()
-      }
-    })
+    // the file read, if it is still in flight, marks its own live rows (see
+    // load): they belong to a run that is over either way
+    if (!changed && this.loaded) {
+      return Promise.resolve()
+    }
+
+    return this.enqueue(() => this.persist())
   }
 
   /**
