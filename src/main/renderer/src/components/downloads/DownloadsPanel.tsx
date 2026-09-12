@@ -2,6 +2,7 @@ import { AnimatePresence, motion } from "framer-motion"
 import { X } from "lucide-react"
 import { useEffect, useRef } from "react"
 
+import { MONO } from "@/lib/fonts"
 import { useT } from "@/lib/i18n"
 import {
   isLiveRow,
@@ -117,12 +118,23 @@ export function DownloadsPanel() {
           transition={{ duration: 0.25, ease: "easeInOut" }}
           className={cn(
             "fixed inset-y-0 right-0 z-50 flex w-[340px] flex-col",
-            "border-l border-border bg-background shadow-2xl"
+            // the app's card surface, standing on its edge: the same white-80
+            // blur, slate border and shadow `PlaylistHeader` and
+            // `VideoDownloadButton` draw, minus the radius a full-height drawer
+            // has no use for
+            "border-l-2 border-slate-300/50 bg-white/80 backdrop-blur-sm",
+            "shadow-2xl shadow-black/10",
+            "dark:border-slate-700/50 dark:bg-slate-800/60",
+            // the family every card sets on its own container. the panel is
+            // mounted in `App` outside the routes, so there is no card above it
+            // to inherit from, and the body's `font-sans` resolves to an
+            // undefined `--font-sans` and leaves the browser's serif behind
+            "font-space-grotesk"
           )}
         >
-          <header className="flex-shrink-0 border-b border-border px-4 py-3">
+          <header className="flex-shrink-0 border-b border-slate-300/50 px-4 py-3 dark:border-slate-700/50">
             <div className="flex items-center justify-between gap-2">
-              <h2 className="text-sm font-medium text-slate-800 dark:text-slate-100">
+              <h2 className="text-sm font-medium text-slate-900 dark:text-white">
                 {t("downloads.title")}
               </h2>
 
@@ -141,7 +153,10 @@ export function DownloadsPanel() {
             </div>
 
             <div className="mt-1 flex items-baseline justify-between gap-2">
-              <span className="font-mono text-[11px] leading-4 tabular-nums text-slate-500 dark:text-slate-400">
+              <span
+                className="text-[11px] leading-4 tabular-nums text-slate-600 dark:text-slate-400"
+                style={{ fontFamily: MONO }}
+              >
                 {activeCount > 0
                   ? t("downloads.active", { n: activeCount })
                   : ""}
@@ -151,8 +166,9 @@ export function DownloadsPanel() {
                 type="button"
                 onClick={() => clearFinished()}
                 disabled={!hasFinished}
+                style={{ fontFamily: MONO }}
                 className={cn(
-                  "font-mono text-[11px] leading-4 text-slate-500 transition-colors duration-200",
+                  "text-[11px] leading-4 text-slate-600 transition-colors duration-200",
                   "hover:text-cyan-700 dark:text-slate-400 dark:hover:text-cyan-300",
                   "disabled:pointer-events-none disabled:opacity-40",
                   "focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-400/40"
@@ -192,10 +208,10 @@ function EmptyState() {
 
   return (
     <div className="px-2 py-8 text-center">
-      <p className="text-[13px] font-medium text-slate-600 dark:text-slate-300">
+      <p className="text-[13px] font-medium text-slate-900 dark:text-white">
         {t("downloads.emptyTitle")}
       </p>
-      <p className="mt-1.5 text-[11px] leading-4 text-muted-foreground">
+      <p className="mt-1.5 text-[11px] leading-4 text-slate-600 dark:text-slate-400">
         {t("downloads.emptyBody")}
       </p>
     </div>

@@ -2,6 +2,7 @@ import { motion } from "framer-motion"
 import { Download } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
+import { MONO } from "@/lib/fonts"
 import { useT } from "@/lib/i18n"
 import { useActiveCount, useDownloadsStore } from "@/lib/stores/downloadsStore"
 import { cn } from "@/lib/utils"
@@ -49,10 +50,11 @@ export function DownloadsToggle() {
 
         {count > 0 && (
           <span
+            style={{ fontFamily: MONO }}
             className={cn(
               "absolute -right-1 -top-1 flex h-[18px] min-w-[18px]",
               "items-center justify-center rounded-full px-1",
-              "bg-cyan-600 font-mono text-[10px] leading-none tabular-nums text-white",
+              "bg-cyan-600 text-[10px] leading-none tabular-nums text-white",
               "shadow-sm"
             )}
           >

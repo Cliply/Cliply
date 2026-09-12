@@ -17,6 +17,7 @@ import {
 import { requestStop } from "@/lib/cancelIntent"
 import { canRetry, retryDownload } from "@/lib/downloadRetry"
 import { videoLabel } from "@/lib/downloadKinds"
+import { MONO } from "@/lib/fonts"
 import { formatFileSize } from "@/lib/format"
 import { localizeError, useT, type Key } from "@/lib/i18n"
 import {
@@ -55,8 +56,11 @@ export function DownloadRow({ row, highlighted = false }: DownloadRowProps) {
     <div
       data-download-id={row.downloadId}
       className={cn(
-        "flex flex-col gap-2 rounded-xl border px-3 py-2.5",
-        "border-slate-200/70 bg-white/60 dark:border-slate-700/50 dark:bg-slate-800/40",
+        // a card, drawn the way every card in the app is: the radius, the
+        // two-pixel slate border and the white-80 blur off `PlaylistHeader`
+        "flex flex-col gap-2 rounded-xl border-2 px-3 py-2.5",
+        "border-slate-300/50 bg-white/80 backdrop-blur-sm shadow-lg",
+        "dark:border-slate-700/50 dark:bg-slate-800/60",
         "transition-shadow duration-200",
         // the ring is the answer to "you already asked for this one": it says
         // which row, and then stops, because a permanent marker on a row the
@@ -65,23 +69,29 @@ export function DownloadRow({ row, highlighted = false }: DownloadRowProps) {
       )}
     >
       <span
-        className="truncate text-[13px] font-medium text-slate-800 dark:text-slate-100"
+        className="truncate text-[13px] font-medium text-slate-900 dark:text-white"
         title={row.title || undefined}
       >
         {title}
       </span>
 
       <div className="flex items-baseline justify-between gap-2">
+        {/* the same pill `PlaylistRow` gives a video that has landed, down to
+            the cyan it is drawn in */}
         <span
           className={cn(
-            "shrink-0 rounded-full px-2 py-0.5 font-mono text-[10.5px] leading-4",
+            "shrink-0 rounded-full px-2 py-0.5 text-[10.5px] leading-4",
             "bg-cyan-100 text-cyan-700 dark:bg-cyan-950/60 dark:text-cyan-300"
           )}
+          style={{ fontFamily: MONO }}
         >
           {chipOf(row, t)}
         </span>
 
-        <span className="truncate font-mono text-[11px] leading-4 tabular-nums text-slate-500 dark:text-slate-400">
+        <span
+          className="truncate text-[11px] leading-4 tabular-nums text-slate-600 dark:text-slate-400"
+          style={{ fontFamily: MONO }}
+        >
           {standingOf(row, t)}
         </span>
       </div>
@@ -143,6 +153,7 @@ export function DownloadRow({ row, highlighted = false }: DownloadRowProps) {
           <RowAction
             icon={<RotateCcw className="h-3 w-3" />}
             label={t("downloads.retry")}
+            tone="accent"
             disabled={!canRetry(row)}
             title={canRetry(row) ? undefined : t("downloads.retryUnavailable")}
             onClick={() => void retryDownload(row)}
@@ -184,9 +195,18 @@ function LiveProgress({ row, label }: { row: Row; label: string }) {
     <ProgressBar value={row.progress} isIndeterminate={indeterminate}>
       <ProgressBarLabel className="sr-only">{label}</ProgressBarLabel>
       <ProgressBarTrack />
+      {/*
+        the family is set here rather than left to the slot: `ProgressBarMeta`
+        and `ProgressBarValue` ask for `font-mono`, which resolves to an
+        undefined `--font-mono` and so inherits the panel's Space Grotesk. the
+        speed, the eta and the percentage are numbers that should not reflow as
+        they tick, so they get the real monospace stack
+      */}
       <div className="flex items-baseline justify-between gap-2">
-        <ProgressBarMeta className="truncate">{meta}</ProgressBarMeta>
-        <ProgressBarValue />
+        <ProgressBarMeta className="truncate" style={{ fontFamily: MONO }}>
+          {meta}
+        </ProgressBarMeta>
+        <ProgressBarValue style={{ fontFamily: MONO }} />
       </div>
     </ProgressBar>
   )
@@ -198,7 +218,7 @@ interface RowActionProps {
   onClick: () => void
   disabled?: boolean
   title?: string
-  tone?: "neutral" | "danger"
+  tone?: "neutral" | "danger" | "accent"
 }
 
 /**
@@ -207,6 +227,10 @@ interface RowActionProps {
  * the same shape as the stop control on the inline card (`StopButton` in
  * `DownloadProgressBar`), because it is the same control in a narrower place:
  * neutral until you reach for it, then either the app's error red or its slate.
+ *
+ * retry is the exception, and takes the `accent` tone: it is the one thing to
+ * do with a row that failed, so it wears the cyan the app gives a primary
+ * action (`VideoDownloadButton`) rather than waiting to be hovered.
  */
 function RowAction({
   icon,
@@ -222,13 +246,17 @@ function RowAction({
       onClick={onClick}
       disabled={disabled}
       title={title}
+      style={{ fontFamily: MONO }}
       className={cn(
         "flex shrink-0 items-center gap-1 rounded-lg border px-2 py-0.5",
-        "font-mono text-[11px] leading-4 transition-colors duration-200 ease-out",
-        "border-slate-200/70 text-slate-500 dark:border-slate-700/60 dark:text-slate-400",
-        tone === "danger"
-          ? "hover:border-red-300/80 hover:text-red-600 dark:hover:border-red-500/40 dark:hover:text-red-400"
-          : "hover:border-cyan-300/80 hover:text-cyan-700 dark:hover:border-cyan-500/40 dark:hover:text-cyan-300",
+        "text-[11px] leading-4 transition-colors duration-200 ease-out",
+        tone === "accent"
+          ? "border-cyan-300/80 text-cyan-700 hover:bg-cyan-100/70 dark:border-cyan-500/40 dark:text-cyan-300 dark:hover:bg-cyan-950/50"
+          : "border-slate-200/70 text-slate-500 dark:border-slate-700/60 dark:text-slate-400",
+        tone === "danger" &&
+          "hover:border-red-300/80 hover:text-red-600 dark:hover:border-red-500/40 dark:hover:text-red-400",
+        tone === "neutral" &&
+          "hover:border-cyan-300/80 hover:text-cyan-700 dark:hover:border-cyan-500/40 dark:hover:text-cyan-300",
         "disabled:pointer-events-none disabled:opacity-40",
         "focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-400/40"
       )}

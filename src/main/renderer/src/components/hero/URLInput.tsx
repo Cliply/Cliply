@@ -4,15 +4,13 @@ import { useEffect, useState } from "react"
 import type { UseFormReturn } from "react-hook-form"
 
 import { track } from "@/lib/analytics"
+import { MONO } from "@/lib/fonts"
 import { useDownloadPath } from "@/lib/hooks/useDownloadPath"
 import { useT, type Key } from "@/lib/i18n"
 import { PLATFORM_LIST, PLATFORM_REGISTRY } from "@/lib/platform-config"
 import { DEMO_PLAYLIST_URL } from "@/lib/playlistView"
 import { useAppStore, type Platform } from "@/lib/stores/store"
 import { cn } from "@/lib/utils"
-
-const MONO =
-  'Geist Mono, ui-monospace, SFMono-Regular, "SF Mono", Consolas, "Liberation Mono", Menlo, monospace'
 
 interface URLInputProps {
   form: UseFormReturn<{ url: string }>

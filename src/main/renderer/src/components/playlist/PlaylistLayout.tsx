@@ -98,9 +98,16 @@ export function PlaylistLayout() {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.5 }}
-            className="flex-1 flex flex-col space-y-3 xl:overflow-y-auto"
+            className="flex-1 flex flex-col space-y-3 min-h-0 xl:overflow-hidden"
           >
-            <PlaylistHeader info={playlistInfo} phase={phase} />
+            {/* the header keeps its own height and the list takes the rest:
+                the scroll lives in the list at `xl`, not around the pair of
+                them, so the rows run to the bottom of the window */}
+            <PlaylistHeader
+              info={playlistInfo}
+              phase={phase}
+              className="shrink-0"
+            />
             <PlaylistList phase={phase} />
           </motion.div>
         </div>

@@ -46,7 +46,11 @@ export function CompactSearch({
             placeholder={t("url.replacePlaceholder")}
             disabled={isLoading}
             className={cn(
-              "w-full h-12 pl-12 pr-16 rounded-xl border transition-all duration-200",
+              // the padding has to clear both controls on the right, not one:
+              // the clear button and the submit button are 2rem each, with the
+              // cluster's own inset and gap between them, so a long url used to
+              // run underneath the cross
+              "w-full h-12 pl-12 pr-24 rounded-xl border transition-all duration-200",
               "dark:bg-slate-800/60 dark:border-slate-700/50 dark:text-white dark:placeholder:text-slate-500",
               "dark:focus:bg-slate-700/70 dark:focus:border-slate-600",
               "bg-white/80 border-slate-300/50 text-slate-900 placeholder:text-slate-500",
@@ -56,14 +60,20 @@ export function CompactSearch({
             )}
           />
 
-          <div className="absolute right-2 flex items-center gap-1">
+          <div className="absolute right-2 flex items-center gap-1.5">
             {form.watch("url") && (
               <Button
                 type="button"
                 variant="ghost"
                 size="sm"
                 onClick={handleClear}
-                className="h-8 w-8 p-0 hover:bg-slate-100 dark:hover:bg-slate-700"
+                // a surface of its own, the same rounded square the submit
+                // button beside it is: without one the cross sat on the input's
+                // background and read as the last character of the url
+                className={cn(
+                  "h-8 w-8 rounded-lg p-0 text-slate-500 hover:bg-slate-100 hover:text-slate-900",
+                  "dark:text-slate-400 dark:hover:bg-slate-700 dark:hover:text-slate-100"
+                )}
               >
                 <X className="h-4 w-4" />
               </Button>
