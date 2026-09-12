@@ -50,6 +50,9 @@ const event = (
 })
 
 const store = () => useDownloadsStore.getState()
+
+/** let a reply from main, and the reconciliation behind it, land */
+const flush = () => new Promise((resolve) => setTimeout(resolve, 0))
 const rowOf = (downloadId: string) =>
   store().rows.find((known) => known.downloadId === downloadId)
 
@@ -559,6 +562,95 @@ describe("clearing and removing", () => {
     expect(mocks.removeHistory).toHaveBeenCalledWith("done")
   })
 
+  /**
+   * the clear and main's clear do not always mean the same rows: a download
+   * that finishes between the click and main handling the request is live on
+   * this side and terminal on that one, so main drops it and this keeps it -
+   * and the row sat in the panel until the next launch lost it.
+   */
+  test("a completion crossing the clear goes with main's answer", async () => {
+    store().hydrate([], [], 5)
+    store().add(row({ downloadId: "crossing", status: "downloading" }))
+    // main saw the completion first, so its answer holds nothing at all
+    mocks.clearHistory.mockResolvedValue([])
+
+    store().clearFinished()
+    store().applyEvent(
+      event({
+        downloadId: "crossing",
+        status: "completed",
+        progress: 100,
+        lifetimeCompleted: 6
+      })
+    )
+    await flush()
+
+    expect(store().rows).toEqual([])
+    // the clear never touches the number; the completion is what moved it
+    expect(store().lifetimeCompleted).toBe(6)
+  })
+
+  test("a row that arrived after the clear was sent survives it", async () => {
+    store().add(row({ downloadId: "old", status: "completed" }))
+    mocks.clearHistory.mockResolvedValue([])
+
+    store().clearFinished()
+    // main had not heard of this one when it built that answer
+    store().add(row({ downloadId: "new", status: "downloading" }))
+    await flush()
+
+    expect(store().rows.map((known) => known.downloadId)).toEqual(["new"])
+  })
+
+  test("and a row main still has is kept", async () => {
+    store().add(row({ downloadId: "live", status: "downloading" }))
+    mocks.clearHistory.mockResolvedValue([
+      { download_id: "live", status: "downloading" } as DownloadHistoryRow
+    ])
+
+    store().clearFinished()
+    await flush()
+
+    expect(store().rows.map((known) => known.downloadId)).toEqual(["live"])
+  })
+
+  /**
+   * a snapshot asked for before the clear describes a history that no longer
+   * exists. Landing it afterwards put every cleared row back.
+   */
+  test("a snapshot read before the clear cannot restore what it removed", async () => {
+    const generation = store().generation
+    store().add(row({ downloadId: "old", status: "completed" }))
+    mocks.clearHistory.mockResolvedValue([])
+
+    store().clearFinished()
+    store().hydrate(
+      [],
+      [{ download_id: "old", status: "completed" } as DownloadHistoryRow],
+      0,
+      generation
+    )
+    await flush()
+
+    expect(store().rows).toEqual([])
+  })
+
+  test("and neither can a re-read that was in flight", async () => {
+    const generation = store().generation
+    store().add(row({ downloadId: "old", status: "completed" }))
+    mocks.clearHistory.mockResolvedValue([])
+
+    store().clearFinished()
+    store().adopt(
+      [],
+      [{ download_id: "old", status: "completed" } as DownloadHistoryRow],
+      generation
+    )
+    await flush()
+
+    expect(store().rows).toEqual([])
+  })
+
   test("a history write that fails costs nothing", async () => {
     vi.spyOn(console, "error").mockImplementation(() => {})
     mocks.clearHistory.mockRejectedValue(new Error("disk full"))
@@ -744,6 +836,107 @@ describe("where the file landed", () => {
     )
 
     expect(rowOf("old")?.filePath).toBeUndefined()
+  })
+})
+
+/**
+ * the answer to a download main admitted after this window read its list: ask
+ * again, and take only what is missing. `hydrate`'s "main wins" rule is right
+ * at startup, when the store has nothing better, and wrong afterwards, when
+ * every row it holds has been kept current by the events since.
+ */
+describe("adopting rows main has and this list does not", () => {
+  test("adds an active row the store never heard of", () => {
+    store().adopt(
+      [
+        {
+          downloadId: "late",
+          status: "downloading",
+          progress: 12,
+          type: "combined",
+          platform: "youtube",
+          title: "Admitted after the read",
+          label: "1080p mp4"
+        } as DownloadStatus
+      ],
+      []
+    )
+
+    expect(rowOf("late")).toMatchObject({
+      title: "Admitted after the read",
+      status: "downloading"
+    })
+  })
+
+  test("and a finished one out of the history", () => {
+    store().adopt(
+      [],
+      [
+        {
+          download_id: "late",
+          status: "completed",
+          title: "Landed while we were away"
+        } as DownloadHistoryRow
+      ]
+    )
+
+    expect(rowOf("late")?.status).toBe("completed")
+  })
+
+  test("leaves every row it already has exactly as it is", () => {
+    store().add(row({ downloadId: "d1", status: "completed", progress: 100 }))
+
+    store().adopt(
+      [
+        {
+          downloadId: "d1",
+          status: "downloading",
+          progress: 5,
+          type: "combined",
+          platform: "youtube",
+          title: "An older title",
+          label: "1080p mp4"
+        } as DownloadStatus
+      ],
+      []
+    )
+
+    expect(rowOf("d1")).toMatchObject({
+      status: "completed",
+      progress: 100,
+      title: "My Holiday Video"
+    })
+  })
+
+  test("and says nothing when there is nothing to add", () => {
+    store().add(row({ downloadId: "d1" }))
+    const before = store().rows
+
+    store().adopt([], [])
+
+    // the same array, so nothing that reads the list re-renders for an answer
+    // that told it nothing
+    expect(store().rows).toBe(before)
+  })
+
+  test("the newest download is still first", () => {
+    store().add(row({ downloadId: "older", startedAt: 1 }))
+
+    store().adopt(
+      [],
+      [
+        {
+          download_id: "newer",
+          status: "completed",
+          started_at: 9
+        } as DownloadHistoryRow
+      ]
+    )
+
+    expect(store().rows.map((known) => known.downloadId)).toEqual([
+      "newer",
+      "older"
+    ])
   })
 })
 

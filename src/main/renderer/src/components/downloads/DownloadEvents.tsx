@@ -65,6 +65,25 @@ export function DownloadEvents() {
     let buffered: BufferedEvent[] | null = []
     let mounted = true
 
+    /**
+     * the ids this window has already asked main about
+     *
+     * an id neither the store nor main knows is a download nothing can say
+     * anything about, and every later event for it would ask again: a dead id
+     * reported at four updates a second is four reads a second. Asked once,
+     * dropped thereafter.
+     */
+    const askedAbout = new Set<string>()
+
+    /**
+     * the events waiting on a re-read of main's snapshot, and the read itself
+     *
+     * one read for all of them, whatever arrives while it is in flight: a
+     * download admitted after hydration sends progress like any other, and a
+     * read per event would be a request per percent.
+     */
+    let adopting: BufferedEvent[] | null = null
+
     const handleProgress = (event: DownloadProgress) => {
       // read before the store is touched, only to learn whose event this is. an
       // id nothing knows yet is not a row we could invent: it would have no
@@ -78,7 +97,85 @@ export function DownloadEvents() {
 
       reconcileCancelIntent(event)
 
-      if (known) announce(known, event)
+      if (known) {
+        announce(known, event)
+        return
+      }
+
+      // ...and an id we do not have, once the startup window has closed, is
+      // main's to explain: it admitted a download this window never saw
+      if (!buffered) askMain(event)
+    }
+
+    /**
+     * ask main for its snapshot again, because an id turned up that we lack
+     *
+     * the case is a start whose acknowledgement never reached a renderer: main
+     * was still preparing the download folder when the window reloaded, so
+     * neither snapshot mentioned it, and then it was reserved and run. Without
+     * this the panel has no row for a download holding a slot - no Stop, no
+     * outcome - until the next launch reads it out of the history.
+     *
+     * the event that provoked the read is kept and replayed after the merge,
+     * exactly as the startup window does: main writes the finished row before
+     * it answers, so a completion that started the read still lands on the row
+     * the answer brings, and the outcome is announced once.
+     */
+    const askMain = (event: DownloadProgress) => {
+      if (askedAbout.has(event.downloadId)) return
+
+      askedAbout.add(event.downloadId)
+
+      if (adopting) {
+        // a read is already on its way: it will carry this id too
+        adopting.push({ event, handled: false })
+        return
+      }
+
+      adopting = [{ event, handled: false }]
+
+      // the generation the read is issued under. a "clear history" between the
+      // question and the answer makes the answer describe a list that no longer
+      // exists, and the store drops it rather than restoring what was cleared
+      const generation = downloadsActions.generation()
+
+      Promise.all([downloadApi.getAllDownloads(), downloadApi.getHistory()])
+        .then(([active, history]) => {
+          if (!mounted) return
+
+          settleAdoption(() =>
+            downloadsActions.adopt(active, history, generation)
+          )
+        })
+        .catch((error: unknown) => {
+          // nothing to adopt and nothing to replay onto: the ids stay in
+          // `askedAbout`, so this is one failed read rather than one per event
+          console.error("Failed to re-read the downloads list:", error)
+
+          if (mounted) settleAdoption(() => {})
+        })
+    }
+
+    /**
+     * merge what main sent, then replay what arrived while it was sending
+     *
+     * the same shape as `settle` below and for the same reasons: the rows come
+     * first so the replay writes the newest state over them, and the
+     * announcements come last so a row is described as it finally stands. An id
+     * main did not know either leaves no row, and its events are dropped.
+     */
+    const settleAdoption = (merge: () => void) => {
+      const replay = adopting ?? []
+      adopting = null
+
+      merge()
+
+      for (const { event } of replay) downloadsActions.applyEvent(event)
+
+      for (const { event } of replay) {
+        const row = downloadsActions.rowOf(event.downloadId)
+        if (row) announce(row, event)
+      }
     }
 
     /**
@@ -100,10 +197,17 @@ export function DownloadEvents() {
       for (const { event } of replay) downloadsActions.applyEvent(event)
 
       for (const { event, handled } of replay) {
-        if (handled) continue
-
         const row = downloadsActions.rowOf(event.downloadId)
-        if (row) announce(row, event)
+
+        // an id the snapshot did not carry either: main may have admitted it
+        // while this window was reading, which is the same question `askMain`
+        // answers for every event after this point
+        if (!row) {
+          askMain(event)
+          continue
+        }
+
+        if (!handled) announce(row, event)
       }
     }
 
@@ -115,6 +219,8 @@ export function DownloadEvents() {
     // remembers, and the lifetime count the panel shows above them. the count
     // is its own channel because the history reply is the rows array itself
     // (see handleGetHistory in ipc-handlers.js)
+    const generation = downloadsActions.generation()
+
     Promise.all([
       downloadApi.getAllDownloads(),
       downloadApi.getHistory(),
@@ -122,7 +228,9 @@ export function DownloadEvents() {
     ])
       .then(([active, history, lifetime]) => {
         if (mounted) {
-          settle(() => downloadsActions.hydrate(active, history, lifetime))
+          settle(() =>
+            downloadsActions.hydrate(active, history, lifetime, generation)
+          )
         }
       })
       .catch((error: unknown) => {

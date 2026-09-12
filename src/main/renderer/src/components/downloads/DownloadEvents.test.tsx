@@ -102,6 +102,9 @@ const emit = async (payload: Partial<DownloadProgress>) => {
   })
 }
 
+/** let a re-read of main's snapshot, and the replay behind it, land */
+const settled = () => act(async () => {})
+
 async function mount() {
   const view = render(<DownloadEvents />)
   // the two hydration reads settle a microtask after mount
@@ -316,10 +319,11 @@ describe("events that arrive while the list is still loading", () => {
 })
 
 describe("what an event does to the list", () => {
-  test("an id the list does not have is ignored", async () => {
+  test("an id neither the list nor main has is ignored", async () => {
     await mount()
 
     await emit({ downloadId: "from-a-previous-life" })
+    await settled()
 
     expect(store().rows).toEqual([])
     expect(mocks.successToast).not.toHaveBeenCalled()
@@ -337,6 +341,142 @@ describe("what an event does to the list", () => {
     )
     // the two rows are separate: this is the regression the one store fixes
     expect(store().rows.find((r) => r.downloadId === "d1")?.progress).toBe(40)
+  })
+})
+
+/**
+ * a download main admitted after this window had already read its list
+ *
+ * the hole the final review reproduced: a start whose acknowledgement never
+ * reached a renderer (main was still preparing the download folder when the
+ * window reloaded), so neither snapshot mentioned it and it was reserved
+ * afterwards. Its events name an id the store has no row for, `applyEvent`
+ * drops those by design, and the download holds a slot with nothing on screen
+ * to stop it.
+ */
+describe("a download admitted after the list was read", () => {
+  test("an unknown id is asked about, and becomes a row", async () => {
+    await mount()
+    mocks.getAllDownloads.mockResolvedValue([live({ downloadId: "late" })])
+
+    await emit({ downloadId: "late", status: "downloading", progress: 12 })
+    await settled()
+
+    const adopted = store().rows.find((r) => r.downloadId === "late")
+
+    expect(adopted?.title).toBe("My Holiday Video")
+    // main's row, with the event that provoked the read replayed over it: the
+    // snapshot is already out of date by the time it arrives
+    expect(adopted?.progress).toBe(12)
+    // and it can be stopped, which is the whole point: the request came with it
+    expect(adopted?.request).toMatchObject({ url: "https://youtu.be/abc" })
+  })
+
+  test("and an unknown completion becomes a finished row, announced once", async () => {
+    await mount()
+    mocks.getHistory.mockResolvedValue([
+      {
+        download_id: "late",
+        status: "completed",
+        kind: "video",
+        platform: "youtube",
+        title: "Landed while we were away",
+        label: "1080p mp4",
+        started_at: 10
+      } as DownloadHistoryRow
+    ])
+
+    await emit({
+      downloadId: "late",
+      status: "completed",
+      progress: 100,
+      filename: "late.mp4"
+    })
+    await settled()
+
+    expect(store().rows.map((r) => r.downloadId)).toEqual(["late"])
+    expect(store().rows[0].status).toBe("completed")
+    expect(mocks.successToast).toHaveBeenCalledTimes(1)
+  })
+
+  /**
+   * main's snapshot wins at startup because the store has nothing better. Here
+   * it does: every row it holds has been kept current by the events since, and
+   * an older snapshot landing on top of them would undo a completion or drag a
+   * bar backwards.
+   */
+  test("the answer adds rows and overwrites none", async () => {
+    await mount()
+    store().add(row())
+    mocks.getAllDownloads.mockResolvedValue([
+      live({ downloadId: "d1", progress: 5, title: "An older title" }),
+      live({ downloadId: "late" })
+    ])
+
+    await emit({ downloadId: "late", status: "downloading", progress: 12 })
+    await settled()
+
+    const known = store().rows.find((r) => r.downloadId === "d1")
+
+    expect(known?.progress).toBe(40)
+    expect(known?.title).toBe("My Holiday Video")
+  })
+
+  test("an id main does not know either is dropped, and asked about once", async () => {
+    await mount()
+    const reads = mocks.getHistory.mock.calls.length
+
+    await emit({ downloadId: "ghost", status: "downloading", progress: 1 })
+    await settled()
+    await emit({ downloadId: "ghost", status: "downloading", progress: 2 })
+    await settled()
+
+    expect(store().rows).toEqual([])
+    expect(mocks.getHistory).toHaveBeenCalledTimes(reads + 1)
+  })
+
+  // a run reports four times a second: a read per event would be a read per
+  // percent, and two unknown ids at once are still one question
+  test("everything that arrives during the read shares it", async () => {
+    await mount()
+    const reads = mocks.getHistory.mock.calls.length
+
+    let answer!: (rows: DownloadStatus[]) => void
+    mocks.getAllDownloads.mockReturnValue(
+      new Promise<DownloadStatus[]>((resolve) => {
+        answer = resolve
+      })
+    )
+
+    await emit({ downloadId: "late", status: "downloading", progress: 1 })
+    await emit({ downloadId: "later", status: "downloading", progress: 1 })
+    await emit({ downloadId: "late", status: "downloading", progress: 2 })
+
+    expect(mocks.getHistory).toHaveBeenCalledTimes(reads + 1)
+
+    await act(async () => {
+      answer([live({ downloadId: "late" }), live({ downloadId: "later" })])
+    })
+    await settled()
+
+    expect(
+      store()
+        .rows.map((r) => r.downloadId)
+        .sort()
+    ).toEqual(["late", "later"])
+  })
+
+  // the read is one more thing that can fail, and a panel missing a row is not
+  // a reason to break the app
+  test("a read that fails leaves the list alone", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {})
+    await mount()
+    mocks.getAllDownloads.mockRejectedValue(new Error("no list for you"))
+
+    await emit({ downloadId: "late", status: "downloading", progress: 1 })
+    await settled()
+
+    expect(store().rows).toEqual([])
   })
 })
 
