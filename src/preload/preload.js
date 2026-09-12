@@ -18,6 +18,8 @@ const IPC_CHANNELS = {
 
   // download management
   DOWNLOAD_PROGRESS: "download:progress",
+  // the whole list, pushed after every change to it
+  DOWNLOADS_LIST: "downloads:list",
   SUPPORT_MILESTONE: "support:milestone",
   DOWNLOAD_COMPLETE: "download:complete",
   DOWNLOAD_ERROR: "download:error",
@@ -116,12 +118,25 @@ contextBridge.exposeInMainWorld("electronAPI", {
     cancel: (downloadId) =>
       invoke(IPC_CHANNELS.DOWNLOAD_CANCEL, { downloadId }),
     getStatus: (downloadId) => invoke("download:get-status", { downloadId }),
-    getAll: () => invoke("download:get-all"),
+    // the whole list, read once at startup and after that only if something
+    // needs a re-sync: main pushes it on downloads:list whenever it changes
+    getList: () => invoke("download:get-list"),
+    clearHistory: () => invoke("download:clear-history"),
+    removeHistory: (downloadId) =>
+      invoke("download:remove-history", { downloadId }),
     onProgress: (callback) => {
       const handler = (_event, data) => callback(data)
       ipcRenderer.on(IPC_CHANNELS.DOWNLOAD_PROGRESS, handler)
       return () =>
         ipcRenderer.removeListener(IPC_CHANNELS.DOWNLOAD_PROGRESS, handler)
+    },
+    // the list itself, pushed after every change to it: a reservation, a slot
+    // taken, a settle, a clear, a removal. never for progress
+    onList: (callback) => {
+      const handler = (_event, data) => callback(data)
+      ipcRenderer.on(IPC_CHANNELS.DOWNLOADS_LIST, handler)
+      return () =>
+        ipcRenderer.removeListener(IPC_CHANNELS.DOWNLOADS_LIST, handler)
     }
   },
 
@@ -150,6 +165,11 @@ contextBridge.exposeInMainWorld("electronAPI", {
     openExternal: (url) => invoke(IPC_CHANNELS.SYSTEM_OPEN_EXTERNAL, { url }),
     getDiagnostics: () => invoke(IPC_CHANNELS.SYSTEM_GET_DIAGNOSTICS),
     openDownloadFolder: () => invoke("system:open-download-folder"),
+    // the folder a file landed in, with the file selected. main refuses any
+    // path outside the download folder (see handleShowInFolder in
+    // ipc-handlers.js), so a row whose file has moved falls back to
+    // openDownloadFolder rather than revealing something else
+    showInFolder: (path) => invoke("system:show-in-folder", { path }),
     selectDownloadFolder: () => invoke("system:select-download-folder")
   },
 
@@ -163,6 +183,9 @@ contextBridge.exposeInMainWorld("electronAPI", {
   // settings operations
   settings: {
     getDownloadPath: () => invoke("settings:get-download-path"),
+    // how many downloads this install has ever finished, for the number at the
+    // top of the panel. the same counter the support milestones are counted by
+    getDownloadCount: () => invoke("settings:get-download-count"),
     setDownloadPath: (path) => invoke("settings:set-download-path", { path })
   },
 

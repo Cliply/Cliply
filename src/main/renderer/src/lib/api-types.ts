@@ -31,13 +31,60 @@ export interface AudioTrack {
   is_original: boolean
 }
 
+/**
+ * which of the four rows a downloads list is drawing
+ *
+ * not the same question as `type`: a playlist of audio fetches audio and is
+ * still a playlist row, one that counts videos and whose stored request only
+ * the playlist channel can re-send. main answers it the same way (see
+ * historyKind in services/download-runner.js).
+ */
+export type DownloadKind = "video" | "audio" | "playlist" | "simple"
+
+/**
+ * every state a download can be found in
+ *
+ * two of these never travel as an event. `starting` is the renderer's own word
+ * for the gap between the click and main's first event, and `interrupted` is
+ * what the history rewrites a live row to when it finds one at launch.
+ */
+export type DownloadRowStatus =
+  | "queued"
+  | "starting"
+  | "downloading"
+  | "completed"
+  | "failed"
+  | "cancelled"
+  | "interrupted"
+
 export interface DownloadProgress {
   downloadId: string
-  status: "downloading" | "completed" | "failed" | "cancelled"
+  // `queued` is sent once, by a download parked behind the concurrency cap
+  status: "queued" | "downloading" | "completed" | "failed" | "cancelled"
   progress: number
   speed?: string
   eta?: string
   filename?: string
+  /**
+   * where the file went and how big it is, on a completed event only.
+   *
+   * the reservation is gone by the time this lands, so a consumer that missed
+   * them here cannot ask for them afterwards. a playlist's `file_path` is
+   * whichever video landed last rather than the run, which is why a playlist
+   * row reads the item counts instead.
+   */
+  file_path?: string
+  file_size?: number
+  /**
+   * how many downloads this install has finished, counting this one.
+   *
+   * on a completed event only, and main's own count rather than anything the
+   * renderer works out for itself: it is the number the panel shows, and a
+   * tally kept on this side cannot survive hydration replaying a completion
+   * over a snapshot older than it. camelCase like the rest of the envelope
+   * main writes, rather than the snake_case fields that came off the result.
+   */
+  lifetimeCompleted?: number
   error?: string
   // failures now arrive as events rather than a rejected invoke, so the report
   // payload's technical detail rides along with them
@@ -103,17 +150,105 @@ export interface DownloadProgress {
 
 export interface DownloadStatus {
   downloadId: string
-  status: "downloading" | "completed" | "failed" | "cancelled"
+  status: "queued" | "downloading" | "completed" | "failed" | "cancelled"
   progress: number
   filename?: string
   error?: string
   startTime?: number
   endTime?: number
+  // what this download fetches: "combined" or "audio"
+  type?: string
+  title?: string
+  platform?: string
   // a playlist is one row covering n videos, downloaded one after another; a
   // single video is one row and nothing else. `type` says what is being
   // fetched, which is the same answer for both, so this is what tells a
   // downloads list which of the two shapes to draw
   playlist?: boolean
+  /**
+   * what a renderer that reloaded mid-download rebuilds a whole row from: the
+   * words to put beside the title, and the request a retry would re-send. main
+   * keeps the request exactly as the renderer sent it, so it is snake_case and
+   * it carries the `platform` main added to it.
+   */
+  label?: string
+  request?: DownloadRequest
+}
+
+/**
+ * the request each kind of download was started from
+ *
+ * keyed by kind because that is how a retry has to read it: only the playlist
+ * channel can re-send a list of entries, and only the audio channel a mode.
+ */
+export interface DownloadRequestsByKind {
+  video: VideoDownloadRequest
+  audio: AudioDownloadRequest
+  playlist: PlaylistDownloadRequest
+  simple: PinterestDownloadRequest | TikTokDownloadRequest
+}
+
+/**
+ * any of them, as it comes back from main
+ *
+ * `platform` is main's addition (see retryRequest in ipc-handlers.js): the
+ * request is stored so it can be re-sent, and which channel to send it on is
+ * not otherwise recoverable from a url.
+ */
+export type DownloadRequest =
+  DownloadRequestsByKind[keyof DownloadRequestsByKind] & {
+    platform?: string
+  }
+
+/**
+ * the whole download list, as main built it
+ *
+ * one shape for the push on `downloads:list`, for the reply to
+ * `download:get-list`, and for what a clear or a removal answers with. Main
+ * builds it from its own memory after every change to the list, so the renderer
+ * replaces what it has rather than merging: there is no interleaving to reason
+ * about, which is what four rounds of review taught about merging pulled
+ * snapshots against live events.
+ *
+ * `seq` counts snapshots and only goes up, so a push that overtakes a reply
+ * costs nothing. `rows` are history rows - the reservations main still holds are
+ * written in the same spelling - newest first.
+ */
+export interface DownloadListSnapshot {
+  seq: number
+  lifetimeCompleted: number
+  rows: DownloadHistoryRow[]
+}
+
+/**
+ * one row of the history main keeps on disk
+ *
+ * snake_case throughout, because a row is the wire payloads written down
+ * rather than a shape of main's own. only `download_id` and `status` are
+ * promised: a row assembled from a settle alone, or read back from a file an
+ * older version wrote, can be missing any of the rest.
+ */
+export interface DownloadHistoryRow {
+  download_id: string
+  status: DownloadRowStatus
+  kind?: DownloadKind
+  platform?: string
+  title?: string
+  label?: string
+  started_at?: number
+  finished_at?: number
+  filename?: string
+  file_path?: string
+  file_size?: number
+  error?: string
+  category?: string
+  request?: DownloadRequest
+  // playlist rows only: the total is written at reserve and then again, better
+  // known, when the run settles
+  items_total?: number
+  items_saved?: number
+  items_reused?: number
+  items_skipped?: number
 }
 
 export interface SystemHealth {
@@ -217,14 +352,24 @@ export interface PinterestDownloadRequest {
   format_id?: string
   // keeps the media title in the output filename
   title?: string
+  // see AudioDownloadRequest.download_id. these two send one now for the same
+  // reason every other kind does: the download reports through progress events
+  download_id?: string
 }
 
-export interface PinterestDownloadResponse {
-  success: boolean
-  filename: string
-  file_path: string
-  file_size: number
+/**
+ * the acknowledgement a simple-platform download answers with
+ *
+ * it used to be the finished file: main awaited the whole download and replied
+ * with the filename, the path and the size. with a queue in front of it that
+ * invoke would sit open for as long as the row waited, so pinterest and tiktok
+ * now start and report through `download:progress` like every other kind, and
+ * this is only "we have it, here is the id to follow".
+ */
+export interface SimpleDownloadResponse {
   download_id: string
+  status: string
+  type: string
 }
 
 export interface TikTokVideoInfoResponse {
@@ -240,14 +385,8 @@ export interface TikTokDownloadRequest {
   format_id?: string
   // keeps the media title in the output filename
   title?: string
-}
-
-export interface TikTokDownloadResponse {
-  success: boolean
-  filename: string
-  file_path: string
-  file_size: number
-  download_id: string
+  // see PinterestDownloadRequest.download_id
+  download_id?: string
 }
 
 /**

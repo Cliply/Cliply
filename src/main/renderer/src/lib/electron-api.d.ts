@@ -10,15 +10,15 @@ import type {
   CookieTestResult,
   DownloadPathInfo,
   DownloadProgress,
+  DownloadListSnapshot,
   DownloadStatus,
   PinterestDownloadRequest,
-  PinterestDownloadResponse,
   PinterestVideoInfoResponse,
   PlaylistDownloadRequest,
   PlaylistInfoResponse,
+  SimpleDownloadResponse,
   SystemHealth,
   TikTokDownloadRequest,
-  TikTokDownloadResponse,
   TikTokVideoInfoResponse,
   UpdateInfo,
   UpdateProgress,
@@ -85,21 +85,33 @@ declare global {
         ) => Promise<IPCResponse<PinterestVideoInfoResponse>>
         download: (
           options: PinterestDownloadRequest
-        ) => Promise<IPCResponse<PinterestDownloadResponse>>
+        ) => Promise<IPCResponse<SimpleDownloadResponse>>
       }
       tiktok: {
         getInfo: (url: string) => Promise<IPCResponse<TikTokVideoInfoResponse>>
         download: (
           options: TikTokDownloadRequest
-        ) => Promise<IPCResponse<TikTokDownloadResponse>>
+        ) => Promise<IPCResponse<SimpleDownloadResponse>>
       }
       download: {
         cancel: (
           downloadId: string
         ) => Promise<IPCResponse<{ cancelled: boolean }>>
         getStatus: (downloadId: string) => Promise<IPCResponse<DownloadStatus>>
-        getAll: () => Promise<IPCResponse<DownloadStatus[]>>
+        /**
+         * the whole list, read once at startup and for a re-sync. all three
+         * answer with the list as it stands afterwards, and main pushes the
+         * same shape on `onList` whenever it changes.
+         */
+        getList: () => Promise<IPCResponse<DownloadListSnapshot>>
+        clearHistory: () => Promise<IPCResponse<DownloadListSnapshot>>
+        removeHistory: (
+          downloadId: string
+        ) => Promise<IPCResponse<DownloadListSnapshot>>
         onProgress: (callback: (data: DownloadProgress) => void) => () => void
+        onList: (
+          callback: (snapshot: DownloadListSnapshot) => void
+        ) => () => void
       }
       // optional: an older preload has no support bridge, and the dialog has
       // to be able to mount against one
@@ -112,11 +124,28 @@ declare global {
           url: string
         ) => Promise<IPCResponse<{ opened: boolean; url: string }>>
         openDownloadFolder: () => Promise<IPCResponse<{ success: boolean }>>
+        /**
+         * reveal one downloaded file in its folder.
+         *
+         * main refuses a path outside the download folder, so this can fail
+         * for a file that has been moved: the caller falls back to
+         * `openDownloadFolder`. optional, because an older preload has no such
+         * bridge and the panel still has to open a folder there.
+         */
+        showInFolder?: (
+          path: string
+        ) => Promise<IPCResponse<{ shown: boolean; path: string }>>
         selectDownloadFolder: () => Promise<IPCResponse<{ folderPath: string }>>
         getDiagnostics: () => Promise<IPCResponse<ReportEnvironment>>
       }
       settings: {
         getDownloadPath: () => Promise<IPCResponse<DownloadPathInfo>>
+        /**
+         * how many downloads this install has finished, ever. optional for the
+         * same reason as `showInFolder`: an older preload does not have it, and
+         * a panel with no number is better than a panel that throws.
+         */
+        getDownloadCount?: () => Promise<IPCResponse<{ count: number }>>
         setDownloadPath: (
           path: string
         ) => Promise<IPCResponse<DownloadPathInfo>>

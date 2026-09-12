@@ -109,7 +109,10 @@ jest.mock("../src/main/utils/analytics-helpers", () => ({
   extractQuality: jest.fn()
 }))
 
+const { EventEmitter } = require("events")
+
 const CliplyApp = require("../src/main/index")
+const { DownloadRunner } = require("../src/main/services/download-runner")
 const { Analytics } = require("../src/main/services/analytics")
 const { SettingsStore } = require("../src/main/services/settings-store")
 const IPCHandlers = require("../src/main/ipc-handlers")
@@ -117,6 +120,19 @@ const helpers = require("../src/main/utils/analytics-helpers")
 
 // the promise chains hang several thens deep; one macrotask drains them all
 const settle = () => new Promise((resolve) => setImmediate(resolve))
+
+/**
+ * the same, for a test holding fake timers
+ *
+ * setImmediate is one of the timers jest fakes, so settle() would sit there
+ * unfired. these are real microtasks and run whatever the clock is doing; ten
+ * is well past the deepest await chain in the quit path
+ */
+async function microtasks() {
+  for (let index = 0; index < 10; index++) {
+    await Promise.resolve()
+  }
+}
 
 function toolsSubmenu() {
   const [template] = mockElectron.Menu.buildFromTemplate.mock.calls.at(-1)
@@ -172,7 +188,10 @@ beforeEach(() => {
 
   mockIpcHandlers = {
     setMainWindow: jest.fn(),
-    cleanup: jest.fn()
+    cleanup: jest.fn(),
+    // the download history the handlers own. only the quit path reaches it
+    // from here, and only to say "whatever is running was interrupted"
+    history: { interruptLive: jest.fn().mockResolvedValue(undefined) }
   }
 
   // a stand-in that keeps the one part of the real contract this suite leans
@@ -1373,6 +1392,10 @@ describe("quitting", () => {
 
     try {
       const quitting = app.onBeforeQuit(quitEvent())
+      // the history is marked before any of this, so the cap on the flush is
+      // armed a few awaits later - advancing the clock before that would
+      // advance it past a timer that does not exist yet
+      await microtasks()
       jest.advanceTimersByTime(10000)
       await quitting
 
@@ -1405,6 +1428,101 @@ describe("quitting", () => {
     expect(mockElectron.app.quit).toHaveBeenCalledTimes(1)
   })
 
+  it("marks the running downloads interrupted before anything cancels them", async () => {
+    // cancelAll settles every live download as `cancelled` on the way out, and
+    // the user would reopen the app to rows they never cancelled. the history
+    // drops those late writes, but only for rows it has already marked - so
+    // this has to happen first, and it has to be awaited
+    await app.onBeforeQuit(quitEvent())
+
+    const history = mockIpcHandlers.history.interruptLive
+    expect(history).toHaveBeenCalledTimes(1)
+    expect(history.mock.invocationCallOrder[0]).toBeLessThan(
+      mockEngine.awaitShutdown.mock.invocationCallOrder[0]
+    )
+    expect(history.mock.invocationCallOrder[0]).toBeLessThan(
+      mockIpcHandlers.cleanup.mock.invocationCallOrder[0]
+    )
+  })
+
+  it("holds the quit open until the history has been written", async () => {
+    // a write that is only started here is a write that never happens
+    let markWritten
+    mockIpcHandlers.history.interruptLive.mockImplementation(
+      () => new Promise((resolve) => { markWritten = resolve })
+    )
+
+    const quitting = app.onBeforeQuit(quitEvent())
+    await Promise.resolve().then().then()
+
+    expect(mockEngine.awaitShutdown).not.toHaveBeenCalled()
+    expect(mockElectron.app.quit).not.toHaveBeenCalled()
+
+    markWritten()
+    await quitting
+
+    expect(mockElectron.app.quit).toHaveBeenCalledTimes(1)
+  })
+
+  it("leaves the history alone when an update is installing", async () => {
+    // nothing is being cancelled on an install quit, so there is nothing to get
+    // in front of. the rows are marked at the next launch by load() instead
+    global.isUpdating = true
+
+    try {
+      await app.onBeforeQuit(quitEvent())
+
+      expect(mockIpcHandlers.history.interruptLive).not.toHaveBeenCalled()
+    } finally {
+      global.isUpdating = false
+    }
+  })
+
+  it("does the rest of the teardown when the history cannot be marked", async () => {
+    // caught where it happens rather than by the shutdown's own catch, which
+    // would take the engine shutdown, the drain and the ipc teardown with it
+    const warn = jest.spyOn(console, "warn").mockImplementation(() => {})
+    mockIpcHandlers.history.interruptLive.mockRejectedValue(new Error("no disk"))
+
+    await app.onBeforeQuit(quitEvent())
+
+    expect(mockEngine.awaitShutdown).toHaveBeenCalledTimes(1)
+    expect(mockAnalytics.flush).toHaveBeenCalledTimes(1)
+    expect(mockIpcHandlers.cleanup).toHaveBeenCalledTimes(1)
+    expect(mockElectron.app.quit).toHaveBeenCalledTimes(1)
+    warn.mockRestore()
+  })
+
+  it("does not let a stuck history hold the app open", async () => {
+    // one rename is milliseconds. a history that never answers is stuck on
+    // something, and the wording on a row is not worth a window that will not
+    // close - so the cap gives up on it and the quit carries on
+    jest.useFakeTimers()
+    mockIpcHandlers.history.interruptLive.mockImplementation(
+      () => new Promise(() => {})
+    )
+
+    try {
+      const quitting = app.onBeforeQuit(quitEvent())
+      await microtasks()
+
+      // nothing has moved yet: the marking runs before the shutdown on purpose
+      expect(mockEngine.awaitShutdown).not.toHaveBeenCalled()
+
+      jest.advanceTimersByTime(2000)
+      await microtasks()
+      jest.advanceTimersByTime(10000)
+      await quitting
+
+      expect(mockEngine.awaitShutdown).toHaveBeenCalledTimes(1)
+      expect(mockAnalytics.flush).toHaveBeenCalledTimes(1)
+      expect(mockIpcHandlers.cleanup).toHaveBeenCalledTimes(1)
+      expect(mockElectron.app.quit).toHaveBeenCalledTimes(1)
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
   it("runs the engine shutdown wait and the analytics flush concurrently", async () => {
     // sequential waits would make a quit during an active download pay both
     // costs back to back; concurrent means a quit with nothing running is not
@@ -1426,5 +1544,96 @@ describe("quitting", () => {
 
     expect(order[0]).toBe("shutdown-start")
     expect(order[1]).toBe("flush-start")
+  })
+
+  /**
+   * the queue and the shutdown wait, which only fit together in one order
+   *
+   * driven against the real DownloadRunner: the bug was in how its queue and
+   * the engine's shutdown wait meet, and a stand-in for the queue would be a
+   * stand-in for the thing under test.
+   */
+  describe("with downloads still in flight", () => {
+    /**
+     * an engine handle, as much of one as the runner touches
+     *
+     * `cancel` settles the operation rather than rejecting it, because the
+     * runner reads the cancelled code off a rejection through the engine
+     * barrel and this suite mocks that barrel away. which terminal path a
+     * download takes is not what this is about: every one of them frees the
+     * slot (tests/download-runner.test.js pins that), and the slot is the
+     * whole question here.
+     */
+    class FakeHandle extends EventEmitter {
+      constructor() {
+        super()
+        this.promise = new Promise((resolve) => {
+          this.finish = resolve
+        })
+      }
+
+      cancel() {
+        this.finish({})
+        return true
+      }
+    }
+
+    it("never starts a queued download on the way out", async () => {
+      const spawned = []
+      const handles = []
+      const runner = new DownloadRunner({
+        engine: {},
+        sendEvent: () => {},
+        maxConcurrent: 3
+      })
+
+      const runs = ["a", "b", "c", "d", "e"].map((downloadId) =>
+        runner.run({
+          downloadId,
+          type: "combined",
+          platform: "youtube",
+          title: downloadId,
+          createHandle: () => {
+            spawned.push(downloadId)
+            const handle = new FakeHandle()
+            handles.push(handle)
+            return handle
+          }
+        })
+      )
+      await settle()
+
+      // three running, two waiting behind the cap
+      expect(spawned).toEqual(["a", "b", "c"])
+
+      app.ipcHandlers.runner = runner
+
+      // the engine's shutdown as it really works: it cancels the handles that
+      // exist when it starts and waits for those. a process spawned after this
+      // snapshot is a process nothing waits for
+      let spawnedAtShutdown = null
+
+      mockEngine.awaitShutdown.mockImplementation(async () => {
+        spawnedAtShutdown = [...spawned]
+
+        const cancelling = [...handles]
+        for (const handle of cancelling) handle.cancel()
+        await Promise.all(cancelling.map((handle) => handle.promise))
+
+        return cancelling.length
+      })
+
+      await app.onBeforeQuit(quitEvent())
+      await settle()
+
+      // d and e never became processes, so the wait above covered every one
+      // that existed
+      expect(spawnedAtShutdown).toEqual(["a", "b", "c"])
+      expect(spawned).toEqual(["a", "b", "c"])
+
+      // ...and every reservation settled rather than being left behind
+      await Promise.all(runs)
+      expect(runner.size).toBe(0)
+    })
   })
 })

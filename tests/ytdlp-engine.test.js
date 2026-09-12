@@ -222,6 +222,89 @@ describe("combined download args", () => {
   })
 })
 
+/**
+ * --concurrent-fragments, on the two operations that fetch a dash stream
+ *
+ * it used to ride only on a playlist walk. a single video is the same fetch of
+ * the same kind of fragments, and now that the runner caps how many downloads
+ * run at once the total number of open fragment requests is a number we chose
+ * rather than one the user's paste history decided.
+ */
+describe("fragment concurrency", () => {
+  const FRAGMENTS = "4"
+
+  const DOWNLOADS = {
+    combined: { height: 1080, container: "mp4" },
+    audio: { audioMode: "mp3" }
+  }
+
+  for (const [operation, extra] of Object.entries(DOWNLOADS)) {
+    test(`${operation} fetches its fragments in parallel`, () => {
+      const args = buildArgs(operation, {
+        ...PATHS,
+        ...extra,
+        url: "https://youtu.be/abc",
+        outputDir: "/downloads",
+        outputTemplate: "out.%(ext)s"
+      })
+
+      expect(valueAfter(args, "-N")).toBe(FRAGMENTS)
+      expect(args.filter((arg) => arg === "-N")).toHaveLength(1)
+    })
+
+    // a trimmed download hands the fetch to ffmpeg, which ignores the flag, so
+    // there is no special case to write - only a promise not to grow one
+    test(`${operation} keeps it when the download is trimmed`, () => {
+      const args = buildArgs(operation, {
+        ...PATHS,
+        ...extra,
+        url: "https://youtu.be/abc",
+        outputDir: "/downloads",
+        outputTemplate: "out.%(ext)s",
+        timeRange: { start: 5, end: 65 }
+      })
+
+      expect(valueAfter(args, "-N")).toBe(FRAGMENTS)
+    })
+  }
+
+  // a playlist already asked for this and its argv is unchanged; the exact
+  // position of the flag there is pinned in tests/ytdlp-playlist.test.js
+  test("a playlist still asks for the same number", () => {
+    const args = buildArgs("playlist-combined", {
+      ...PATHS,
+      url: "https://www.youtube.com/playlist?list=PL1",
+      height: 1080,
+      playlistEntries: [{ index: 1, id: "aaaaaaaaaaa" }],
+      outputDir: "/downloads",
+      outputTemplate: "out.%(ext)s"
+    })
+
+    expect(valueAfter(args, "-N")).toBe(FRAGMENTS)
+    expect(args.filter((arg) => arg === "-N")).toHaveLength(1)
+  })
+
+  // tiktok and pinterest serve one muxed file: there are no fragments to fetch
+  // in parallel, so the flag would be noise on the command line
+  test("a simple platform download asks for nothing of the sort", () => {
+    const args = buildArgs("simple", {
+      ...PATHS,
+      url: "https://tiktok.com/@a/video/1",
+      outputDir: "/downloads",
+      outputTemplate: "out.%(ext)s"
+    })
+
+    expect(args).not.toContain("-N")
+  })
+
+  // --dump-json downloads nothing at all
+  test("the metadata operations ask for nothing of the sort", () => {
+    for (const operation of ["info", "playlist-info"]) {
+      expect(buildArgs(operation, { ...PATHS, url: "https://youtu.be/abc" })).not.toContain("-N")
+    }
+  })
+})
+
 describe("nothing that downloads is run quiet", () => {
   const OPERATION_PARAMS = {
     combined: { height: 720, container: "mp4" },

@@ -32,11 +32,13 @@ const { getSimplePlatformOptions } = require("./utils/ytdlp-formats")
 const { resolveDownloadId } = require("./utils/download-id")
 
 const { DownloadRunner } = require("./services/download-runner")
+const { DownloadHistory } = require("./services/download-history")
 const { SettingsStore } = require("./services/settings-store")
 const {
   ERROR_CODES,
   PLAYLIST_CONTAINER,
-  RECORDS_UNWRITABLE
+  RECORDS_UNWRITABLE,
+  normalizeQualityTier
 } = require("./services/ytdlp-engine")
 
 const {
@@ -61,6 +63,109 @@ const {
   playlistProperties,
   shortErrorMessage
 } = require("./ipc/analytics-translation")
+
+/**
+ * the request a download row would be retried from
+ *
+ * kept in the renderer's own snake_case spelling, because it is the wire
+ * payload rather than a shape of ours: a retry hands it straight back to the
+ * same channel and it is validated again on the way in. fields that were never
+ * sent are dropped rather than carried as undefined, so a re-send is the same
+ * request the user made and not a wider one.
+ *
+ * @param {Object} fields - the validated payload fields, snake_case
+ * @returns {Object} the same, minus anything absent
+ */
+function retryRequest(fields) {
+  return Object.fromEntries(
+    Object.entries(fields).filter(([, value]) => value !== undefined)
+  )
+}
+
+/**
+ * one of the runner's reservations, in the spelling the history uses
+ *
+ * the two halves of the list have to be one shape, and the history row is the
+ * one that survives a restart, so the reservation is written the way it will be
+ * written to disk a moment later anyway (see reservationRow in
+ * services/download-runner.js).
+ *
+ * @param {Object} status - one row of runner.list()
+ * @returns {Object} the same download as a history row
+ */
+function listRow(status) {
+  return {
+    download_id: status.downloadId,
+    kind: status.playlist
+      ? "playlist"
+      : status.type === "audio"
+        ? "audio"
+        : status.platform === "tiktok" || status.platform === "pinterest"
+          ? "simple"
+          : "video",
+    platform: status.platform,
+    title: status.title,
+    label: status.label,
+    status: status.status,
+    started_at: status.startTime,
+    filename: status.filename,
+    error: status.error,
+    request: status.request
+  }
+}
+
+/**
+ * a whole, non-negative count, or none
+ *
+ * `settings.json` is a file on the user's disk and the panel draws whatever is
+ * in it: `Number(value) || 0` let through -5 for a hand-edited negative, 1.5
+ * for a fraction, and `Infinity` for the perfectly valid json string
+ * "Infinity". None of those is a number of downloads.
+ *
+ * @param {unknown} value - whatever `downloads_completed` held
+ * @returns {number} the count, floored, or 0 for anything that is not one
+ */
+function normalizeCount(value) {
+  const count = Number(value)
+
+  return Number.isFinite(count) && count > 0 ? Math.floor(count) : 0
+}
+
+/**
+ * whether anything between the download folder and this file is a symlink
+ *
+ * the lexical check in `handleShowInFolder` compares strings, and a string can
+ * be inside a folder while the file it names is not: a link at
+ * `<downloads>/elsewhere` pointing anywhere on disk makes every path under it
+ * pass. So each component below the root is `lstat`ed on the way down, and a
+ * link at any of them refuses the whole path.
+ *
+ * the root itself is not walked. A user whose download folder is a link chose
+ * that folder, and refusing it would break the app for them.
+ *
+ * a component that is not there at all is not an escape: the existence check
+ * on the target is what answers that, and it answers it as "gone" rather than
+ * as "refused".
+ *
+ * @param {string} root - the resolved download folder
+ * @param {string} inside - the target, relative to it
+ * @returns {Promise<boolean>} whether the walk found a link
+ */
+async function pathEscapes(root, inside) {
+  let walked = root
+
+  for (const segment of inside.split(path.sep)) {
+    walked = path.join(walked, segment)
+
+    try {
+      if ((await fs.promises.lstat(walked)).isSymbolicLink()) return true
+    } catch {
+      return false
+    }
+  }
+
+  return false
+}
 
 class IPCHandlers {
   constructor(services, autoUpdater = null) {
@@ -89,12 +194,64 @@ class IPCHandlers {
     // escalates without it - there is just nothing yet to escalate with
     this.potInstaller = services.potInstaller || null
 
+    /**
+     * what the downloads panel still knows after a restart
+     *
+     * `<userData>/downloads/history.json`, beside the playlist archives and
+     * resolved through the engine the same way they are. read once here, so
+     * the rows are in memory before the renderer can ask for them and before
+     * the first reservation can add to them.
+     *
+     * an engine that cannot say where userData is (a stub, a build without one)
+     * leaves the history with no file rather than leaving the app with no
+     * history: the panel works for the session, and no download fails for want
+     * of somewhere to write it down.
+     */
+    this.history =
+      services.downloadHistory ||
+      new DownloadHistory({ filePath: this.historyFilePath() })
+
+    this.history.load()
+
+
+
+    /**
+     * how many downloads this install has ever finished
+     *
+     * one number, owned here: `noteCompletedDownload` increments it, the
+     * completed event carries it and settings:get-download-count answers with
+     * it, so every place it is read agrees. `downloads_completed` in
+     * settings.json is where it survives a restart, and the read that starts it
+     * is the head of the write chain.
+     */
+    // which snapshot of the list the renderer has seen (see listSnapshot)
+    this.listSeq = 0
+    this.lifetimeCompleted = 0
+    // how many of those landed in this session, which is how a queued write
+    // works out which download it is writing about
+    this.sessionCompletions = 0
+    /**
+     * ...and the list is sent again once it lands.
+     *
+     * a window that read the list before this resolved was answered with a
+     * count of zero. The read awaits this now, but a reply can still be built
+     * on one side of it and delivered on the other, and one push costs nothing.
+     */
+    this.lifetimeReady = this.loadLifetimeCount().then(() => {
+      this.publishList()
+    })
+    this.completionWrites = this.lifetimeReady
+
     // drives engine downloads and forwards their progress to the renderer
     this.runner = new DownloadRunner({
       engine: this.engine,
       updater: this.updater,
+      history: this.history,
       sendEvent: (downloadId, payload) =>
         this.sendDownloadEvent(downloadId, payload),
+      // every reservation, every slot taken and every settle is a change to the
+      // list the panel draws, and the runner is where all three happen
+      listChanged: () => this.publishList(),
       trackEvent: (name, payload) => this.trackDownloadEvent(name, payload),
       logAudit: (operation, success, data) =>
         this.logAudit(operation, success, data)
@@ -103,15 +260,101 @@ class IPCHandlers {
     this.registerHandlers()
   }
 
-  // send one download:progress event - the channel the renderer hooks listen on
+  /**
+   * where the download history is kept
+   * @returns {string|null} the file, or null when userData cannot be resolved
+   */
+  historyFilePath() {
+    if (typeof this.engine.getUserDataPath !== "function") {
+      return null
+    }
+
+    return path.join(this.engine.getUserDataPath(), "downloads", "history.json")
+  }
+
+  /**
+   * the whole download list, as it stands right now
+   *
+   * one shape, built synchronously from memory: every reservation the runner
+   * holds, then every row the history remembers that is not one of them. The
+   * renderer replaces its list with this rather than merging it into what it
+   * has, which is the difference that ends four rounds of races - a pulled
+   * snapshot had to be reconciled against events and clears that could land on
+   * either side of it, and there was always one more ordering.
+   *
+   * `seq` orders the stream: the renderer applies a snapshot only if it is
+   * newer than the last one it applied, so a push that overtakes a reply, or a
+   * reply that arrives after the push it provoked, costs nothing. It counts
+   * snapshots rather than downloads, so it is the same number in the push and
+   * in the reply to a read.
+   *
+   * the lifetime count rides along because it changes with the same events and
+   * the panel draws the two together.
+   */
+  listSnapshot() {
+    const rows = []
+    const seen = new Set()
+
+    for (const status of this.runner.list()) {
+      seen.add(status.downloadId)
+      rows.push(listRow(status))
+    }
+
+    for (const row of this.history ? this.history.list() : []) {
+      if (seen.has(row.download_id)) continue
+      rows.push(row)
+    }
+
+    return {
+      seq: (this.listSeq += 1),
+      lifetimeCompleted: this.lifetimeCompleted,
+      rows
+    }
+  }
+
+  /**
+   * ...and the renderer hears about it
+   *
+   * called after every change to the list and after nothing else: a reserve, a
+   * slot taken, a settle, a clear, a removal. Progress is not a change to the
+   * list - it is a number on a row that already exists - and pushing the whole
+   * list four times a second per download would be a list rebuilt on every
+   * frame.
+   */
+  publishList() {
+    if (!this.mainWindow || this.mainWindow.isDestroyed()) return
+
+    this.mainWindow.webContents.send(
+      IPC_CHANNELS.DOWNLOADS_LIST,
+      this.listSnapshot()
+    )
+  }
+
+  /**
+   * send one download:progress event - the channel the renderer hooks listen on
+   *
+   * a completion is counted here, before the window is consulted: this is the
+   * one path every finished download takes, on every platform, whether or not
+   * there is an analytics exit point and whether or not there is still a window
+   * to tell. The new total rides out on the event itself (`lifetime_completed`),
+   * so the panel's number is main's number rather than a tally the renderer
+   * keeps - see the panel v2 review, where every renderer-side tally was either
+   * one too many or one too few after a hydration replay.
+   */
   sendDownloadEvent(downloadId, payload) {
+    const lifetimeCompleted =
+      payload && payload.status === "completed"
+        ? this.noteCompletedDownload()
+        : null
+
     if (!this.mainWindow || this.mainWindow.isDestroyed()) {
       return
     }
 
     this.mainWindow.webContents.send(IPC_CHANNELS.DOWNLOAD_PROGRESS, {
       downloadId,
-      ...payload
+      ...payload,
+      ...(lifetimeCompleted === null ? null : { lifetimeCompleted })
     })
   }
 
@@ -189,11 +432,12 @@ class IPCHandlers {
     }
 
     if (name === "download_completed") {
-      // every platform's completion passes through here, which is why the
-      // counter lives at this point rather than in the four places the
-      // renderer shows a success toast
-      this.noteCompletedDownload()
-
+      // the lifetime counter used to be incremented here. it moved to
+      // `sendDownloadEvent`, which is the path every completion takes whether
+      // or not there is an analytics exit point at all - and the completed
+      // event has to carry the new number, so it has to have been counted by
+      // the time the event goes out
+      //
       // a size of zero is a stat that failed, not an empty file: a download
       // that resolved always wrote something. sending the zero would report
       // an empty file and drag every average through it, so all three of the
@@ -325,41 +569,104 @@ class IPCHandlers {
    * and then it ends: 5, 15, 40, 60, 100, and never again however many hundreds
    * follow.
    *
-   * fire and forget on purpose: this hangs off the analytics hook, which the
-   * runner calls on the path where a download reports success. A settings write
-   * that fails must not turn a finished file into a failed one.
+   * **the count in memory is the count.** it is incremented here, synchronously,
+   * and everything else reads it: the completed event carries it to the panel
+   * (see sendDownloadEvent) and settings:get-download-count answers with it.
+   * the file is where it survives a restart, nothing more. The renderer counting
+   * for itself was the bug this replaced - hydration replays a completion over a
+   * snapshot older than it, and any number the renderer derives from its own
+   * rows is either one too many or one too few for the rest of the session.
    *
-   * the writes are chained because the engine allows concurrent downloads and
-   * each of these is a read, an increment and a write. Two finishing together
-   * both read 4, both write 5, and both announce milestone 5 - one file goes
-   * uncounted and the user is asked for a coffee twice in a second. The work is
-   * short and the chain never breaks, since the catch below resolves.
+   * fire and forget on purpose: this hangs off the path where a download reports
+   * success. A settings write that fails must not turn a finished file into a
+   * failed one.
+   *
+   * the write is still chained, behind the one read that starts the counter
+   * (loadLifetimeCount): the engine allows concurrent downloads, and two writes
+   * racing would leave the file holding whichever landed last rather than the
+   * total. Each chained write persists the total as it stands, so two downloads
+   * finishing together write 5 once and 5 again rather than 4 and 5 - and the
+   * milestone is decided from this call's own number, which is unique to it, so
+   * nobody is asked for a coffee twice in a second.
+   *
+   * @returns {number} how many downloads this install has now finished
    */
   noteCompletedDownload() {
-    if (!this.settings) return
+    const count = (this.lifetimeCompleted += 1)
+    // which completion of this session this is, so the work below can name its
+    // own total however many landed after it
+    const nth = (this.sessionCompletions += 1)
+
+    if (!this.settings) return count
 
     this.completionWrites = (this.completionWrites || Promise.resolve())
       .then(async () => {
-        const settings = await this.settings.readAll()
-        const previous = Number(settings.downloads_completed) || 0
-        const count = previous + 1
+        /**
+         * this download's own number, decided here rather than above.
+         *
+         * `count` is the total as this call saw it, which is the install's
+         * total the moment the file has been read - and it is read at
+         * construction, long before anything can finish. The subtraction is
+         * what keeps the rare exception honest: whatever was counted after this
+         * call is taken back off, so two downloads finishing in the same tick
+         * are the 4th and the 5th rather than the 5th twice, and nobody is
+         * asked for a coffee twice in one second.
+         */
+        const total = this.lifetimeCompleted - (this.sessionCompletions - nth)
 
-        await this.settings.writeSettings({ downloads_completed: count })
+        await this.settings.writeSettings({
+          downloads_completed: this.lifetimeCompleted
+        })
 
-        if (!SUPPORT_MILESTONES.includes(count)) return
+        if (!SUPPORT_MILESTONES.includes(total)) return
         if (!this.mainWindow || this.mainWindow.isDestroyed()) return
 
         this.mainWindow.webContents.send(IPC_CHANNELS.SUPPORT_MILESTONE, {
-          count
+          count: total
         })
 
         // captured here rather than in the renderer because this is the line
         // that decides a prompt happens. A shown event reported from the other
         // side could only ever say the dialog mounted
-        this.capture("support_prompt_shown", { milestone: count })
+        this.capture("support_prompt_shown", { milestone: total })
       })
       .catch((error) => {
         console.error("failed to record a completed download:", error.message)
+      })
+
+    return count
+  }
+
+  /**
+   * read the counter this install starts the session with, once
+   *
+   * added to rather than assigned, because a download could in principle finish
+   * while the read is in flight: what `lifetimeCompleted` holds before this
+   * lands is a count of this session's own completions, which is a delta on top
+   * of what the file says and not a total the file replaces.
+   *
+   * it is the head of `completionWrites`, so no write can persist a total that
+   * was assembled before the file had been read.
+   *
+   * @returns {Promise<void>} settles when the counter is the install's own
+   */
+  loadLifetimeCount() {
+    if (!this.settings || typeof this.settings.readAll !== "function") {
+      return Promise.resolve()
+    }
+
+    return this.settings
+      .readAll()
+      .then((settings) => {
+        this.lifetimeCompleted += normalizeCount(settings.downloads_completed)
+      })
+      .catch((error) => {
+        // a counter we could not read is a zero on the panel, not a broken app.
+        // the next completion still counts, and still writes
+        console.warn(
+          "the lifetime download count could not be read:",
+          describeError(error)
+        )
       })
   }
 
@@ -586,7 +893,12 @@ class IPCHandlers {
       "download:get-status",
       this.handleGetDownloadStatus.bind(this)
     )
-    ipcMain.handle("download:get-all", this.handleGetAllDownloads.bind(this))
+    ipcMain.handle("download:get-list", this.handleGetList.bind(this))
+    ipcMain.handle("download:clear-history", this.handleClearHistory.bind(this))
+    ipcMain.handle(
+      "download:remove-history",
+      this.handleRemoveHistory.bind(this)
+    )
 
     // cookie management
     ipcMain.handle(IPC_CHANNELS.COOKIES_TEST, this.handleTestCookies.bind(this))
@@ -624,12 +936,20 @@ class IPCHandlers {
       this.handleOpenDownloadFolder.bind(this)
     )
     ipcMain.handle(
+      "system:show-in-folder",
+      this.handleShowInFolder.bind(this)
+    )
+    ipcMain.handle(
       "system:select-download-folder",
       this.handleSelectDownloadFolder.bind(this)
     )
     ipcMain.handle(
       "settings:get-download-path",
       this.handleGetDownloadPath.bind(this)
+    )
+    ipcMain.handle(
+      "settings:get-download-count",
+      this.handleGetDownloadCount.bind(this)
     )
     ipcMain.handle(
       "settings:set-download-path",
@@ -826,7 +1146,23 @@ class IPCHandlers {
           !this.runner.reserve(downloadId, {
             type: "combined",
             platform: targetPlatform,
-            title
+            title,
+            // what a downloads list shows beside the title, and what a retry
+            // re-sends. the label is built from the tier the engine will
+            // really use rather than from the raw payload, so a container we
+            // never offered cannot put a word on the row that disagrees with
+            // the file it produces
+            label: `${height}p ${normalizeQualityTier({ height, container }).container}`,
+            request: retryRequest({
+              url,
+              title,
+              platform: targetPlatform,
+              height,
+              container,
+              audio_language: audioLanguage,
+              time_range: rawTimeRange,
+              precise_cut: preciseCut
+            })
           })
         ) {
           return this.duplicateDownloadError(downloadId)
@@ -851,8 +1187,21 @@ class IPCHandlers {
         })
       }
 
-      // tiktok / pinterest have no progress ui and their components still await
-      // completion, so these keep resolving when the file is on disk
+      /**
+       * tiktok and pinterest answer the same way every other kind does: an
+       * acknowledgement now, the rest over progress events.
+       *
+       * awaiting the run here would hold the ipc call open for however long the
+       * row waits behind the cap plus the download itself, and a download the
+       * queue cannot show is a download the queue does not cover.
+       *
+       * it also closes the last ordering gap. this was the one path that called
+       * run() outside startDownload's setImmediate, so a tiktok link pasted
+       * after a youtube one reached the semaphore first. every kind starts
+       * through startDownload now, and since nothing awaits between reserve()
+       * and it, the order runs reach the queue is the order they were accepted
+       * in (see park in services/download-runner.js).
+       */
       const outputTemplate = buildSimpleOutputTemplate({
         title,
         platform: targetPlatform
@@ -878,13 +1227,21 @@ class IPCHandlers {
         !this.runner.reserve(downloadId, {
           type: "combined",
           platform: targetPlatform,
-          title
+          title,
+          // a simple platform offers no choice at all, so the platform is the
+          // only thing there is to say about what this download is
+          label: targetPlatform,
+          request: retryRequest({ url, title, platform: targetPlatform })
         })
       ) {
         return this.duplicateDownloadError(downloadId)
       }
 
-      const result = await this.runner.run({
+      // fire and forget: the renderer follows the rest over progress events.
+      // nothing translates a failure here any more, because the runner's
+      // `failed` event already carries the wording, the details and the
+      // category, and startDownload is what notes a refusal
+      this.startDownload({
         downloadId,
         type: "combined",
         platform: targetPlatform,
@@ -893,35 +1250,11 @@ class IPCHandlers {
         createHandle
       })
 
-      if (!result.success) {
-        /**
-         * the taxonomy is on the error object, not on the wording beside it.
-         *
-         * the runner hands back three fields with three different jobs:
-         * `error.code` is the category mapError already chose, `message` is
-         * the sentence the user reads, and `details` is the raw text. reading
-         * the message here re-runs the patterns against wording written for a
-         * human, which matches almost none of them - so nearly every category
-         * would arrive at the renderer as UNKNOWN_ERROR, in the same failure
-         * the runner had just reported correctly to analytics.
-         *
-         * the error object rather than a rebuilt bag: classify() takes the
-         * explicit code when it owns one and falls back to the patterns when
-         * it does not, which is what a throw from outside the engine looks
-         * like. the adjacent catch below reads it exactly this way.
-         */
-        return this.createError(
-          result.message || "Download failed",
-          "Please try again or check your connection",
-          result.error?.code || "DOWNLOAD_FAILED",
-          {
-            details: result.details,
-            category: classify(result.error, ERROR_STAGES.DOWNLOAD).category
-          }
-        )
-      }
-
-      return this.createSuccess(result)
+      return this.createSuccess({
+        download_id: downloadId,
+        status: "started",
+        type: "combined"
+      })
     } catch (error) {
       console.error(`[${downloadId}] Combined download failed:`, error.message)
 
@@ -981,7 +1314,17 @@ class IPCHandlers {
         !this.runner.reserve(downloadId, {
           type: "audio",
           platform: "youtube",
-          title
+          title,
+          // the mode is the whole choice an audio download offers
+          label: audioMode,
+          request: retryRequest({
+            url,
+            title,
+            platform: "youtube",
+            audio_mode: audioMode,
+            audio_language: audioLanguage,
+            time_range: rawTimeRange
+          })
         })
       ) {
         return this.duplicateDownloadError(downloadId)
@@ -1229,7 +1572,26 @@ class IPCHandlers {
           platform: "youtube",
           title,
           // one row in a downloads list, covering n videos - see list()
-          playlist: true
+          playlist: true,
+          // the count is what a playlist row has instead of a quality: the
+          // ceiling applies per video and says nothing about the size of the
+          // job, which is the number the user is waiting on
+          label: `${entries.length} ${entries.length === 1 ? "video" : "videos"}`,
+          // the selection travels with it, so a retry downloads the videos
+          // that were picked rather than the whole playlist. `type` here is
+          // the wire spelling the renderer sends, which is not the runner's:
+          // a playlist of videos is "video" on the wire and "combined" to the
+          // runner, and this field is the one that gets re-sent
+          request: retryRequest({
+            url,
+            title,
+            platform: "youtube",
+            playlist_id: playlistId,
+            entries,
+            type: audioOnly ? "audio" : "video",
+            ...(audioOnly ? { audio_mode: audio } : { height: ceiling }),
+            ...(ignoreArchive === true ? { ignore_archive: true } : {})
+          })
         })
       ) {
         return this.duplicateDownloadError(downloadId)
@@ -1395,15 +1757,69 @@ class IPCHandlers {
   }
 
   // get all active downloads
-  async handleGetAllDownloads(_event) {
+  /**
+   * the renderer's one read of the list
+   *
+   * the same snapshot the pushes carry, for the first read of a window and for
+   * any re-sync: applied through the same path, ordered by the same counter, so
+   * a push that overtook the reply is not undone by it.
+   */
+  async handleGetList(_event) {
     try {
-      // getAllDownloads() on the renderer side reads response.data straight
-      // as the array the DownloadStatus[] contract promises - wrapping it in
-      // an object here was handing back something that is not that array
-      return this.createSuccess(this.runner.list())
+      /**
+       * both reads have to have landed.
+       *
+       * the history, or a window that opened in the first moments of the
+       * session would be told this install has no downloads; and the lifetime
+       * counter, or it would be told the number is zero - and nothing corrects
+       * that until the next download finishes, which on a quiet install is
+       * never. The pushes carry both, so this is only about the first answer.
+       */
+      await Promise.all([this.history.ready, this.lifetimeReady])
+
+      return this.createSuccess(this.listSnapshot())
     } catch (error) {
-      console.error("Get all downloads failed:", error.message)
-      return this.createError("Failed to get downloads")
+      console.error("Get download list failed:", error.message)
+      return this.createError("Failed to get the downloads list")
+    }
+  }
+
+  /**
+   * "clear finished": the rows with nothing left to happen to them go, and the
+   * ones still queued or running stay. answers with what is left, and with the
+   * epoch it happened at, so the panel does not have to guess which of its rows
+   * this covered.
+   *
+   * the epoch moves before the history does. A snapshot read taken between the
+   * two would otherwise carry the new number over rows this clear is about to
+   * delete, and the renderer would keep them for the rest of the session.
+   */
+  async handleClearHistory(_event) {
+    try {
+      await this.history.clear()
+      this.publishList()
+
+      return this.createSuccess(this.listSnapshot())
+    } catch (error) {
+      console.error("Clear download history failed:", error.message)
+      return this.createError("Failed to clear the download history")
+    }
+  }
+
+  // forget one row. it says nothing about the download itself - a row removed
+  // while it is still running keeps running, and cancel is the channel for that.
+  // the epoch moves for the same reason it does on a clear: this is the other
+  // way a row leaves the history
+  async handleRemoveHistory(_event, data) {
+    try {
+      this.validateRequest(data, ["downloadId"])
+      await this.history.remove(data.downloadId)
+      this.publishList()
+
+      return this.createSuccess(this.listSnapshot())
+    } catch (error) {
+      console.error("Remove download history failed:", error.message)
+      return this.createError("Failed to remove that download")
     }
   }
 
@@ -1746,6 +2162,98 @@ class IPCHandlers {
     }
   }
 
+  /**
+   * show one downloaded file where it landed
+   *
+   * the panel's "open folder" on a finished row: the file manager opens on its
+   * folder with the file selected, which is the difference between this and
+   * `handleOpenDownloadFolder` above, and the reason a path has to travel over
+   * ipc at all.
+   *
+   * **which is why the path is checked before anything is revealed.** the
+   * renderer is the only caller today and it sends back a `file_path` main
+   * itself wrote, but a channel that reveals whatever it is handed is a channel
+   * that reveals anything a compromised renderer names. So the path is resolved
+   * and compared against the download folder the same way: `path.relative`
+   * between the two, refused when it climbs out (`..`) or when it turns out to
+   * be absolute, which is what a different drive on windows looks like.
+   *
+   * lexical containment is not containment on its own, which is what
+   * `pathEscapes` is for: a symlink inside the download folder pointing
+   * anywhere else would let a name under it pass the string comparison while
+   * the file it reaches is somewhere else entirely. The folder the user
+   * configured may itself be a link - that one is their own choice - so only
+   * what lies below it is walked.
+   *
+   * `realpath` on the target is deliberately not used: a file that has since
+   * been moved would fail for a reason the caller cannot tell apart from the
+   * refusals above, and the fallback to the folder is the whole reason the row
+   * still works when the file is gone. That case is answered instead by
+   * `shown: false`, which is what the row falls back on - `showItemInFolder`
+   * returns nothing at all, so a missing file would otherwise be reported as
+   * revealed and the row would do nothing at all.
+   */
+  async handleShowInFolder(_event, data) {
+    try {
+      this.validateRequest(data, ["path"])
+
+      const target = path.resolve(data.path)
+      const root = path.resolve(await this.settings.ensureDownloadPath())
+      const inside = path.relative(root, target)
+
+      if (!inside || inside.startsWith("..") || path.isAbsolute(inside)) {
+        return this.createError("That file is not in the download folder")
+      }
+
+      if (await pathEscapes(root, inside)) {
+        return this.createError("That file is not in the download folder")
+      }
+
+      try {
+        await fs.promises.access(target)
+      } catch {
+        // gone, moved, or never written where the row remembers it. not a
+        // refusal: the row opens the download folder instead
+        return this.createSuccess({ shown: false, path: target })
+      }
+
+      const { shell } = require("electron")
+      shell.showItemInFolder(target)
+
+      return this.createSuccess({ shown: true, path: target })
+    } catch (error) {
+      console.error("Show in folder failed:", error.message)
+      return this.createError("Failed to show that file")
+    }
+  }
+
+  /**
+   * how many downloads this install has finished, ever
+   *
+   * the counter in memory, which is the same one the completed events carry, so
+   * the panel's first number and every number after it come from one place and
+   * cannot disagree about a download that finished while this read was in
+   * flight.
+   *
+   * the panel reads it from the list snapshot now (see listSnapshot), which
+   * carries it beside the rows; this channel is what the support dialog and any
+   * caller that wants the number on its own still ask.
+   */
+  async handleGetDownloadCount(_event) {
+    try {
+      // the file has to have been read: answering 0 to the one read the panel
+      // makes would put a zero on screen for an install with a hundred
+      // downloads behind it, and nothing pushes a correction until the next one
+      // finishes
+      await this.lifetimeReady
+
+      return this.createSuccess({ count: this.lifetimeCompleted })
+    } catch (error) {
+      console.error("Get download count failed:", error.message)
+      return this.createError("Failed to read the download count")
+    }
+  }
+
   // select download folder
   async handleSelectDownloadFolder(_event) {
     try {
@@ -1948,15 +2456,39 @@ class IPCHandlers {
       "cookies:import-file",
       "cookies:clear",
       "download:get-status",
-      "download:get-all",
       "system:open-download-folder",
+      "system:show-in-folder",
       "system:select-download-folder",
       "settings:get-download-path",
+      "settings:get-download-count",
       "settings:set-download-path"
     ]
 
     channels.forEach((channel) => {
       ipcMain.removeAllListeners(channel)
+    })
+
+    /**
+     * an invoke handler is not a listener, and removeAllListeners does not
+     * touch it: `ipcMain.handle` keeps its own registry, and `removeHandler` is
+     * the only thing that empties it. a channel left registered means the next
+     * `handle` for it throws, and until then the old closure - holding the old
+     * history and the old runner - is what answers the renderer.
+     *
+     * the three history channels, and the two the panel's second pass added.
+     * every channel above has the same problem and has had it since before
+     * this branch; fixing them is its own change, with its own test for each.
+     */
+    const invokeChannels = [
+      "download:get-list",
+      "download:clear-history",
+      "download:remove-history",
+      "system:show-in-folder",
+      "settings:get-download-count"
+    ]
+
+    invokeChannels.forEach((channel) => {
+      ipcMain.removeHandler(channel)
     })
   }
 }

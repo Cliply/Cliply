@@ -250,6 +250,27 @@ export const ru: Record<Key, string> = {
   "download.mergeHint": "видео и аудио объединятся автоматически",
   "download.audioHint": "аудио будет скачано в выбранном формате и диапазоне",
 
+  "downloads.title": "загрузки",
+  "downloads.toggle": "показать загрузки",
+  // the label under the number, in the three forms russian counts in: «1
+  // медиафайл скачан», «2 медиафайла скачано», «5 медиафайлов скачано». the
+  // number itself is drawn above it, so the label carries no {n}
+  "downloads.mediaDownloaded":
+    "медиафайл скачан|медиафайла скачано|медиафайлов скачано",
+  "downloads.clearHistory": "очистить историю",
+  // «здесь пока ничего нет» over «пока пусто»: the panel's other lines are
+  // sentences rather than labels, and this one sits alone in the middle of it
+  "downloads.nothingToShow": "здесь пока ничего нет",
+  "downloads.untitled": "без названия",
+  "downloads.queued": "в очереди",
+  "downloads.cancelled": "отменено",
+  "downloads.interrupted": "прервано",
+  "downloads.itemsProgress": "{done} из {total}",
+  "downloads.retry": "повторить",
+  "downloads.retryUnavailable":
+    "об этой загрузке сохранилось слишком мало, чтобы начать её заново",
+  "downloads.retryFailed": "не удалось запустить загрузку заново",
+
   "card.tabVideo": "видео",
   "card.tabAudio": "только аудио",
   "card.videoIntro": "скачивание видео с подходящей аудиодорожкой",
@@ -312,6 +333,7 @@ export const ru: Record<Key, string> = {
   "progress.downloading": "скачивание {label}",
   "progress.processing": "обработка {label}",
   "progress.startingUp": "запускаем",
+  "progress.queued": "ждёт своей очереди",
   "progress.trimming": "при обрезке прогресс не показывается",
   "progress.stop": "стоп",
   "progress.stopTitle": "остановить загрузку",

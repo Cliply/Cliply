@@ -32,7 +32,17 @@ export function PlaylistList({ phase, className }: PlaylistListProps) {
   const selectable = entries.filter(isSelectableEntry).length
 
   return (
-    <div className={cn("font-space-grotesk", className)}>
+    // on a wide window the list is a column that fills what the layout left it
+    // (see the left column in `PlaylistLayout`), so the rows reach the bottom
+    // of the window instead of stopping at a share of the viewport that knows
+    // nothing about the header above them
+    <div
+      className={cn(
+        "font-space-grotesk",
+        "xl:flex xl:min-h-0 xl:flex-1 xl:flex-col",
+        className
+      )}
+    >
       <div className="flex items-center gap-3 border-y border-slate-200/70 py-2 text-[12.5px] dark:border-slate-700/60">
         {phase === "picking" ? (
           <>
@@ -68,7 +78,13 @@ export function PlaylistList({ phase, className }: PlaylistListProps) {
         </span>
       </div>
 
-      <div className="max-h-[46vh] overflow-y-auto overscroll-contain xl:max-h-[52vh]">
+      {/*
+        the cap is for the narrow layout only, where the page is `min-h-screen`
+        and scrolls as a whole: without it a hundred rows would push the card
+        on the right off the bottom. at `xl` the page owns the viewport, so the
+        list takes the height that is left rather than a fixed slice of it
+      */}
+      <div className="max-h-[46vh] overflow-y-auto overscroll-contain xl:max-h-none xl:min-h-0 xl:flex-1">
         {entries.map((entry) => (
           <PlaylistRow
             key={`${entry.index}-${entry.id ?? "gone"}`}

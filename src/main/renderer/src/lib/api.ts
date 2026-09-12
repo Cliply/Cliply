@@ -12,6 +12,7 @@ import {
   type CookieTestResult,
   type DownloadPathInfo,
   type DownloadProgress,
+  type DownloadListSnapshot,
   type DownloadStatus,
   type PinterestDownloadRequest,
   type PinterestVideoInfoResponse,
@@ -108,6 +109,21 @@ function unwrap<T>(
 
   return response.data
 }
+
+/**
+ * a list reply, guarded
+ *
+ * an answer with nothing in it is a bridge that could not read the list rather
+ * than an install with no downloads, and `seq: 0` is never newer than anything
+ * the store has applied, so it changes nothing.
+ */
+const listSnapshot = (
+  data: DownloadListSnapshot | undefined
+): DownloadListSnapshot => ({
+  seq: data?.seq ?? 0,
+  lifetimeCompleted: data?.lifetimeCompleted ?? 0,
+  rows: data?.rows ?? []
+})
 
 // Video API functions
 export const videoApi = {
@@ -304,19 +320,70 @@ export const downloadApi = {
   },
 
   /**
-   * Get all downloads
-   * @returns Promise<DownloadStatus[]>
+   * The whole download list, as main has it. Read once at startup and after
+   * that only for a re-sync: main pushes the same snapshot on `onList`
+   * whenever the list changes.
+   * @returns Promise<DownloadListSnapshot>
    */
-  async getAllDownloads(): Promise<DownloadStatus[]> {
+  async getList(): Promise<DownloadListSnapshot> {
     const electronAPI = getElectronAPI()
-    const response = await electronAPI.download.getAll()
+    const response = await electronAPI.download.getList()
 
-    return (
-      unwrap(response, "Failed to get downloads", {
+    return listSnapshot(
+      unwrap(response, "Failed to get the downloads list", {
         makeError: plainError,
         requireData: false
-      }) || []
+      })
     )
+  },
+
+  /**
+   * Forget every finished row. A download still queued or running keeps its
+   * row, because it has events still to come. Answers with the list as it
+   * stands afterwards, which every other window is sent too.
+   * @returns Promise<DownloadListSnapshot>
+   */
+  async clearHistory(): Promise<DownloadListSnapshot> {
+    const electronAPI = getElectronAPI()
+    const response = await electronAPI.download.clearHistory()
+
+    return listSnapshot(
+      unwrap(response, "Failed to clear the download history", {
+        makeError: plainError,
+        requireData: false
+      })
+    )
+  },
+
+  /**
+   * Forget one finished row. It says nothing about the download itself, and
+   * main ignores it for a row that is still live: cancelling one is what
+   * `cancelDownload` is for.
+   * @param downloadId Download ID
+   * @returns Promise<DownloadListSnapshot> the list as it stands afterwards
+   */
+  async removeHistory(downloadId: string): Promise<DownloadListSnapshot> {
+    const electronAPI = getElectronAPI()
+    const response = await electronAPI.download.removeHistory(downloadId)
+
+    return listSnapshot(
+      unwrap(response, "Failed to remove that download", {
+        makeError: plainError,
+        requireData: false
+      })
+    )
+  },
+
+  /**
+   * Listen for the list itself. Main sends it after every change to it - a
+   * reservation, a slot taken, a settle, a clear, a removal - and never for
+   * progress.
+   * @param callback List callback
+   * @returns Cleanup function
+   */
+  onList(callback: (snapshot: DownloadListSnapshot) => void): () => void {
+    const electronAPI = getElectronAPI()
+    return electronAPI.download.onList(callback)
   },
 
   /**
@@ -353,6 +420,27 @@ export const systemApi = {
     const electronAPI = getElectronAPI()
     const response = await electronAPI.system.openDownloadFolder()
     return response.success === true
+  },
+
+  /**
+   * Reveal one downloaded file in its folder. Answers false rather than
+   * throwing when the file is gone, has been moved out of the download folder,
+   * or the preload is too old to carry the channel - the caller's fallback is
+   * `openDownloadFolder`, which is what the row offers anyway.
+   * @param path Absolute path main itself reported for the download
+   * @returns Promise<boolean> whether the file was revealed
+   */
+  async showInFolder(path: string): Promise<boolean> {
+    const electronAPI = getElectronAPI()
+
+    if (!electronAPI.system.showInFolder) return false
+
+    const response = await electronAPI.system.showInFolder(path)
+
+    // `success` says the channel answered, `shown` says it revealed something:
+    // main answers a file that is no longer there with `shown: false` rather
+    // than an error, because that is the case the folder fallback is for
+    return response.success === true && response.data?.shown === true
   },
 
   /**
@@ -410,6 +498,23 @@ export const settingsApi = {
     return unwrap(response, "Failed to get download path", {
       makeError: plainError
     })
+  },
+
+  /**
+   * How many downloads this install has ever finished. Never decreases, and
+   * clearing the history does not touch it: it is a counter in settings.json,
+   * not a count of the rows kept (see `handleGetDownloadCount` in
+   * `ipc-handlers.js`). Zero on a preload too old to answer.
+   * @returns Promise<number>
+   */
+  async getDownloadCount(): Promise<number> {
+    const electronAPI = getElectronAPI()
+
+    if (!electronAPI.settings.getDownloadCount) return 0
+
+    const response = await electronAPI.settings.getDownloadCount()
+
+    return response.success && response.data ? response.data.count : 0
   },
 
   /**

@@ -13,7 +13,12 @@
  */
 
 jest.mock("electron", () => ({
-  ipcMain: { handle: jest.fn(), removeAllListeners: jest.fn() },
+  ipcMain: {
+    handle: jest.fn(),
+    removeAllListeners: jest.fn(),
+    // invoke handlers live in their own registry, and cleanup() empties it
+    removeHandler: jest.fn()
+  },
   dialog: { showOpenDialog: jest.fn() },
   app: { getVersion: jest.fn(() => "1.2.3") },
   shell: { openExternal: jest.fn(), openPath: jest.fn() }
@@ -25,6 +30,7 @@ const os = require("os")
 const path = require("path")
 
 const IPCHandlers = require("../src/main/ipc-handlers")
+const { DownloadHistory } = require("../src/main/services/download-history")
 const { ERROR_CODES, PLAYLIST_MAX_ITEMS } = require("../src/main/services/ytdlp-engine")
 const { ERROR_CATEGORIES } = require("../src/main/utils/error-taxonomy")
 
@@ -109,7 +115,12 @@ function createHandlers({ listing = LISTING, listingError = null } = {}) {
     settingsStore: {
       ensureDownloadPath: jest.fn().mockResolvedValue(outputDir),
       setPotEnabled: jest.fn().mockResolvedValue({ success: true })
-    }
+    },
+    // a real history with no file: its rows behave exactly as they do in the
+    // app, and nothing is written into the temp userData folder this suite
+    // deletes the moment a test ends. tests/download-history-ipc.test.js is
+    // where the file itself is pinned
+    downloadHistory: new DownloadHistory()
   })
 
   return { handlers, engine, runs, userDataPath, outputDir, workspace }
@@ -527,16 +538,57 @@ describe("what a downloads list would see", () => {
     await handlers.handleDownloadPlaylist(null, request())
     await settle()
 
-    const rows = await handlers.handleGetAllDownloads(null)
+    const rows = await handlers.handleGetList(null)
 
-    expect(rows.data).toHaveLength(1)
-    expect(rows.data[0]).toMatchObject({
-      downloadId: "playlist_1",
-      // still "combined": what this fetches is the same thing one video does,
-      // and analytics and the audit log read that field
-      type: "combined",
-      playlist: true
+    expect(rows.data.rows).toHaveLength(1)
+    expect(rows.data.rows[0]).toMatchObject({
+      download_id: "playlist_1",
+      // one row covering n videos: `kind` is what the panel draws from, and
+      // "combined" - what this fetches, which analytics and the audit log read
+      // - stays on the reservation rather than on the row
+      kind: "playlist",
+      // the count is what a playlist row has instead of a quality
+      label: "2 videos",
+      request: {
+        url: URL,
+        title: "Short talks",
+        platform: "youtube",
+        playlist_id: "PLLojVvWCZ5N4",
+        // the selection travels with it, so a retry downloads the videos that
+        // were picked rather than the whole playlist
+        entries: [
+          { index: 1, id: "aaaaaaaaaaa" },
+          { index: 3, id: "ccccccccccc" }
+        ],
+        // "video" rather than "combined": this is the wire spelling the
+        // renderer sends and the one a retry re-sends
+        type: "video",
+        height: 1080
+      }
     })
+  })
+
+  test("an audio playlist of one carries its mode and says video, not videos", async () => {
+    const { handlers } = createHandlers()
+
+    await handlers.handleDownloadPlaylist(
+      null,
+      request({
+        type: "audio",
+        audio_mode: "mp3",
+        height: undefined,
+        entries: [{ index: 1, id: "aaaaaaaaaaa" }]
+      })
+    )
+    await settle()
+
+    const rows = await handlers.handleGetList(null)
+
+    expect(rows.data.rows[0]).toMatchObject({
+      label: "1 video",
+      request: { type: "audio", audio_mode: "mp3" }
+    })
+    expect(rows.data.rows[0].request.height).toBeUndefined()
   })
 })
 

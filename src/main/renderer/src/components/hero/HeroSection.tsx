@@ -1,3 +1,4 @@
+import { DownloadsToggle } from "@/components/downloads/DownloadsToggle"
 import { LocaleToggle } from "@/components/ui/locale-toggle"
 import { MenuVertical } from "@/components/ui/menu-vertical"
 import { ModeToggle } from "@/components/ui/mode-toggle"
@@ -69,10 +70,22 @@ export function HeroSection() {
         />
       </div>
 
-      {/* Language and mode toggles - top right */}
-      <div className="absolute top-6 right-6 z-20 flex items-center gap-2">
-        <LocaleToggle />
-        <ModeToggle />
+      {/* Language and mode toggles, with the downloads toggle under them - top right */}
+      <div className="absolute top-6 right-6 z-20 flex flex-col items-end gap-2">
+        <div className="flex items-center gap-2">
+          <LocaleToggle />
+          <ModeToggle />
+        </div>
+
+        {/*
+          on its own line on the home page, right-aligned under `ModeToggle`
+          and in the cluster's own gap: the two switches above it set how the
+          app looks, and the way into the downloads panel is a different kind
+          of thing sitting in the same corner. The other layouts keep it beside
+          `ModeToggle`, where there is no locale switch and the header is a bar
+          rather than open space
+        */}
+        <DownloadsToggle />
       </div>
 
       {/*

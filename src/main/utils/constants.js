@@ -6,9 +6,13 @@ const os = require("os")
 // app config
 const APP_CONFIG = {
   // download settings
-  // nothing reads this yet - it is reserved for the download queue, which is
-  // where the cap on simultaneous downloads will be enforced
-  MAX_CONCURRENT_DOWNLOADS: 4,
+  // how many downloads may run at once. DownloadRunner enforces it and holds
+  // everything past it in a queue, so this is the number of yt-dlp processes
+  // the app will ever have in flight. three rather than four because each one
+  // already fetches its fragments in parallel (CONCURRENT_FRAGMENTS in
+  // services/ytdlp/args.js), and the point of the cap is to keep a handful of
+  // pasted links from saturating the connection they all share
+  MAX_CONCURRENT_DOWNLOADS: 3,
 
   // file paths
   DOWNLOADS_DIR: path.join(os.homedir(), "Downloads", "Cliply"),
@@ -51,6 +55,10 @@ const IPC_CHANNELS = {
 
   // download management
   DOWNLOAD_PROGRESS: "download:progress",
+  // the whole list, pushed whenever it changes: main is the one process that
+  // knows the order of a reservation against a clear, so it says what the list
+  // is rather than leaving the renderer to merge what it can pull
+  DOWNLOADS_LIST: "downloads:list",
   // fired only on the handful of downloads that hit a support milestone
   SUPPORT_MILESTONE: "support:milestone",
   DOWNLOAD_COMPLETE: "download:complete",

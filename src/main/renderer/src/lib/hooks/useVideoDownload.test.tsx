@@ -1,20 +1,19 @@
 // @vitest-environment jsdom
 //
-// the hook owns the contract the cold review kept finding holes in: which
-// download's events it accepts, who reports a terminal outcome, and what
-// happens when the view goes away mid-download.
+// what the hook owns now that it no longer follows the download: the row goes
+// into the store before main is asked, the mutation comes back at the
+// acknowledgement rather than at the end, and a second click on the same
+// request goes to the download already running instead of starting beside it.
+//
+// the outcome - the toast, the staged report, the row settling - belongs to
+// DownloadEvents, and is proved there.
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { act, renderHook, waitFor } from "@testing-library/react"
 import type { ReactNode } from "react"
-import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
+import { beforeEach, describe, expect, test, vi } from "vitest"
 
-type ProgressListener = (payload: Record<string, unknown>) => void
-
-// vi.mock factories are hoisted above the module body, so anything they close
-// over has to be hoisted with them
 const mocks = vi.hoisted(() => ({
-  listeners: [] as ((payload: Record<string, unknown>) => void)[],
   stage: vi.fn(),
   showDownloadErrorToast: vi.fn(),
   successToast: vi.fn(),
@@ -24,7 +23,6 @@ const mocks = vi.hoisted(() => ({
 }))
 
 const {
-  listeners,
   stage,
   showDownloadErrorToast,
   successToast,
@@ -42,15 +40,9 @@ vi.mock("@/lib/api", () => {
   return {
     DownloadError,
     downloadApi: {
-      onProgress: (listener: ProgressListener) => {
-        mocks.listeners.push(listener)
-
-        return () => {
-          const index = mocks.listeners.indexOf(listener)
-          if (index >= 0) mocks.listeners.splice(index, 1)
-        }
-      },
-      cancelDownload: (id: string) => mocks.cancelDownload(id)
+      cancelDownload: (id: string) => mocks.cancelDownload(id),
+      clearHistory: vi.fn(),
+      removeHistory: vi.fn()
     },
     videoApi: {
       downloadVideo: (request: unknown) => mocks.downloadVideo(request)
@@ -73,6 +65,10 @@ vi.mock("sonner", () => ({
   }
 }))
 
+import { requestStop } from "@/lib/cancelIntent"
+import { en } from "@/lib/i18n/en"
+import { useDownloadsStore } from "@/lib/stores/downloadsStore"
+
 import { useVideoDownload } from "./useVideoDownload"
 
 function wrapper({ children }: { children: ReactNode }) {
@@ -86,7 +82,8 @@ function wrapper({ children }: { children: ReactNode }) {
 const REQUEST = {
   url: "https://www.youtube.com/watch?v=abc",
   height: 1080,
-  container: "mp4" as const
+  container: "mp4" as const,
+  title: "My Holiday Video"
 }
 
 type Settled = { ok: boolean; value: unknown }
@@ -94,10 +91,9 @@ type Settled = { ok: boolean; value: unknown }
 /**
  * start a download and observe its outcome immediately
  *
- * mutateAsync rejects for cancellation and abandonment as well as failure, and
- * a rejection nobody is watching yet would be reported as unhandled - a test
- * artifact. Attaching the handler at creation keeps the assertions about the
- * hook, not about when the test happened to await.
+ * the only rejection left is a start main refused, and a rejection nobody is
+ * watching yet would be reported as unhandled - a test artifact. Attaching the
+ * handler at creation keeps the assertions about the hook.
  */
 async function startDownload(result: {
   current: ReturnType<typeof useVideoDownload>
@@ -108,8 +104,6 @@ async function startDownload(result: {
     pending = result.current.mutateAsync(REQUEST)
   })
 
-  // wrapped in an object on purpose: awaiting this helper would otherwise
-  // unwrap the outcome promise and block until the download finished
   return {
     settled: pending
       .then((value: unknown) => ({ ok: true, value }))
@@ -131,143 +125,108 @@ function deferredAck() {
   return { resolve, reject }
 }
 
-const emit = async (payload: Record<string, unknown>) => {
-  await act(async () => {
-    for (const listener of [...listeners]) listener(payload)
-  })
-}
-
+const store = () => useDownloadsStore.getState()
 const sentDownloadId = () =>
   downloadVideo.mock.calls[0][0].download_id as string
-
 const flush = () => act(async () => {})
 
 beforeEach(() => {
-  listeners.length = 0
   vi.clearAllMocks()
-  downloadVideo.mockResolvedValue({ download_id: "ignored", status: "started" })
+  store().reset()
+  downloadVideo.mockResolvedValue({ downloadId: "ignored" })
   cancelDownload.mockResolvedValue(true)
 })
 
-afterEach(() => {
-  // every path must drop its progress listener
-  expect(listeners).toHaveLength(0)
-})
-
-describe("event correlation", () => {
-  test("the id exists and the listener is live before the ack lands", async () => {
+describe("the row it puts in the store", () => {
+  test("exists, as starting, before main has been asked", async () => {
     const ack = deferredAck()
-    const { result, unmount } = renderHook(() => useVideoDownload(), {
-      wrapper
-    })
+    const { result } = renderHook(() => useVideoDownload(), { wrapper })
 
     const { settled } = await startDownload(result)
 
-    expect(listeners).toHaveLength(1)
-    expect(sentDownloadId()).toEqual(expect.any(String))
+    expect(store().rows).toHaveLength(1)
+    expect(store().rows[0]).toMatchObject({
+      kind: "video",
+      platform: "youtube",
+      title: "My Holiday Video",
+      // built here rather than waited for: the row exists before the
+      // acknowledgement, and the label is half of what tells two apart
+      label: "1080p mp4",
+      status: "starting",
+      progress: 0,
+      request: REQUEST
+    })
+    expect(store().rows[0].downloadId).toBe(sentDownloadId())
 
     ack.resolve({})
-    await flush()
-    unmount()
-
-    expect(await settled).toMatchObject({
-      ok: false,
-      value: { outcome: "abandoned" }
-    })
+    expect((await settled).ok).toBe(true)
   })
 
-  test("another download's terminal event is ignored", async () => {
+  test("is the row the hook hands back, and it decides `isDownloading`", async () => {
+    const { result } = renderHook(() => useVideoDownload(), { wrapper })
+
+    await startDownload(result)
+    await waitFor(() => expect(result.current.row).toBeDefined())
+
+    expect(result.current.isDownloading).toBe(true)
+
+    await act(async () => {
+      store().applyEvent({
+        downloadId: sentDownloadId(),
+        status: "completed",
+        progress: 100,
+        filename: "clip.mp4"
+      })
+    })
+
+    expect(result.current.isDownloading).toBe(false)
+    expect(result.current.isCompleted).toBe(true)
+    expect(result.current.row?.filename).toBe("clip.mp4")
+  })
+
+  /**
+   * the whole point of resolving here: the button comes back while the download
+   * is still running, so a second link can be pasted and started
+   */
+  test("the mutation resolves at the acknowledgement, not at the end", async () => {
+    const ack = deferredAck()
     const { result } = renderHook(() => useVideoDownload(), { wrapper })
 
     const { settled } = await startDownload(result)
+    expect(result.current.isPending).toBe(true)
+
+    ack.resolve({})
+
+    expect(await settled).toMatchObject({
+      ok: true,
+      value: { downloadId: sentDownloadId(), duplicate: false }
+    })
+    await waitFor(() => expect(result.current.isPending).toBe(false))
+    // ...and the download it started is still going
+    expect(result.current.isDownloading).toBe(true)
+  })
+
+  test("another download's event never touches this row", async () => {
+    const { result } = renderHook(() => useVideoDownload(), { wrapper })
+
+    await startDownload(result)
     await waitFor(() => expect(downloadVideo).toHaveBeenCalled())
 
-    // a concurrent audio/tiktok download failing must not touch this one
-    await emit({ downloadId: "someone-else", status: "failed", error: "boom" })
-
-    expect(showDownloadErrorToast).not.toHaveBeenCalled()
-    expect(stage).not.toHaveBeenCalled()
-    expect(result.current.downloadState.status).not.toBe("failed")
-
-    await emit({
-      downloadId: sentDownloadId(),
-      status: "completed",
-      filename: "clip.mp4"
+    await act(async () => {
+      store().applyEvent({
+        downloadId: "someone-else",
+        status: "failed",
+        progress: 0,
+        error: "boom"
+      })
     })
 
-    expect((await settled).ok).toBe(true)
+    expect(result.current.row?.status).toBe("starting")
   })
 })
 
-describe("terminal outcome ownership", () => {
-  test("a mid-download failure reports and toasts exactly once", async () => {
-    const { result } = renderHook(() => useVideoDownload(), { wrapper })
-
-    const { settled } = await startDownload(result)
-    await waitFor(() => expect(downloadVideo).toHaveBeenCalled())
-
-    await emit({
-      downloadId: sentDownloadId(),
-      status: "failed",
-      error: "Video unavailable",
-      details: "stderr tail",
-      category: "VIDEO_UNAVAILABLE"
-    })
-
-    expect(await settled).toMatchObject({
-      ok: false,
-      value: { outcome: "failed" }
-    })
-    await flush()
-
-    // onError must stay silent: the event path already did this
-    expect(showDownloadErrorToast).toHaveBeenCalledTimes(1)
-    expect(stage).toHaveBeenCalledTimes(1)
-    expect(stage.mock.calls[0][0]).toMatchObject({
-      shortMessage: "Video unavailable",
-      details: "stderr tail"
-    })
-    expect(result.current.downloadState.status).toBe("failed")
-  })
-
-  test("completion produces one success toast and no report", async () => {
-    const { result } = renderHook(() => useVideoDownload(), { wrapper })
-
-    const { settled } = await startDownload(result)
-    await waitFor(() => expect(downloadVideo).toHaveBeenCalled())
-
-    await emit({
-      downloadId: sentDownloadId(),
-      status: "completed",
-      progress: 100,
-      filename: "clip.mp4"
-    })
-
-    expect((await settled).ok).toBe(true)
-    expect(successToast).toHaveBeenCalledTimes(1)
-    expect(showDownloadErrorToast).not.toHaveBeenCalled()
-    expect(stage).not.toHaveBeenCalled()
-  })
-
-  test("a cancellation is not dressed up as a failure", async () => {
-    const { result } = renderHook(() => useVideoDownload(), { wrapper })
-
-    const { settled } = await startDownload(result)
-    await waitFor(() => expect(downloadVideo).toHaveBeenCalled())
-
-    await emit({ downloadId: sentDownloadId(), status: "cancelled" })
-
-    expect(await settled).toMatchObject({
-      ok: false,
-      value: { outcome: "cancelled" }
-    })
-    await flush()
-
-    expect(showDownloadErrorToast).not.toHaveBeenCalled()
-    expect(stage).not.toHaveBeenCalled()
-  })
-
-  test("a start failure keeps the component-facing error path", async () => {
+describe("a start main refused", () => {
+  test("marks the row failed and reports it once", async () => {
     const ack = deferredAck()
     const { result } = renderHook(() => useVideoDownload(), { wrapper })
 
@@ -279,129 +238,249 @@ describe("terminal outcome ownership", () => {
     expect(outcome.value).toHaveProperty("message", "engine missing")
     await flush()
 
-    // this one is NOT owned by the event path, so onError reports it
+    // no event will ever come for this row, so the row has to say so itself
+    expect(result.current.row).toMatchObject({
+      status: "failed",
+      error: "engine missing"
+    })
+    expect(result.current.isDownloading).toBe(false)
+
+    // DownloadEvents will never see this one, so onError is what reports it
     expect(showDownloadErrorToast).toHaveBeenCalledTimes(1)
+    expect(showDownloadErrorToast.mock.calls[0][0]).toBe(
+      en["download.videoFailed"]
+    )
     expect(stage).toHaveBeenCalledTimes(1)
-    expect(result.current.downloadState.status).toBe("failed")
+    expect(stage.mock.calls[0][0]).toMatchObject({
+      shortMessage: "engine missing",
+      platform: "youtube",
+      downloadType: "video",
+      videoUrl: REQUEST.url
+    })
+  })
+
+  /**
+   * the one race the store did not remove: a start that rejects after the view
+   * has moved on. the row is marked by its id, so the failure lands on the
+   * download it belongs to rather than on whatever the hook points at now
+   */
+  test("settles the row it belongs to, not the one on screen", async () => {
+    const ack = deferredAck()
+    const { result } = renderHook(() => useVideoDownload(), { wrapper })
+
+    const { settled } = await startDownload(result)
+    const abandoned = sentDownloadId()
+
+    await act(async () => {
+      result.current.reset()
+    })
+    ack.reject(new Error("engine missing"))
+    await settled
+    await flush()
+
+    expect(
+      store().rows.find((row) => row.downloadId === abandoned)
+    ).toMatchObject({ status: "failed", error: "engine missing" })
+    // the view is following nothing now
+    expect(result.current.row).toBeUndefined()
   })
 })
 
-describe("unmount and reset", () => {
-  test("unmount before the ack raises no unhandled rejection", async () => {
-    const unhandled = vi.fn()
-    process.on("unhandledRejection", unhandled)
-
-    const ack = deferredAck()
-    const { result, unmount } = renderHook(() => useVideoDownload(), {
-      wrapper
-    })
+describe("the same download asked for twice", () => {
+  test("opens the panel on the first one and starts nothing", async () => {
+    const { result } = renderHook(() => useVideoDownload(), { wrapper })
 
     const { settled } = await startDownload(result)
+    expect((await settled).ok).toBe(true)
+    const first = sentDownloadId()
 
-    // the view goes away while the start ipc is still in flight, so the
-    // terminal promise is rejected before anything awaits it
-    unmount()
-    await flush()
+    const second = await startDownload(result)
 
-    // node reports unhandled rejections at the end of a microtask checkpoint
-    await new Promise((resolve) => setTimeout(resolve, 0))
-    expect(unhandled).not.toHaveBeenCalled()
-
-    ack.resolve({})
-    expect(await settled).toMatchObject({
-      ok: false,
-      value: { outcome: "abandoned" }
+    expect(await second.settled).toMatchObject({
+      ok: true,
+      value: { downloadId: first, duplicate: true }
     })
-
-    process.off("unhandledRejection", unhandled)
+    // one process, one row
+    expect(downloadVideo).toHaveBeenCalledTimes(1)
+    expect(store().rows).toHaveLength(1)
+    expect(store().highlightedId).toBe(first)
+    expect(store().panelOpen).toBe(true)
   })
 
-  test("unmount mid-download settles the mutation and does not cancel the engine", async () => {
-    const { result, unmount } = renderHook(() => useVideoDownload(), {
-      wrapper
-    })
+  test("a download that has finished is not in the way", async () => {
+    const { result } = renderHook(() => useVideoDownload(), { wrapper })
 
-    const { settled } = await startDownload(result)
+    await startDownload(result)
     await waitFor(() => expect(downloadVideo).toHaveBeenCalled())
 
-    await emit({
-      downloadId: sentDownloadId(),
-      status: "downloading",
-      progress: 40
+    await act(async () => {
+      store().applyEvent({
+        downloadId: sentDownloadId(),
+        status: "completed",
+        progress: 100
+      })
     })
 
-    unmount()
-
-    expect(await settled).toMatchObject({
-      ok: false,
-      value: { outcome: "abandoned" }
-    })
-
-    // deliberate: the download keeps running when its view is swapped out
-    expect(cancelDownload).not.toHaveBeenCalled()
+    await startDownload(result)
+    await waitFor(() => expect(downloadVideo).toHaveBeenCalledTimes(2))
+    expect(store().rows).toHaveLength(2)
   })
+})
 
-  test("reset settles the mutation and drops the listener", async () => {
+/**
+ * the panel's Stop, pressed before main had the id
+ *
+ * main reserves it only after preparing the download folder, so the panel's ask
+ * comes back false and is kept (see `lib/cancelIntent.ts`). the acknowledgement
+ * here is the first moment it can be carried out - and for a trimmed download,
+ * which is one ffmpeg pass that reports nothing until it is finished, it is the
+ * only moment: no progress event will arrive to reconcile against.
+ */
+describe("a Stop the panel kept while main was preparing", () => {
+  test("goes out at the acknowledgement, with no event of any kind", async () => {
+    const ack = deferredAck()
     const { result } = renderHook(() => useVideoDownload(), { wrapper })
 
     const { settled } = await startDownload(result)
     await waitFor(() => expect(downloadVideo).toHaveBeenCalled())
+
+    // the panel's Stop, answered against an id main has not reserved yet
+    store().rememberCancelIntent(sentDownloadId())
+
+    await act(async () => {
+      ack.resolve({ downloadId: "ignored" })
+    })
+    await flush()
+
+    expect(cancelDownload).toHaveBeenCalledWith(sentDownloadId())
+    expect(store().cancelIntents).toEqual([])
+    expect((await settled).ok).toBe(true)
+  })
+
+  /**
+   * the same Stop, pressed through the panel's own helper, with main's two
+   * replies arriving in the order that hides it: the start is acknowledged
+   * first, and the Stop's `false` lands afterwards on a row that still says
+   * `starting` - a free-slot trimmed download says nothing until it finishes,
+   * so no event will ever come to reconcile against.
+   */
+  test("survives its reply arriving after the acknowledgement", async () => {
+    const ack = deferredAck()
+    let answerStop!: (cancelled: boolean) => void
+    cancelDownload.mockReturnValueOnce(
+      new Promise<boolean>((resolve) => {
+        answerStop = resolve
+      })
+    )
+
+    const { result } = renderHook(() => useVideoDownload(), { wrapper })
+
+    const { settled } = await startDownload(result)
+    await waitFor(() => expect(downloadVideo).toHaveBeenCalled())
+
+    // the panel's Stop, main still preparing the download folder
+    const stopping = requestStop(sentDownloadId())
+
+    await act(async () => {
+      ack.resolve({ downloadId: "ignored" })
+    })
+    await flush()
+
+    // the row has heard nothing from main and looks exactly as it did
+    expect(result.current.row?.status).toBe("starting")
+
+    await act(async () => {
+      answerStop(false)
+      await stopping
+    })
+    await flush()
+
+    expect(cancelDownload).toHaveBeenCalledTimes(2)
+    expect(cancelDownload).toHaveBeenLastCalledWith(sentDownloadId())
+    expect(store().cancelIntents).toEqual([])
+    expect((await settled).ok).toBe(true)
+  })
+
+  test("a download nobody stopped is not cancelled at its acknowledgement", async () => {
+    const { result } = renderHook(() => useVideoDownload(), { wrapper })
+
+    const { settled } = await startDownload(result)
+    await waitFor(() => expect(downloadVideo).toHaveBeenCalled())
+    await flush()
+
+    expect(cancelDownload).not.toHaveBeenCalled()
+    expect((await settled).ok).toBe(true)
+  })
+})
+
+describe("cancellation and reset", () => {
+  test("an accepted cancel says so, and the event settles the row", async () => {
+    const { result } = renderHook(() => useVideoDownload(), { wrapper })
+
+    await startDownload(result)
+    await waitFor(() => expect(downloadVideo).toHaveBeenCalled())
+
+    await act(async () => {
+      await result.current.cancelDownload()
+    })
+
+    expect(cancelDownload).toHaveBeenCalledWith(sentDownloadId())
+    expect(infoToast).toHaveBeenCalledTimes(1)
+    expect(showDownloadErrorToast).not.toHaveBeenCalled()
+    expect(stage).not.toHaveBeenCalled()
+  })
+
+  test("a refused cancel leaves the download alone", async () => {
+    // main reports false when it had nothing to cancel - usually because the
+    // download just finished, and "cancelled" over a completed one is a lie
+    cancelDownload.mockResolvedValue(false)
+
+    const { result } = renderHook(() => useVideoDownload(), { wrapper })
+
+    await startDownload(result)
+    await waitFor(() => expect(downloadVideo).toHaveBeenCalled())
+
+    await act(async () => {
+      await result.current.cancelDownload()
+    })
+
+    expect(infoToast).not.toHaveBeenCalled()
+    expect(result.current.row?.status).toBe("starting")
+  })
+
+  /**
+   * unmounting a view does not cancel its download and never did. what is new
+   * is that it no longer loses it either: the row and its outcome outlive the
+   * card that started it
+   */
+  test("unmounting stops following the download and keeps its row", async () => {
+    const { result, unmount } = renderHook(() => useVideoDownload(), {
+      wrapper
+    })
+
+    await startDownload(result)
+    await waitFor(() => expect(downloadVideo).toHaveBeenCalled())
+
+    unmount()
+
+    expect(cancelDownload).not.toHaveBeenCalled()
+    expect(store().rows).toHaveLength(1)
+    expect(store().rows[0].status).toBe("starting")
+  })
+
+  test("reset lets go of the row without touching it", async () => {
+    const { result } = renderHook(() => useVideoDownload(), { wrapper })
+
+    await startDownload(result)
+    await waitFor(() => expect(result.current.row).toBeDefined())
 
     await act(async () => {
       result.current.reset()
     })
 
-    expect(await settled).toMatchObject({
-      ok: false,
-      value: { outcome: "abandoned" }
-    })
-    expect(result.current.downloadState.status).toBe("idle")
-  })
-})
-
-describe("cancellation", () => {
-  test("a refused cancel leaves the download alone", async () => {
-    cancelDownload.mockResolvedValue(false)
-
-    const { result } = renderHook(() => useVideoDownload(), { wrapper })
-
-    const { settled } = await startDownload(result)
-    await waitFor(() => expect(downloadVideo).toHaveBeenCalled())
-
-    // main had nothing to cancel - usually because it just finished
-    await act(async () => {
-      await result.current.cancelDownload()
-    })
-
-    expect(result.current.downloadState.status).not.toBe("cancelled")
-    expect(infoToast).not.toHaveBeenCalled()
-
-    // and the completion event still lands
-    await emit({
-      downloadId: sentDownloadId(),
-      status: "completed",
-      filename: "clip.mp4"
-    })
-
-    expect((await settled).ok).toBe(true)
-  })
-
-  test("an accepted cancel settles the mutation as cancelled", async () => {
-    const { result } = renderHook(() => useVideoDownload(), { wrapper })
-
-    const { settled } = await startDownload(result)
-    await waitFor(() => expect(downloadVideo).toHaveBeenCalled())
-
-    await act(async () => {
-      await result.current.cancelDownload()
-    })
-
-    expect(await settled).toMatchObject({
-      ok: false,
-      value: { outcome: "cancelled" }
-    })
-    expect(infoToast).toHaveBeenCalledTimes(1)
-    expect(showDownloadErrorToast).not.toHaveBeenCalled()
-    expect(stage).not.toHaveBeenCalled()
+    expect(result.current.row).toBeUndefined()
+    expect(result.current.isDownloading).toBe(false)
+    expect(store().rows).toHaveLength(1)
+    expect(successToast).not.toHaveBeenCalled()
   })
 })

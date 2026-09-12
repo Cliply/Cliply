@@ -32,9 +32,11 @@ interface DownloadProgressBarProps {
 /**
  * live progress for a running download
  *
- * trimmed downloads are muxed by ffmpeg in a single pass and only report once
- * at the end, so they get a sweeping bar rather than a percentage that would
- * sit at 0 and then jump straight to 100
+ * three states have no percentage to show. a trimmed download is muxed by
+ * ffmpeg in one pass that reports once at the end; a starting one has not
+ * spawned yet; and a queued one is waiting behind the three that are already
+ * running. all three get a sweeping bar rather than a 0 that would sit there
+ * and then jump straight to 100.
  */
 export function DownloadProgressBar({
   state,
@@ -44,12 +46,17 @@ export function DownloadProgressBar({
 }: DownloadProgressBarProps) {
   const t = useT()
   const isStarting = state.status === "starting"
-  const isIndeterminate = state.indeterminate || isStarting
+  const isQueued = state.status === "queued"
+  const isIndeterminate = state.indeterminate || isStarting || isQueued
 
-  const meta = isIndeterminate
-    ? isStarting
+  const waitingMeta = isQueued
+    ? t("progress.queued")
+    : isStarting
       ? t("progress.startingUp")
       : t("progress.trimming")
+
+  const meta = isIndeterminate
+    ? waitingMeta
     : [state.speed, state.eta && `ETA ${state.eta}`]
         .filter(Boolean)
         .join("  ·  ")

@@ -284,8 +284,15 @@ const PLAYLIST_SLEEP_REQUESTS = 1
 // --concurrent-fragments. this speeds up the video being downloaded *now* by
 // fetching its dash fragments in parallel; it is not several videos at once.
 // yt-dlp walks a playlist strictly one video at a time and nothing here
-// changes that
-const PLAYLIST_FRAGMENTS = 4
+// changes that.
+//
+// it rides on every single video too, not only on a playlist walk: a dash
+// stream arrives in fragments whoever asked for it, and the runner now caps
+// simultaneous downloads at MAX_CONCURRENT_DOWNLOADS, so the most fragment
+// requests this app can have open is a number we choose rather than one the
+// user's paste history decides. `simple` is left alone - a tiktok or pinterest
+// download is one muxed file with no fragments to fetch in parallel
+const CONCURRENT_FRAGMENTS = 4
 
 // a playlist is mp4 at every height, unlike the per-tier container a single
 // video gets. `-t mp4` does not fall back to 1080p h264 above 1080p - measured
@@ -329,7 +336,7 @@ function buildPlaylistArgs({ playlistIndices, playlistEntries, archiveFile, igno
     // downloaded everything it was asked for is a trap for whoever reads the
     // exit code
     "-N",
-    String(PLAYLIST_FRAGMENTS)
+    String(CONCURRENT_FRAGMENTS)
   ]
 
   // resume: yt-dlp skips anything already listed in the archive, so an
@@ -448,6 +455,9 @@ function buildArgs(operation, params = {}) {
       }
 
       args.push("--no-playlist")
+      // safe here: the ORDER IS LOAD-BEARING pushes above are about -t against
+      // -S, and -N takes part in neither
+      args.push("-N", String(CONCURRENT_FRAGMENTS))
       args.push(...buildDownloadArgs({ ...params, playlist }))
       args.push(...buildTrimArgs(params))
       break
@@ -475,6 +485,10 @@ function buildArgs(operation, params = {}) {
       }
 
       args.push("--no-playlist")
+      // a converted mode hands the fetch to ffmpeg afterwards, but the fetch
+      // itself is still yt-dlp's and still fragmented, so this earns its place
+      // on audio as much as on video
+      args.push("-N", String(CONCURRENT_FRAGMENTS))
       args.push(...buildDownloadArgs({ ...params, playlist }))
       args.push(...buildTrimArgs(params))
       break
@@ -655,11 +669,15 @@ module.exports = {
   buildArgs,
   normalizeAudioMode,
   normalizeAudioLanguage,
+  normalizeQualityTier,
   expectedStreamCount,
   normalizeUrl,
   isYouTubeCookieHost,
   PLAYLIST_ERROR_BUDGET,
   PLAYLIST_SLEEP_REQUESTS,
-  PLAYLIST_FRAGMENTS,
+  CONCURRENT_FRAGMENTS,
+  // the name this was called while it only rode on a playlist walk, kept so
+  // that nothing importing it has to change in the same commit that widened it
+  PLAYLIST_FRAGMENTS: CONCURRENT_FRAGMENTS,
   PLAYLIST_CONTAINER
 }
