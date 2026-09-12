@@ -412,21 +412,19 @@ describe("what a pinterest/tiktok download hands the renderer", () => {
     await settle()
   })
 
-  it("hands the renderer's DownloadStatus[]/DownloadStatus contracts back as declared", async () => {
-    // getAllDownloads() reads response.data straight as the array; getStatus()
-    // reads it straight as one entry. both used to disagree with what the ipc
-    // layer actually sent back
+  it("hands the renderer's list and DownloadStatus contracts back as declared", async () => {
+    // the list is one snapshot of rows in the history's own spelling;
+    // getStatus() reads response.data straight as one live entry. both used to
+    // disagree with what the ipc layer actually sent back
     const harness = createHandlers()
     const { handlers } = harness
     const { handle } = await startSimpleDownload(harness)
 
-    const all = await handlers.handleGetAllDownloads()
-    // {epoch, rows}: the rows are the contract, and the epoch says which side
-    // of the user's clears they were read on
-    expect(all.data.epoch).toBe(0)
+    const all = await handlers.handleGetList()
+
     expect(all.data.rows).toEqual([
       expect.objectContaining({
-        downloadId: "download_1",
+        download_id: "download_1",
         status: "downloading",
         // a row also carries what it would take to describe and retry it, so a
         // renderer that reloaded mid-download can rebuild the whole list
@@ -476,7 +474,7 @@ describe("what a pinterest/tiktok download hands the renderer", () => {
 describe("the request a reservation keeps", () => {
   async function rowFor(handlers) {
     await settle()
-    const all = await handlers.handleGetAllDownloads()
+    const all = await handlers.handleGetList()
     return all.data.rows[0]
   }
 

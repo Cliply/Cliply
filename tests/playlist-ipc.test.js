@@ -538,15 +538,15 @@ describe("what a downloads list would see", () => {
     await handlers.handleDownloadPlaylist(null, request())
     await settle()
 
-    const rows = await handlers.handleGetAllDownloads(null)
+    const rows = await handlers.handleGetList(null)
 
     expect(rows.data.rows).toHaveLength(1)
     expect(rows.data.rows[0]).toMatchObject({
-      downloadId: "playlist_1",
-      // still "combined": what this fetches is the same thing one video does,
-      // and analytics and the audit log read that field
-      type: "combined",
-      playlist: true,
+      download_id: "playlist_1",
+      // one row covering n videos: `kind` is what the panel draws from, and
+      // "combined" - what this fetches, which analytics and the audit log read
+      // - stays on the reservation rather than on the row
+      kind: "playlist",
       // the count is what a playlist row has instead of a quality
       label: "2 videos",
       request: {
@@ -582,7 +582,7 @@ describe("what a downloads list would see", () => {
     )
     await settle()
 
-    const rows = await handlers.handleGetAllDownloads(null)
+    const rows = await handlers.handleGetList(null)
 
     expect(rows.data.rows[0]).toMatchObject({
       label: "1 video",

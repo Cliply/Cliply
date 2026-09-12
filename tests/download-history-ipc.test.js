@@ -173,10 +173,10 @@ describe("where the history lives", () => {
       settingsStore: { ensureDownloadPath: jest.fn().mockResolvedValue("/tmp") }
     })
 
-    const response = await handlers.handleGetHistory(null)
+    const response = await handlers.handleGetList(null)
 
     expect(response.success).toBe(true)
-    expect(response.data).toEqual({ epoch: 0, rows: [] })
+    expect(response.data).toMatchObject({ rows: [], lifetimeCompleted: 0 })
   })
 })
 
@@ -214,7 +214,7 @@ describe("the hydration read", () => {
 
     const { handlers } = createHandlers(workspace, { history })
 
-    const answering = handlers.handleGetHistory(null)
+    const answering = handlers.handleGetList(null)
     release(saved)
 
     const response = await answering
@@ -271,7 +271,7 @@ describe("the hydration read", () => {
     // knows this download ever happened
     expect(handlers.runner.list()).toEqual([])
 
-    const answering = handlers.handleGetHistory(null)
+    const answering = handlers.handleGetList(null)
     releaseWrite()
 
     const response = await answering
@@ -303,7 +303,7 @@ describe("across two launches", () => {
     const second = createHandlers(workspace)
     await second.handlers.history.load()
 
-    const response = await second.handlers.handleGetHistory(null)
+    const response = await second.handlers.handleGetList(null)
     expect(response.data.rows).toHaveLength(1)
     expect(response.data.rows[0].status).toBe("interrupted")
     // and the request is still there, which is what makes the row retryable
@@ -313,8 +313,14 @@ describe("across two launches", () => {
   })
 })
 
-describe("the three channels", () => {
-  test("get-history answers with the rows, and which clear they predate", async () => {
+describe("the list main pushes and answers with", () => {
+  /** every downloads:list push this window has been sent */
+  const pushes = (handlers) =>
+    handlers.mainWindow.webContents.send.mock.calls
+      .filter(([channel]) => channel === "downloads:list")
+      .map(([, snapshot]) => snapshot)
+
+  test("get-list answers with the rows and the count", async () => {
     const workspace = createWorkspace()
     const { handlers, handles } = createHandlers(workspace)
 
@@ -322,14 +328,48 @@ describe("the three channels", () => {
     handles[0].resolve({ filePath: path.join(workspace.outputDir, "a.mp4") })
     await written(handlers)
 
-    const response = await handlers.handleGetHistory(null)
+    const response = await handlers.handleGetList(null)
 
-    // {epoch, rows}, as download:get-all answers: the rows are what the
-    // renderer hydrates from, and the epoch is the one thing it cannot work
-    // out for itself
     expect(response.success).toBe(true)
-    expect(response.data.epoch).toBe(0)
-    expect(response.data.rows[0].download_id).toBe("combined_1")
+    expect(response.data.rows[0]).toMatchObject({
+      download_id: "combined_1",
+      status: "completed"
+    })
+    expect(response.data.lifetimeCompleted).toBe(1)
+  })
+
+  /**
+   * the whole point of the push model: the snapshot is built from memory after
+   * the change it announces, so there is no window in which it can describe the
+   * list as it was. The disk write is queued behind it and says nothing.
+   */
+  test("a snapshot after a clear never holds the cleared row", async () => {
+    const workspace = createWorkspace()
+    const { handlers, handles } = createHandlers(workspace)
+
+    await start(handlers)
+    handles[0].resolve({ filePath: path.join(workspace.outputDir, "a.mp4") })
+    await written(handlers)
+
+    let releaseWrite
+    const held = new Promise((resolve) => {
+      releaseWrite = resolve
+    })
+    const realPersist = handlers.history.persist.bind(handlers.history)
+    handlers.history.persist = async () => {
+      await held
+      return realPersist()
+    }
+
+    const clearing = handlers.handleClearHistory(null)
+    const duringTheWrite = await handlers.handleGetList(null)
+
+    releaseWrite()
+    const cleared = await clearing
+
+    expect(duringTheWrite.data.rows).toEqual([])
+    expect(cleared.data.rows).toEqual([])
+    expect(cleared.data.seq).toBeGreaterThan(duringTheWrite.data.seq)
   })
 
   test("clear-history keeps a download that is still running", async () => {
@@ -348,8 +388,10 @@ describe("the three channels", () => {
     expect(response.data.rows.map((row) => row.download_id)).toEqual([
       "combined_live"
     ])
-    // the clear is what moved the epoch, and its own answer carries the new one
-    expect(response.data.epoch).toBe(1)
+    // and every window hears the same thing, whether or not it asked
+    expect(pushes(handlers).at(-1).rows.map((row) => row.download_id)).toEqual([
+      "combined_live"
+    ])
 
     handles[1].resolve({ filePath: path.join(workspace.outputDir, "b.mp4") })
     await written(handlers)
@@ -373,80 +415,51 @@ describe("the three channels", () => {
     expect(response.data.rows.map((row) => row.download_id)).toEqual([
       "combined_2"
     ])
-    expect(response.data.epoch).toBe(1)
   })
 
   /**
-   * the epoch is the one thing the renderer cannot work out for itself: which
-   * side of a clear a snapshot was read on. It counts the times a row left the
-   * history, so a download finishing is not one of them.
+   * the list changes when a download is accepted, when it takes a slot and when
+   * it settles, and when the user clears or removes a row. A percentage is not
+   * a change to the list, and pushing one four times a second per download
+   * would be a list rebuilt on every frame.
    */
-  test("the epoch moves when a row leaves the history, and not otherwise", async () => {
+  test("a push for every change to the list, and none for progress", async () => {
     const workspace = createWorkspace()
     const { handlers, handles } = createHandlers(workspace)
 
-    await start(handlers, { download_id: "combined_1" })
+    await start(handlers)
+
+    // the reservation, and the slot it took
+    expect(pushes(handlers)).toHaveLength(2)
+    expect(pushes(handlers)[0].rows[0]).toMatchObject({
+      download_id: "combined_1",
+      status: "queued"
+    })
+    expect(pushes(handlers)[1].rows[0].status).toBe("downloading")
+
+    handles[0].emit("progress", { progress: 42 })
+    await settle()
+
+    expect(pushes(handlers)).toHaveLength(2)
+
     handles[0].resolve({ filePath: path.join(workspace.outputDir, "a.mp4") })
     await written(handlers)
 
-    // a download that started and finished is not a row leaving
-    expect((await handlers.handleGetHistory(null)).data.epoch).toBe(0)
-    expect((await handlers.handleGetAllDownloads(null)).data.epoch).toBe(0)
+    expect(pushes(handlers)).toHaveLength(3)
+    expect(pushes(handlers)[2].rows[0].status).toBe("completed")
 
     await handlers.handleClearHistory(null)
+    await handlers.handleRemoveHistory(null, { downloadId: "combined_1" })
 
-    expect((await handlers.handleGetHistory(null)).data.epoch).toBe(1)
-    // both snapshots answer with the same number: they describe one history
-    expect((await handlers.handleGetAllDownloads(null)).data.epoch).toBe(1)
+    expect(pushes(handlers)).toHaveLength(5)
 
-    await start(handlers, { download_id: "combined_2" })
-    handles[1].resolve({ filePath: path.join(workspace.outputDir, "b.mp4") })
-    await written(handlers)
-
-    expect((await handlers.handleGetHistory(null)).data.epoch).toBe(1)
-
-    await handlers.handleRemoveHistory(null, { downloadId: "combined_2" })
-
-    expect((await handlers.handleGetHistory(null)).data.epoch).toBe(2)
-  })
-
-  /**
-   * the epoch moves before the history does. A snapshot read taken between the
-   * two would otherwise carry the new number over rows the clear is about to
-   * delete, and the renderer would keep them for the rest of the session.
-   */
-  test("a snapshot taken while a clear is running is not counted as after it", async () => {
-    const workspace = createWorkspace()
-    const { handlers, handles } = createHandlers(workspace)
-
-    await start(handlers, { download_id: "combined_1" })
-    handles[0].resolve({ filePath: path.join(workspace.outputDir, "a.mp4") })
-    await written(handlers)
-
-    let release
-    const held = new Promise((resolve) => {
-      release = resolve
-    })
-    const realClear = handlers.history.clear.bind(handlers.history)
-    handlers.history.clear = async () => {
-      await held
-      return realClear()
-    }
-
-    const clearing = handlers.handleClearHistory(null)
-    const during = await handlers.handleGetHistory(null)
-
-    release()
-    const cleared = await clearing
-
-    // the snapshot still holds the row the clear is about to delete, and its
-    // epoch is the clear's own: the renderer reads it as not newer than the
-    // clear, which is what makes it discard those rows
-    expect(during.data.rows.map((row) => row.download_id)).toEqual([
-      "combined_1"
-    ])
-    expect(during.data.epoch).toBe(cleared.data.epoch)
-    expect(cleared.data.rows).toEqual([])
+    // one counter for the pushes and the replies both, strictly increasing
+    const seqs = [
+      ...pushes(handlers).map((snapshot) => snapshot.seq),
+      (await handlers.handleGetList(null)).data.seq
+    ]
+    expect(seqs).toEqual([...seqs].sort((a, b) => a - b))
+    expect(new Set(seqs).size).toBe(seqs.length)
   })
 
   test("remove-history refuses a request with no download id", async () => {
@@ -470,7 +483,7 @@ describe("the three channels", () => {
     const registered = ipcMain.handle.mock.calls.map(([channel]) => channel)
     expect(registered).toEqual(
       expect.arrayContaining([
-        "download:get-history",
+        "download:get-list",
         "download:clear-history",
         "download:remove-history"
       ])
@@ -487,7 +500,7 @@ describe("the three channels", () => {
      */
     const removed = ipcMain.removeHandler.mock.calls.map(([channel]) => channel)
     expect(removed).toEqual([
-      "download:get-history",
+      "download:get-list",
       "download:clear-history",
       "download:remove-history",
       // the panel's second pass added these two, and they are unregistered on

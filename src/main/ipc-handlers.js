@@ -83,6 +83,38 @@ function retryRequest(fields) {
 }
 
 /**
+ * one of the runner's reservations, in the spelling the history uses
+ *
+ * the two halves of the list have to be one shape, and the history row is the
+ * one that survives a restart, so the reservation is written the way it will be
+ * written to disk a moment later anyway (see reservationRow in
+ * services/download-runner.js).
+ *
+ * @param {Object} status - one row of runner.list()
+ * @returns {Object} the same download as a history row
+ */
+function listRow(status) {
+  return {
+    download_id: status.downloadId,
+    kind: status.playlist
+      ? "playlist"
+      : status.type === "audio"
+        ? "audio"
+        : status.platform === "tiktok" || status.platform === "pinterest"
+          ? "simple"
+          : "video",
+    platform: status.platform,
+    title: status.title,
+    label: status.label,
+    status: status.status,
+    started_at: status.startTime,
+    filename: status.filename,
+    error: status.error,
+    request: status.request
+  }
+}
+
+/**
  * a whole, non-negative count, or none
  *
  * `settings.json` is a file on the user's disk and the panel draws whatever is
@@ -181,22 +213,7 @@ class IPCHandlers {
 
     this.history.load()
 
-    /**
-     * which side of the user's clears a snapshot was read on
-     *
-     * an integer that moves every time a row leaves the history - a clear, a
-     * removal - and rides out on every answer about it: the two snapshot reads
-     * and the two replies that do the removing. It is the one thing the renderer
-     * cannot work out for itself, and every attempt to (a version counter of its
-     * own, a set of the ids it happened to be holding, a comparison of clocks)
-     * missed an ordering, because only this process knows whether a snapshot was
-     * taken before a clear or after it.
-     *
-     * it counts clears rather than downloads, so it stays small, and it lives
-     * for the session: the renderer only ever compares two numbers from the same
-     * run, and a reload re-reads everything anyway.
-     */
-    this.historyEpoch = 0
+
 
     /**
      * how many downloads this install has ever finished
@@ -207,6 +224,8 @@ class IPCHandlers {
      * settings.json is where it survives a restart, and the read that starts it
      * is the head of the write chain.
      */
+    // which snapshot of the list the renderer has seen (see listSnapshot)
+    this.listSeq = 0
     this.lifetimeCompleted = 0
     // how many of those landed in this session, which is how a queued write
     // works out which download it is writing about
@@ -221,6 +240,9 @@ class IPCHandlers {
       history: this.history,
       sendEvent: (downloadId, payload) =>
         this.sendDownloadEvent(downloadId, payload),
+      // every reservation, every slot taken and every settle is a change to the
+      // list the panel draws, and the runner is where all three happen
+      listChanged: () => this.publishList(),
       trackEvent: (name, payload) => this.trackDownloadEvent(name, payload),
       logAudit: (operation, success, data) =>
         this.logAudit(operation, success, data)
@@ -239,6 +261,64 @@ class IPCHandlers {
     }
 
     return path.join(this.engine.getUserDataPath(), "downloads", "history.json")
+  }
+
+  /**
+   * the whole download list, as it stands right now
+   *
+   * one shape, built synchronously from memory: every reservation the runner
+   * holds, then every row the history remembers that is not one of them. The
+   * renderer replaces its list with this rather than merging it into what it
+   * has, which is the difference that ends four rounds of races - a pulled
+   * snapshot had to be reconciled against events and clears that could land on
+   * either side of it, and there was always one more ordering.
+   *
+   * `seq` orders the stream: the renderer applies a snapshot only if it is
+   * newer than the last one it applied, so a push that overtakes a reply, or a
+   * reply that arrives after the push it provoked, costs nothing. It counts
+   * snapshots rather than downloads, so it is the same number in the push and
+   * in the reply to a read.
+   *
+   * the lifetime count rides along because it changes with the same events and
+   * the panel draws the two together.
+   */
+  listSnapshot() {
+    const rows = []
+    const seen = new Set()
+
+    for (const status of this.runner.list()) {
+      seen.add(status.downloadId)
+      rows.push(listRow(status))
+    }
+
+    for (const row of this.history ? this.history.list() : []) {
+      if (seen.has(row.download_id)) continue
+      rows.push(row)
+    }
+
+    return {
+      seq: (this.listSeq += 1),
+      lifetimeCompleted: this.lifetimeCompleted,
+      rows
+    }
+  }
+
+  /**
+   * ...and the renderer hears about it
+   *
+   * called after every change to the list and after nothing else: a reserve, a
+   * slot taken, a settle, a clear, a removal. Progress is not a change to the
+   * list - it is a number on a row that already exists - and pushing the whole
+   * list four times a second per download would be a list rebuilt on every
+   * frame.
+   */
+  publishList() {
+    if (!this.mainWindow || this.mainWindow.isDestroyed()) return
+
+    this.mainWindow.webContents.send(
+      IPC_CHANNELS.DOWNLOADS_LIST,
+      this.listSnapshot()
+    )
   }
 
   /**
@@ -804,8 +884,7 @@ class IPCHandlers {
       "download:get-status",
       this.handleGetDownloadStatus.bind(this)
     )
-    ipcMain.handle("download:get-all", this.handleGetAllDownloads.bind(this))
-    ipcMain.handle("download:get-history", this.handleGetHistory.bind(this))
+    ipcMain.handle("download:get-list", this.handleGetList.bind(this))
     ipcMain.handle("download:clear-history", this.handleClearHistory.bind(this))
     ipcMain.handle(
       "download:remove-history",
@@ -1669,47 +1748,24 @@ class IPCHandlers {
   }
 
   // get all active downloads
-  async handleGetAllDownloads(_event) {
-    try {
-      // {epoch, rows} rather than the bare array it used to be: the rows alone
-      // do not say when they were read, and the renderer cannot tell a snapshot
-      // taken before a "clear history" from one taken after it. see historyEpoch
-      return this.createSuccess({
-        epoch: this.historyEpoch,
-        rows: this.runner.list()
-      })
-    } catch (error) {
-      console.error("Get all downloads failed:", error.message)
-      return this.createError("Failed to get downloads")
-    }
-  }
-
   /**
-   * the downloads this install remembers, newest first
+   * the renderer's one read of the list
    *
-   * {epoch, rows}, as download:get-all answers: the rows are what the renderer
-   * hydrates from, and the epoch is which side of the user's clears they were
-   * read on (see historyEpoch).
-   *
-   * the file has to have been read first, and so does every status already
-   * written down. this is the renderer's one hydration read and nothing pushes
-   * a correction afterwards: answering from a list the pending read is about to
-   * replace would tell an install with a hundred rows that it has never
-   * downloaded anything, and answering before a terminal write that is queued
-   * behind an earlier one would hand back a finished download as a live row
-   * that can never be settled, stopped or retried. `snapshot` waits for both.
+   * the same snapshot the pushes carry, for the first read of a window and for
+   * any re-sync: applied through the same path, ordered by the same counter, so
+   * a push that overtook the reply is not undone by it.
    */
-  async handleGetHistory(_event) {
+  async handleGetList(_event) {
     try {
-      const rows = await this.history.snapshot()
+      // the file has to have been read, or a window that opened in the first
+      // moments of the session would be told this install has no history - and
+      // the next push is a download away
+      await this.history.ready
 
-      // read after the snapshot, not before: a clear that lands while the
-      // snapshot is being taken is a clear these rows predate, and the epoch
-      // has to say so
-      return this.createSuccess({ epoch: this.historyEpoch, rows })
+      return this.createSuccess(this.listSnapshot())
     } catch (error) {
-      console.error("Get download history failed:", error.message)
-      return this.createError("Failed to get the download history")
+      console.error("Get download list failed:", error.message)
+      return this.createError("Failed to get the downloads list")
     }
   }
 
@@ -1725,13 +1781,10 @@ class IPCHandlers {
    */
   async handleClearHistory(_event) {
     try {
-      this.historyEpoch += 1
       await this.history.clear()
+      this.publishList()
 
-      return this.createSuccess({
-        epoch: this.historyEpoch,
-        rows: this.history.list()
-      })
+      return this.createSuccess(this.listSnapshot())
     } catch (error) {
       console.error("Clear download history failed:", error.message)
       return this.createError("Failed to clear the download history")
@@ -1745,13 +1798,10 @@ class IPCHandlers {
   async handleRemoveHistory(_event, data) {
     try {
       this.validateRequest(data, ["downloadId"])
-      this.historyEpoch += 1
       await this.history.remove(data.downloadId)
+      this.publishList()
 
-      return this.createSuccess({
-        epoch: this.historyEpoch,
-        rows: this.history.list()
-      })
+      return this.createSuccess(this.listSnapshot())
     } catch (error) {
       console.error("Remove download history failed:", error.message)
       return this.createError("Failed to remove that download")
@@ -2170,11 +2220,9 @@ class IPCHandlers {
    * cannot disagree about a download that finished while this read was in
    * flight.
    *
-   * its own channel rather than a field on `download:get-history`, whose reply
-   * is the rows array itself (see handleGetHistory) - and a lifetime count is
-   * not a row, does not belong in a list "clear history" empties, and is read at
-   * exactly the same moment, so the second invoke costs nothing worth the change
-   * of shape.
+   * the panel reads it from the list snapshot now (see listSnapshot), which
+   * carries it beside the rows; this channel is what the support dialog and any
+   * caller that wants the number on its own still ask.
    */
   async handleGetDownloadCount(_event) {
     try {
@@ -2393,7 +2441,6 @@ class IPCHandlers {
       "cookies:import-file",
       "cookies:clear",
       "download:get-status",
-      "download:get-all",
       "system:open-download-folder",
       "system:show-in-folder",
       "system:select-download-folder",
@@ -2418,7 +2465,7 @@ class IPCHandlers {
      * this branch; fixing them is its own change, with its own test for each.
      */
     const invokeChannels = [
-      "download:get-history",
+      "download:get-list",
       "download:clear-history",
       "download:remove-history",
       "system:show-in-folder",

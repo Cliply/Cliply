@@ -37,6 +37,7 @@ class DownloadRunner {
     trackEvent = () => {},
     logAudit = () => {},
     history = null,
+    listChanged = null,
     maxConcurrent = APP_CONFIG.MAX_CONCURRENT_DOWNLOADS
   }) {
     this.engine = engine
@@ -44,6 +45,15 @@ class DownloadRunner {
     this.sendEvent = sendEvent
     this.trackEvent = trackEvent
     this.logAudit = logAudit
+    /**
+     * say that the list of downloads has changed
+     *
+     * every point where it does is a point where this runner writes the row
+     * down, so it is called from `record` and nowhere else. Optional: a runner
+     * built without one simply tells nobody, which is what every test that only
+     * cares about events does.
+     */
+    this.listChanged = listChanged || (() => {})
     // where a download is written down so it is still there after a restart.
     // optional: every runner behaviour is the same without one, and a build or
     // a test that constructs no history simply keeps no record
@@ -545,17 +555,29 @@ class DownloadRunner {
    * @param {Object} fields - the status and whatever this moment knows
    */
   record(downloadId, entry, fields) {
-    if (!this.history) return
-
     try {
-      this.history.upsert({
-        download_id: downloadId,
-        ...(entry ? reservationRow(entry) : null),
-        ...fields
-      })
+      if (this.history) {
+        this.history.upsert({
+          download_id: downloadId,
+          ...(entry ? reservationRow(entry) : null),
+          ...fields
+        })
+      }
     } catch (error) {
       console.warn(`failed to record ${downloadId}:`, describeError(error))
     }
+
+    /**
+     * ...and whoever is drawing the list hears about it.
+     *
+     * the three points a download is written down - the reservation, the slot,
+     * the settle - are the three points the list changes, so this is one place
+     * rather than three. It is outside the try because a history that could not
+     * write is a history this session forgets, not a panel that stops updating:
+     * the rows in memory are still right, and they are what the snapshot is
+     * built from.
+     */
+    this.listChanged()
   }
 
   settleCompleted({ downloadId, type, platform, formatId, trimmed, result }) {

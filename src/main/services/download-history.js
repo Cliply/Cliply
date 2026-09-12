@@ -58,6 +58,21 @@ class DownloadHistory {
     this.chain = Promise.resolve()
 
     /**
+     * what the file read must not undo
+     *
+     * the rows change in memory synchronously now, so a clear or a removal can
+     * land while the one read of the file is still in flight. These say what to
+     * do with the rows it brings back; both are only consulted by that read.
+     */
+    this.clearedEarly = false
+    this.removed = new Set()
+
+    // whether the one read of the file has landed. until it has, a clear or a
+    // removal that finds nothing here still has a write to make: what it is
+    // dropping may be in the file
+    this.loaded = true
+
+    /**
      * the file having been read, for callers that answer with `rows`
      *
      * `list()` is synchronous and the chain is not, so a reader arriving in the
@@ -83,10 +98,39 @@ class DownloadHistory {
    * @returns {Promise<void>} settles when the file has been read and repaired
    */
   load() {
-    this.ready = this.enqueue(async () => {
-      this.rows = normalizeRows(await this.readFile(), this.limit)
+    this.loaded = false
 
-      if (this.markLiveInterrupted()) {
+    this.ready = this.enqueue(async () => {
+      const stored = await this.readFile()
+
+      // what this session has already written wins: the rows change in memory
+      // the moment they are recorded (see upsert), so the file is the older
+      // half of the truth by the time it arrives, and a clear or a removal that
+      // landed in the window is applied to it here rather than undone
+      const kept = this.survivors(stored)
+      let interrupted = false
+
+      /**
+       * a live row in the *file* belongs to a run that is over: the app went
+       * away without marking it (a crash, a kill, a power cut). This session's
+       * own live rows are in memory rather than in what was just read, and they
+       * are genuinely running, so the marking is applied to the file's rows
+       * alone.
+       */
+      const older = kept.map((row) => {
+        if (!LIVE_STATUSES.has(row.status)) return row
+
+        interrupted = true
+        return { ...row, status: INTERRUPTED }
+      })
+
+      this.rows = normalizeRows([...this.rows, ...older], this.limit)
+      this.loaded = true
+
+      // a row of the file that did not survive is a row the file still holds:
+      // the clear that dropped it had nothing in memory to write about, so this
+      // is where that write happens
+      if (interrupted || kept.length !== stored.length) {
         await this.persist()
       }
     })
@@ -95,11 +139,39 @@ class DownloadHistory {
   }
 
   /**
+   * the rows of the file this session has not already answered for
+   *
+   * a clear removes every finished row, so a finished row read afterwards is
+   * one it removed; a removal names an id. Both are kept for the length of the
+   * load and no longer: from then on the rows in memory are the whole history.
+   *
+   * @param {Object[]} stored - whatever the file held
+   * @returns {Object[]}
+   */
+  survivors(stored) {
+    const known = new Set(this.rows.map((row) => row.download_id))
+
+    return stored.filter((row) => {
+      if (!row || known.has(row.download_id)) return false
+      if (this.removed.has(row.download_id)) return false
+
+      return this.clearedEarly ? LIVE_STATUSES.has(row.status) : true
+    })
+  }
+
+  /**
    * record where one download stands
    *
    * fields present replace what the row held; fields absent leave it alone, so
    * a settle can carry its outcome without repeating the title and the request
    * that were written at reserve.
+   *
+   * **the rows change here, synchronously; only the file write is queued.** the
+   * list main pushes to the renderer is built from these rows the moment a
+   * download changes (see listSnapshot in ipc-handlers.js), so a row that
+   * changed in memory a chain later would be announced in the state it had
+   * before the change - which is the whole family of races the push model
+   * exists to end.
    *
    * never rejects, and never throws: this is called from inside the runner's
    * try, where a throw would be caught as the download itself breaking.
@@ -114,32 +186,33 @@ class DownloadHistory {
       return Promise.resolve()
     }
 
-    return this.enqueue(async () => {
-      const index = this.rows.findIndex((known) => known.download_id === downloadId)
+    const index = this.rows.findIndex(
+      (known) => known.download_id === downloadId
+    )
 
-      if (index === -1) {
-        this.rows.push({ ...row })
-      } else {
-        /**
-         * interrupted is the last word on a row.
-         *
-         * the quit path marks every live row interrupted and then cancels the
-         * downloads, so each of them settles as `cancelled` a moment later -
-         * and the user would reopen the app to rows they never cancelled. the
-         * late write is dropped here rather than ordered around, because the
-         * cancels arrive from four different call stacks and only this one
-         * place sees all of them.
-         */
-        if (this.rows[index].status === INTERRUPTED) {
-          return
-        }
-
-        this.rows[index] = { ...this.rows[index], ...row }
+    if (index === -1) {
+      this.rows.push({ ...row })
+    } else {
+      /**
+       * interrupted is the last word on a row.
+       *
+       * the quit path marks every live row interrupted and then cancels the
+       * downloads, so each of them settles as `cancelled` a moment later -
+       * and the user would reopen the app to rows they never cancelled. the
+       * late write is dropped here rather than ordered around, because the
+       * cancels arrive from four different call stacks and only this one
+       * place sees all of them.
+       */
+      if (this.rows[index].status === INTERRUPTED) {
+        return Promise.resolve()
       }
 
-      this.rows = normalizeRows(this.rows, this.limit)
-      await this.persist()
-    })
+      this.rows[index] = { ...this.rows[index], ...row }
+    }
+
+    this.rows = normalizeRows(this.rows, this.limit)
+
+    return this.enqueue(() => this.persist())
   }
 
   /**
@@ -223,19 +296,23 @@ class DownloadHistory {
    * @param {string} downloadId - the id the row is keyed by
    * @returns {Promise<void>} settles when the write has been attempted
    */
-  async remove(downloadId) {
-    await this.ready
+  remove(downloadId) {
+    const target = this.rows.find((row) => row.download_id === downloadId)
 
-    return this.enqueue(async () => {
-      const target = this.rows.find((row) => row.download_id === downloadId)
+    if (target && LIVE_STATUSES.has(target.status)) {
+      return Promise.resolve()
+    }
 
-      if (!target || LIVE_STATUSES.has(target.status)) {
-        return
-      }
+    this.rows = this.rows.filter((row) => row.download_id !== downloadId)
+    // the file read, if it is still in flight, must not bring it back
+    this.removed.add(downloadId)
 
-      this.rows = this.rows.filter((row) => row.download_id !== downloadId)
-      await this.persist()
-    })
+    // nothing here to drop and the file already read: there is nothing to write
+    if (!target && this.loaded) {
+      return Promise.resolve()
+    }
+
+    return this.enqueue(() => this.persist())
   }
 
   /**
@@ -247,19 +324,22 @@ class DownloadHistory {
    *
    * @returns {Promise<void>} settles when the write has been attempted
    */
-  async clear() {
-    await this.ready
+  clear() {
+    // recorded whether or not anything went: the file read may still be in
+    // flight, and what it brings back was cleared by this too
+    this.clearedEarly = true
 
-    return this.enqueue(async () => {
-      const next = this.rows.filter((row) => LIVE_STATUSES.has(row.status))
+    const next = this.rows.filter((row) => LIVE_STATUSES.has(row.status))
+    const changed = next.length !== this.rows.length
 
-      if (next.length === this.rows.length) {
-        return
-      }
+    this.rows = next
 
-      this.rows = next
-      await this.persist()
-    })
+    // nothing here to drop and the file already read: there is nothing to write
+    if (!changed && this.loaded) {
+      return Promise.resolve()
+    }
+
+    return this.enqueue(() => this.persist())
   }
 
   /**

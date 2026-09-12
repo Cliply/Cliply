@@ -55,6 +55,10 @@ const IPC_CHANNELS = {
 
   // download management
   DOWNLOAD_PROGRESS: "download:progress",
+  // the whole list, pushed whenever it changes: main is the one process that
+  // knows the order of a reservation against a clear, so it says what the list
+  // is rather than leaving the renderer to merge what it can pull
+  DOWNLOADS_LIST: "downloads:list",
   // fired only on the handful of downloads that hit a support milestone
   SUPPORT_MILESTONE: "support:milestone",
   DOWNLOAD_COMPLETE: "download:complete",

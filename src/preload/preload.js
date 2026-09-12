@@ -18,6 +18,8 @@ const IPC_CHANNELS = {
 
   // download management
   DOWNLOAD_PROGRESS: "download:progress",
+  // the whole list, pushed after every change to it
+  DOWNLOADS_LIST: "downloads:list",
   SUPPORT_MILESTONE: "support:milestone",
   DOWNLOAD_COMPLETE: "download:complete",
   DOWNLOAD_ERROR: "download:error",
@@ -116,11 +118,9 @@ contextBridge.exposeInMainWorld("electronAPI", {
     cancel: (downloadId) =>
       invoke(IPC_CHANNELS.DOWNLOAD_CANCEL, { downloadId }),
     getStatus: (downloadId) => invoke("download:get-status", { downloadId }),
-    getAll: () => invoke("download:get-all"),
-    // what the panel was showing before the app was last closed. no push
-    // channel beside it: every change to a live row already arrives on
-    // download:progress, so this is only ever read once, at startup
-    getHistory: () => invoke("download:get-history"),
+    // the whole list, read once at startup and after that only if something
+    // needs a re-sync: main pushes it on downloads:list whenever it changes
+    getList: () => invoke("download:get-list"),
     clearHistory: () => invoke("download:clear-history"),
     removeHistory: (downloadId) =>
       invoke("download:remove-history", { downloadId }),
@@ -129,6 +129,14 @@ contextBridge.exposeInMainWorld("electronAPI", {
       ipcRenderer.on(IPC_CHANNELS.DOWNLOAD_PROGRESS, handler)
       return () =>
         ipcRenderer.removeListener(IPC_CHANNELS.DOWNLOAD_PROGRESS, handler)
+    },
+    // the list itself, pushed after every change to it: a reservation, a slot
+    // taken, a settle, a clear, a removal. never for progress
+    onList: (callback) => {
+      const handler = (_event, data) => callback(data)
+      ipcRenderer.on(IPC_CHANNELS.DOWNLOADS_LIST, handler)
+      return () =>
+        ipcRenderer.removeListener(IPC_CHANNELS.DOWNLOADS_LIST, handler)
     }
   },
 
