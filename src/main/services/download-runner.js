@@ -52,12 +52,18 @@ class DownloadRunner {
      * `running` counts downloads that hold a slot, which is not the same as
      * `active.size`: a reservation exists from the moment the ipc layer claims
      * the id, and a queued one is very much active without running. `waiting`
-     * holds one `{downloadId, resolve}` per parked run, oldest first, which is
-     * what makes the queue FIFO by reservation time.
+     * holds one `{downloadId, resolve, sequence}` per parked run, earliest
+     * reservation first, which is what makes the queue FIFO.
+     *
+     * `reservations` is that order: a counter bumped once per reserve(). the
+     * wall clock in `entry.started` cannot do this job, because two downloads
+     * accepted one setImmediate apart land in the same millisecond and would
+     * tie - which is exactly the pair whose order is in question.
      */
     this.maxConcurrent = maxConcurrent
     this.running = 0
     this.waiting = []
+    this.reservations = 0
   }
 
   /**
@@ -101,6 +107,10 @@ class DownloadRunner {
       // lives in its own field instead of as a fifth media type
       playlist: Boolean(details.playlist),
       started: Date.now(),
+      // where this download stands in the queue, decided here rather than
+      // wherever run() happens to reach the semaphore: the two orders are not
+      // the same one. see acquireSlot
+      sequence: (this.reservations += 1),
       // every reservation begins queued, whether or not it ever waits: run()
       // moves it on where it takes a handle, so there is one place the status
       // changes rather than one per caller
@@ -279,17 +289,57 @@ class DownloadRunner {
     this.sendEvent(downloadId, { status: STATUS.QUEUED, progress: 0 })
 
     return new Promise((resolve) => {
-      this.waiting.push({ downloadId, resolve })
+      this.park(downloadId, resolve)
     })
+  }
+
+  /**
+   * put a run in the queue, in the order its download was accepted
+   *
+   * **the order runs reach the semaphore is not the order they were reserved
+   * in.** startDownload defers run() by a setImmediate, and the simple-platform
+   * path awaits run() inline instead, so a tiktok link pasted after a youtube
+   * one calls run() first and would otherwise park ahead of it. the queue the
+   * user is owed is the order their downloads were accepted, which is the
+   * order reserve() ran, so the waiter is inserted by its reservation's
+   * sequence rather than appended.
+   *
+   * scanning from the back and stopping at the first sequence below this one
+   * keeps equal values in insertion order. sequences are unique, so that is a
+   * property of the walk rather than something being relied on.
+   *
+   * one case this does not cover, on purpose: a download reserved earlier whose
+   * run() has not been called yet cannot be waited for, so a slot going free in
+   * that window is taken by whoever is already parked. it is one setImmediate
+   * wide, and once every kind starts through startDownload the two orders are
+   * the same anyway.
+   *
+   * @param {string} downloadId - the id handed to the renderer
+   * @param {Function} resolve - settles the promise acquireSlot is awaiting
+   */
+  park(downloadId, resolve) {
+    const entry = this.active.get(downloadId)
+    // a run always has its reservation by here, so the fallback only keeps an
+    // impossible state from sorting to the front of everyone else's queue
+    const sequence = entry ? entry.sequence : this.reservations
+
+    let index = this.waiting.length
+
+    while (index > 0 && this.waiting[index - 1].sequence > sequence) {
+      index -= 1
+    }
+
+    this.waiting.splice(index, 0, { downloadId, resolve, sequence })
   }
 
   /**
    * give up a slot, and start whatever was waiting for it
    *
-   * the slot is handed straight to the oldest waiter rather than freed and
-   * re-taken: between a decrement and that waiter's continuation actually
-   * running there is a turn of the event loop in which a fresh run() would find
-   * room and jump the whole queue.
+   * the front of `waiting` is the earliest reservation still parked, which
+   * park() is what maintains. the slot is handed straight to it rather than
+   * freed and re-taken: between a decrement and that waiter's continuation
+   * actually running there is a turn of the event loop in which a fresh run()
+   * would find room and jump the whole queue.
    */
   releaseSlot() {
     const next = this.waiting.shift()

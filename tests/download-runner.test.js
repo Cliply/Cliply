@@ -760,6 +760,51 @@ describe("queue", () => {
     await runs[2]
   })
 
+  /**
+   * the order runs reach the semaphore is not the order they were reserved in
+   *
+   * startDownload defers run() by a setImmediate and the simple-platform path
+   * awaits run() inline, so a tiktok link pasted after a youtube one calls
+   * run() first. the test above cannot see the difference: it reserves and
+   * invokes in the same order, so both contracts pass it.
+   */
+  test("a download reserved first is queued first, whichever run() parked first", async () => {
+    const { runner } = createRunner({ maxConcurrent: 1 })
+    const spawned = []
+    const handles = { a: new FakeHandle(), b: new FakeHandle(), c: new FakeHandle() }
+
+    const a = runner.run({ ...BASE, downloadId: "a", createHandle: spawner(handles.a, spawned, "a") })
+    await settle()
+
+    // b is accepted second and c third, exactly as the ipc layer would claim
+    // them, and then c is the one that gets to run() first
+    runner.reserve("b", { type: "combined", platform: "youtube", title: "Second" })
+    runner.reserve("c", { type: "combined", platform: "tiktok", title: "Third" })
+
+    const c = runner.run({ ...BASE, downloadId: "c", createHandle: spawner(handles.c, spawned, "c") })
+    await settle()
+    const b = runner.run({ ...BASE, downloadId: "b", createHandle: spawner(handles.b, spawned, "b") })
+    await settle()
+
+    expect(spawned).toEqual(["a"])
+
+    handles.a.resolve(completion)
+    await a
+    await settle()
+
+    // b, the earlier reservation, even though c parked first
+    expect(spawned).toEqual(["a", "b"])
+
+    handles.b.resolve(completion)
+    await b
+    await settle()
+
+    expect(spawned).toEqual(["a", "b", "c"])
+
+    handles.c.resolve(completion)
+    await c
+  })
+
   test("a parked download announces itself once, and one that never waits says nothing", async () => {
     const { runner, events } = createRunner({ maxConcurrent: 1 })
     const handles = [new FakeHandle(), new FakeHandle(), new FakeHandle()]
@@ -877,8 +922,89 @@ describe("queue", () => {
     )
     expect(runner.size).toBe(1)
 
+    /**
+     * and the slot really is still a's.
+     *
+     * counting reservations cannot show this. a run() that released
+     * unconditionally instead of only when it holds a slot would pass every
+     * assertion above and still have decremented `running` on b's behalf,
+     * which only a fresh download can reveal: c would start beside a at a cap
+     * of one, and the counter would go negative from there.
+     */
+    const third = new FakeHandle()
+    const c = runner.run({ ...BASE, downloadId: "c", createHandle: spawner(third, spawned, "c") })
+    await settle()
+
+    expect(spawned).toEqual(["a"])
+
     first.resolve(completion)
     await a
+    await settle()
+
+    expect(spawned).toEqual(["a", "c"])
+
+    third.resolve(completion)
+    await c
+
+    expect(runner.size).toBe(0)
+  })
+
+  test("a cancel between the handoff and the waiter waking passes the slot on", async () => {
+    const { runner, events } = createRunner({ maxConcurrent: 1 })
+    const spawned = []
+    const first = new FakeHandle()
+    const second = new FakeHandle()
+    const third = new FakeHandle()
+
+    const a = runner.run({ ...BASE, downloadId: "a", createHandle: spawner(first, spawned, "a") })
+    const b = runner.run({ ...BASE, downloadId: "b", createHandle: spawner(second, spawned, "b") })
+    await settle()
+    const c = runner.run({ ...BASE, downloadId: "c", createHandle: spawner(third, spawned, "c") })
+    await settle()
+
+    expect(spawned).toEqual(["a"])
+
+    /**
+     * the one window a test cannot reach by awaiting.
+     *
+     * the handoff is synchronous inside releaseSlot, and the waiter it wakes
+     * resumes a microtask later - by which time an `await` in the test has
+     * already missed it. cancelling from in here lands exactly between the
+     * two: b holds a slot it is about to discover it does not want, which is
+     * the opposite of the cancel the test above covers.
+     */
+    const releaseSlot = runner.releaseSlot.bind(runner)
+    let queuedWhenCancelled = null
+
+    runner.releaseSlot = () => {
+      releaseSlot()
+
+      if (!queuedWhenCancelled) {
+        queuedWhenCancelled = runner.waiting.map((waiter) => waiter.downloadId)
+        runner.cancel("b")
+      }
+    }
+
+    first.resolve(completion)
+    await a
+    await settle()
+
+    // the cancel really did land on the far side of the handoff: b was out of
+    // the queue and holding the slot by then. without this the test passes
+    // either way, because a cancel one moment earlier ends the same
+    expect(queuedWhenCancelled).toEqual(["c"])
+
+    expect((await b).cancelled).toBe(true)
+    expect(events.filter((event) => event.downloadId === "b").map((event) => event.status)).toEqual(
+      ["queued", "cancelled"]
+    )
+
+    // b never spawned, and the slot it was holding went to c rather than
+    // being released twice or not at all
+    expect(spawned).toEqual(["a", "c"])
+
+    third.resolve(completion)
+    await c
 
     expect(runner.size).toBe(0)
   })
@@ -898,6 +1024,15 @@ describe("queue", () => {
     await settle()
 
     expect(runner.cancelAll()).toBe(3)
+    await settle()
+
+    // the two queued rows have settled, and neither handed its slot to
+    // anybody: a is still the only download holding one
+    const fresh = new FakeHandle()
+    const d = runner.run({ ...BASE, downloadId: "d", createHandle: spawner(fresh, spawned, "d") })
+    await settle()
+
+    expect(spawned).toEqual(["a"])
 
     const error = new Error("cancelled")
     error.code = ERROR_CODES.CANCELLED
@@ -907,7 +1042,11 @@ describe("queue", () => {
 
     expect(results.every((result) => result.cancelled)).toBe(true)
     // the two that were queued never became processes
-    expect(spawned).toEqual(["a"])
+    expect(spawned).toEqual(["a", "d"])
+
+    fresh.resolve(completion)
+    await d
+
     expect(runner.size).toBe(0)
   })
 
