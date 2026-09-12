@@ -220,6 +220,14 @@ export const useDownloadsStore = create<DownloadsState>((set, get) => ({
    * the lifetime number it carries is taken even then: a download this window
    * never had a row for is still a download this install finished, and the
    * count read at hydration may have been taken before it landed.
+   *
+   * **a row that has finished is finished.** events are replayed - over the
+   * hydration snapshot, and over a row a re-read of main's list has just
+   * brought in - and the row they are replayed onto is sometimes newer than
+   * they are. A `downloading` applied to a completed row puts a Stop back on a
+   * file that is already on disk and a bar back on a download nobody is
+   * waiting for, and a second completion is not a second download. So a
+   * terminal row takes nothing from an event but the count.
    */
   applyEvent: (event) =>
     set((state) => {
@@ -232,7 +240,9 @@ export const useDownloadsStore = create<DownloadsState>((set, get) => ({
         (row) => row.downloadId === event.downloadId
       )
 
-      if (index === -1) {
+      const settled = index >= 0 && isTerminalStatus(state.rows[index].status)
+
+      if (index === -1 || settled) {
         return lifetimeCompleted === state.lifetimeCompleted
           ? state
           : { lifetimeCompleted }
@@ -265,15 +275,20 @@ export const useDownloadsStore = create<DownloadsState>((set, get) => ({
    * queued, running or long finished, and the only rows the renderer can have
    * by now are ones a hook added in the window between subscribing and this
    * landing. those are kept, because main has not heard of them yet.
+   *
+   * a "clear history" while this read was in flight invalidates the history
+   * half of the answer and nothing else (see `isStale`): the count is a number
+   * the clear never touches, the active rows are downloads that are still
+   * running and so were never cleared, and the flag has to be set either way or
+   * the panel spends the session unable to say it is empty.
    */
   hydrate: (active, history, lifetimeCompleted, generation) =>
     set((state) => {
-      if (isStale(state, generation)) return state
-
+      const cleared = isStale(state, generation)
       const rows = [...active.map(rowFromStatus)]
       const seen = new Set(rows.map((row) => row.downloadId))
 
-      for (const entry of history) {
+      for (const entry of cleared ? [] : history) {
         if (seen.has(entry.download_id)) continue
         seen.add(entry.download_id)
         rows.push(rowFromHistory(entry))
@@ -310,13 +325,15 @@ export const useDownloadsStore = create<DownloadsState>((set, get) => ({
    * loses here because every row it already holds has been kept current by the
    * events since.
    *
-   * a reply from before a "clear history" is dropped, or it would put the rows
-   * the user just cleared straight back.
+   * a "clear history" while the read was in flight drops the history half of
+   * the answer, which is the half that would put the rows the user just cleared
+   * straight back. The active rows are kept: a clear never removes a download
+   * that is still running, so they are not what was cleared - and one of them
+   * is usually the reason this read was asked for.
    */
   adopt: (active, history, generation) =>
     set((state) => {
-      if (isStale(state, generation)) return state
-
+      const cleared = isStale(state, generation)
       const seen = new Set(state.rows.map((row) => row.downloadId))
       const added: DownloadRow[] = []
 
@@ -326,7 +343,7 @@ export const useDownloadsStore = create<DownloadsState>((set, get) => ({
         added.push(rowFromStatus(status))
       }
 
-      for (const entry of history) {
+      for (const entry of cleared ? [] : history) {
         if (seen.has(entry.download_id)) continue
         seen.add(entry.download_id)
         added.push(rowFromHistory(entry))
@@ -575,7 +592,16 @@ export const useActiveCount = (): number =>
   )
 
 /**
- * whether this reply describes a list that has since been thrown away
+ * whether the history in this reply describes a list that has since been
+ * thrown away
+ *
+ * what a stale reply loses is its history rows, and only those: they are the
+ * rows a clear removed, and putting them back is the bug. The rest of the same
+ * reply is still true - the lifetime count is a number no clear touches, and a
+ * download that is still running was never cleared - so it is kept rather than
+ * thrown away with them, which is how a clear during startup used to cost the
+ * session its count, its live rows and the flag that lets the panel say it is
+ * empty.
  *
  * a read with no generation is a caller that is not reading main at all - the
  * tests, and anything that builds the list itself - and is always current.

@@ -19,19 +19,6 @@ import { reportActions } from "@/lib/stores/reportStore"
 import { showDownloadErrorToast } from "@/lib/toast-utils"
 
 /**
- * one event that arrived while the list was still being read
- *
- * `handled` records whether it has already been through `announce`, which is
- * the same question as whether the store had its row at the time: an event for
- * a row that was already there was applied and announced on arrival, and is
- * replayed only so that hydration's older snapshot cannot undo it.
- */
-interface BufferedEvent {
-  event: DownloadProgress
-  handled: boolean
-}
-
-/**
  * the one subscription to download:progress, and the only place a download's
  * outcome is announced
  *
@@ -62,27 +49,61 @@ export function DownloadEvents() {
      * makes this a window rather than a queue: from then on events apply
      * straight through.
      */
-    let buffered: BufferedEvent[] | null = []
+    let buffered: DownloadProgress[] | null = []
     let mounted = true
 
     /**
-     * the ids this window has already asked main about
+     * every event for a download this window has no row for, in arrival order
      *
-     * an id neither the store nor main knows is a download nothing can say
-     * anything about, and every later event for it would ask again: a dead id
-     * reported at four updates a second is four reads a second. Asked once,
-     * dropped thereafter.
+     * not the first one: a download admitted after this window read its list
+     * sends progress and then finishes, and keeping only the event that
+     * provoked the lookup meant replaying "downloading, 1%" over a row main had
+     * just described as completed. Whatever arrives while the answer is coming
+     * belongs to the same download and is replayed in the order it arrived.
      */
-    const askedAbout = new Set<string>()
+    const pending = new Map<string, PendingEvents>()
 
     /**
-     * the events waiting on a re-read of main's snapshot, and the read itself
+     * the ids main does not know either
      *
-     * one read for all of them, whatever arrives while it is in flight: a
-     * download admitted after hydration sends progress like any other, and a
-     * read per event would be a request per percent.
+     * dropped for good, because there is nothing to draw and every later event
+     * for the same id would ask again: a dead id reported four times a second
+     * is four reads a second. An id only lands here after a read that began
+     * *after* we first heard of it came back without it, twice - see
+     * `reconcile`.
      */
-    let adopting: BufferedEvent[] | null = null
+    const concluded = new Set<string>()
+
+    /**
+     * the downloads whose ending has already been announced
+     *
+     * a terminal event is replayed - over hydration, and over a row a re-read
+     * has just brought in - and a toast is owed once per download, not once per
+     * time its event is applied. A row that arrives from a snapshot already
+     * finished is not announced at all: nobody was waiting on this window for
+     * it.
+     */
+    const announced = new Set<string>()
+
+    let reading = false
+    let failures = 0
+
+    /** apply an event, and say the outcome if this is where it lands */
+    const take = (event: DownloadProgress) => {
+      downloadsActions.applyEvent(event)
+      announceOnce(event)
+    }
+
+    const announceOnce = (event: DownloadProgress) => {
+      if (!isTerminalStatus(event.status)) return
+      if (announced.has(event.downloadId)) return
+
+      const row = downloadsActions.rowOf(event.downloadId)
+      if (!row) return
+
+      announced.add(event.downloadId)
+      announce(row, event)
+    }
 
     const handleProgress = (event: DownloadProgress) => {
       // read before the store is touched, only to learn whose event this is. an
@@ -93,89 +114,129 @@ export function DownloadEvents() {
 
       downloadsActions.applyEvent(event)
 
-      if (buffered) buffered.push({ event, handled: Boolean(known) })
+      if (buffered) buffered.push(event)
 
       reconcileCancelIntent(event)
 
       if (known) {
-        announce(known, event)
+        announceOnce(event)
         return
       }
 
       // ...and an id we do not have, once the startup window has closed, is
       // main's to explain: it admitted a download this window never saw
-      if (!buffered) askMain(event)
+      if (!buffered) remember(event)
     }
 
     /**
-     * ask main for its snapshot again, because an id turned up that we lack
+     * keep an event for a download we have no row for, and ask main about it
      *
      * the case is a start whose acknowledgement never reached a renderer: main
      * was still preparing the download folder when the window reloaded, so
      * neither snapshot mentioned it, and then it was reserved and run. Without
      * this the panel has no row for a download holding a slot - no Stop, no
      * outcome - until the next launch reads it out of the history.
-     *
-     * the event that provoked the read is kept and replayed after the merge,
-     * exactly as the startup window does: main writes the finished row before
-     * it answers, so a completion that started the read still lands on the row
-     * the answer brings, and the outcome is announced once.
      */
-    const askMain = (event: DownloadProgress) => {
-      if (askedAbout.has(event.downloadId)) return
+    const remember = (event: DownloadProgress) => {
+      if (concluded.has(event.downloadId)) return
 
-      askedAbout.add(event.downloadId)
+      const held = pending.get(event.downloadId)
 
-      if (adopting) {
-        // a read is already on its way: it will carry this id too
-        adopting.push({ event, handled: false })
-        return
-      }
+      if (held) held.events.push(event)
+      else pending.set(event.downloadId, { events: [event], misses: 0 })
 
-      adopting = [{ event, handled: false }]
+      read()
+    }
 
-      // the generation the read is issued under. a "clear history" between the
-      // question and the answer makes the answer describe a list that no longer
-      // exists, and the store drops it rather than restoring what was cleared
+    /**
+     * ask main for its snapshot, once at a time
+     *
+     * one read for every id waiting on one: a run reports four times a second
+     * and two unknown downloads are still one question. Which ids this read can
+     * answer for is decided here, when it is issued: an id discovered while it
+     * was in flight is not one of them, because main built that answer before
+     * it had ever heard of it.
+     */
+    const read = () => {
+      if (reading || pending.size === 0) return
+
+      reading = true
+
+      const covered = new Set(pending.keys())
+      // the generation the read is issued under: a "clear history" between the
+      // question and the answer makes the history half of the answer describe a
+      // list that no longer exists
       const generation = downloadsActions.generation()
 
       Promise.all([downloadApi.getAllDownloads(), downloadApi.getHistory()])
         .then(([active, history]) => {
           if (!mounted) return
 
-          settleAdoption(() =>
+          failures = 0
+          reconcile(covered, () =>
             downloadsActions.adopt(active, history, generation)
           )
         })
         .catch((error: unknown) => {
-          // nothing to adopt and nothing to replay onto: the ids stay in
-          // `askedAbout`, so this is one failed read rather than one per event
+          if (!mounted) return
+
+          failures += 1
+
+          // one retry, and then these ids are let go: a bridge that is refusing
+          // reads is not something to ask a third time on every progress line
           console.error("Failed to re-read the downloads list:", error)
 
-          if (mounted) settleAdoption(() => {})
+          reconcile(covered, null, failures > 1)
         })
     }
 
     /**
-     * merge what main sent, then replay what arrived while it was sending
+     * merge what main sent, replay what was waiting, and decide what to ask next
      *
-     * the same shape as `settle` below and for the same reasons: the rows come
-     * first so the replay writes the newest state over them, and the
-     * announcements come last so a row is described as it finally stands. An id
-     * main did not know either leaves no row, and its events are dropped.
+     * an id this read covered and answered for gets its events replayed in
+     * arrival order and is done with. An id it covered and did not mention is
+     * one main may not know at all - but a snapshot can be built a moment before
+     * a reservation, so it takes two such answers to conclude that, and one
+     * more read to get them.
+     *
+     * an id the read did not cover is not answered either way: it was admitted
+     * after the answer was built, which is precisely the case this whole
+     * mechanism exists for, and it waits for the next read.
      */
-    const settleAdoption = (merge: () => void) => {
-      const replay = adopting ?? []
-      adopting = null
+    const reconcile = (
+      covered: Set<string>,
+      merge: (() => void) | null,
+      giveUp = false
+    ) => {
+      reading = false
 
-      merge()
+      merge?.()
 
-      for (const { event } of replay) downloadsActions.applyEvent(event)
+      for (const downloadId of covered) {
+        const held = pending.get(downloadId)
 
-      for (const { event } of replay) {
-        const row = downloadsActions.rowOf(event.downloadId)
-        if (row) announce(row, event)
+        if (!held) continue
+
+        if (downloadsActions.rowOf(downloadId)) {
+          pending.delete(downloadId)
+
+          for (const event of held.events) take(event)
+
+          continue
+        }
+
+        // a read that began after we heard of this id came back without it
+        if (merge) held.misses += 1
+
+        if (giveUp || held.misses > 1) {
+          pending.delete(downloadId)
+          concluded.add(downloadId)
+        }
       }
+
+      // whatever is still waiting - an id admitted after this read was issued,
+      // or one answer short of being let go - asks again, in one more read
+      read()
     }
 
     /**
@@ -185,8 +246,9 @@ export function DownloadEvents() {
      * the replay comes after hydration and in arrival order, so the newest
      * state wins whatever the snapshot said, and the announcements come after
      * the replay so a row is described as it finally stands. an event whose id
-     * neither hydration nor the store knows is still dropped - it belongs to a
-     * download nothing can say anything about.
+     * neither hydration nor the store knows goes to `remember`, the same path
+     * every later event takes: main may have admitted that download while this
+     * window was reading.
      */
     const settle = (hydrate: () => void) => {
       const replay = buffered ?? []
@@ -194,20 +256,15 @@ export function DownloadEvents() {
 
       hydrate()
 
-      for (const { event } of replay) downloadsActions.applyEvent(event)
+      for (const event of replay) downloadsActions.applyEvent(event)
 
-      for (const { event, handled } of replay) {
-        const row = downloadsActions.rowOf(event.downloadId)
-
-        // an id the snapshot did not carry either: main may have admitted it
-        // while this window was reading, which is the same question `askMain`
-        // answers for every event after this point
-        if (!row) {
-          askMain(event)
+      for (const event of replay) {
+        if (downloadsActions.rowOf(event.downloadId)) {
+          announceOnce(event)
           continue
         }
 
-        if (!handled) announce(row, event)
+        remember(event)
       }
     }
 
@@ -250,6 +307,13 @@ export function DownloadEvents() {
   }, [])
 
   return null
+}
+
+/** what is waiting on main's answer about one download */
+interface PendingEvents {
+  events: DownloadProgress[]
+  /** how many reads that knew to ask about this id came back without it */
+  misses: number
 }
 
 /**

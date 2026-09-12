@@ -635,6 +635,68 @@ describe("clearing and removing", () => {
     expect(store().rows).toEqual([])
   })
 
+  /**
+   * ...but only the history half of that reply is wrong. The count is a number
+   * no clear touches, a download that is still running was never cleared, and
+   * the flag has to be set either way: throwing the whole answer away left the
+   * session with no count, no live rows and a panel that could never say it was
+   * empty.
+   */
+  test("a stale hydration still brings its count, its live rows and the flag", async () => {
+    const generation = store().generation
+    store().add(row({ downloadId: "old", status: "completed" }))
+    mocks.clearHistory.mockResolvedValue([])
+
+    store().clearFinished()
+    store().hydrate(
+      [
+        {
+          downloadId: "running",
+          status: "downloading",
+          progress: 40,
+          type: "combined",
+          platform: "youtube",
+          title: "Still going",
+          label: "1080p mp4"
+        } as DownloadStatus
+      ],
+      [{ download_id: "old", status: "completed" } as DownloadHistoryRow],
+      128,
+      generation
+    )
+    await flush()
+
+    expect(store().rows.map((known) => known.downloadId)).toEqual(["running"])
+    expect(store().lifetimeCompleted).toBe(128)
+    expect(store().hydrated).toBe(true)
+  })
+
+  test("and a stale re-read still brings the live row it was asked for", async () => {
+    const generation = store().generation
+    store().add(row({ downloadId: "old", status: "completed" }))
+    mocks.clearHistory.mockResolvedValue([])
+
+    store().clearFinished()
+    store().adopt(
+      [
+        {
+          downloadId: "late",
+          status: "downloading",
+          progress: 1,
+          type: "combined",
+          platform: "youtube",
+          title: "Admitted while we were clearing",
+          label: "1080p mp4"
+        } as DownloadStatus
+      ],
+      [{ download_id: "old", status: "completed" } as DownloadHistoryRow],
+      generation
+    )
+    await flush()
+
+    expect(store().rows.map((known) => known.downloadId)).toEqual(["late"])
+  })
+
   test("and neither can a re-read that was in flight", async () => {
     const generation = store().generation
     store().add(row({ downloadId: "old", status: "completed" }))
@@ -717,6 +779,58 @@ describe("the lifetime count", () => {
 
     expect(store().rows).toEqual([])
     expect(store().lifetimeCompleted).toBe(12)
+  })
+})
+
+/**
+ * a row that has finished is finished
+ *
+ * events are replayed - over the hydration snapshot, and over a row a re-read
+ * has just brought in - and what they are replayed onto is sometimes newer than
+ * they are. A `downloading` landing on a completed row puts a Stop back on a
+ * file that is already on disk.
+ */
+describe("what a terminal row accepts", () => {
+  test("nothing that would make it live again", () => {
+    store().add(row({ downloadId: "d1", status: "completed", progress: 100 }))
+
+    store().applyEvent(event({ status: "downloading", progress: 1 }))
+
+    expect(rowOf("d1")).toMatchObject({ status: "completed", progress: 100 })
+  })
+
+  test("and not a second ending", () => {
+    store().add(
+      row({ downloadId: "d1", status: "failed", error: "the first reason" })
+    )
+
+    store().applyEvent(event({ status: "completed", progress: 100 }))
+
+    expect(rowOf("d1")).toMatchObject({
+      status: "failed",
+      error: "the first reason"
+    })
+  })
+
+  // the count is main's, not the row's: a completion it carries has happened
+  // whatever this window has already written down about the row
+  test("but the count on it is still taken", () => {
+    store().add(row({ downloadId: "d1", status: "completed", progress: 100 }))
+
+    store().applyEvent(
+      event({ status: "completed", progress: 100, lifetimeCompleted: 7 })
+    )
+
+    expect(store().lifetimeCompleted).toBe(7)
+  })
+
+  test("and the list is left alone rather than rebuilt", () => {
+    store().add(row({ downloadId: "d1", status: "completed", progress: 100 }))
+    const before = store().rows
+
+    store().applyEvent(event({ status: "downloading", progress: 1 }))
+
+    expect(store().rows).toBe(before)
   })
 })
 
