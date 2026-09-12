@@ -5,6 +5,7 @@ import { create } from "zustand"
 import {
   downloadApi,
   type DownloadHistoryRow,
+  type HistorySnapshot,
   type DownloadKind,
   type DownloadProgress,
   type DownloadRequest,
@@ -56,6 +57,18 @@ export interface DownloadRow {
   category?: string
   startedAt: number
   finishedAt?: number
+  /**
+   * which of main's snapshots this row came out of
+   *
+   * `historyEpoch` in `ipc-handlers.js`: the number main moves every time a row
+   * leaves the history. A row built from an event or by a hook has none, which
+   * reads as `Infinity` - it is newer than any snapshot, and no reply about a
+   * clear can be describing it.
+   *
+   * it is what lets a reply say which rows it covered without the panel having
+   * to guess from its own clock or from the ids it happened to be holding.
+   */
+  epoch?: number
   /**
    * what a retry re-sends, typed per kind.
    *
@@ -153,46 +166,36 @@ interface DownloadsState {
    */
   admittedIds: string[]
   /**
-   * the downloads this window has been told to forget
+   * the newest epoch a clear or a removal has answered with
    *
-   * "clear history" and a removed row take their ids out of the list, and a
-   * snapshot of main's taken before either of those still names them: a read
-   * issued while a download was running, answered after it finished and was
-   * cleared, would otherwise put it back as running, with a Stop that stops
-   * nothing and no event left to ever settle it.
+   * main moves `historyEpoch` whenever a row leaves the history and stamps it on
+   * every answer about it, so a snapshot below this number was read before a
+   * clear the user has since made: its rows describe a history that no longer
+   * exists. Everything else in such a reply is still true, so it still lands -
+   * the lifetime count, and at startup the flag - and only its rows are left
+   * out, with a fresh read taking their place.
    *
-   * a tombstone rather than a version number, because the question a late reply
-   * raises is about rows and not about time: everything else in that reply is
-   * still true, and throwing it all away cost the session its count, its live
-   * rows and the flag that lets the panel say it is empty. Ids are never reused
-   * - a retry is a new download with a new id - so this only ever grows by what
-   * the user has cleared, and it goes with the rest of the list on a reset.
+   * this is the fourth attempt at the question and the first that does not
+   * guess: a version counter of this window's own, a set of the ids it happened
+   * to be holding, and a comparison of two clocks each missed an ordering,
+   * because only main knows whether a snapshot was taken before its clear or
+   * after it.
    */
-  forgotten: string[]
-  /**
-   * when "clear history" was last asked for, by this window's clock
-   *
-   * the tombstones cover the rows this window was holding. They cannot cover a
-   * finished row it never held - one that exists only inside a history reply
-   * that was already in flight - and that row was cleared too, by main, at the
-   * same moment as the rest. So a reply's finished rows are read against this:
-   * anything that ended before the user pressed the button is something they
-   * have already thrown away, and a download that ends after it is not.
-   *
-   * both times come from the same machine (`finished_at` is main's `Date.now()`
-   * and this is the renderer's), so they are comparable. zero until the first
-   * clear, and zero again with the rest of the list on a reset.
-   */
-  clearedAt: number
+  clearedEpoch: number
 
   add: (row: DownloadRow) => void
   applyEvent: (event: DownloadProgress) => void
   hydrate: (
     active: DownloadStatus[],
     history: DownloadHistoryRow[],
-    lifetimeCompleted?: number
+    lifetimeCompleted?: number,
+    epoch?: number
   ) => void
-  adopt: (active: DownloadStatus[], history: DownloadHistoryRow[]) => void
+  adopt: (
+    active: DownloadStatus[],
+    history: DownloadHistoryRow[],
+    epoch?: number
+  ) => void
   remove: (downloadId: string) => void
   clearFinished: () => void
   setHighlighted: (downloadId: string | null) => void
@@ -214,8 +217,7 @@ export const useDownloadsStore = create<DownloadsState>((set, get) => ({
   highlightedId: null,
   cancelIntents: [],
   admittedIds: [],
-  forgotten: [],
-  clearedAt: 0,
+  clearedEpoch: 0,
 
   // newest first, which is the order the panel lists them in and the order the
   // history keeps them in
@@ -294,24 +296,23 @@ export const useDownloadsStore = create<DownloadsState>((set, get) => ({
    * by now are ones a hook added in the window between subscribing and this
    * landing. those are kept, because main has not heard of them yet.
    *
-   * a download the user has cleared since this read was issued is left out of
-   * it, whichever half of the answer it arrives in (see `forgotten`).
-   * Everything else lands: the count, the flag, and every row main still knows.
+   * a reply read before a clear the user has since made brings no rows at all,
+   * active or history: they describe a history that is gone. What it does bring
+   * is the count and this flag, which no clear touches and which the panel
+   * cannot do without - and `DownloadEvents` asks again straight away.
    */
-  hydrate: (active, history, lifetimeCompleted) =>
+  hydrate: (active, history, lifetimeCompleted, epoch) =>
     set((state) => {
-      const forgotten = new Set(state.forgotten)
-      const rows = active
-        .filter((status) => !forgotten.has(status.downloadId))
-        .map(rowFromStatus)
+      const stale = staleEpoch(state, epoch)
+      const rows = stale
+        ? []
+        : active.map((status) => rowFromStatus(status, epoch))
       const seen = new Set(rows.map((row) => row.downloadId))
 
-      for (const entry of history) {
+      for (const entry of stale ? [] : history) {
         if (seen.has(entry.download_id)) continue
-        if (forgotten.has(entry.download_id)) continue
-        if (cleared(state, entry)) continue
         seen.add(entry.download_id)
-        rows.push(rowFromHistory(entry))
+        rows.push(rowFromHistory(entry, epoch))
       }
 
       for (const row of state.rows) {
@@ -345,31 +346,28 @@ export const useDownloadsStore = create<DownloadsState>((set, get) => ({
    * loses here because every row it already holds has been kept current by the
    * events since.
    *
-   * a download the user cleared while the read was in flight is left out, in
-   * the active half as much as in the history half: it was running when the
-   * snapshot was taken and it is not any more, and adopting it would put a
-   * download back on screen that has already finished, been counted, and been
-   * cleared - with a Stop on it and no event left to settle it.
+   * a reply read before a clear the user has since made adds nothing: every row
+   * in it, running or finished, describes a history that is gone. The ids that
+   * were waiting on it stay waiting, and the next read - issued under the newer
+   * epoch - is the one that answers for them.
    */
-  adopt: (active, history) =>
+  adopt: (active, history, epoch) =>
     set((state) => {
-      const forgotten = new Set(state.forgotten)
+      if (staleEpoch(state, epoch)) return state
+
       const seen = new Set(state.rows.map((row) => row.downloadId))
       const added: DownloadRow[] = []
 
       for (const status of active) {
         if (seen.has(status.downloadId)) continue
-        if (forgotten.has(status.downloadId)) continue
         seen.add(status.downloadId)
-        added.push(rowFromStatus(status))
+        added.push(rowFromStatus(status, epoch))
       }
 
       for (const entry of history) {
         if (seen.has(entry.download_id)) continue
-        if (forgotten.has(entry.download_id)) continue
-        if (cleared(state, entry)) continue
         seen.add(entry.download_id)
-        added.push(rowFromHistory(entry))
+        added.push(rowFromHistory(entry, epoch))
       }
 
       if (added.length === 0) return state
@@ -390,18 +388,21 @@ export const useDownloadsStore = create<DownloadsState>((set, get) => ({
    * behind is removable like any other.
    */
   remove: (downloadId) => {
-    set((state) => ({
-      rows: state.rows.filter((row) => row.downloadId !== downloadId),
-      // ...and it stays forgotten: a snapshot taken before this landed still
-      // names it, and a read in flight would bring it back
-      forgotten: remember(state.forgotten, [downloadId]),
-      highlightedId:
-        state.highlightedId === downloadId ? null : state.highlightedId
-    }))
+    set((state) =>
+      withHighlight(
+        state,
+        state.rows.filter((row) => row.downloadId !== downloadId)
+      )
+    )
 
-    downloadApi.removeHistory(downloadId).catch((error: unknown) => {
-      console.error("Failed to forget that download:", error)
-    })
+    // ...and main's answer says which snapshots this removal covers, exactly as
+    // a clear's does: a read still in flight would otherwise bring the row back
+    downloadApi
+      .removeHistory(downloadId)
+      .then((left) => set((state) => settleRemoval(state, left)))
+      .catch((error: unknown) => {
+        console.error("Failed to forget that download:", error)
+      })
   },
 
   /**
@@ -419,10 +420,10 @@ export const useDownloadsStore = create<DownloadsState>((set, get) => ({
    * a row that arrived after the clear was sent is kept whatever the answer
    * says: main had not heard of it when it built that list.
    *
-   * every id this removes is written down in `forgotten`, both here and when
-   * main answers: a snapshot asked for before the clear still names those
-   * downloads, sometimes as running, and landing it afterwards would put them
-   * all back.
+   * main's answer says which snapshots this covers: it carries the epoch the
+   * clear happened at, and every row still in flight from before it describes a
+   * history that no longer exists. That is the whole of the reconciliation now -
+   * no clock, no set of ids this window happened to be holding.
    *
    * `lifetimeCompleted` is deliberately untouched. the number counts downloads
    * this install finished, not rows it still keeps, so emptying the list is not
@@ -433,43 +434,11 @@ export const useDownloadsStore = create<DownloadsState>((set, get) => ({
     // younger than the request and cannot be something main meant to remove
     const sent = new Set(get().rows.map((row) => row.downloadId))
 
-    const clearedAt = Date.now()
-
-    set((state) => {
-      const kept = state.rows.filter(isLiveRow)
-
-      return {
-        ...withHighlight(state, kept),
-        clearedAt,
-        forgotten: remember(
-          state.forgotten,
-          dropped(state.rows, kept).map((row) => row.downloadId)
-        )
-      }
-    })
+    set((state) => withHighlight(state, state.rows.filter(isLiveRow)))
 
     downloadApi
       .clearHistory()
-      .then((remaining) => {
-        const kept = new Set(remaining.map((entry) => entry.download_id))
-
-        set((state) => {
-          const survivors = state.rows.filter(
-            (row) =>
-              !sent.has(row.downloadId) ||
-              isLiveRow(row) ||
-              kept.has(row.downloadId)
-          )
-
-          return {
-            ...withHighlight(state, survivors),
-            forgotten: remember(
-              state.forgotten,
-              dropped(state.rows, survivors).map((row) => row.downloadId)
-            )
-          }
-        })
-      })
+      .then((left) => set((state) => settleRemoval(state, left, sent)))
       .catch((error: unknown) => {
         // the rows are already gone from the panel and main either cleared its
         // file or did not. nothing here can put that right, and asking again
@@ -559,10 +528,9 @@ export const useDownloadsStore = create<DownloadsState>((set, get) => ({
   reset: () =>
     set(() => ({
       rows: [],
-      // the tombstones and the clear go with the list they belong to: nothing
-      // that comes back after this belongs to the session that wrote them
-      forgotten: [],
-      clearedAt: 0,
+      // the clears go with the list they belong to: nothing that comes back
+      // after this belongs to the session that counted them
+      clearedEpoch: 0,
       hydrated: false,
       lifetimeCompleted: 0,
       panelOpen: false,
@@ -580,13 +548,20 @@ export const downloadsActions = {
   hydrate: (
     active: DownloadStatus[],
     history: DownloadHistoryRow[],
-    lifetimeCompleted?: number
-  ) => useDownloadsStore.getState().hydrate(active, history, lifetimeCompleted),
-  adopt: (active: DownloadStatus[], history: DownloadHistoryRow[]) =>
-    useDownloadsStore.getState().adopt(active, history),
-  /** whether this window has been told to forget this download */
-  isForgotten: (downloadId: string) =>
-    useDownloadsStore.getState().forgotten.includes(downloadId),
+    lifetimeCompleted?: number,
+    epoch?: number
+  ) =>
+    useDownloadsStore
+      .getState()
+      .hydrate(active, history, lifetimeCompleted, epoch),
+  adopt: (
+    active: DownloadStatus[],
+    history: DownloadHistoryRow[],
+    epoch?: number
+  ) => useDownloadsStore.getState().adopt(active, history, epoch),
+  /** whether a reply read at this epoch describes a history that is gone */
+  staleSnapshot: (epoch: number) =>
+    epoch < useDownloadsStore.getState().clearedEpoch,
   findLive: (candidate: DownloadIdentity) =>
     useDownloadsStore.getState().findLive(candidate),
   setHighlighted: (downloadId: string | null) =>
@@ -633,30 +608,50 @@ export const useActiveCount = (): number =>
   )
 
 /**
- * whether this finished row is one the user has already cleared
+ * whether this reply was read before a clear the user has since made
  *
- * a row with no finish time at all cannot have ended after the clear: the only
- * rows without one come from a history file written before main recorded it,
- * which is to say from a previous version and therefore a previous run.
+ * a reply with no epoch at all is one from a build that does not stamp them, or
+ * a caller that is not reading main (the tests): there is nothing to judge it
+ * against, so it is current.
  */
-const cleared = (state: DownloadsState, entry: DownloadHistoryRow): boolean =>
-  state.clearedAt > 0 && (entry.finished_at ?? 0) < state.clearedAt
+const staleEpoch = (state: DownloadsState, epoch?: number): boolean =>
+  typeof epoch === "number" && epoch < state.clearedEpoch
 
-/** the ids this list held and no longer does */
-const dropped = (
-  before: DownloadRow[],
-  after: DownloadRow[]
-): DownloadRow[] => {
-  const kept = new Set(after.map((row) => row.downloadId))
+/** which snapshot a row came from, or `Infinity` for one no snapshot made */
+const epochOf = (row: DownloadRow): number =>
+  typeof row.epoch === "number" ? row.epoch : Number.POSITIVE_INFINITY
 
-  return before.filter((row) => !kept.has(row.downloadId))
-}
+/**
+ * what is left after a clear or a removal, given main's answer
+ *
+ * the rows main still has are the rows that stay, and everything else that was
+ * built from a snapshot older than this answer goes: those rows are what the
+ * user removed, whether or not this window ever saw them.
+ *
+ * `sent` is the ids this window was holding when a clear went out. A row from
+ * that set which has finished since is one main removed while the renderer
+ * still thought it was running, and it goes too. Anything younger than the
+ * request - a hook's row, a download admitted since - is kept whatever the
+ * answer says: main had not heard of it when it built that list.
+ */
+function settleRemoval(
+  state: DownloadsState,
+  left: HistorySnapshot,
+  sent?: Set<string>
+): Partial<DownloadsState> {
+  const kept = new Set(left.rows.map((entry) => entry.download_id))
 
-/** the tombstones, plus these, without repeating any */
-const remember = (forgotten: string[], ids: string[]): string[] => {
-  const added = ids.filter((id) => !forgotten.includes(id))
+  const rows = state.rows.filter(
+    (row) =>
+      isLiveRow(row) ||
+      kept.has(row.downloadId) ||
+      (epochOf(row) >= left.epoch && !sent?.has(row.downloadId))
+  )
 
-  return added.length === 0 ? forgotten : [...forgotten, ...added]
+  return {
+    ...withHighlight(state, rows),
+    clearedEpoch: Math.max(state.clearedEpoch, left.epoch)
+  }
 }
 
 /**
@@ -728,10 +723,11 @@ function mergeEvent(row: DownloadRow, event: DownloadProgress): DownloadRow {
  * to draw: a playlist of audio fetches audio and is still a playlist. main
  * decides it the same way (see historyKind in services/download-runner.js).
  */
-function rowFromStatus(status: DownloadStatus): DownloadRow {
+function rowFromStatus(status: DownloadStatus, epoch?: number): DownloadRow {
   const kind = kindOf(status)
 
   return {
+    epoch,
     downloadId: status.downloadId,
     kind,
     platform: platformOf(status.platform),
@@ -750,8 +746,12 @@ function rowFromStatus(status: DownloadStatus): DownloadRow {
 }
 
 /** a row from a download that is over, or was when this install last ran */
-function rowFromHistory(entry: DownloadHistoryRow): DownloadRow {
+function rowFromHistory(
+  entry: DownloadHistoryRow,
+  epoch?: number
+): DownloadRow {
   return {
+    epoch,
     downloadId: entry.download_id,
     kind: entry.kind || "video",
     platform: platformOf(entry.platform),

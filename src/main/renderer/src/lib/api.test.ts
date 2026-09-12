@@ -214,17 +214,29 @@ describe("the download history client", () => {
     return sent
   }
 
-  test("the rows come back as they were written", async () => {
-    historyBridge(() => ({ success: true, data: [ROW] }))
+  test("the rows come back as they were written, with their epoch", async () => {
+    historyBridge(() => ({ success: true, data: { epoch: 3, rows: [ROW] } }))
 
-    await expect(downloadApi.getHistory()).resolves.toEqual([ROW])
+    await expect(downloadApi.getHistory()).resolves.toEqual({
+      epoch: 3,
+      rows: [ROW]
+    })
   })
 
   test("clearing and removing answer with what is left", async () => {
-    const sent = historyBridge(() => ({ success: true, data: [ROW] }))
+    const sent = historyBridge(() => ({
+      success: true,
+      data: { epoch: 4, rows: [ROW] }
+    }))
 
-    await expect(downloadApi.clearHistory()).resolves.toEqual([ROW])
-    await expect(downloadApi.removeHistory("d2")).resolves.toEqual([ROW])
+    await expect(downloadApi.clearHistory()).resolves.toEqual({
+      epoch: 4,
+      rows: [ROW]
+    })
+    await expect(downloadApi.removeHistory("d2")).resolves.toEqual({
+      epoch: 4,
+      rows: [ROW]
+    })
     expect(sent).toEqual(["d2"])
   })
 
@@ -235,7 +247,24 @@ describe("the download history client", () => {
   test("an empty answer is an empty list, not a failure", async () => {
     historyBridge(() => ({ success: true }))
 
-    await expect(downloadApi.getHistory()).resolves.toEqual([])
+    await expect(downloadApi.getHistory()).resolves.toEqual({
+      epoch: 0,
+      rows: []
+    })
+  })
+
+  /**
+   * a build from before main stamped an epoch answers with the bare array it
+   * always did. reading that as epoch 0 is the truthful version of it: older
+   * than any clear, and with no clears at all nothing is ever judged stale
+   */
+  test("and a bare array is read as a snapshot older than any clear", async () => {
+    historyBridge(() => ({ success: true, data: [ROW] }))
+
+    await expect(downloadApi.getHistory()).resolves.toEqual({
+      epoch: 0,
+      rows: [ROW]
+    })
   })
 
   test("a refusal is thrown, with main's own sentence", async () => {

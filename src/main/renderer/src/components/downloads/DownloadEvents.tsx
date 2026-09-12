@@ -88,6 +88,9 @@ export function DownloadEvents() {
     /** the ids a read is out asking about right now */
     const awaiting = new Set<string>()
 
+    /** whether this turn has already queued the work that issues a read */
+    let queued = false
+
     /** apply an event, and say the outcome if this is where it lands */
     const take = (event: DownloadProgress) => {
       downloadsActions.applyEvent(event)
@@ -140,10 +143,6 @@ export function DownloadEvents() {
     const remember = (event: DownloadProgress) => {
       if (concluded.has(event.downloadId)) return
 
-      // a download the user has cleared is not one to ask main about: the row
-      // is gone on purpose, and `adopt` would leave it out anyway
-      if (downloadsActions.isForgotten(event.downloadId)) return
-
       const held = pending.get(event.downloadId)
 
       if (held) held.events.push(event)
@@ -167,7 +166,26 @@ export function DownloadEvents() {
      * was in flight is not one of them, because main built that answer before
      * it had ever heard of it.
      */
+    /**
+     * ask, once per turn
+     *
+     * a hundred unknown ids discovered in one synchronous turn - a window that
+     * reloaded while a queue was draining - would otherwise be a hundred reads
+     * and a hundred follow-ups. The work is queued on a microtask, so
+     * everything that turn discovered is one question.
+     */
     const read = () => {
+      if (queued) return
+
+      queued = true
+
+      void Promise.resolve().then(() => {
+        queued = false
+        if (mounted) ask()
+      })
+    }
+
+    const ask = () => {
       // the ids nobody is asking about yet. an id discovered while a read was
       // in flight is not one that read can answer for, so it gets its own
       // rather than waiting for an answer that was built before main had heard
@@ -184,7 +202,24 @@ export function DownloadEvents() {
         .then(([active, history]) => {
           if (!mounted) return
 
-          reconcile(covered, () => downloadsActions.adopt(active, history))
+          const epoch = Math.min(active.epoch, history.epoch)
+
+          /**
+           * a reply read before a clear the user has since made describes a
+           * history that is gone, so it answers for nobody: the ids it covered
+           * stay pending, uncharged, and the read that goes out behind it -
+           * under the newer epoch - is the one that answers for them. Bounded
+           * by the number of clears, which is the user's own doing.
+           */
+          if (downloadsActions.staleSnapshot(epoch)) {
+            for (const downloadId of covered) awaiting.delete(downloadId)
+            read()
+            return
+          }
+
+          reconcile(covered, () =>
+            downloadsActions.adopt(active.rows, history.rows, epoch)
+          )
         })
         .catch((error: unknown) => {
           if (!mounted) return
@@ -286,25 +321,47 @@ export function DownloadEvents() {
     // remembers, and the lifetime count the panel shows above them. the count
     // is its own channel because the history reply is the rows array itself
     // (see handleGetHistory in ipc-handlers.js)
-    Promise.all([
-      downloadApi.getAllDownloads(),
-      downloadApi.getHistory(),
-      settingsApi.getDownloadCount()
-    ])
-      .then(([active, history, lifetime]) => {
-        if (mounted) {
-          settle(() => downloadsActions.hydrate(active, history, lifetime))
-        }
-      })
-      .catch((error: unknown) => {
-        // a list we could not read is an empty panel, not a broken app: every
-        // download started from here on still arrives on the subscription
-        console.error("Failed to load the downloads list:", error)
+    /**
+     * the one hydration read, and the one repeat of it a clear can force
+     *
+     * a "clear history" landing while these three are in flight leaves the two
+     * snapshots describing a history that is gone: the count and the flag still
+     * land, the rows do not, and the list would be empty for the session. So it
+     * is asked once more, under the newer epoch. Once, because the second read
+     * is issued after the clear that invalidated the first.
+     */
+    const loadList = (again = false) => {
+      Promise.all([
+        downloadApi.getAllDownloads(),
+        downloadApi.getHistory(),
+        settingsApi.getDownloadCount()
+      ])
+        .then(([active, history, lifetime]) => {
+          if (!mounted) return
 
-        // ...and the window still has to close, or an event that arrived inside
-        // it would wait in the buffer for the life of the session
-        if (mounted) settle(() => {})
-      })
+          const epoch = Math.min(active.epoch, history.epoch)
+          const stale = downloadsActions.staleSnapshot(epoch)
+
+          const hydrate = () =>
+            downloadsActions.hydrate(active.rows, history.rows, lifetime, epoch)
+
+          if (buffered) settle(hydrate)
+          else hydrate()
+
+          if (stale && !again) loadList(true)
+        })
+        .catch((error: unknown) => {
+          // a list we could not read is an empty panel, not a broken app: every
+          // download started from here on still arrives on the subscription
+          console.error("Failed to load the downloads list:", error)
+
+          // ...and the window still has to close, or an event that arrived
+          // inside it would wait in the buffer for the life of the session
+          if (mounted && buffered) settle(() => {})
+        })
+    }
+
+    loadList()
 
     return () => {
       mounted = false

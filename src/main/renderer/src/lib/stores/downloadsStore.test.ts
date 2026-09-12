@@ -18,10 +18,18 @@ const mocks = vi.hoisted(() => ({
   removeHistory: vi.fn()
 }))
 
+/**
+ * main answers `{epoch, rows}`; a bare array is what most of these fixtures
+ * hand back, and it reads as epoch 0 exactly as `api.ts` reads it
+ */
+const asSnapshot = (rows: unknown) =>
+  Array.isArray(rows) ? { epoch: 0, rows } : rows
+
 vi.mock("@/lib/api", () => ({
   downloadApi: {
-    clearHistory: () => mocks.clearHistory(),
-    removeHistory: (downloadId: string) => mocks.removeHistory(downloadId)
+    clearHistory: () => Promise.resolve(mocks.clearHistory()).then(asSnapshot),
+    removeHistory: (downloadId: string) =>
+      Promise.resolve(mocks.removeHistory(downloadId)).then(asSnapshot)
   }
 }))
 
@@ -615,12 +623,15 @@ describe("clearing and removing", () => {
   })
 
   /**
-   * a snapshot asked for before the clear still names what the clear removed,
-   * and landing it afterwards put every one of those rows back.
+   * main stamps every answer about the history with the epoch it was read at,
+   * and moves that number whenever a row leaves. A snapshot below the epoch a
+   * clear came back with was read before it, so its rows describe a history
+   * that no longer exists - whether they arrive as finished rows or as running
+   * ones, and whether or not this window ever held them.
    */
   test("a snapshot read before the clear cannot restore what it removed", async () => {
     store().add(row({ downloadId: "old", status: "completed" }))
-    mocks.clearHistory.mockResolvedValue([])
+    mocks.clearHistory.mockResolvedValue({ epoch: 1, rows: [] })
 
     store().clearFinished()
     await flush()
@@ -628,6 +639,7 @@ describe("clearing and removing", () => {
     store().hydrate(
       [],
       [{ download_id: "old", status: "completed" } as DownloadHistoryRow],
+      0,
       0
     )
 
@@ -636,49 +648,45 @@ describe("clearing and removing", () => {
 
   test("and neither can a re-read that was in flight", async () => {
     store().add(row({ downloadId: "old", status: "completed" }))
-    mocks.clearHistory.mockResolvedValue([])
+    mocks.clearHistory.mockResolvedValue({ epoch: 1, rows: [] })
 
     store().clearFinished()
     await flush()
 
     store().adopt(
       [],
-      [{ download_id: "old", status: "completed" } as DownloadHistoryRow]
+      [{ download_id: "old", status: "completed" } as DownloadHistoryRow],
+      0
     )
 
     expect(store().rows).toEqual([])
   })
 
   /**
-   * the case the tombstones exist for: the snapshot was taken while the
-   * download was still running, so it comes back in the *active* half. Keeping
-   * it because "a clear never removes a live row" put a finished, counted,
-   * cleared download back on screen with a Stop on it and no event left to
-   * settle it.
+   * the ordering three rounds of renderer-side guessing could not see: the
+   * snapshot was taken while the download was still running, so it comes back
+   * in the *active* half, and this window may never have held it at all.
    */
   test("even when the stale snapshot still calls it active", async () => {
-    store().add(row({ downloadId: "done", status: "downloading" }))
-    mocks.clearHistory.mockResolvedValue([])
+    mocks.clearHistory.mockResolvedValue({ epoch: 1, rows: [] })
 
-    store().applyEvent(
-      event({ downloadId: "done", status: "completed", progress: 100 })
-    )
     store().clearFinished()
     await flush()
 
     store().adopt(
       [
         {
-          downloadId: "done",
+          downloadId: "unseen",
           status: "downloading",
           progress: 40,
           type: "combined",
           platform: "youtube",
-          title: "My Holiday Video",
+          title: "Never had a row here",
           label: "1080p mp4"
         } as DownloadStatus
       ],
-      []
+      [],
+      0
     )
 
     expect(store().rows).toEqual([])
@@ -687,26 +695,54 @@ describe("clearing and removing", () => {
   // ...and the same for one row forgotten on its own
   test("a removed row is not brought back by a reply that still names it", async () => {
     store().add(row({ downloadId: "done", status: "completed" }))
+    mocks.removeHistory.mockResolvedValue({ epoch: 1, rows: [] })
 
     store().remove("done")
+    await flush()
+
     store().adopt(
       [],
-      [{ download_id: "done", status: "completed" } as DownloadHistoryRow]
+      [{ download_id: "done", status: "completed" } as DownloadHistoryRow],
+      0
     )
 
     expect(store().rows).toEqual([])
   })
 
-  /**
-   * ...and everything else in that reply is still true. The count is a number
-   * no clear touches, a download the user did not clear is still theirs, and
-   * the flag has to be set either way: throwing the whole answer away left the
-   * session with no count, no live rows and a panel that could never say it was
-   * empty.
-   */
-  test("a late hydration still brings its count, its live rows and the flag", async () => {
+  // ...and a snapshot read after the clear is as good as any other: a download
+  // that finished after the user cleared belongs on screen
+  test("a snapshot read after the clear brings its rows as usual", async () => {
     store().add(row({ downloadId: "old", status: "completed" }))
-    mocks.clearHistory.mockResolvedValue([])
+    mocks.clearHistory.mockResolvedValue({ epoch: 1, rows: [] })
+
+    store().clearFinished()
+    await flush()
+
+    store().adopt(
+      [],
+      [
+        {
+          download_id: "after",
+          status: "completed",
+          started_at: 10
+        } as DownloadHistoryRow
+      ],
+      1
+    )
+
+    expect(store().rows.map((known) => known.downloadId)).toEqual(["after"])
+  })
+
+  /**
+   * a stale reply still carries what no clear touches. Throwing the whole
+   * answer away left the session with no count, no live rows and a panel that
+   * could never say it was empty; keeping its rows put cleared downloads back.
+   * So it brings the count and the flag, and `DownloadEvents` asks again for
+   * the rows.
+   */
+  test("a stale hydration still brings its count and the flag, and no rows", async () => {
+    store().add(row({ downloadId: "old", status: "completed" }))
+    mocks.clearHistory.mockResolvedValue({ epoch: 1, rows: [] })
 
     store().clearFinished()
     await flush()
@@ -724,123 +760,67 @@ describe("clearing and removing", () => {
         } as DownloadStatus
       ],
       [{ download_id: "old", status: "completed" } as DownloadHistoryRow],
-      128
+      128,
+      0
     )
 
-    expect(store().rows.map((known) => known.downloadId)).toEqual(["running"])
+    expect(store().rows).toEqual([])
     expect(store().lifetimeCompleted).toBe(128)
     expect(store().hydrated).toBe(true)
   })
 
-  test("and a late re-read still brings the live row it was asked for", async () => {
-    store().add(row({ downloadId: "old", status: "completed" }))
-    mocks.clearHistory.mockResolvedValue([])
+  test("and the read behind it brings the live row", async () => {
+    mocks.clearHistory.mockResolvedValue({ epoch: 1, rows: [] })
 
     store().clearFinished()
     await flush()
 
-    store().adopt(
+    store().hydrate(
       [
         {
-          downloadId: "late",
+          downloadId: "running",
           status: "downloading",
-          progress: 1,
+          progress: 40,
           type: "combined",
           platform: "youtube",
-          title: "Admitted while we were clearing",
+          title: "Still going",
           label: "1080p mp4"
         } as DownloadStatus
       ],
-      [{ download_id: "old", status: "completed" } as DownloadHistoryRow]
+      [],
+      128,
+      1
     )
 
-    expect(store().rows.map((known) => known.downloadId)).toEqual(["late"])
+    expect(store().rows.map((known) => known.downloadId)).toEqual(["running"])
+    expect(store().hydrated).toBe(true)
   })
 
   /**
-   * the rows the tombstones cannot name: a finished download this window never
-   * held, which exists only inside a history reply that was already in flight
-   * when the user cleared. Main cleared it at the same moment as the rest, so
-   * the only thing that can tell it apart from a download that has since
-   * finished is when it ended.
+   * the reply also settles the rows this window is holding from older
+   * snapshots: they are what the user removed. A row a hook added since is
+   * younger than the request and was never what the answer was talking about.
    */
-  test("a reply's finished rows are covered by the clear too", async () => {
-    const before = Date.now() - 60_000
-    mocks.clearHistory.mockResolvedValue([])
-
-    store().add(row({ downloadId: "held", status: "completed" }))
-    store().clearFinished()
-    await flush()
-
+  test("the clear's answer drops the snapshot rows it did not name", async () => {
     store().hydrate(
       [],
       [
-        {
-          download_id: "never-seen",
-          status: "completed",
-          finished_at: before
-        } as DownloadHistoryRow
+        { download_id: "old", status: "completed" } as DownloadHistoryRow,
+        { download_id: "kept", status: "completed" } as DownloadHistoryRow
       ],
+      0,
       0
     )
+    mocks.clearHistory.mockResolvedValue({
+      epoch: 1,
+      rows: [{ download_id: "kept", status: "completed" }]
+    })
 
-    expect(store().rows).toEqual([])
-  })
-
-  test("and one that finished after the clear still lands", async () => {
-    mocks.clearHistory.mockResolvedValue([])
-
-    store().add(row({ downloadId: "held", status: "completed" }))
+    store().add(row({ downloadId: "fresh", status: "downloading" }))
     store().clearFinished()
     await flush()
 
-    store().adopt(
-      [],
-      [
-        {
-          download_id: "after",
-          status: "completed",
-          started_at: 10,
-          finished_at: Date.now() + 60_000
-        } as DownloadHistoryRow
-      ]
-    )
-
-    expect(store().rows.map((known) => known.downloadId)).toEqual(["after"])
-  })
-
-  // a row with no finish time comes from a history file written before main
-  // recorded one, which is to say from a run that is long over
-  test("and one with no finish time at all is treated as older", async () => {
-    mocks.clearHistory.mockResolvedValue([])
-
-    store().add(row({ downloadId: "held", status: "completed" }))
-    store().clearFinished()
-    await flush()
-
-    store().adopt(
-      [],
-      [{ download_id: "ancient", status: "completed" } as DownloadHistoryRow]
-    )
-
-    expect(store().rows).toEqual([])
-  })
-
-  // nothing has been cleared, so nothing in a reply is old news
-  test("and an install that has never cleared keeps everything", () => {
-    store().hydrate(
-      [],
-      [
-        {
-          download_id: "old",
-          status: "completed",
-          finished_at: 1
-        } as DownloadHistoryRow
-      ],
-      0
-    )
-
-    expect(store().rows.map((known) => known.downloadId)).toEqual(["old"])
+    expect(store().rows.map((known) => known.downloadId)).toEqual(["fresh"])
   })
 
   test("a history write that fails costs nothing", async () => {

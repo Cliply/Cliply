@@ -201,6 +201,28 @@ export type DownloadRequest =
   }
 
 /**
+ * an answer about the history, and which side of the user's clears it was read
+ * on
+ *
+ * `epoch` is main's counter (`historyEpoch` in `ipc-handlers.js`): it moves
+ * every time a row leaves the history, and it rides out on both snapshot reads
+ * and on the two replies that do the removing. The renderer cannot decide for
+ * itself whether a snapshot predates a clear - it has tried a counter of its
+ * own, a set of the ids it was holding and a comparison of clocks, and each
+ * missed an ordering - so main says it.
+ */
+export interface HistorySnapshot {
+  epoch: number
+  rows: DownloadHistoryRow[]
+}
+
+/** the same, for the downloads main still has in flight */
+export interface ActiveSnapshot {
+  epoch: number
+  rows: DownloadStatus[]
+}
+
+/**
  * one row of the history main keeps on disk
  *
  * snake_case throughout, because a row is the wire payloads written down

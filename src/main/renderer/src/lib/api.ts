@@ -5,6 +5,7 @@ import type { ReportEnvironment } from "@/lib/report"
 import {
   CookieError,
   DownloadError,
+  type ActiveSnapshot,
   type ApiError,
   type AudioDownloadRequest,
   type CookieImportResult,
@@ -14,6 +15,7 @@ import {
   type DownloadPathInfo,
   type DownloadProgress,
   type DownloadStatus,
+  type HistorySnapshot,
   type PinterestDownloadRequest,
   type PinterestVideoInfoResponse,
   type PlaylistDownloadRequest,
@@ -109,6 +111,30 @@ function unwrap<T>(
 
   return response.data
 }
+
+/**
+ * a snapshot reply, whatever shape it arrived in
+ *
+ * main answers `{epoch, rows}` (see handleGetHistory in ipc-handlers.js). A
+ * bare array is what it used to answer and what a preload from before this
+ * change still would, and epoch 0 is the truthful reading of it: it is older
+ * than any clear this session has seen. With no clears at all - `clearedEpoch`
+ * is 0 too - nothing is ever judged stale, so such a build behaves exactly as
+ * it did before the epoch existed.
+ */
+const historySnapshot = (
+  data: HistorySnapshot | DownloadHistoryRow[] | undefined
+): HistorySnapshot =>
+  Array.isArray(data)
+    ? { epoch: 0, rows: data }
+    : { epoch: data?.epoch ?? 0, rows: data?.rows ?? [] }
+
+const activeSnapshot = (
+  data: ActiveSnapshot | DownloadStatus[] | undefined
+): ActiveSnapshot =>
+  Array.isArray(data)
+    ? { epoch: 0, rows: data }
+    : { epoch: data?.epoch ?? 0, rows: data?.rows ?? [] }
 
 // Video API functions
 export const videoApi = {
@@ -305,52 +331,55 @@ export const downloadApi = {
   },
 
   /**
-   * Get all downloads
-   * @returns Promise<DownloadStatus[]>
+   * The downloads main still has in flight, and which side of the user's
+   * clears the snapshot was read on.
+   * @returns Promise<ActiveSnapshot>
    */
-  async getAllDownloads(): Promise<DownloadStatus[]> {
+  async getAllDownloads(): Promise<ActiveSnapshot> {
     const electronAPI = getElectronAPI()
     const response = await electronAPI.download.getAll()
 
-    return (
+    return activeSnapshot(
       unwrap(response, "Failed to get downloads", {
         makeError: plainError,
         requireData: false
-      }) || []
+      })
     )
   },
 
   /**
-   * The downloads this install remembers, newest first. Read once, at startup:
-   * every later change to a live row arrives on `onProgress` instead.
-   * @returns Promise<DownloadHistoryRow[]>
+   * The downloads this install remembers, newest first, with the epoch they
+   * were read at. Read once, at startup: every later change to a live row
+   * arrives on `onProgress` instead.
+   * @returns Promise<HistorySnapshot>
    */
-  async getHistory(): Promise<DownloadHistoryRow[]> {
+  async getHistory(): Promise<HistorySnapshot> {
     const electronAPI = getElectronAPI()
     const response = await electronAPI.download.getHistory()
 
-    return (
+    return historySnapshot(
       unwrap(response, "Failed to get the download history", {
         makeError: plainError,
         requireData: false
-      }) || []
+      })
     )
   },
 
   /**
    * Forget every finished row. A download still queued or running keeps its
-   * row, because it has events still to come.
-   * @returns Promise<DownloadHistoryRow[]> what is left
+   * row, because it has events still to come. The reply carries the epoch the
+   * clear happened at, which is what tells the panel which snapshots it covers.
+   * @returns Promise<HistorySnapshot> what is left
    */
-  async clearHistory(): Promise<DownloadHistoryRow[]> {
+  async clearHistory(): Promise<HistorySnapshot> {
     const electronAPI = getElectronAPI()
     const response = await electronAPI.download.clearHistory()
 
-    return (
+    return historySnapshot(
       unwrap(response, "Failed to clear the download history", {
         makeError: plainError,
         requireData: false
-      }) || []
+      })
     )
   },
 
@@ -359,17 +388,17 @@ export const downloadApi = {
    * main ignores it for a row that is still live: cancelling one is what
    * `cancelDownload` is for.
    * @param downloadId Download ID
-   * @returns Promise<DownloadHistoryRow[]> what is left
+   * @returns Promise<HistorySnapshot> what is left
    */
-  async removeHistory(downloadId: string): Promise<DownloadHistoryRow[]> {
+  async removeHistory(downloadId: string): Promise<HistorySnapshot> {
     const electronAPI = getElectronAPI()
     const response = await electronAPI.download.removeHistory(downloadId)
 
-    return (
+    return historySnapshot(
       unwrap(response, "Failed to remove that download", {
         makeError: plainError,
         requireData: false
-      }) || []
+      })
     )
   },
 

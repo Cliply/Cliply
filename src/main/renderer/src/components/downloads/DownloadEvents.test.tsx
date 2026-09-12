@@ -32,6 +32,13 @@ const mocks = vi.hoisted(() => ({
   successToast: vi.fn()
 }))
 
+/**
+ * main answers `{epoch, rows}`; a bare array is what the fixtures below mostly
+ * hand back, and it reads as epoch 0 exactly as `api.ts` reads it
+ */
+const asSnapshot = <T,>(rows: T[] | { epoch: number; rows: T[] }) =>
+  Array.isArray(rows) ? { epoch: 0, rows } : rows
+
 vi.mock("@/lib/api", () => ({
   downloadApi: {
     onProgress: (listener: ProgressListener) => {
@@ -44,12 +51,12 @@ vi.mock("@/lib/api", () => ({
     },
     getAllDownloads: () => {
       mocks.listenersAtRead = mocks.listeners.length
-      return mocks.getAllDownloads()
+      return Promise.resolve(mocks.getAllDownloads()).then(asSnapshot)
     },
-    getHistory: () => mocks.getHistory(),
+    getHistory: () => Promise.resolve(mocks.getHistory()).then(asSnapshot),
     cancelDownload: (downloadId: string) => mocks.cancelDownload(downloadId),
-    clearHistory: () => mocks.clearHistory(),
-    removeHistory: vi.fn()
+    clearHistory: () => Promise.resolve(mocks.clearHistory()).then(asSnapshot),
+    removeHistory: () => Promise.resolve([]).then(asSnapshot)
   },
   systemApi: { openDownloadFolder: mocks.openDownloadFolder },
   // the lifetime number the panel shows, read in the same window as the two
@@ -463,22 +470,29 @@ describe("a download admitted after the list was read", () => {
     // enough to enable "clear history" before hydration has settled
     store().add(row({ downloadId: "refused", status: "failed" }))
 
+    mocks.clearHistory.mockResolvedValue({ epoch: 1, rows: [] })
+
     await act(async () => {
       store().clearFinished()
     })
 
-    // a finished row this window never held: it exists only inside the reply
-    // that was already in flight, and the clear covered it too
+    // what the read behind the stale one will find: main's list, after the
+    // clear
+    mocks.getAllDownloads.mockResolvedValue({
+      epoch: 1,
+      rows: [live({ downloadId: "running" })]
+    })
+    mocks.getHistory.mockResolvedValue({ epoch: 1, rows: [] })
+
+    // ...and the reply that was already in flight, which still holds a row the
+    // clear has since removed
     await hydration.landed([
-      {
-        download_id: "old",
-        status: "completed",
-        finished_at: Date.now() - 60_000
-      } as DownloadHistoryRow
+      { download_id: "old", status: "completed" } as DownloadHistoryRow
     ])
     await settled()
 
-    // the cleared rows stay gone, and everything else the answer carried lands
+    // the cleared rows stay gone, the surviving download is found by the read
+    // that follows, and the count and the flag were never in doubt
     expect(store().rows.map((r) => r.downloadId)).toEqual(["running"])
     expect(store().lifetimeCompleted).toBe(128)
     expect(store().hydrated).toBe(true)
@@ -700,9 +714,9 @@ describe("a download admitted after the list was read", () => {
     await mount()
     store().add(row({ downloadId: "done" }))
 
-    let answer!: (rows: DownloadStatus[]) => void
+    let answer!: (rows: { epoch: number; rows: DownloadStatus[] }) => void
     mocks.getAllDownloads.mockReturnValue(
-      new Promise<DownloadStatus[]>((resolve) => {
+      new Promise<{ epoch: number; rows: DownloadStatus[] }>((resolve) => {
         answer = resolve
       })
     )
@@ -712,14 +726,27 @@ describe("a download admitted after the list was read", () => {
     // it finishes, is announced, and the user clears the list
     await emit({ downloadId: "done", status: "completed", progress: 100 })
 
+    mocks.clearHistory.mockResolvedValue({ epoch: 1, rows: [] })
+
     await act(async () => {
       store().clearFinished()
     })
 
-    // ...and the answer, built before any of that, still calls it active
-    await act(async () => {
-      answer([live({ downloadId: "done" }), live({ downloadId: "late" })])
+    // the read that follows the stale one sees main's list as it is now
+    mocks.getAllDownloads.mockResolvedValue({
+      epoch: 1,
+      rows: [live({ downloadId: "late" })]
     })
+    mocks.getHistory.mockResolvedValue({ epoch: 1, rows: [] })
+
+    // ...and the answer built before any of that still calls `done` active
+    await act(async () => {
+      answer({
+        epoch: 0,
+        rows: [live({ downloadId: "done" }), live({ downloadId: "late" })]
+      })
+    })
+    await settled()
     await settled()
 
     expect(store().rows.map((r) => r.downloadId)).toEqual(["late"])
@@ -731,14 +758,51 @@ describe("a download admitted after the list was read", () => {
     store().add(row({ downloadId: "done" }))
     await emit({ downloadId: "done", status: "completed", progress: 100 })
 
+    mocks.clearHistory.mockResolvedValue({ epoch: 1, rows: [] })
+
     await act(async () => {
       store().clearFinished()
     })
+
+    mocks.getAllDownloads.mockResolvedValue({ epoch: 1, rows: [] })
+    mocks.getHistory.mockResolvedValue({ epoch: 1, rows: [] })
 
     await hydration.landed([])
     await settled()
 
     expect(store().rows).toEqual([])
+    expect(store().hydrated).toBe(true)
+  })
+
+  /**
+   * the review's own ordering: the download is never a row here at all. It
+   * exists only inside the held snapshot, its completion is buffered behind
+   * that snapshot, and the user clears in between - so there is nothing for a
+   * tombstone to name, and only main's epoch can say that the snapshot is old.
+   */
+  test("a download this window never held is not restored by a stale reply", async () => {
+    const hydration = mountMidRead([live({ downloadId: "unseen" })])
+
+    // a locally refused start, which is what lets the user clear before
+    // hydration has settled
+    store().add(row({ downloadId: "refused", status: "failed" }))
+    await emit({ downloadId: "unseen", status: "completed", progress: 100 })
+
+    mocks.clearHistory.mockResolvedValue({ epoch: 1, rows: [] })
+
+    await act(async () => {
+      store().clearFinished()
+    })
+
+    mocks.getAllDownloads.mockResolvedValue({ epoch: 1, rows: [] })
+    mocks.getHistory.mockResolvedValue({ epoch: 1, rows: [] })
+
+    await hydration.landed([])
+    await settled()
+    await settled()
+
+    expect(store().rows).toEqual([])
+    expect(mocks.successToast).not.toHaveBeenCalled()
     expect(store().hydrated).toBe(true)
   })
 
@@ -811,6 +875,52 @@ describe("a download admitted after the list was read", () => {
     await settled()
 
     expect(store().rows.map((r) => r.downloadId)).toEqual(["b"])
+  })
+
+  /**
+   * a window that reloaded while a queue was draining can meet a great many
+   * unknown ids in one turn. One question, not one per id.
+   */
+  test("a hundred unknown ids in one turn cost one read", async () => {
+    await mount()
+    const reads = mocks.getHistory.mock.calls.length
+
+    // held, so the answer cannot arrive and start the follow-up while the turn
+    // is still being counted
+    let answer!: (rows: { epoch: number; rows: DownloadStatus[] }) => void
+    mocks.getAllDownloads.mockReturnValue(
+      new Promise<{ epoch: number; rows: DownloadStatus[] }>((resolve) => {
+        answer = resolve
+      })
+    )
+
+    await act(async () => {
+      for (let index = 0; index < 100; index += 1) {
+        for (const listener of [...mocks.listeners]) {
+          listener({
+            downloadId: `ghost-${index}`,
+            status: "downloading",
+            progress: 1
+          } as DownloadProgress)
+        }
+      }
+    })
+
+    expect(mocks.getHistory).toHaveBeenCalledTimes(reads + 1)
+
+    await act(async () => {
+      answer({ epoch: 0, rows: [] })
+    })
+    await settled()
+
+    // one follow-up for their second miss, and then they are let go
+    expect(mocks.getHistory).toHaveBeenCalledTimes(reads + 2)
+
+    await emit({ downloadId: "ghost-0", status: "downloading", progress: 2 })
+    await settled()
+
+    expect(mocks.getHistory).toHaveBeenCalledTimes(reads + 2)
+    expect(store().rows).toEqual([])
   })
 
   // the read is one more thing that can fail, and a panel missing a row is not
