@@ -25,6 +25,7 @@ const os = require("os")
 const path = require("path")
 
 const IPCHandlers = require("../src/main/ipc-handlers")
+const { DownloadHistory } = require("../src/main/services/download-history")
 const { ERROR_CODES, PLAYLIST_MAX_ITEMS } = require("../src/main/services/ytdlp-engine")
 const { ERROR_CATEGORIES } = require("../src/main/utils/error-taxonomy")
 
@@ -109,7 +110,12 @@ function createHandlers({ listing = LISTING, listingError = null } = {}) {
     settingsStore: {
       ensureDownloadPath: jest.fn().mockResolvedValue(outputDir),
       setPotEnabled: jest.fn().mockResolvedValue({ success: true })
-    }
+    },
+    // a real history with no file: its rows behave exactly as they do in the
+    // app, and nothing is written into the temp userData folder this suite
+    // deletes the moment a test ends. tests/download-history-ipc.test.js is
+    // where the file itself is pinned
+    downloadHistory: new DownloadHistory()
   })
 
   return { handlers, engine, runs, userDataPath, outputDir, workspace }

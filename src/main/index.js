@@ -544,6 +544,25 @@ class CliplyApp {
       if (!installing) {
         this.updateState.isCheckingForUpdates = false
 
+        /**
+         * write down what was still running before anything kills it.
+         *
+         * the cancels below settle every live download as `cancelled` a moment
+         * before the process goes, and the user would reopen the app to rows
+         * they never cancelled. marked first, the history drops those late
+         * writes (see upsert in services/download-history.js) and the rows say
+         * `interrupted`, which is what happened.
+         *
+         * awaited rather than started, because the file has to be on disk
+         * before the quit continues. an install quit skips it with the rest of
+         * the teardown: nothing is being cancelled there, so there is nothing
+         * to get in front of, and the rows are marked at the next launch by
+         * load() instead.
+         */
+        if (this.ipcHandlers && this.ipcHandlers.history) {
+          await this.ipcHandlers.history.interruptLive()
+        }
+
         // kill any running yt-dlp process and actually wait for the tree to
         // exit - partial .part files stay resumable either way, but a wait
         // shorter than the engine's own sigterm->sigkill escalation would let

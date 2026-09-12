@@ -32,7 +32,7 @@ class FakeHandle extends EventEmitter {
 // test outside describe("queue") runs fewer downloads than that, so the cap is
 // invisible to them. the queue tests set it to 1 or 2 rather than starting four
 // downloads to reach the real one
-function createRunner({ updater = null, maxConcurrent } = {}) {
+function createRunner({ updater = null, maxConcurrent, history = null } = {}) {
   const events = []
   const tracked = []
 
@@ -41,6 +41,7 @@ function createRunner({ updater = null, maxConcurrent } = {}) {
     updater,
     sendEvent: (downloadId, payload) => events.push({ downloadId, ...payload }),
     trackEvent: (name, payload) => tracked.push({ name, ...payload }),
+    ...(history ? { history } : null),
     ...(maxConcurrent === undefined ? null : { maxConcurrent })
   })
 
@@ -1570,5 +1571,257 @@ describe("playlist outcomes", () => {
 
     expect(events[events.length - 1]).not.toHaveProperty("suggestion")
     expect(events[events.length - 1]).not.toHaveProperty("items_total")
+  })
+})
+
+/**
+ * what the runner writes down, and when
+ *
+ * the history itself is pinned in tests/download-history.test.js; these are
+ * about the three moments the runner hands it a row, and about the rule that
+ * nothing else does.
+ */
+describe("history", () => {
+  // records the rows rather than storing them: what matters here is what the
+  // runner said and how often, not what a file ended up holding
+  function createHistory() {
+    const rows = []
+
+    return {
+      rows,
+      upsert: jest.fn((row) => {
+        rows.push(row)
+        return Promise.resolve()
+      }),
+      // the row for one download, as the writes so far leave it
+      row: (downloadId = BASE.downloadId) =>
+        rows
+          .filter((entry) => entry.download_id === downloadId)
+          .reduce((merged, entry) => ({ ...merged, ...entry }), {})
+    }
+  }
+
+  test("a reservation is written down before anything runs", () => {
+    const history = createHistory()
+    const { runner } = createRunner({ history })
+
+    runner.reserve("combined_1", {
+      type: "combined",
+      platform: "youtube",
+      title: "A Video",
+      label: "1080p mp4",
+      request: { url: "https://youtu.be/x", height: 1080 }
+    })
+
+    expect(history.rows).toHaveLength(1)
+    expect(history.rows[0]).toMatchObject({
+      download_id: "combined_1",
+      kind: "video",
+      platform: "youtube",
+      title: "A Video",
+      label: "1080p mp4",
+      status: "queued",
+      request: { url: "https://youtu.be/x", height: 1080 }
+    })
+    // when the user asked, which is where the row belongs in the list
+    expect(history.rows[0].started_at).toEqual(expect.any(Number))
+  })
+
+  test("the slot being taken is the second write", async () => {
+    const history = createHistory()
+    const { runner } = createRunner({ history })
+    const handle = new FakeHandle()
+
+    const running = runner.run({ ...BASE, createHandle: () => handle })
+    await settle()
+
+    expect(history.rows.map((row) => row.status)).toEqual([
+      "queued",
+      "downloading"
+    ])
+
+    handle.resolve({ filePath: "/downloads/a.mp4" })
+    await running
+  })
+
+  test("a download waiting behind the cap stays queued until its turn", async () => {
+    const history = createHistory()
+    const { runner } = createRunner({ history, maxConcurrent: 1 })
+    const handles = [new FakeHandle(), new FakeHandle()]
+
+    const runs = ["a", "b"].map((id, index) =>
+      runner.run({ ...BASE, downloadId: id, createHandle: () => handles[index] })
+    )
+    await settle()
+
+    expect(history.row("b").status).toBe("queued")
+
+    handles[0].resolve({ filePath: "/downloads/a.mp4" })
+    await runs[0]
+    await settle()
+
+    expect(history.row("b").status).toBe("downloading")
+
+    handles[1].resolve({ filePath: "/downloads/b.mp4" })
+    await Promise.all(runs)
+  })
+
+  test("progress never writes", async () => {
+    const history = createHistory()
+    const { runner } = createRunner({ history })
+    const handle = new FakeHandle()
+
+    const running = runner.run({ ...BASE, createHandle: () => handle })
+    await settle()
+
+    for (let percent = 1; percent <= 50; percent++) {
+      handle.emit("progress", { progress: percent, speed: "3MiB/s" })
+    }
+
+    // three per download is the whole budget: a percentage is not worth a file
+    // rewrite, and the panel is watching the events for it anyway
+    expect(history.upsert).toHaveBeenCalledTimes(2)
+
+    handle.resolve({ filePath: "/downloads/a.mp4" })
+    await running
+
+    expect(history.upsert).toHaveBeenCalledTimes(3)
+  })
+
+  test("a completed download says where the file went and how big it is", async () => {
+    const history = createHistory()
+    const { runner } = createRunner({ history })
+    const handle = new FakeHandle()
+    jest.spyOn(fs, "statSync").mockReturnValue({ size: 8_000_000 })
+
+    const running = runner.run({ ...BASE, createHandle: () => handle })
+    await settle()
+    handle.resolve({ filePath: "/downloads/a.mp4" })
+    await running
+
+    expect(history.row()).toMatchObject({
+      status: "completed",
+      filename: "a.mp4",
+      file_path: "/downloads/a.mp4",
+      file_size: 8_000_000
+    })
+    expect(history.row().finished_at).toEqual(expect.any(Number))
+
+    fs.statSync.mockRestore()
+  })
+
+  test("a completion the engine named no file for claims none", async () => {
+    // a zero-byte file is what a row would otherwise show, and it would be a
+    // lie about a download that worked
+    const history = createHistory()
+    const { runner } = createRunner({ history })
+    const handle = new FakeHandle()
+
+    const running = runner.run({ ...BASE, createHandle: () => handle })
+    await settle()
+    handle.resolve({})
+    await running
+
+    expect(history.row().status).toBe("completed")
+    expect(history.row()).not.toHaveProperty("file_path")
+    expect(history.row()).not.toHaveProperty("file_size")
+  })
+
+  test("a failed download keeps the wording and the category the event carried", async () => {
+    const history = createHistory()
+    const { runner } = createRunner({ history })
+    const handle = new FakeHandle()
+
+    const running = runner.run({ ...BASE, createHandle: () => handle })
+    await settle()
+
+    const error = new Error("YouTube asked us to confirm you're not a bot.")
+    error.code = ERROR_CODES.BOT_DETECTION
+    handle.reject(error)
+    await running
+
+    expect(history.row()).toMatchObject({
+      status: "failed",
+      error: "YouTube asked us to confirm you're not a bot.",
+      category: ERROR_CODES.BOT_DETECTION
+    })
+  })
+
+  test("a cancelled download is written down as cancelled", async () => {
+    const history = createHistory()
+    const { runner } = createRunner({ history })
+    const handle = new FakeHandle()
+
+    const running = runner.run({ ...BASE, createHandle: () => handle })
+    await settle()
+
+    runner.cancel(BASE.downloadId)
+    const error = new Error("cancelled")
+    error.code = ERROR_CODES.CANCELLED
+    handle.reject(error)
+    await running
+
+    expect(history.row().status).toBe("cancelled")
+    expect(history.row().finished_at).toEqual(expect.any(Number))
+  })
+
+  test.each([
+    ["a single video", { type: "combined", platform: "youtube" }, "video"],
+    ["an audio download", { type: "audio", platform: "youtube" }, "audio"],
+    ["a tiktok", { type: "combined", platform: "tiktok" }, "simple"],
+    ["a pinterest video", { type: "combined", platform: "pinterest" }, "simple"],
+    [
+      "a playlist",
+      { type: "combined", platform: "youtube", playlist: true },
+      "playlist"
+    ],
+    [
+      // the one the order decides: it fetches audio and it is still a playlist
+      // row, and only the playlist channel can re-send the request it stored
+      "a playlist of audio",
+      { type: "audio", platform: "youtube", playlist: true },
+      "playlist"
+    ]
+  ])("%s is a %s row", (_name, details, kind) => {
+    const history = createHistory()
+    const { runner } = createRunner({ history })
+
+    runner.reserve("d_1", details)
+
+    expect(history.rows[0].kind).toBe(kind)
+  })
+
+  test("a history that throws does not fail the download", async () => {
+    // the collaborator is injected, and every one of these calls sits where a
+    // throw would be caught as the download itself breaking
+    const warn = jest.spyOn(console, "warn").mockImplementation(() => {})
+    const history = {
+      upsert: jest.fn(() => {
+        throw new Error("no disk")
+      })
+    }
+    const { runner } = createRunner({ history })
+    const handle = new FakeHandle()
+
+    const running = runner.run({ ...BASE, createHandle: () => handle })
+    await settle()
+    handle.resolve({ filePath: "/downloads/a.mp4" })
+
+    await expect(running).resolves.toMatchObject({ success: true })
+    expect(warn).toHaveBeenCalled()
+
+    warn.mockRestore()
+  })
+
+  test("a runner with no history runs exactly as it did", async () => {
+    const { runner, events } = createRunner()
+    const handle = new FakeHandle()
+
+    const running = runner.run({ ...BASE, createHandle: () => handle })
+    await settle()
+    handle.resolve({ filePath: "/downloads/a.mp4" })
+
+    await expect(running).resolves.toMatchObject({ success: true })
+    expect(events.at(-1).status).toBe("completed")
   })
 })

@@ -10,6 +10,7 @@ const fs = require("fs")
 const { ERROR_CODES } = require("./ytdlp-engine")
 const { describeError } = require("../utils/analytics-helpers")
 const { classify, ERROR_STAGES } = require("../utils/error-taxonomy")
+const { isSimplePlatform } = require("../utils/ytdlp-formats")
 const { APP_CONFIG } = require("../utils/constants")
 
 // the statuses the renderer hooks already understand, plus `queued`, which is
@@ -27,7 +28,7 @@ const STATUS = {
 class DownloadRunner {
   /**
    * @param {Object} options - {engine, updater, sendEvent, trackEvent,
-   *   logAudit, maxConcurrent}
+   *   logAudit, history, maxConcurrent}
    */
   constructor({
     engine,
@@ -35,6 +36,7 @@ class DownloadRunner {
     sendEvent,
     trackEvent = () => {},
     logAudit = () => {},
+    history = null,
     maxConcurrent = APP_CONFIG.MAX_CONCURRENT_DOWNLOADS
   }) {
     this.engine = engine
@@ -42,6 +44,10 @@ class DownloadRunner {
     this.sendEvent = sendEvent
     this.trackEvent = trackEvent
     this.logAudit = logAudit
+    // where a download is written down so it is still there after a restart.
+    // optional: every runner behaviour is the same without one, and a build or
+    // a test that constructs no history simply keeps no record
+    this.history = history
 
     // downloadId -> {handle, type, title, platform, started, request, label}
     this.active = new Map()
@@ -86,7 +92,7 @@ class DownloadRunner {
       return false
     }
 
-    this.active.set(downloadId, {
+    const entry = {
       type: details.type,
       title: details.title,
       platform: details.platform,
@@ -121,7 +127,15 @@ class DownloadRunner {
       // it. a cancel arrives from another call stack entirely, so there is
       // nowhere else it could be read from by then
       progress: 0
-    })
+    }
+
+    this.active.set(downloadId, entry)
+
+    // the row exists from the moment the download is accepted, not from the
+    // moment it starts: a download that waits behind the cap and is then
+    // interrupted by a quit never runs at all, and it is still something the
+    // user asked for and should find waiting for them
+    this.record(downloadId, entry, { status: STATUS.QUEUED })
 
     return true
   }
@@ -197,6 +211,10 @@ class DownloadRunner {
 
         entry.handle = handle
         entry.status = STATUS.DOWNLOADING
+        // the second of the three writes a download costs: it has a slot and a
+        // process now. progress does not write - a percentage is not worth a
+        // file rewrite, and the panel is watching the events for that anyway
+        this.record(downloadId, entry, { status: STATUS.DOWNLOADING })
 
         handle.on("progress", (update) => {
           if (Number.isFinite(update.progress)) {
@@ -401,6 +419,35 @@ class DownloadRunner {
     }
   }
 
+  /**
+   * write down where this download stands
+   *
+   * three points in a download's life and no more: it was accepted, it took a
+   * slot, it settled. that is the whole write budget, and it is what keeps a
+   * hundred progress lines a second from turning into a hundred file rewrites.
+   *
+   * guarded the way track() is, and for the same reason: the history's own
+   * writes never throw, but the collaborator is injected and every one of these
+   * calls sits somewhere a throw would be read as the download itself failing.
+   *
+   * @param {string} downloadId - the id handed to the renderer
+   * @param {Object|null} entry - the reservation, when there still is one
+   * @param {Object} fields - the status and whatever this moment knows
+   */
+  record(downloadId, entry, fields) {
+    if (!this.history) return
+
+    try {
+      this.history.upsert({
+        download_id: downloadId,
+        ...(entry ? reservationRow(entry) : null),
+        ...fields
+      })
+    } catch (error) {
+      console.warn(`failed to record ${downloadId}:`, describeError(error))
+    }
+  }
+
   settleCompleted({ downloadId, type, platform, formatId, trimmed, result }) {
     // the reservation is where the wait began - before the ipc acknowledgement
     // and before the spawn, which is what the user actually sat through
@@ -431,6 +478,20 @@ class DownloadRunner {
         : null
 
     this.logAudit("download_success", true, { type, filename })
+
+    /**
+     * the file and its size only when there is one, exactly as the event does.
+     *
+     * a playlist's `filePath` is whichever video landed last, so on a playlist
+     * row these two describe that one file rather than the run. they are kept
+     * anyway - the folder they name is the right folder to open - and a
+     * playlist row is drawn from its item counts instead
+     */
+    this.record(downloadId, entry, {
+      status: STATUS.COMPLETED,
+      finished_at: Date.now(),
+      ...(filePath ? { filename, file_path: filePath, file_size: fileSize } : null)
+    })
 
     this.sendEvent(downloadId, {
       status: STATUS.COMPLETED,
@@ -497,6 +558,14 @@ class DownloadRunner {
     this.active.delete(downloadId)
     this.logAudit("download_cancelled", true, {})
 
+    // dropped by the history when the quit path has already called this row
+    // interrupted, which is what keeps a quit from reading back as a user who
+    // cancelled everything on their way out
+    this.record(downloadId, entry, {
+      status: STATUS.CANCELLED,
+      finished_at: Date.now()
+    })
+
     this.sendEvent(downloadId, {
       status: STATUS.CANCELLED,
       progress: 0,
@@ -526,6 +595,15 @@ class DownloadRunner {
     const tally = itemTally(error)
 
     this.logAudit("download_failed", false, { type, error: message })
+
+    // the same two fields the failed event carries, so a row rebuilt from the
+    // history after a restart says what a row built from the event says
+    this.record(downloadId, entry, {
+      status: STATUS.FAILED,
+      finished_at: Date.now(),
+      error: message,
+      category: (error && error.code) || "DOWNLOAD_FAILED"
+    })
 
     this.sendEvent(downloadId, {
       status: STATUS.FAILED,
@@ -654,6 +732,54 @@ class DownloadRunner {
       label: entry.label
     }))
   }
+}
+
+/**
+ * the half of a history row that comes from the reservation
+ *
+ * written at every one of the three points rather than only at the first: the
+ * history merges, so repeating them costs nothing, and it means a row created
+ * by a settle - a history file that lost the reserve write, a download that
+ * reached run() by some other route - is still a row that can be drawn and
+ * retried rather than a status with nothing around it.
+ *
+ * @param {Object} entry - the reservation
+ * @returns {Object} the row fields the reservation knows
+ */
+function reservationRow(entry) {
+  return {
+    kind: historyKind(entry),
+    platform: entry.platform,
+    title: entry.title,
+    label: entry.label,
+    // when the user asked, not when it started. a row that waited behind the
+    // cap belongs where they put it in the list, and the cap drops the oldest
+    // by this too
+    started_at: entry.started,
+    request: entry.request
+  }
+}
+
+/**
+ * which of the four rows a downloads panel draws this is
+ *
+ * `type` is what the download fetches - "combined" or "audio" - and it is not
+ * this question: a playlist of audio fetches audio and is still a playlist row,
+ * one that counts videos and whose stored request only the playlist channel can
+ * re-send. so the playlist check comes first; deciding by `type` would send a
+ * retry to the audio channel carrying a list of entries it knows nothing about.
+ *
+ * @param {Object} entry - the reservation
+ * @returns {string} playlist | audio | simple | video
+ */
+function historyKind(entry) {
+  if (entry.playlist) return "playlist"
+  if (entry.type === "audio") return "audio"
+  // tiktok and pinterest offer no choice of quality or container, which is the
+  // same thing that makes their row a different one to draw
+  if (isSimplePlatform(entry.platform)) return "simple"
+
+  return "video"
 }
 
 /**

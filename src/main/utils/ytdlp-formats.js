@@ -50,6 +50,25 @@ function getSimplePlatformOptions(platform) {
   return { formatSelector: preset.formatSelector, extraArgs: [...preset.extraArgs] }
 }
 
+/**
+ * is this a platform we download with a fixed preset?
+ *
+ * the presets above are the definition, so there is one list rather than two:
+ * a platform with an entry here has no format list, no quality menu and no
+ * choice to make, which is also what makes its downloads a row of their own in
+ * a downloads list (see historyKind in services/download-runner.js).
+ *
+ * @param {string} platform - the platform a request named
+ * @returns {boolean}
+ */
+function isSimplePlatform(platform) {
+  return Object.prototype.hasOwnProperty.call(
+    SIMPLE_PLATFORM_PRESETS,
+    String(platform || "").toLowerCase()
+  )
+}
+
 module.exports = {
-  getSimplePlatformOptions
+  getSimplePlatformOptions,
+  isSimplePlatform
 }

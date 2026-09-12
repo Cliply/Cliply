@@ -117,6 +117,13 @@ contextBridge.exposeInMainWorld("electronAPI", {
       invoke(IPC_CHANNELS.DOWNLOAD_CANCEL, { downloadId }),
     getStatus: (downloadId) => invoke("download:get-status", { downloadId }),
     getAll: () => invoke("download:get-all"),
+    // what the panel was showing before the app was last closed. no push
+    // channel beside it: every change to a live row already arrives on
+    // download:progress, so this is only ever read once, at startup
+    getHistory: () => invoke("download:get-history"),
+    clearHistory: () => invoke("download:clear-history"),
+    removeHistory: (downloadId) =>
+      invoke("download:remove-history", { downloadId }),
     onProgress: (callback) => {
       const handler = (_event, data) => callback(data)
       ipcRenderer.on(IPC_CHANNELS.DOWNLOAD_PROGRESS, handler)

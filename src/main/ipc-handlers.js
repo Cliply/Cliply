@@ -32,6 +32,7 @@ const { getSimplePlatformOptions } = require("./utils/ytdlp-formats")
 const { resolveDownloadId } = require("./utils/download-id")
 
 const { DownloadRunner } = require("./services/download-runner")
+const { DownloadHistory } = require("./services/download-history")
 const { SettingsStore } = require("./services/settings-store")
 const {
   ERROR_CODES,
@@ -108,10 +109,30 @@ class IPCHandlers {
     // escalates without it - there is just nothing yet to escalate with
     this.potInstaller = services.potInstaller || null
 
+    /**
+     * what the downloads panel still knows after a restart
+     *
+     * `<userData>/downloads/history.json`, beside the playlist archives and
+     * resolved through the engine the same way they are. read once here, so
+     * the rows are in memory before the renderer can ask for them and before
+     * the first reservation can add to them.
+     *
+     * an engine that cannot say where userData is (a stub, a build without one)
+     * leaves the history with no file rather than leaving the app with no
+     * history: the panel works for the session, and no download fails for want
+     * of somewhere to write it down.
+     */
+    this.history =
+      services.downloadHistory ||
+      new DownloadHistory({ filePath: this.historyFilePath() })
+
+    this.history.load()
+
     // drives engine downloads and forwards their progress to the renderer
     this.runner = new DownloadRunner({
       engine: this.engine,
       updater: this.updater,
+      history: this.history,
       sendEvent: (downloadId, payload) =>
         this.sendDownloadEvent(downloadId, payload),
       trackEvent: (name, payload) => this.trackDownloadEvent(name, payload),
@@ -120,6 +141,18 @@ class IPCHandlers {
     })
 
     this.registerHandlers()
+  }
+
+  /**
+   * where the download history is kept
+   * @returns {string|null} the file, or null when userData cannot be resolved
+   */
+  historyFilePath() {
+    if (typeof this.engine.getUserDataPath !== "function") {
+      return null
+    }
+
+    return path.join(this.engine.getUserDataPath(), "downloads", "history.json")
   }
 
   // send one download:progress event - the channel the renderer hooks listen on
@@ -606,6 +639,12 @@ class IPCHandlers {
       this.handleGetDownloadStatus.bind(this)
     )
     ipcMain.handle("download:get-all", this.handleGetAllDownloads.bind(this))
+    ipcMain.handle("download:get-history", this.handleGetHistory.bind(this))
+    ipcMain.handle("download:clear-history", this.handleClearHistory.bind(this))
+    ipcMain.handle(
+      "download:remove-history",
+      this.handleRemoveHistory.bind(this)
+    )
 
     // cookie management
     ipcMain.handle(IPC_CHANNELS.COOKIES_TEST, this.handleTestCookies.bind(this))
@@ -1468,6 +1507,48 @@ class IPCHandlers {
     }
   }
 
+  /**
+   * the downloads this install remembers, newest first
+   *
+   * the array is the data, as it is for download:get-all: the renderer reads
+   * response.data straight as the rows it hydrates from.
+   */
+  async handleGetHistory(_event) {
+    try {
+      return this.createSuccess(this.history.list())
+    } catch (error) {
+      console.error("Get download history failed:", error.message)
+      return this.createError("Failed to get the download history")
+    }
+  }
+
+  // "clear finished": the rows with nothing left to happen to them go, and the
+  // ones still queued or running stay. answers with what is left, so the panel
+  // does not have to guess which of the two each of its rows was
+  async handleClearHistory(_event) {
+    try {
+      await this.history.clear()
+      return this.createSuccess(this.history.list())
+    } catch (error) {
+      console.error("Clear download history failed:", error.message)
+      return this.createError("Failed to clear the download history")
+    }
+  }
+
+  // forget one row. it says nothing about the download itself - a row removed
+  // while it is still running keeps running, and cancel is the channel for that
+  async handleRemoveHistory(_event, data) {
+    try {
+      this.validateRequest(data, ["downloadId"])
+      await this.history.remove(data.downloadId)
+
+      return this.createSuccess(this.history.list())
+    } catch (error) {
+      console.error("Remove download history failed:", error.message)
+      return this.createError("Failed to remove that download")
+    }
+  }
+
 
   // import cookies from file
   async handleImportCookieFile(_event) {
@@ -2010,6 +2091,9 @@ class IPCHandlers {
       "cookies:clear",
       "download:get-status",
       "download:get-all",
+      "download:get-history",
+      "download:clear-history",
+      "download:remove-history",
       "system:open-download-folder",
       "system:select-download-folder",
       "settings:get-download-path",

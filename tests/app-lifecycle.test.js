@@ -172,7 +172,10 @@ beforeEach(() => {
 
   mockIpcHandlers = {
     setMainWindow: jest.fn(),
-    cleanup: jest.fn()
+    cleanup: jest.fn(),
+    // the download history the handlers own. only the quit path reaches it
+    // from here, and only to say "whatever is running was interrupted"
+    history: { interruptLive: jest.fn().mockResolvedValue(undefined) }
   }
 
   // a stand-in that keeps the one part of the real contract this suite leans
@@ -1373,6 +1376,10 @@ describe("quitting", () => {
 
     try {
       const quitting = app.onBeforeQuit(quitEvent())
+      // the history is marked before any of this, so the cap on the flush is
+      // armed one await later - advancing the clock before that would advance
+      // it past a timer that does not exist yet
+      await Promise.resolve().then().then()
       jest.advanceTimersByTime(10000)
       await quitting
 
@@ -1403,6 +1410,68 @@ describe("quitting", () => {
     await quitting
 
     expect(mockElectron.app.quit).toHaveBeenCalledTimes(1)
+  })
+
+  it("marks the running downloads interrupted before anything cancels them", async () => {
+    // cancelAll settles every live download as `cancelled` on the way out, and
+    // the user would reopen the app to rows they never cancelled. the history
+    // drops those late writes, but only for rows it has already marked - so
+    // this has to happen first, and it has to be awaited
+    await app.onBeforeQuit(quitEvent())
+
+    const history = mockIpcHandlers.history.interruptLive
+    expect(history).toHaveBeenCalledTimes(1)
+    expect(history.mock.invocationCallOrder[0]).toBeLessThan(
+      mockEngine.awaitShutdown.mock.invocationCallOrder[0]
+    )
+    expect(history.mock.invocationCallOrder[0]).toBeLessThan(
+      mockIpcHandlers.cleanup.mock.invocationCallOrder[0]
+    )
+  })
+
+  it("holds the quit open until the history has been written", async () => {
+    // a write that is only started here is a write that never happens
+    let markWritten
+    mockIpcHandlers.history.interruptLive.mockImplementation(
+      () => new Promise((resolve) => { markWritten = resolve })
+    )
+
+    const quitting = app.onBeforeQuit(quitEvent())
+    await Promise.resolve().then().then()
+
+    expect(mockEngine.awaitShutdown).not.toHaveBeenCalled()
+    expect(mockElectron.app.quit).not.toHaveBeenCalled()
+
+    markWritten()
+    await quitting
+
+    expect(mockElectron.app.quit).toHaveBeenCalledTimes(1)
+  })
+
+  it("leaves the history alone when an update is installing", async () => {
+    // nothing is being cancelled on an install quit, so there is nothing to get
+    // in front of. the rows are marked at the next launch by load() instead
+    global.isUpdating = true
+
+    try {
+      await app.onBeforeQuit(quitEvent())
+
+      expect(mockIpcHandlers.history.interruptLive).not.toHaveBeenCalled()
+    } finally {
+      global.isUpdating = false
+    }
+  })
+
+  it("still quits when the history cannot be marked", async () => {
+    // the service does not reject, but this is the last thing standing between
+    // the user and a closed app
+    const error = jest.spyOn(console, "error").mockImplementation(() => {})
+    mockIpcHandlers.history.interruptLive.mockRejectedValue(new Error("no disk"))
+
+    await app.onBeforeQuit(quitEvent())
+
+    expect(mockElectron.app.quit).toHaveBeenCalledTimes(1)
+    error.mockRestore()
   })
 
   it("runs the engine shutdown wait and the analytics flush concurrently", async () => {
