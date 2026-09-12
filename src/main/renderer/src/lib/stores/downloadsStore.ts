@@ -246,7 +246,7 @@ export const useDownloadsStore = create<DownloadsState>((set, get) => ({
    */
   applyEvent: (event) =>
     set((state) => {
-      const overlay = mergeOverlay(state.overlay, event)
+      const overlay = mergeOverlay(state.overlay, event, state.rows)
       const lifetimeCompleted = adoptCount(
         state.lifetimeCompleted,
         event.lifetimeCompleted
@@ -545,13 +545,17 @@ export interface DownloadOverlay {
  * events arrive for downloads this window has no row for - it reloaded
  * mid-run, another window started them - and the push that names them is
  * usually a moment away. A cap, because "usually" is not "always".
+ *
+ * it counts those ids and no others. An overlay with a row behind it is the bar
+ * on screen, and there are never more of them than there are rows.
  */
-const OVERLAY_LIMIT = 200
+const ORPHAN_LIMIT = 200
 
 /** what this event leaves behind, over whatever the id had already said */
 function mergeOverlay(
   overlay: Record<string, DownloadOverlay>,
-  event: DownloadProgress
+  event: DownloadProgress,
+  rows: DownloadRow[]
 ): Record<string, DownloadOverlay> {
   const held = overlay[event.downloadId]
 
@@ -578,19 +582,29 @@ function mergeOverlay(
     category: event.category
   }
 
-  const known = Object.keys(overlay)
+  if (held) return { ...overlay, [event.downloadId]: next }
 
-  // the oldest entry goes when the cap is reached. it is only ever reached by
-  // ids this window has no rows for, because an entry with a row on screen is
-  // dropped by the next snapshot that settles it
-  if (!held && known.length >= OVERLAY_LIMIT) {
-    const { [known[0]]: expired, ...rest } = overlay
-    void expired
+  /**
+   * ...and the oldest orphan goes when there are too many of them.
+   *
+   * only an orphan: capping the whole map evicted the bar of a download that
+   * was on screen and running - three running rows behind two hundred queued
+   * ones sent one of them back to 0% and lost a trimmed run's indeterminate
+   * flag, because a queued row's every event was a new entry.
+   */
+  const onScreen = new Set(rows.map((row) => row.downloadId))
+  const orphans = Object.keys(overlay).filter(
+    (downloadId) => !onScreen.has(downloadId)
+  )
 
-    return { ...rest, [event.downloadId]: next }
+  if (orphans.length < ORPHAN_LIMIT) {
+    return { ...overlay, [event.downloadId]: next }
   }
 
-  return { ...overlay, [event.downloadId]: next }
+  const { [orphans[0]]: expired, ...rest } = overlay
+  void expired
+
+  return { ...rest, [event.downloadId]: next }
 }
 
 /**

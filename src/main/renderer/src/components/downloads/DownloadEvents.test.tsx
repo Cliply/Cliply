@@ -266,22 +266,57 @@ describe("the list, and the events over it", () => {
   })
 
   /**
-   * a download this window never had a row for - another window started it, or
-   * this one reloaded after it ended. Its outcome is somebody else's news.
+   * a completion can overtake the push that lists its download. The ending is
+   * this window's news either way, so it waits for the row and is said once.
    */
-  test("a completion for a row this window never had says nothing", async () => {
+  test("a completion that arrives before its row is announced when it lands", async () => {
     await mount()
 
     await emit({ downloadId: "late", status: "completed", progress: 100 })
+
+    expect(mocks.successToast).not.toHaveBeenCalled()
+
     await push(
       snapshot({
         rows: [listed({ download_id: "late", status: "completed" })]
       })
     )
 
-    expect(store().rows[0].status).toBe("completed")
-    // the row arrived from a snapshot already finished: nobody in this window
-    // was waiting on it, and the event that ended it was not this window's
+    expect(mocks.successToast).toHaveBeenCalledTimes(1)
+
+    // ...and not again, however many lists follow
+    await push(
+      snapshot({
+        rows: [listed({ download_id: "late", status: "completed" })]
+      })
+    )
+
+    expect(mocks.successToast).toHaveBeenCalledTimes(1)
+  })
+
+  test("and once when the push comes first", async () => {
+    await mount()
+
+    await push(snapshot({ rows: [listed({ download_id: "late" })] }))
+    await emit({ downloadId: "late", status: "completed", progress: 100 })
+
+    expect(mocks.successToast).toHaveBeenCalledTimes(1)
+  })
+
+  /**
+   * a row that arrives already finished with no event behind it is a download
+   * nobody in this window was waiting on: another window's, or one that ended
+   * before this one opened.
+   */
+  test("but a finished row nobody here was waiting on says nothing", async () => {
+    await mount()
+
+    await push(
+      snapshot({
+        rows: [listed({ download_id: "someone-elses", status: "completed" })]
+      })
+    )
+
     expect(mocks.successToast).not.toHaveBeenCalled()
   })
 

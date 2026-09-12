@@ -382,6 +382,91 @@ describe("taking main's list", () => {
   })
 })
 
+/**
+ * the bar lives on this side: main pushes the list when it changes, not four
+ * times a second, so an overlay evicted is a bar that jumps back to where the
+ * download was accepted. Only the entries with no row of their own are ever
+ * capped, and there are never more rows than the panel is showing.
+ */
+describe("the overlay's cap", () => {
+  test("three running rows keep their bars behind two hundred queued ones", () => {
+    const running = ["a", "b", "c"]
+
+    store().applySnapshot(
+      snapshot({
+        rows: [
+          ...running.map(
+            (downloadId) =>
+              ({
+                download_id: downloadId,
+                status: "downloading",
+                kind: "video",
+                title: `Running ${downloadId}`,
+                started_at: 1000
+              }) as DownloadHistoryRow
+          ),
+          ...Array.from(
+            { length: 201 },
+            (_, index) =>
+              ({
+                download_id: `queued-${index}`,
+                status: "queued",
+                kind: "video",
+                title: `Queued ${index}`,
+                started_at: 900
+              }) as DownloadHistoryRow
+          )
+        ]
+      })
+    )
+
+    store().applyEvent(
+      event({ downloadId: "a", status: "downloading", progress: 67 })
+    )
+    store().applyEvent(
+      event({
+        downloadId: "b",
+        status: "downloading",
+        progress: 0,
+        indeterminate: true
+      })
+    )
+
+    // every queued row reports once: two hundred and one entries, each with a
+    // row of its own, and none of them may cost a running download its bar
+    for (let index = 0; index < 201; index += 1) {
+      store().applyEvent(
+        event({
+          downloadId: `queued-${index}`,
+          status: "queued",
+          progress: 0
+        })
+      )
+    }
+
+    expect(rowOf("a")?.progress).toBe(67)
+    expect(rowOf("b")?.indeterminate).toBe(true)
+    expect(rowOf("c")?.status).toBe("downloading")
+  })
+
+  // the ids with no row are the ones that can arrive without end
+  test("and the oldest orphan is what goes when there are too many", () => {
+    for (let index = 0; index < 201; index += 1) {
+      store().applyEvent(
+        event({
+          downloadId: `ghost-${index}`,
+          status: "downloading",
+          progress: 1
+        })
+      )
+    }
+
+    expect(Object.keys(store().overlay)).toHaveLength(200)
+    expect(store().overlay["ghost-0"]).toBeUndefined()
+    expect(store().overlay["ghost-200"]).toBeDefined()
+  })
+})
+
 describe("the duplicate rule", () => {
   const candidate = {
     kind: "video" as const,

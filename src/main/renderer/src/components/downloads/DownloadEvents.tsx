@@ -1,7 +1,12 @@
 import { useEffect } from "react"
 import { toast } from "sonner"
 
-import { downloadApi, systemApi, type DownloadProgress } from "@/lib/api"
+import {
+  downloadApi,
+  systemApi,
+  type DownloadListSnapshot,
+  type DownloadProgress
+} from "@/lib/api"
 import { reconcileCancelIntent } from "@/lib/cancelIntent"
 import { DOWNLOAD_WORDING } from "@/lib/downloadKinds"
 import { localizeError, t } from "@/lib/i18n"
@@ -47,6 +52,21 @@ export function DownloadEvents() {
      */
     const announced = new Set<string>()
 
+    /**
+     * the endings that arrived before there was a row to attach them to
+     *
+     * a download this window never had a row for is usually somebody else's -
+     * another window's, or one that ended before this one opened - and the
+     * snapshot that names it says nothing about who was waiting. But a
+     * completion can also overtake the push that lists its download, and that
+     * one is this window's news: it is kept here and said when the row appears.
+     *
+     * bounded for the same reason the store's overlay is: a window that hears
+     * about a great many downloads it has no rows for must not grow an entry
+     * for each of them for ever.
+     */
+    const unannounced = new Map<string, DownloadProgress>()
+
     const handleProgress = (event: DownloadProgress) => {
       downloadsActions.applyEvent(event)
       reconcileCancelIntent(event)
@@ -55,10 +75,48 @@ export function DownloadEvents() {
       if (announced.has(event.downloadId)) return
 
       const row = downloadsActions.rowOf(event.downloadId)
-      if (!row) return
+
+      if (!row) {
+        if (unannounced.size >= PENDING_LIMIT) {
+          unannounced.delete(unannounced.keys().next().value as string)
+        }
+
+        unannounced.set(event.downloadId, event)
+        return
+      }
 
       announced.add(event.downloadId)
       announce(row, event)
+    }
+
+    /**
+     * take main's list, and say what the events could not say yet
+     *
+     * an ending kept above belongs to a row that has just arrived, and the
+     * announcement is owed once: the snapshot itself never announces anything,
+     * because a row that arrives already finished is a download nobody in this
+     * window was waiting on.
+     */
+    const applyList = (snapshot: DownloadListSnapshot) => {
+      downloadsActions.applySnapshot(snapshot)
+
+      if (unannounced.size === 0) return
+
+      for (const entry of snapshot.rows) {
+        const event = unannounced.get(entry.download_id)
+
+        if (!event) continue
+
+        unannounced.delete(entry.download_id)
+
+        if (announced.has(entry.download_id)) continue
+
+        const row = downloadsActions.rowOf(entry.download_id)
+        if (!row) continue
+
+        announced.add(entry.download_id)
+        announce(row, event)
+      }
     }
 
     // subscribed before the read below, not after: a push that lands in that
@@ -66,13 +124,13 @@ export function DownloadEvents() {
     // arrives with the higher number
     const stopListening = downloadApi.onProgress(handleProgress)
     const stopWatching = downloadApi.onList((snapshot) => {
-      if (mounted) downloadsActions.applySnapshot(snapshot)
+      if (mounted) applyList(snapshot)
     })
 
     downloadApi
       .getList()
       .then((snapshot) => {
-        if (mounted) downloadsActions.applySnapshot(snapshot)
+        if (mounted) applyList(snapshot)
       })
       .catch((error: unknown) => {
         // a list we could not read is an empty panel, not a broken app: the
@@ -89,6 +147,14 @@ export function DownloadEvents() {
 
   return null
 }
+
+/**
+ * how many endings may wait for a row that has not arrived
+ *
+ * the same bound, and the same reason, as the store's overlay: an ending with
+ * no row is either about to have one or was never this window's business.
+ */
+const PENDING_LIMIT = 200
 
 /**
  * say what this event means for this row, if it means anything
