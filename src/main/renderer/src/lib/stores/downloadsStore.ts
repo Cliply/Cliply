@@ -68,8 +68,26 @@ const LIVE_STATUSES: ReadonlySet<DownloadRowStatus> = new Set([
 export const isLiveRow = (row?: DownloadRow): boolean =>
   Boolean(row && LIVE_STATUSES.has(row.status))
 
+/** ...and the four it cannot */
+const TERMINAL_STATUSES: ReadonlySet<DownloadRowStatus> = new Set([
+  "completed",
+  "failed",
+  "cancelled",
+  "interrupted"
+])
+
+/**
+ * whether a download is over, asked of a status rather than of a row
+ *
+ * named as the set it is rather than as "not live": a status main invents
+ * tomorrow is a status nothing here can settle a row on, and the answer that
+ * keeps a run cancellable is the conservative one. `interrupted` never arrives
+ * on an event - it is derived by the history at load and at quit - and it is
+ * listed because it is a status a row wears, and a reader asking this question
+ * of one deserves the same answer wherever it came from.
+ */
 export const isTerminalStatus = (status: string): boolean =>
-  status === "completed" || status === "failed" || status === "cancelled"
+  TERMINAL_STATUSES.has(status as DownloadRowStatus)
 
 /**
  * enough of a row to ask whether one like it is already running
@@ -88,6 +106,18 @@ interface DownloadsState {
   /** the panel's own chrome, session-only: nothing about it is worth keeping */
   panelOpen: boolean
   highlightedId: string | null
+  /**
+   * the downloads a Stop was pressed on before main could take it
+   *
+   * main reserves an id only after it has prepared the download folder, so a
+   * cancel arriving before that is answered `false` against nothing at all -
+   * while the row has been on screen, with a Stop on it, since the click. the
+   * intent is kept here and issued again on that row's first event from main,
+   * which is the first moment the id exists to be cancelled. the playlist
+   * screen keeps the same intent for its own Cancel (see `cancelIntentRef` in
+   * `usePlaylistDownload`); this is the panel's, for every kind of row.
+   */
+  cancelIntents: string[]
 
   add: (row: DownloadRow) => void
   applyEvent: (event: DownloadProgress) => void
@@ -96,6 +126,8 @@ interface DownloadsState {
   clearFinished: () => void
   setHighlighted: (downloadId: string | null) => void
   setPanelOpen: (open: boolean) => void
+  keepCancelIntent: (downloadId: string) => void
+  takeCancelIntent: (downloadId: string) => boolean
   findLive: (candidate: DownloadIdentity) => DownloadRow | undefined
   reset: () => void
 }
@@ -105,6 +137,7 @@ export const useDownloadsStore = create<DownloadsState>((set, get) => ({
   hydrated: false,
   panelOpen: false,
   highlightedId: null,
+  cancelIntents: [],
 
   // newest first, which is the order the panel lists them in and the order the
   // history keeps them in
@@ -216,14 +249,39 @@ export const useDownloadsStore = create<DownloadsState>((set, get) => ({
   setHighlighted: (downloadId) => set({ highlightedId: downloadId }),
   setPanelOpen: (open) => set({ panelOpen: open }),
 
+  keepCancelIntent: (downloadId) =>
+    set((state) =>
+      state.cancelIntents.includes(downloadId)
+        ? state
+        : { cancelIntents: [...state.cancelIntents, downloadId] }
+    ),
+
+  /**
+   * take the intent back, and say whether there was one
+   *
+   * read and clear together so the same intent cannot be issued twice by two
+   * events arriving in one batch: a cancel asked for once is asked for once.
+   */
+  takeCancelIntent: (downloadId) => {
+    const held = get().cancelIntents.includes(downloadId)
+
+    if (held) {
+      set((state) => ({
+        cancelIntents: state.cancelIntents.filter((id) => id !== downloadId)
+      }))
+    }
+
+    return held
+  },
+
   /**
    * the download already in flight that this one would duplicate
    *
    * two processes writing the same `.part` file corrupt each other, so a second
    * click on an identical request opens the panel at the first one instead of
    * spawning. identity is the kind, the url, the label (which carries the
-   * quality, the container or the mode) and the range - the four things that
-   * decide which file lands where.
+   * quality, the container or the mode), the range and what the request asks
+   * for - the things that decide which file lands where.
    *
    * a candidate with no url matches nothing: there is nothing to be identical
    * to, and refusing to start would be worse than starting twice.
@@ -239,12 +297,19 @@ export const useDownloadsStore = create<DownloadsState>((set, get) => ({
         row.kind === candidate.kind &&
         row.label === candidate.label &&
         urlOf(row.request) === url &&
+        outputOf(row.request) === outputOf(candidate.request) &&
         sameTimeRange(timeRangeOf(row.request), timeRangeOf(candidate.request))
     )
   },
 
   reset: () =>
-    set({ rows: [], hydrated: false, panelOpen: false, highlightedId: null })
+    set({
+      rows: [],
+      hydrated: false,
+      panelOpen: false,
+      highlightedId: null,
+      cancelIntents: []
+    })
 }))
 
 /** for the hooks and the event handler, which are not components */
@@ -260,6 +325,10 @@ export const downloadsActions = {
     useDownloadsStore.getState().setHighlighted(downloadId),
   setPanelOpen: (open: boolean) =>
     useDownloadsStore.getState().setPanelOpen(open),
+  keepCancelIntent: (downloadId: string) =>
+    useDownloadsStore.getState().keepCancelIntent(downloadId),
+  takeCancelIntent: (downloadId: string) =>
+    useDownloadsStore.getState().takeCancelIntent(downloadId),
   rowOf: (downloadId?: string) =>
     downloadId
       ? useDownloadsStore
@@ -357,7 +426,12 @@ function rowFromHistory(entry: DownloadHistoryRow): DownloadRow {
     // the history keeps no percentages: a finished download is at 100 and
     // everything else stopped somewhere nobody wrote down
     progress: entry.status === "completed" ? 100 : 0,
-    itemsTotal: entry.items_total,
+    // main writes the total at reserve, so a row from this version has one. a
+    // row from a history file written before it does not, and the selection it
+    // stored is the same number - which is what a Retry of an interrupted
+    // playlist then counts from, rather than counting from nothing until the
+    // first event arrives
+    itemsTotal: entry.items_total ?? entryCount(entry.request),
     itemsSaved: entry.items_saved,
     itemsReused: entry.items_reused,
     itemsSkipped: entry.items_skipped,
@@ -390,6 +464,36 @@ const entryCount = (request?: DownloadRequest): number | undefined => {
   const entries = (request as { entries?: unknown[] } | undefined)?.entries
 
   return Array.isArray(entries) ? entries.length : undefined
+}
+
+/**
+ * what a request asks for, beyond which link it is
+ *
+ * the label already carries this for a single download - "1080p mp4", "mp3" -
+ * and cannot for a playlist, whose label counts videos: the same selection
+ * started from the video tab and from the audio tab would otherwise be one
+ * download, and the second click would be sent to a run that will never write
+ * the file it asked for.
+ *
+ * read through a cast for the same reason the range below is: the caller may
+ * not know which of the four request shapes it is holding, and a key none of
+ * them has is absent on both sides of the comparison.
+ *
+ * @returns the fields joined, so "absent" and "absent" compare equal
+ */
+const outputOf = (request?: DownloadRequest): string => {
+  const asked = request as
+    | {
+        type?: string
+        height?: number
+        container?: string
+        audio_mode?: string
+      }
+    | undefined
+
+  return [asked?.type, asked?.height, asked?.container, asked?.audio_mode].join(
+    "|"
+  )
 }
 
 /**

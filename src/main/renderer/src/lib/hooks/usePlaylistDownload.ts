@@ -19,7 +19,7 @@ import {
   summarizePlaylistItems,
   type PlaylistDownloadOptions
 } from "@/lib/playlistRequest"
-import { downloadsActions } from "@/lib/stores/downloadsStore"
+import { downloadsActions, isTerminalStatus } from "@/lib/stores/downloadsStore"
 import { usePlaylistStore } from "@/lib/stores/playlistStore"
 import { reportActions } from "@/lib/stores/reportStore"
 import { showDownloadErrorToast } from "@/lib/toast-utils"
@@ -47,6 +47,9 @@ export interface PlaylistDownloadState {
   status:
     | "idle"
     | "starting"
+    // main sends this one when the run is waiting behind the concurrency cap.
+    // it is live, not an outcome: see `phaseOf` in `lib/playlistView.ts`
+    | "queued"
     | "downloading"
     | "completed"
     | "failed"
@@ -221,6 +224,36 @@ export const usePlaylistDownload = () => {
         options
       )
 
+      const label = playlistLabel(request.entries.length)
+
+      /**
+       * the same playlist, already in flight somewhere else.
+       *
+       * `runningRef` above only knows about runs this hook instance started,
+       * and there are two ways past it: a retry from the panel, and this screen
+       * being left and come back to while its run carries on. both end with two
+       * processes writing the same files and the same archive, which is the one
+       * thing D3 exists to prevent - so the shared list is asked as well, the
+       * same way `useMediaDownload` asks it.
+       *
+       * nothing else happens here: no row, no analytics, no ipc. the panel
+       * opens on the download that is already running, which is the answer to
+       * what was asked for, and this screen stays where it was rather than
+       * adopting a run whose per-item badges it has no way to rebuild.
+       */
+      const existing = downloadsActions.findLive({
+        kind: "playlist",
+        label,
+        request
+      })
+
+      if (existing) {
+        downloadsActions.setHighlighted(existing.downloadId)
+        downloadsActions.setPanelOpen(true)
+
+        return { downloadId: existing.downloadId }
+      }
+
       runningRef.current = true
       ackedRef.current = false
       cancelIntentRef.current = false
@@ -268,7 +301,7 @@ export const usePlaylistDownload = () => {
         // playlists are youtube's, and this hook only ever serves them
         platform: "youtube",
         title: request.title || "",
-        label: playlistLabel(request.entries.length),
+        label,
         status: "starting",
         progress: 0,
         itemsTotal: request.entries.length,
@@ -320,8 +353,17 @@ export const usePlaylistDownload = () => {
           wordingCode: data.wordingCode
         }))
 
-        if (data.status === "downloading") {
-          applyItemStatus(data)
+        /**
+         * everything that is not one of the four endings leaves the run open.
+         *
+         * asked as "is this terminal" rather than as "is this anything but
+         * downloading", which is what it used to be: `queued` arrived and was
+         * read as an outcome, so the guard below closed over a run that had not
+         * started, and the screen's own Cancel stopped calling main for the
+         * rest of it. a status main invents next should cost nothing either.
+         */
+        if (!isTerminalStatus(data.status)) {
+          if (data.status === "downloading") applyItemStatus(data)
           return
         }
 
@@ -643,7 +685,10 @@ export const usePlaylistDownload = () => {
     reset,
     isDownloading:
       downloadState.status === "downloading" ||
-      downloadState.status === "starting",
+      downloadState.status === "starting" ||
+      // a run waiting for a slot is a run this screen owns: its Cancel works,
+      // and a second Download must not start beside it
+      downloadState.status === "queued",
     isCompleted: downloadState.status === "completed",
     isFailed: downloadState.status === "failed",
     isCancelled: downloadState.status === "cancelled"

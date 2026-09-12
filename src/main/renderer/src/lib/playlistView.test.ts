@@ -54,6 +54,10 @@ describe("which screen a status means", () => {
   test.each([
     ["idle", "picking"],
     ["starting", "running"],
+    // waiting behind the concurrency cap: it has not started and it has not
+    // ended, and reading it as finished puts the outcome summary over a run
+    // that is yet to happen
+    ["queued", "running"],
     ["downloading", "running"],
     ["completed", "finished"],
     ["failed", "finished"],

@@ -70,6 +70,8 @@ export function DownloadEvents() {
 
       if (buffered) buffered.push({ event, handled: Boolean(known) })
 
+      reconcileCancelIntent(event)
+
       if (known) announce(known, event)
     }
 
@@ -124,6 +126,36 @@ export function DownloadEvents() {
   }, [])
 
   return null
+}
+
+/**
+ * ask again for a Stop main was not yet in a position to take
+ *
+ * the panel's Stop can reach main before it has reserved the id - it reserves
+ * only after preparing the download folder - and the answer is `false` against
+ * nothing at all. the intent is kept by the row (see `stopDownload` in
+ * `DownloadRow`), and this is the moment it becomes askable: an event from main
+ * means the id exists there now.
+ *
+ * here rather than in the row, because the row is not the thing that has to be
+ * on screen for a Stop to stick: the panel can be closed, or the app looking at
+ * another screen entirely, and the download the user stopped should still stop.
+ *
+ * a terminal event drops the intent instead. the download is over, and asking
+ * main to cancel a finished one only earns another `false`.
+ */
+function reconcileCancelIntent(event: DownloadProgress): void {
+  if (isTerminalStatus(event.status)) {
+    downloadsActions.takeCancelIntent(event.downloadId)
+    return
+  }
+
+  if (event.status !== "queued" && event.status !== "downloading") return
+  if (!downloadsActions.takeCancelIntent(event.downloadId)) return
+
+  downloadApi.cancelDownload(event.downloadId).catch((error: unknown) => {
+    console.error("Failed to cancel download:", error)
+  })
 }
 
 /**

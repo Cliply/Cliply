@@ -233,7 +233,17 @@ function PlaylistProgress({
     playlistInfo?.entries.find((entry) => entry.index === state.playlistIndex)
       ?.title ?? ""
 
+  /**
+   * the two states with nothing to draw a percentage from
+   *
+   * `queued` is one of them now: the run is waiting behind the concurrency cap,
+   * so a 0% bar under "Video 1 of 3" would be describing a download that has
+   * not begun. it says what it is instead, in the words the panel's own queued
+   * rows use.
+   */
   const starting = state.status === "starting"
+  const queued = state.status === "queued"
+  const waiting = starting || queued
 
   return (
     <motion.div
@@ -247,15 +257,17 @@ function PlaylistProgress({
         className
       )}
     >
-      <ProgressBar value={state.progress} isIndeterminate={starting}>
+      <ProgressBar value={state.progress} isIndeterminate={waiting}>
         <ProgressBarHeader>
           <ProgressBarLabel>
-            {starting || total === 0
-              ? t("progress.startingUp")
-              : t("playlist.videoOf", {
-                  current: Math.min(current, total),
-                  total
-                })}
+            {queued
+              ? t("progress.queued")
+              : starting || total === 0
+                ? t("progress.startingUp")
+                : t("playlist.videoOf", {
+                    current: Math.min(current, total),
+                    total
+                  })}
           </ProgressBarLabel>
           <ProgressBarValue />
         </ProgressBarHeader>
@@ -263,7 +275,7 @@ function PlaylistProgress({
         <ProgressBarMeta>{currentTitle}</ProgressBarMeta>
       </ProgressBar>
 
-      <ProgressBar value={state.itemProgress ?? 0} isIndeterminate={starting}>
+      <ProgressBar value={state.itemProgress ?? 0} isIndeterminate={waiting}>
         <ProgressBarHeader>
           <ProgressBarLabel>{t("playlist.thisVideo")}</ProgressBarLabel>
           <ProgressBarValue />

@@ -295,6 +295,40 @@ describe("hydrating after a reload", () => {
 
     expect(rowOf("pl")).toMatchObject({ kind: "playlist", itemsTotal: 3 })
   })
+
+  /**
+   * main has written the total at reserve since the history was added, so this
+   * is a row from a file an older version wrote - and the selection it stored
+   * is the same number. it matters on the way out rather than on the way in: a
+   * Retry copies this row, and one with no total counts from nothing until the
+   * first event of the new run arrives.
+   */
+  test("an interrupted playlist with no stored total falls back to its selection", () => {
+    store().hydrate(
+      [],
+      [
+        {
+          download_id: "pl",
+          kind: "playlist",
+          platform: "youtube",
+          status: "interrupted",
+          title: "Short talks",
+          label: "2 videos",
+          started_at: 1000,
+          request: {
+            url: "https://youtube.com/playlist?list=PL1",
+            playlist_id: "PL1",
+            entries: [
+              { index: 1, id: "a" },
+              { index: 2, id: "b" }
+            ]
+          }
+        } as DownloadHistoryRow
+      ]
+    )
+
+    expect(rowOf("pl")).toMatchObject({ status: "interrupted", itemsTotal: 2 })
+  })
 })
 
 describe("the duplicate rule", () => {
@@ -369,6 +403,43 @@ describe("the duplicate rule", () => {
   })
 
   /**
+   * a playlist's label counts videos and says nothing about what they arrive
+   * as, so the request is the only thing that separates the two tabs: the same
+   * selection as m4a while it downloads as video writes different files and is
+   * a different download.
+   */
+  test("the same playlist asked for as audio is a different download", () => {
+    const playlist = {
+      kind: "playlist" as const,
+      label: "2 videos",
+      request: {
+        url: "https://youtube.com/playlist?list=PL1",
+        playlist_id: "PL1",
+        entries: [{ index: 1, id: "a" }],
+        type: "video" as const,
+        height: 1080
+      }
+    }
+
+    store().add(
+      row({ kind: "playlist", label: "2 videos", request: playlist.request })
+    )
+
+    expect(store().findLive(playlist)?.downloadId).toBe("d1")
+    expect(
+      store().findLive({
+        ...playlist,
+        request: {
+          ...playlist.request,
+          type: "audio",
+          height: undefined,
+          audio_mode: "m4a"
+        }
+      })
+    ).toBeUndefined()
+  })
+
+  /**
    * nothing to be identical to. refusing to start would be worse than starting
    * twice, and a row with no request is one a retry cannot re-send either
    */
@@ -440,5 +511,29 @@ describe("the panel's own state", () => {
 
     expect(store().panelOpen).toBe(false)
     expect(store().highlightedId).toBeNull()
+  })
+})
+
+/**
+ * a Stop pressed before main has reserved the id, kept until there is an id to
+ * cancel. the panel records it and `DownloadEvents` issues it again; the store
+ * only has to hold it, once, and hand it over exactly once.
+ */
+describe("a cancel main could not take yet", () => {
+  test("is held until somebody takes it, and only once", () => {
+    store().keepCancelIntent("d1")
+    store().keepCancelIntent("d1")
+
+    expect(store().cancelIntents).toEqual(["d1"])
+    expect(store().takeCancelIntent("d1")).toBe(true)
+    expect(store().takeCancelIntent("d1")).toBe(false)
+    expect(store().cancelIntents).toEqual([])
+  })
+
+  test("belongs to the download it was pressed on", () => {
+    store().keepCancelIntent("d1")
+
+    expect(store().takeCancelIntent("d2")).toBe(false)
+    expect(store().cancelIntents).toEqual(["d1"])
   })
 })

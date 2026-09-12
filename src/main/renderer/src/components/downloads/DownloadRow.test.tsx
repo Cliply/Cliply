@@ -7,7 +7,13 @@
 // and that the chip and the finished line are built from the request rather
 // than from main's english label.
 
-import { cleanup, fireEvent, render, screen } from "@testing-library/react"
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor
+} from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
 
 const mocks = vi.hoisted(() => ({
@@ -221,6 +227,53 @@ describe("what each status offers", () => {
   })
 })
 
+/**
+ * main reserves an id only after it has prepared the download folder, and the
+ * row is on screen with a Stop on it from the click - so a Stop pressed in that
+ * window is answered `false` against an id main has never heard of. dropping
+ * that answer loses the user's Stop and the download runs on.
+ */
+describe("a Stop main answered false", () => {
+  test("is remembered while the row is still live", async () => {
+    mocks.cancelDownload.mockResolvedValue(false)
+    const starting = row({ status: "starting", progress: 0 })
+    store().add(starting)
+
+    render(<DownloadRow row={starting} />)
+    fireEvent.click(action(en["progress.stop"]))
+
+    await waitFor(() => expect(store().cancelIntents).toEqual(["d1"]))
+  })
+
+  test("is forgotten when the download had already finished", async () => {
+    // the other meaning of `false`: main had nothing to cancel because the
+    // download completed while the click was in flight. asking again would be
+    // asking main to stop a file that is on disk
+    mocks.cancelDownload.mockResolvedValue(false)
+    const live = row()
+    store().add(live)
+
+    render(<DownloadRow row={live} />)
+    fireEvent.click(action(en["progress.stop"]))
+
+    store().applyEvent({ downloadId: "d1", status: "completed", progress: 100 })
+
+    await waitFor(() => expect(mocks.cancelDownload).toHaveBeenCalled())
+    expect(store().cancelIntents).toEqual([])
+  })
+
+  test("is not remembered at all when the cancel took", async () => {
+    const starting = row({ status: "starting", progress: 0 })
+    store().add(starting)
+
+    render(<DownloadRow row={starting} />)
+    fireEvent.click(action(en["progress.stop"]))
+
+    await waitFor(() => expect(mocks.cancelDownload).toHaveBeenCalled())
+    expect(store().cancelIntents).toEqual([])
+  })
+})
+
 describe("a playlist row", () => {
   const playlist = (overrides: Partial<Row> = {}): Row =>
     row({
@@ -243,6 +296,23 @@ describe("a playlist row", () => {
 
     expect(screen.getByText("3 of 12")).toBeTruthy()
   })
+
+  /**
+   * from the moment the row is live, not from the first video that lands
+   *
+   * the bar, the speed and the eta describe the file being fetched right now;
+   * how far through the playlist the run is is the one thing they cannot say,
+   * and a counter that only appears once something has completed leaves the
+   * first video of a long list looking like the whole download.
+   */
+  test.each([["starting" as const], ["downloading" as const]])(
+    "%s already counts, from zero",
+    (status) => {
+      render(<DownloadRow row={playlist({ status, progress: 0 })} />)
+
+      expect(screen.getByText("0 of 12")).toBeTruthy()
+    }
+  )
 
   /**
    * the size on a playlist's completed event describes the last file that

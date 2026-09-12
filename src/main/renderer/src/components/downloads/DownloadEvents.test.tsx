@@ -23,6 +23,7 @@ const mocks = vi.hoisted(() => ({
   listenersAtRead: -1,
   getAllDownloads: vi.fn(),
   getHistory: vi.fn(),
+  cancelDownload: vi.fn(),
   openDownloadFolder: vi.fn(),
   stage: vi.fn(),
   showDownloadErrorToast: vi.fn(),
@@ -44,6 +45,7 @@ vi.mock("@/lib/api", () => ({
       return mocks.getAllDownloads()
     },
     getHistory: () => mocks.getHistory(),
+    cancelDownload: (downloadId: string) => mocks.cancelDownload(downloadId),
     clearHistory: vi.fn(),
     removeHistory: vi.fn()
   },
@@ -151,6 +153,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   mocks.getAllDownloads.mockResolvedValue([])
   mocks.getHistory.mockResolvedValue([])
+  mocks.cancelDownload.mockResolvedValue(true)
   store().reset()
 })
 
@@ -473,5 +476,54 @@ describe("terminal outcomes", () => {
 
     expect(mocks.showDownloadErrorToast).not.toHaveBeenCalled()
     expect(mocks.stage).not.toHaveBeenCalled()
+  })
+})
+
+/**
+ * a Stop the panel could not get taken, asked again
+ *
+ * main reserves an id only after it has prepared the download folder, so a Stop
+ * pressed on a row that has only just appeared is answered against nothing. the
+ * row records the intent (see `stopDownload` in `DownloadRow`) and this is what
+ * carries it out - here rather than in the row, because the panel can be closed
+ * and the row unmounted and the download should still stop.
+ */
+describe("a cancel main was not ready for", () => {
+  test("is issued again on the row's first event, once and once only", async () => {
+    await mount()
+    store().add(row({ status: "starting", progress: 0 }))
+    store().keepCancelIntent("d1")
+
+    await emit({ status: "queued", progress: 0 })
+
+    expect(mocks.cancelDownload).toHaveBeenCalledWith("d1")
+    expect(mocks.cancelDownload).toHaveBeenCalledTimes(1)
+    expect(store().cancelIntents).toEqual([])
+
+    // the run takes its slot before main gets the cancel: the intent has been
+    // spent, and every progress line after it is not another cancel
+    await emit({ status: "downloading", progress: 12 })
+
+    expect(mocks.cancelDownload).toHaveBeenCalledTimes(1)
+  })
+
+  test("is dropped when the download turns out to be over", async () => {
+    await mount()
+    store().add(row())
+    store().keepCancelIntent("d1")
+
+    await emit({ status: "completed", progress: 100 })
+
+    expect(mocks.cancelDownload).not.toHaveBeenCalled()
+    expect(store().cancelIntents).toEqual([])
+  })
+
+  test("leaves a row nobody stopped alone", async () => {
+    await mount()
+    store().add(row({ status: "starting", progress: 0 }))
+
+    await emit({ status: "queued", progress: 0 })
+
+    expect(mocks.cancelDownload).not.toHaveBeenCalled()
   })
 })

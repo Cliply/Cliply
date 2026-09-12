@@ -76,6 +76,7 @@ vi.mock("@/components/video/CompactSearch", () => ({
   CompactSearch: () => null
 }))
 
+import { useDownloadsStore } from "@/lib/stores/downloadsStore"
 import { usePlaylistStore } from "@/lib/stores/playlistStore"
 import { PlaylistLayout } from "./PlaylistLayout"
 
@@ -143,6 +144,10 @@ beforeEach(() => {
   mocks.listeners.length = 0
   vi.clearAllMocks()
   usePlaylistStore.getState().reset()
+  // a row left live by the previous case is a download the duplicate rule
+  // would send this one's click to rather than starting it: nothing here
+  // mounts `DownloadEvents`, so nothing else ever settles those rows
+  useDownloadsStore.getState().reset()
   mocks.downloadPlaylist.mockResolvedValue({ downloadId: "ignored" })
   mocks.cancelDownload.mockResolvedValue(true)
   load()

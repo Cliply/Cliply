@@ -50,9 +50,21 @@ export type PlaylistPhase = "picking" | "running" | "finished"
  * `starting` counts as running: the job is the user's from the moment they
  * press the button, and leaving the checkboxes live for the second before the
  * engine answers invites a change the run will not honour.
+ *
+ * so does `queued`, for the same reason and more so: a run waiting behind the
+ * cap has not started and has not ended, and reading it as finished would put
+ * the outcome summary over a download that has not happened yet - taking
+ * "Cancel remaining" off the screen with it.
  */
 export function phaseOf(status: string): PlaylistPhase {
-  if (status === "starting" || status === "downloading") return "running"
+  if (
+    status === "queued" ||
+    status === "starting" ||
+    status === "downloading"
+  ) {
+    return "running"
+  }
+
   if (status === "idle") return "picking"
 
   return "finished"

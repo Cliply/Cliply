@@ -6,7 +6,13 @@
 // and a finish that has to be honest about what it did not save.
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { act, renderHook, waitFor } from "@testing-library/react"
+import {
+  act,
+  render,
+  renderHook,
+  screen,
+  waitFor
+} from "@testing-library/react"
 import type { ReactNode } from "react"
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
 
@@ -57,12 +63,19 @@ vi.mock("@/lib/api", () => {
           if (index >= 0) mocks.listeners.splice(index, 1)
         }
       },
-      cancelDownload: (id: string) => mocks.cancelDownload(id)
+      cancelDownload: (id: string) => mocks.cancelDownload(id),
+      removeHistory: vi.fn(),
+      clearHistory: vi.fn()
     },
     playlistApi: {
       download: (request: unknown) => mocks.downloadPlaylist(request)
     },
-    systemApi: { openDownloadFolder: vi.fn() }
+    systemApi: { openDownloadFolder: vi.fn() },
+    // the panel row is rendered from one of these tests, and its Retry reaches
+    // every platform's api through `downloadRetry`. nothing here presses it
+    videoApi: { downloadVideo: vi.fn(), downloadAudio: vi.fn() },
+    tiktokApi: { download: vi.fn() },
+    pinterestApi: { download: vi.fn() }
   }
 })
 
@@ -80,6 +93,7 @@ vi.mock("sonner", () => ({
   }
 }))
 
+import { DownloadRow } from "@/components/downloads/DownloadRow"
 import { useDownloadsStore } from "@/lib/stores/downloadsStore"
 import { usePlaylistStore } from "@/lib/stores/playlistStore"
 import {
@@ -761,6 +775,153 @@ describe("overlapping starts", () => {
 
     ack.resolve({})
     await flush()
+    await emit({ downloadId: sentDownloadId(), status: "completed" })
+    expect((await settled).ok).toBe(true)
+  })
+})
+
+/**
+ * the panel's row, drawn from what the hook actually put in the store
+ *
+ * ten seconds can pass between the click and the first event: a playlist's
+ * progress starts arriving only once yt-dlp has listed and begun the first
+ * video, and behind the cap it may not start at all for a while. the row has to
+ * say how big the run is in that gap, and the only thing that knows it then is
+ * the selection the request carries.
+ *
+ * asserted through the real component rather than on the row's fields, because
+ * "the row holds itemsTotal" and "the panel says 0 of 2" are two different
+ * claims and it is the second one the user reads.
+ */
+describe("what the panel shows before the first event", () => {
+  test("the row the hook adds already counts the selection", async () => {
+    const { result } = renderHook(() => usePlaylistDownload(), { wrapper })
+
+    const { settled } = await startDownload(result)
+    await waitFor(() => expect(downloadPlaylist).toHaveBeenCalled())
+
+    const row = useDownloadsStore.getState().rows[0]
+
+    expect(row).toMatchObject({
+      kind: "playlist",
+      // the renderer's own state between the click and main's first event
+      status: "starting",
+      // the two selectable rows of the three the listing holds
+      itemsTotal: 2
+    })
+
+    const view = render(<DownloadRow row={row} />)
+
+    expect(screen.getByText("0 of 2")).toBeTruthy()
+
+    view.unmount()
+
+    await emit({ downloadId: sentDownloadId(), status: "completed" })
+    expect((await settled).ok).toBe(true)
+  })
+})
+
+/**
+ * a playlist can wait behind the concurrency cap like anything else, and
+ * `queued` is the one status this hook had never seen: it is live, and reading
+ * it as an outcome closes the run's own guard over a download that has not
+ * started yet.
+ */
+describe("waiting behind the cap", () => {
+  test("a queued run is live, and stays cancellable for the rest of it", async () => {
+    const { result } = renderHook(() => usePlaylistDownload(), { wrapper })
+
+    const { settled } = await startDownload(result)
+    await waitFor(() => expect(downloadPlaylist).toHaveBeenCalled())
+
+    await emit({ downloadId: sentDownloadId(), status: "queued", progress: 0 })
+
+    expect(result.current.downloadState.status).toBe("queued")
+    expect(result.current.isDownloading).toBe(true)
+    expect(result.current.isCompleted).toBe(false)
+    // nothing was settled on the rows either: no video has been reached, let
+    // alone skipped
+    expect(usePlaylistStore.getState().itemStatus.size).toBe(0)
+
+    // ...and when its turn comes, the screen's own Cancel still reaches main
+    await emit({
+      downloadId: sentDownloadId(),
+      status: "downloading",
+      progress: 3
+    })
+
+    await act(async () => {
+      await result.current.cancelDownload()
+    })
+
+    expect(cancelDownload).toHaveBeenCalledWith(sentDownloadId())
+    expect(result.current.downloadState.status).toBe("cancelled")
+
+    await emit({ downloadId: sentDownloadId(), status: "cancelled" })
+    expect((await settled).ok).toBe(false)
+  })
+})
+
+/**
+ * the same playlist, already running somewhere this hook cannot see
+ *
+ * `runningRef` only knows about runs this instance started. the panel's Retry
+ * and a screen the user left and came back to both get past it, and two
+ * processes writing the same files and the same archive is the thing D3 exists
+ * to prevent.
+ */
+describe("the live duplicate rule", () => {
+  test("a run already in flight is focused rather than started again", async () => {
+    const first = renderHook(() => usePlaylistDownload(), { wrapper })
+
+    const { settled } = await startDownload(first.result)
+    await waitFor(() => expect(downloadPlaylist).toHaveBeenCalledTimes(1))
+
+    const second = renderHook(() => usePlaylistDownload(), { wrapper })
+    const { settled: refused } = await startDownload(second.result)
+
+    // nothing was sent, and the answer is the download that is already running
+    expect(downloadPlaylist).toHaveBeenCalledTimes(1)
+    expect(await refused).toEqual({
+      ok: true,
+      value: { downloadId: sentDownloadId() }
+    })
+
+    // the panel opens on it, which is the whole of what a duplicate click does
+    expect(useDownloadsStore.getState().panelOpen).toBe(true)
+    expect(useDownloadsStore.getState().highlightedId).toBe(sentDownloadId())
+    expect(useDownloadsStore.getState().rows).toHaveLength(1)
+    // and the second screen started nothing, so it has nothing to listen to
+    expect(listeners).toHaveLength(1)
+
+    second.unmount()
+    await emit({ downloadId: sentDownloadId(), status: "completed" })
+    expect((await settled).ok).toBe(true)
+  })
+
+  test("the same playlist as audio is a different download", async () => {
+    const first = renderHook(() => usePlaylistDownload(), { wrapper })
+
+    const { settled } = await startDownload(first.result)
+    await waitFor(() => expect(downloadPlaylist).toHaveBeenCalledTimes(1))
+
+    // the label counts videos and says nothing about what they arrive as, so
+    // the request is what separates the two: an m4a of a playlist already
+    // downloading as video writes different files and must start
+    act(() => {
+      usePlaylistStore.getState().setActiveTab("audio")
+      usePlaylistStore.getState().setSelectedAudioMode("m4a")
+    })
+
+    const second = renderHook(() => usePlaylistDownload(), { wrapper })
+    const { settled: audio } = await startDownload(second.result)
+    await waitFor(() => expect(downloadPlaylist).toHaveBeenCalledTimes(2))
+
+    expect(sentRequest(1)).toMatchObject({ type: "audio", audio_mode: "m4a" })
+
+    await emit({ downloadId: sentDownloadId(1), status: "completed" })
+    expect((await audio).ok).toBe(true)
+
     await emit({ downloadId: sentDownloadId(), status: "completed" })
     expect((await settled).ok).toBe(true)
   })

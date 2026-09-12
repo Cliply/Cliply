@@ -20,6 +20,8 @@ import { videoLabel } from "@/lib/downloadKinds"
 import { formatFileSize } from "@/lib/format"
 import { localizeError, useT, type Key } from "@/lib/i18n"
 import {
+  downloadsActions,
+  isLiveRow,
   useDownloadsStore,
   type DownloadRow as Row
 } from "@/lib/stores/downloadsStore"
@@ -246,10 +248,35 @@ const isFinished = (row: Row): boolean =>
   row.status === "cancelled" ||
   row.status === "interrupted"
 
+/**
+ * stop this download, now or as soon as main is in a position to
+ *
+ * a row exists from the click, and main reserves its id only after it has
+ * prepared the download folder - so a Stop pressed in that window is answered
+ * `false` against an id main has never heard of, and the download it was meant
+ * to stop starts a moment later. the answer is not the outcome either way: the
+ * row is settled by the `cancelled` event, as it always was.
+ *
+ * `false` on a row that is no longer live means something else entirely - the
+ * download finished while the click was in flight - and remembering an intent
+ * there would be asking main to cancel a file that is already on disk. the
+ * row's own status is what separates the two, read after the answer rather
+ * than before it (see `reconcileCancelIntent` in `DownloadEvents`, which is
+ * what issues a kept intent again).
+ */
 const stopDownload = (downloadId: string) => {
-  downloadApi.cancelDownload(downloadId).catch((error: unknown) => {
-    console.error("Failed to cancel download:", error)
-  })
+  downloadApi
+    .cancelDownload(downloadId)
+    .then((cancelled) => {
+      if (cancelled) return
+
+      if (isLiveRow(downloadsActions.rowOf(downloadId))) {
+        downloadsActions.keepCancelIntent(downloadId)
+      }
+    })
+    .catch((error: unknown) => {
+      console.error("Failed to cancel download:", error)
+    })
 }
 
 /** the mode an audio download was asked for, in the dropdown's own words */
