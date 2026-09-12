@@ -886,8 +886,21 @@ class IPCHandlers {
         })
       }
 
-      // tiktok / pinterest have no progress ui and their components still await
-      // completion, so these keep resolving when the file is on disk
+      /**
+       * tiktok and pinterest answer the same way every other kind does: an
+       * acknowledgement now, the rest over progress events.
+       *
+       * awaiting the run here would hold the ipc call open for however long the
+       * row waits behind the cap plus the download itself, and a download the
+       * queue cannot show is a download the queue does not cover.
+       *
+       * it also closes the last ordering gap. this was the one path that called
+       * run() outside startDownload's setImmediate, so a tiktok link pasted
+       * after a youtube one reached the semaphore first. every kind starts
+       * through startDownload now, and since nothing awaits between reserve()
+       * and it, the order runs reach the queue is the order they were accepted
+       * in (see park in services/download-runner.js).
+       */
       const outputTemplate = buildSimpleOutputTemplate({
         title,
         platform: targetPlatform
@@ -923,7 +936,11 @@ class IPCHandlers {
         return this.duplicateDownloadError(downloadId)
       }
 
-      const result = await this.runner.run({
+      // fire and forget: the renderer follows the rest over progress events.
+      // nothing translates a failure here any more, because the runner's
+      // `failed` event already carries the wording, the details and the
+      // category, and startDownload is what notes a refusal
+      this.startDownload({
         downloadId,
         type: "combined",
         platform: targetPlatform,
@@ -932,35 +949,11 @@ class IPCHandlers {
         createHandle
       })
 
-      if (!result.success) {
-        /**
-         * the taxonomy is on the error object, not on the wording beside it.
-         *
-         * the runner hands back three fields with three different jobs:
-         * `error.code` is the category mapError already chose, `message` is
-         * the sentence the user reads, and `details` is the raw text. reading
-         * the message here re-runs the patterns against wording written for a
-         * human, which matches almost none of them - so nearly every category
-         * would arrive at the renderer as UNKNOWN_ERROR, in the same failure
-         * the runner had just reported correctly to analytics.
-         *
-         * the error object rather than a rebuilt bag: classify() takes the
-         * explicit code when it owns one and falls back to the patterns when
-         * it does not, which is what a throw from outside the engine looks
-         * like. the adjacent catch below reads it exactly this way.
-         */
-        return this.createError(
-          result.message || "Download failed",
-          "Please try again or check your connection",
-          result.error?.code || "DOWNLOAD_FAILED",
-          {
-            details: result.details,
-            category: classify(result.error, ERROR_STAGES.DOWNLOAD).category
-          }
-        )
-      }
-
-      return this.createSuccess(result)
+      return this.createSuccess({
+        download_id: downloadId,
+        status: "started",
+        type: "combined"
+      })
     } catch (error) {
       console.error(`[${downloadId}] Combined download failed:`, error.message)
 

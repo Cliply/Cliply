@@ -761,12 +761,16 @@ describe("queue", () => {
   })
 
   /**
-   * the order runs reach the semaphore is not the order they were reserved in
+   * the order runs reach the semaphore need not be the order they were
+   * reserved in
    *
-   * startDownload defers run() by a setImmediate and the simple-platform path
-   * awaits run() inline, so a tiktok link pasted after a youtube one calls
-   * run() first. the test above cannot see the difference: it reserves and
-   * invokes in the same order, so both contracts pass it.
+   * the ipc layer no longer produces that mismatch: every kind starts through
+   * startDownload, which defers run() by a setImmediate with nothing awaited
+   * between it and reserve(). it used to, back when the simple-platform path
+   * awaited run() inline and a tiktok link pasted after a youtube one called
+   * run() first. the guarantee is still "accepted first, run first", so it is
+   * still tested directly: the test above cannot see the difference, because it
+   * reserves and invokes in the same order.
    */
   test("a download reserved first is queued first, whichever run() parked first", async () => {
     const { runner } = createRunner({ maxConcurrent: 1 })

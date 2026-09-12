@@ -67,6 +67,10 @@ function createHandlers({
   importCookieFile
 } = {}) {
   const captured = []
+  // every download:progress payload main sent, in order. the download flows
+  // report through this channel rather than through the ipc reply, so a test
+  // that used to read a resolved result reads the events instead
+  const events = []
 
   const cookieManager = {
     hasValidCookies: jest.fn(() => hasValidCookies),
@@ -85,7 +89,25 @@ function createHandlers({
     }
   })
 
-  return { handlers, captured, cookieManager }
+  handlers.mainWindow = {
+    isDestroyed: () => false,
+    webContents: { send: (channel, payload) => events.push({ channel, payload }) }
+  }
+
+  return { handlers, captured, events, cookieManager }
+}
+
+/**
+ * the last download:progress payload for one download, whatever its status
+ * @param {Object[]} events - what the mainWindow stub recorded
+ * @param {string} downloadId - the id the request carried
+ * @returns {Object|undefined} the payload, without the channel around it
+ */
+function lastEvent(events, downloadId = "download_1") {
+  return events
+    .filter(({ payload }) => payload.downloadId === downloadId)
+    .map(({ payload }) => payload)
+    .pop()
 }
 
 /**
@@ -184,62 +206,87 @@ describe("what the taxonomy does with a download failure", () => {
   })
 })
 
-describe("what a pinterest/tiktok failure hands the renderer", () => {
+describe("what a pinterest/tiktok download hands the renderer", () => {
   /**
-   * run one simple-platform download to failure through the real ipc handler
-   * @param {Object} handlers - the IPCHandlers under test
-   * @param {Error} error - what the engine handle rejects with
-   * @returns {Promise<Object>} the ipc response
+   * start one simple-platform download through the real ipc handler
+   *
+   * the invoke resolves at the acknowledgement now, so the run has to be
+   * settled from outside it: the caller gets the reply and the handle the
+   * engine was asked for, and finishes that handle itself.
+   *
+   * @param {Object} harness - what createHandlers returned
+   * @param {Object} data - what to add to the request payload
+   * @returns {Promise<Object>} {response, handle}
    */
-  async function failSimpleDownload(handlers, error) {
+  async function startSimpleDownload({ handlers }, data = {}) {
     const handle = new FakeHandle()
     handlers.engine.downloadSimple = jest.fn(() => handle)
 
-    const responding = handlers.handleDownloadCombined(null, {
+    const response = await handlers.handleDownloadCombined(null, {
       url: "https://www.pinterest.com/pin/1/",
       platform: "pinterest",
-      download_id: "download_1"
+      download_id: "download_1",
+      ...data
     })
 
+    // startDownload defers run() by a setImmediate, so nothing has spawned
+    // until this returns
     await settle()
-    handle.reject(error)
 
-    return responding
+    return { response, handle }
   }
 
-  it("keeps the engine's category instead of reclassifying the wording", async () => {
-    // these two flows await the runner and translate its result themselves,
-    // rather than letting the renderer follow progress events. the taxonomy
-    // sits on the error object the runner passes back - `code` - while
-    // `message` beside it is the wording the user reads, which matches none of
-    // the patterns the categories were written from
-    const { handlers } = createHandlers()
+  /**
+   * run one simple-platform download to failure through the real ipc handler
+   * @param {Object} harness - what createHandlers returned
+   * @param {Error} error - what the engine handle rejects with
+   * @returns {Promise<Object>} {response, event} - the ack and the failed event
+   */
+  async function failSimpleDownload(harness, error) {
+    const { response, handle } = await startSimpleDownload(harness)
 
-    const response = await failSimpleDownload(
-      handlers,
+    handle.reject(error)
+    await settle()
+
+    return { response, event: lastEvent(harness.events) }
+  }
+
+  it("acknowledges the start and reports the failure over the event", async () => {
+    // the invoke answers as soon as the id is claimed, exactly as the youtube
+    // flows do, and everything the handler used to translate into an ipc error
+    // rides the download:progress event the runner emits
+    const harness = createHandlers()
+
+    const { response, event } = await failSimpleDownload(
+      harness,
       engineError(
         ERROR_CODES.FFMPEG_AV_BLOCKED,
         "Your antivirus stopped the video processor."
       )
     )
 
-    expect(response.success).toBe(false)
-    expect(response.error.category).toBe(ERROR_CATEGORIES.FFMPEG_AV_BLOCKED)
-    expect(response.error.code).toBe(ERROR_CODES.FFMPEG_AV_BLOCKED)
-    // the wording is still the wording - only the taxonomy fields changed
-    expect(response.error.message).toBe(
-      "Your antivirus stopped the video processor."
-    )
+    expect(response.success).toBe(true)
+    expect(response.data).toEqual({
+      download_id: "download_1",
+      status: "started",
+      type: "combined"
+    })
+
+    expect(event.status).toBe("failed")
+    // the taxonomy the engine chose at mapError, not the patterns re-run
+    // against wording written for a human: that would read UNKNOWN_ERROR
+    expect(event.category).toBe(ERROR_CATEGORIES.FFMPEG_AV_BLOCKED)
+    expect(event.error).toBe("Your antivirus stopped the video processor.")
   })
 
   it("agrees with the event the runner already sent", async () => {
-    // the runner classified this failure for analytics before the handler ran.
-    // one download must not be one category in posthog and another in the
-    // issue report the user pastes into github
-    const { handlers, captured } = createHandlers()
+    // one download must not be one category in posthog and another on the row
+    // the user is looking at
+    const harness = createHandlers()
+    const { captured } = harness
 
-    const response = await failSimpleDownload(
-      handlers,
+    const { event } = await failSimpleDownload(
+      harness,
       engineError(
         ERROR_CODES.DISK_FULL,
         "Not enough disk space to save this download."
@@ -248,39 +295,118 @@ describe("what a pinterest/tiktok failure hands the renderer", () => {
 
     expect(captured).toHaveLength(1)
     expect(captured[0].event).toBe("download_failed")
-    expect(response.error.category).toBe(captured[0].properties.error_category)
-    expect(response.error.category).toBe(ERROR_CATEGORIES.DISK_FULL)
+    expect(event.category).toBe(captured[0].properties.error_category)
+    expect(event.category).toBe(ERROR_CATEGORIES.DISK_FULL)
   })
 
   it("still classifies a failure that arrived without a code", async () => {
-    // a throw from outside the engine has no taxonomy value on it, so the
-    // patterns are still what answers - reading the error object rather than
-    // the wording does not give that up
-    const { handlers } = createHandlers()
+    /**
+     * a throw from outside the engine carries no taxonomy value, and the two
+     * readers answer that differently now.
+     *
+     * the event repeats the code the failure arrived with, so an uncoded one
+     * says DOWNLOAD_FAILED. this is what every other download kind has always
+     * reported, and the simple platforms only looked different because the
+     * handler classified the result itself before answering.
+     *
+     * analytics is where the patterns still run: trackDownloadEvent hands
+     * classify() the code and the wording together, so the funnel keeps the
+     * category the wording earns rather than the placeholder.
+     */
+    const harness = createHandlers()
+    const { captured } = harness
 
-    const response = await failSimpleDownload(
-      handlers,
+    const { event } = await failSimpleDownload(
+      harness,
       new Error("ERROR: unable to download webpage: The read operation timed out")
     )
 
-    expect(response.error.category).toBe(ERROR_CATEGORIES.NETWORK_ERROR)
-    expect(response.error.code).toBe("DOWNLOAD_FAILED")
+    expect(event.category).toBe("DOWNLOAD_FAILED")
+    expect(captured[0].properties.error_category).toBe(
+      ERROR_CATEGORIES.NETWORK_ERROR
+    )
+  })
+
+  it("reports a finished download on the event, not in the reply", async () => {
+    // the filename the old resolved result carried is on the completed event,
+    // which is the only place the renderer will look for it once the row lives
+    // in the downloads list
+    const harness = createHandlers()
+
+    const { response, handle } = await startSimpleDownload(harness)
+
+    expect(response.data.status).toBe("started")
+    // nothing has finished yet: the reply went out while the process ran
+    expect(lastEvent(harness.events)).toBeUndefined()
+
+    handle.resolve({ filePath: "/downloads/pin.mp4" })
+    await settle()
+
+    expect(lastEvent(harness.events)).toEqual(
+      expect.objectContaining({
+        downloadId: "download_1",
+        status: "completed",
+        progress: 100,
+        filename: "pin.mp4"
+      })
+    )
+  })
+
+  it("parks behind the cap and still answers straight away", async () => {
+    // three downloads hold every slot, so the fourth is accepted and queued.
+    // the invoke must not wait for a slot: it resolves now, and the row says
+    // `queued` until one comes free
+    const harness = createHandlers()
+    const { handlers } = harness
+    const held = []
+
+    for (let index = 0; index < 3; index++) {
+      const handle = new FakeHandle()
+      held.push(handle)
+      handlers.runner.run({
+        downloadId: `holding_${index}`,
+        type: "combined",
+        platform: "youtube",
+        title: "A Video",
+        createHandle: () => handle
+      })
+    }
+    await settle()
+
+    const { response, handle } = await startSimpleDownload(harness, {
+      platform: "tiktok",
+      url: "https://www.tiktok.com/@user/video/1"
+    })
+
+    expect(response.data).toEqual({
+      download_id: "download_1",
+      status: "started",
+      type: "combined"
+    })
+    // no process for this one yet, only a place in the line
+    expect(handlers.engine.downloadSimple).not.toHaveBeenCalled()
+    expect(lastEvent(harness.events)).toEqual(
+      expect.objectContaining({ downloadId: "download_1", status: "queued", progress: 0 })
+    )
+
+    held[0].resolve({ filePath: "/downloads/a.mp4" })
+    await settle()
+
+    expect(handlers.engine.downloadSimple).toHaveBeenCalledTimes(1)
+
+    handle.resolve({ filePath: "/downloads/tik.mp4" })
+    held[1].resolve({ filePath: "/downloads/b.mp4" })
+    held[2].resolve({ filePath: "/downloads/c.mp4" })
+    await settle()
   })
 
   it("hands the renderer's DownloadStatus[]/DownloadStatus contracts back as declared", async () => {
     // getAllDownloads() reads response.data straight as the array; getStatus()
     // reads it straight as one entry. both used to disagree with what the ipc
     // layer actually sent back
-    const { handlers } = createHandlers()
-    const handle = new FakeHandle()
-    handlers.engine.downloadSimple = jest.fn(() => handle)
-
-    handlers.handleDownloadCombined(null, {
-      url: "https://www.pinterest.com/pin/1/",
-      platform: "pinterest",
-      download_id: "download_1"
-    })
-    await settle()
+    const harness = createHandlers()
+    const { handlers } = harness
+    const { handle } = await startSimpleDownload(harness)
 
     const all = await handlers.handleGetAllDownloads()
     expect(Array.isArray(all.data)).toBe(true)
@@ -309,20 +435,16 @@ describe("what a pinterest/tiktok failure hands the renderer", () => {
     // 'b' is chosen specifically because yt-dlp scores the non-watermarked
     // stream above the watermarked one for it - a format_id from the ipc
     // payload used to be able to silently override that
-    const { handlers } = createHandlers()
-    const handle = new FakeHandle()
-    handlers.engine.downloadSimple = jest.fn(() => handle)
+    const harness = createHandlers()
 
-    handlers.handleDownloadCombined(null, {
+    const { handle } = await startSimpleDownload(harness, {
       url: "https://www.tiktok.com/@user/video/1",
       platform: "tiktok",
-      download_id: "download_1",
       format_id: "worst"
     })
-    await settle()
     handle.resolve({})
 
-    expect(handlers.engine.downloadSimple).toHaveBeenCalledWith(
+    expect(harness.handlers.engine.downloadSimple).toHaveBeenCalledWith(
       expect.objectContaining({ formatSelector: "b" })
     )
   })

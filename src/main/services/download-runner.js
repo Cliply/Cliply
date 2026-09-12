@@ -296,13 +296,17 @@ class DownloadRunner {
   /**
    * put a run in the queue, in the order its download was accepted
    *
-   * **the order runs reach the semaphore is not the order they were reserved
-   * in.** startDownload defers run() by a setImmediate, and the simple-platform
-   * path awaits run() inline instead, so a tiktok link pasted after a youtube
-   * one calls run() first and would otherwise park ahead of it. the queue the
-   * user is owed is the order their downloads were accepted, which is the
-   * order reserve() ran, so the waiter is inserted by its reservation's
-   * sequence rather than appended.
+   * the queue the user is owed is the order their downloads were accepted,
+   * which is the order reserve() ran, so the waiter is inserted by its
+   * reservation's sequence rather than appended.
+   *
+   * every ipc handler now starts its download through startDownload, which
+   * defers run() by the same setImmediate and is called with nothing awaited
+   * between it and reserve(), so the two orders currently agree. they have not
+   * always: the simple-platform path used to await run() inline, and a tiktok
+   * link pasted after a youtube one would park ahead of it. the sequence is
+   * kept because "accepted first, run first" is the promise, and a caller that
+   * reaches run() by some other route should not be able to break it.
    *
    * scanning from the back and stopping at the first sequence below this one
    * keeps equal values in insertion order. sequences are unique, so that is a
@@ -311,8 +315,7 @@ class DownloadRunner {
    * one case this does not cover, on purpose: a download reserved earlier whose
    * run() has not been called yet cannot be waited for, so a slot going free in
    * that window is taken by whoever is already parked. it is one setImmediate
-   * wide, and once every kind starts through startDownload the two orders are
-   * the same anyway.
+   * wide.
    *
    * @param {string} downloadId - the id handed to the renderer
    * @param {Function} resolve - settles the promise acquireSlot is awaiting
