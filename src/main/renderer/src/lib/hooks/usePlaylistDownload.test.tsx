@@ -822,6 +822,34 @@ describe("what the panel shows before the first event", () => {
 })
 
 /**
+ * the panel's Stop is by row rather than by screen, and its intent is kept
+ * across the window where main has not reserved the id yet (see
+ * `lib/cancelIntent.ts`). a playlist that then waits behind the cap emits one
+ * `queued` event and nothing else until its turn, so the acknowledgement is
+ * where the ask has to go out.
+ */
+describe("a Stop the panel kept for this run", () => {
+  test("goes out at the acknowledgement", async () => {
+    downloadPlaylist.mockImplementationOnce(
+      async (request: { download_id: string }) => {
+        useDownloadsStore.getState().rememberCancelIntent(request.download_id)
+        return { downloadId: "ignored", itemsTotal: 2 }
+      }
+    )
+
+    const { result } = renderHook(() => usePlaylistDownload(), { wrapper })
+    const { settled } = await startDownload(result)
+    await waitFor(() => expect(downloadPlaylist).toHaveBeenCalled())
+
+    expect(cancelDownload).toHaveBeenCalledWith(sentDownloadId())
+    expect(useDownloadsStore.getState().cancelIntents).toEqual([])
+
+    await emit({ downloadId: sentDownloadId(), status: "cancelled" })
+    expect((await settled).ok).toBe(false)
+  })
+})
+
+/**
  * a playlist can wait behind the concurrency cap like anything else, and
  * `queued` is the one status this hook had never seen: it is live, and reading
  * it as an outcome closes the run's own guard over a download that has not
@@ -895,6 +923,42 @@ describe("the live duplicate rule", () => {
     expect(listeners).toHaveLength(1)
 
     second.unmount()
+    await emit({ downloadId: sentDownloadId(), status: "completed" })
+    expect((await settled).ok).toBe(true)
+  })
+
+  /**
+   * a selection is not its size. entry 1 alone and entry 3 alone are both
+   * "1 video" at the same height, and they write different files - so the
+   * second one starts rather than being sent to the first one's row.
+   */
+  test("a different selection of the same playlist is a different download", async () => {
+    act(() => {
+      const { selectNone, toggleIndex } = usePlaylistStore.getState()
+      selectNone()
+      toggleIndex(1)
+    })
+
+    const first = renderHook(() => usePlaylistDownload(), { wrapper })
+    const { settled } = await startDownload(first.result)
+    await waitFor(() => expect(downloadPlaylist).toHaveBeenCalledTimes(1))
+
+    act(() => {
+      const { selectNone, toggleIndex } = usePlaylistStore.getState()
+      selectNone()
+      toggleIndex(3)
+    })
+
+    const second = renderHook(() => usePlaylistDownload(), { wrapper })
+    const { settled: other } = await startDownload(second.result)
+    await waitFor(() => expect(downloadPlaylist).toHaveBeenCalledTimes(2))
+
+    expect(sentRequest(0).entries).toEqual([{ index: 1, id: "video1" }])
+    expect(sentRequest(1).entries).toEqual([{ index: 3, id: "video3" }])
+
+    await emit({ downloadId: sentDownloadId(1), status: "completed" })
+    expect((await other).ok).toBe(true)
+
     await emit({ downloadId: sentDownloadId(), status: "completed" })
     expect((await settled).ok).toBe(true)
   })

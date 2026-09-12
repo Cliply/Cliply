@@ -326,6 +326,48 @@ describe("the same download asked for twice", () => {
   })
 })
 
+/**
+ * the panel's Stop, pressed before main had the id
+ *
+ * main reserves it only after preparing the download folder, so the panel's ask
+ * comes back false and is kept (see `lib/cancelIntent.ts`). the acknowledgement
+ * here is the first moment it can be carried out - and for a trimmed download,
+ * which is one ffmpeg pass that reports nothing until it is finished, it is the
+ * only moment: no progress event will arrive to reconcile against.
+ */
+describe("a Stop the panel kept while main was preparing", () => {
+  test("goes out at the acknowledgement, with no event of any kind", async () => {
+    const ack = deferredAck()
+    const { result } = renderHook(() => useVideoDownload(), { wrapper })
+
+    const { settled } = await startDownload(result)
+    await waitFor(() => expect(downloadVideo).toHaveBeenCalled())
+
+    // the panel's Stop, answered against an id main has not reserved yet
+    store().rememberCancelIntent(sentDownloadId())
+
+    await act(async () => {
+      ack.resolve({ downloadId: "ignored" })
+    })
+    await flush()
+
+    expect(cancelDownload).toHaveBeenCalledWith(sentDownloadId())
+    expect(store().cancelIntents).toEqual([])
+    expect((await settled).ok).toBe(true)
+  })
+
+  test("a download nobody stopped is not cancelled at its acknowledgement", async () => {
+    const { result } = renderHook(() => useVideoDownload(), { wrapper })
+
+    const { settled } = await startDownload(result)
+    await waitFor(() => expect(downloadVideo).toHaveBeenCalled())
+    await flush()
+
+    expect(cancelDownload).not.toHaveBeenCalled()
+    expect((await settled).ok).toBe(true)
+  })
+})
+
 describe("cancellation and reset", () => {
   test("an accepted cancel says so, and the event settles the row", async () => {
     const { result } = renderHook(() => useVideoDownload(), { wrapper })

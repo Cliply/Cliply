@@ -440,6 +440,78 @@ describe("the duplicate rule", () => {
   })
 
   /**
+   * the label counts videos, so two one-video selections of the same playlist
+   * read identically: same url, same count, same height, same range. they are
+   * different videos and different files, and the second click has to start.
+   */
+  test("a different selection of the same playlist is a different download", () => {
+    const playlist = (entries: { index: number; id: string }[]) => ({
+      kind: "playlist" as const,
+      label: "1 video",
+      request: {
+        url: "https://youtube.com/playlist?list=PL1",
+        playlist_id: "PL1",
+        entries,
+        type: "video" as const,
+        height: 1080
+      }
+    })
+
+    const first = playlist([{ index: 1, id: "a" }])
+    store().add(row({ ...first, status: "downloading" }))
+
+    expect(store().findLive(playlist([{ index: 2, id: "b" }]))).toBeUndefined()
+    // ...and the same selection still is the same download, whichever order
+    // the boxes were ticked in
+    expect(store().findLive(first)?.downloadId).toBe("d1")
+  })
+
+  test("the order the selection was ticked in is not part of it", () => {
+    const entries = [
+      { index: 3, id: "c" },
+      { index: 1, id: "a" }
+    ]
+    const request = {
+      url: "https://youtube.com/playlist?list=PL1",
+      playlist_id: "PL1",
+      entries,
+      type: "video" as const,
+      height: 1080
+    }
+
+    store().add(
+      row({ kind: "playlist", label: "2 videos", request, status: "queued" })
+    )
+
+    expect(
+      store().findLive({
+        kind: "playlist",
+        label: "2 videos",
+        request: { ...request, entries: [...entries].reverse() }
+      })?.downloadId
+    ).toBe("d1")
+  })
+
+  /**
+   * D3 is about identical requests, and a dub is not the same file as the
+   * original track. no label mentions the language, so the request is the only
+   * thing that can tell the two apart.
+   */
+  test("the same video in another language is a different download", () => {
+    store().add(
+      row({ request: { ...candidate.request, audio_language: "es" } })
+    )
+
+    expect(store().findLive(candidate)).toBeUndefined()
+    expect(
+      store().findLive({
+        ...candidate,
+        request: { ...candidate.request, audio_language: "es" }
+      })?.downloadId
+    ).toBe("d1")
+  })
+
+  /**
    * nothing to be identical to. refusing to start would be worse than starting
    * twice, and a row with no request is one a retry cannot re-send either
    */
@@ -521,8 +593,8 @@ describe("the panel's own state", () => {
  */
 describe("a cancel main could not take yet", () => {
   test("is held until somebody takes it, and only once", () => {
-    store().keepCancelIntent("d1")
-    store().keepCancelIntent("d1")
+    store().rememberCancelIntent("d1")
+    store().rememberCancelIntent("d1")
 
     expect(store().cancelIntents).toEqual(["d1"])
     expect(store().takeCancelIntent("d1")).toBe(true)
@@ -531,7 +603,7 @@ describe("a cancel main could not take yet", () => {
   })
 
   test("belongs to the download it was pressed on", () => {
-    store().keepCancelIntent("d1")
+    store().rememberCancelIntent("d1")
 
     expect(store().takeCancelIntent("d2")).toBe(false)
     expect(store().cancelIntents).toEqual(["d1"])

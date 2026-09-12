@@ -12,6 +12,7 @@ import {
   type AudioDownloadRequest,
   type VideoDownloadRequest
 } from "@/lib/api"
+import { stopIfRequested } from "@/lib/cancelIntent"
 import { DOWNLOAD_WORDING, videoLabel } from "@/lib/downloadKinds"
 import { localizeError, t } from "@/lib/i18n"
 import {
@@ -171,6 +172,11 @@ export const useMediaDownload = <K extends MediaKind>(kind: K) => {
         failRow(downloadId, error)
         throw error
       }
+
+      // main has the id now, which is the first moment a Stop can land on it:
+      // one pressed while the download folder was being prepared has been
+      // waiting for exactly this (see `lib/cancelIntent.ts`)
+      stopIfRequested(downloadId)
 
       return { downloadId, duplicate: false }
     },

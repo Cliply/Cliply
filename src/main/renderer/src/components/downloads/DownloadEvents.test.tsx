@@ -492,7 +492,7 @@ describe("a cancel main was not ready for", () => {
   test("is issued again on the row's first event, once and once only", async () => {
     await mount()
     store().add(row({ status: "starting", progress: 0 }))
-    store().keepCancelIntent("d1")
+    store().rememberCancelIntent("d1")
 
     await emit({ status: "queued", progress: 0 })
 
@@ -510,7 +510,7 @@ describe("a cancel main was not ready for", () => {
   test("is dropped when the download turns out to be over", async () => {
     await mount()
     store().add(row())
-    store().keepCancelIntent("d1")
+    store().rememberCancelIntent("d1")
 
     await emit({ status: "completed", progress: 100 })
 

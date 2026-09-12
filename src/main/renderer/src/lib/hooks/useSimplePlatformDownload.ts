@@ -1,5 +1,6 @@
 import { SIMPLE_QUALITY, track } from "@/lib/analytics"
 import { DownloadError } from "@/lib/api"
+import { stopIfRequested } from "@/lib/cancelIntent"
 import { DOWNLOAD_WORDING } from "@/lib/downloadKinds"
 import { localizeError, useT } from "@/lib/i18n"
 import {
@@ -137,6 +138,11 @@ export function useSimplePlatformDownload({
       // resolves at the acknowledgement; the download itself is followed on
       // download:progress, and its outcome is announced by DownloadEvents
       await api.download({ ...request, download_id: downloadId })
+
+      // ...and the acknowledgement is also when main first has an id to
+      // cancel, so a Stop pressed on this row before now goes out here (see
+      // `lib/cancelIntent.ts`)
+      stopIfRequested(downloadId)
     } catch (error) {
       const message =
         error instanceof Error ? error.message : "Failed to download video"

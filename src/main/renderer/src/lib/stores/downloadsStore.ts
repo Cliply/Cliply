@@ -112,10 +112,12 @@ interface DownloadsState {
    * main reserves an id only after it has prepared the download folder, so a
    * cancel arriving before that is answered `false` against nothing at all -
    * while the row has been on screen, with a Stop on it, since the click. the
-   * intent is kept here and issued again on that row's first event from main,
-   * which is the first moment the id exists to be cancelled. the playlist
-   * screen keeps the same intent for its own Cancel (see `cancelIntentRef` in
-   * `usePlaylistDownload`); this is the panel's, for every kind of row.
+   * intent is kept here and issued at the first moment the id is known to
+   * exist: the start acknowledgement, or an event that says main has it. the
+   * rules for that are `lib/cancelIntent.ts`, which is the only thing that
+   * should be writing to this. the playlist screen keeps its own version for
+   * its own Cancel (see `cancelIntentRef` in `usePlaylistDownload`); this is
+   * the panel's, for every kind of row.
    */
   cancelIntents: string[]
 
@@ -126,7 +128,7 @@ interface DownloadsState {
   clearFinished: () => void
   setHighlighted: (downloadId: string | null) => void
   setPanelOpen: (open: boolean) => void
-  keepCancelIntent: (downloadId: string) => void
+  rememberCancelIntent: (downloadId: string) => void
   takeCancelIntent: (downloadId: string) => boolean
   findLive: (candidate: DownloadIdentity) => DownloadRow | undefined
   reset: () => void
@@ -249,7 +251,9 @@ export const useDownloadsStore = create<DownloadsState>((set, get) => ({
   setHighlighted: (downloadId) => set({ highlightedId: downloadId }),
   setPanelOpen: (open) => set({ panelOpen: open }),
 
-  keepCancelIntent: (downloadId) =>
+  // the state half of it only. whether an intent is kept at all, and what makes
+  // it go out, is `lib/cancelIntent.ts`
+  rememberCancelIntent: (downloadId) =>
     set((state) =>
       state.cancelIntents.includes(downloadId)
         ? state
@@ -325,8 +329,8 @@ export const downloadsActions = {
     useDownloadsStore.getState().setHighlighted(downloadId),
   setPanelOpen: (open: boolean) =>
     useDownloadsStore.getState().setPanelOpen(open),
-  keepCancelIntent: (downloadId: string) =>
-    useDownloadsStore.getState().keepCancelIntent(downloadId),
+  rememberCancelIntent: (downloadId: string) =>
+    useDownloadsStore.getState().rememberCancelIntent(downloadId),
   takeCancelIntent: (downloadId: string) =>
     useDownloadsStore.getState().takeCancelIntent(downloadId),
   rowOf: (downloadId?: string) =>
@@ -469,11 +473,27 @@ const entryCount = (request?: DownloadRequest): number | undefined => {
 /**
  * what a request asks for, beyond which link it is
  *
- * the label already carries this for a single download - "1080p mp4", "mp3" -
- * and cannot for a playlist, whose label counts videos: the same selection
- * started from the video tab and from the audio tab would otherwise be one
- * download, and the second click would be sent to a run that will never write
- * the file it asked for.
+ * the label already carries part of this for a single download - "1080p mp4",
+ * "mp3" - and carries none of it for a playlist, whose label counts videos. so
+ * the request is read directly, and three things it says are what separate two
+ * runs of the same link:
+ *
+ * - **what the files are.** the same playlist as video and as audio writes two
+ *   different sets of files, and the second click must start rather than be
+ *   sent to the first run.
+ * - **which videos.** a playlist's selection is not its size: entry 1 alone and
+ *   entry 2 alone are both "1 video" at the same height, and they are different
+ *   downloads. the positions are compared, sorted, because the same selection
+ *   ticked in a different order is the same run.
+ * - **which soundtrack.** the same video at the same height with a dub and
+ *   without one are two files, and no label mentions the language.
+ *
+ * `precise_cut` stays out on purpose: it changes how the range is cut, not what
+ * the run is of, and `time_range` beside this is what actually decides the
+ * file. `ignore_archive` stays out too - a playlist run that ignores the
+ * archive writes the same files as one that does not, so starting both would be
+ * two processes over one set of paths, which is what this check exists to
+ * prevent.
  *
  * read through a cast for the same reason the range below is: the caller may
  * not know which of the four request shapes it is holding, and a key none of
@@ -488,12 +508,41 @@ const outputOf = (request?: DownloadRequest): string => {
         height?: number
         container?: string
         audio_mode?: string
+        audio_language?: string
+        entries?: { index?: number; id?: string | null }[]
       }
     | undefined
 
-  return [asked?.type, asked?.height, asked?.container, asked?.audio_mode].join(
-    "|"
-  )
+  return [
+    asked?.type,
+    asked?.height,
+    asked?.container,
+    asked?.audio_mode,
+    asked?.audio_language,
+    selectionOf(asked?.entries)
+  ].join("|")
+}
+
+/**
+ * which videos of a playlist a run was asked for
+ *
+ * by position rather than by id: the index is what the request is built from
+ * and what main archives against, and a listing row can arrive with a null id
+ * (an unavailable video) where the position is always there. sorted so the
+ * order the boxes were ticked in is not part of the identity.
+ *
+ * @param entries the selection a playlist request carries, if it is one
+ * @returns the positions joined, or "" for a request with no selection at all
+ */
+const selectionOf = (
+  entries?: { index?: number; id?: string | null }[]
+): string => {
+  if (!Array.isArray(entries)) return ""
+
+  return entries
+    .map((entry) => String(entry?.index ?? entry?.id ?? ""))
+    .sort()
+    .join(",")
 }
 
 /**

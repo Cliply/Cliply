@@ -21,6 +21,7 @@ import {
   type TikTokDownloadRequest,
   type VideoDownloadRequest
 } from "@/lib/api"
+import { stopIfRequested } from "@/lib/cancelIntent"
 import { localizeError, t } from "@/lib/i18n"
 import { downloadsActions, type DownloadRow } from "@/lib/stores/downloadsStore"
 import { reportActions } from "@/lib/stores/reportStore"
@@ -110,6 +111,10 @@ export async function retryDownload(row: DownloadRow): Promise<void> {
 
   try {
     await startDownload(row, request, downloadId)
+
+    // the row has had a Stop on it since it appeared, and main only has the id
+    // now: a Stop pressed in between goes out here (see `lib/cancelIntent.ts`)
+    stopIfRequested(downloadId)
   } catch (error) {
     const message =
       error instanceof Error ? error.message : "Failed to start download"

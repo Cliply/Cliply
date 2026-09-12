@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => ({
   downloadPinterest: vi.fn(),
   removeHistory: vi.fn(),
   clearHistory: vi.fn(),
+  cancelDownload: vi.fn(),
   showDownloadErrorToast: vi.fn(),
   track: vi.fn()
 }))
@@ -31,7 +32,8 @@ vi.mock("@/lib/api", () => {
     DownloadError,
     downloadApi: {
       removeHistory: mocks.removeHistory,
-      clearHistory: mocks.clearHistory
+      clearHistory: mocks.clearHistory,
+      cancelDownload: mocks.cancelDownload
     },
     videoApi: {
       downloadVideo: mocks.downloadVideo,
@@ -89,6 +91,7 @@ beforeEach(() => {
   mocks.downloadPlaylist.mockResolvedValue({ downloadId: "new", itemsTotal: 3 })
   mocks.downloadTikTok.mockResolvedValue({ downloadId: "new" })
   mocks.downloadPinterest.mockResolvedValue({ downloadId: "new" })
+  mocks.cancelDownload.mockResolvedValue(true)
 
   // `track` reaches for the bridge and swallows everything, so the spy is the
   // bridge rather than a mocked module: the property bag is what is asserted
@@ -271,6 +274,36 @@ describe("the row a retry adds", () => {
     await retryDownload(row())
 
     expect(rowsWhenCalled).toBe(1)
+  })
+})
+
+/**
+ * the retried row has a Stop on it from the moment it appears, and main
+ * reserves its id only after preparing the download folder - so a Stop pressed
+ * in between is answered against nothing and kept (see `lib/cancelIntent.ts`).
+ * the panel is the only screen this row has, and nothing else will carry it out
+ * if the download then says nothing until it finishes.
+ */
+describe("a Stop pressed before main had the retried id", () => {
+  test("is carried out at the acknowledgement", async () => {
+    mocks.downloadVideo.mockImplementation(
+      async (request: { download_id: string }) => {
+        // the Stop, pressed while main was still preparing
+        store().rememberCancelIntent(request.download_id)
+        return { downloadId: "new" }
+      }
+    )
+
+    await retryDownload(row())
+
+    expect(mocks.cancelDownload).toHaveBeenCalledWith(started().downloadId)
+    expect(store().cancelIntents).toEqual([])
+  })
+
+  test("and a retry nobody stopped is not cancelled", async () => {
+    await retryDownload(row())
+
+    expect(mocks.cancelDownload).not.toHaveBeenCalled()
   })
 })
 

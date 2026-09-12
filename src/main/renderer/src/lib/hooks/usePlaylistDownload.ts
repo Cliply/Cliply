@@ -6,6 +6,7 @@ import {
   systemApi,
   type DownloadProgress
 } from "@/lib/api"
+import { stopIfRequested } from "@/lib/cancelIntent"
 import { playlistLabel } from "@/lib/downloadKinds"
 import { isTerminalReason, terminalReason } from "@/lib/downloadOutcome"
 import { t } from "@/lib/i18n"
@@ -492,6 +493,11 @@ export const usePlaylistDownload = () => {
         // find. main reserves it only after preparing the download directory,
         // which is the window the retry below exists for
         ackedRef.current = true
+
+        // the panel keeps its own Stop intent, by id, for the row rather than
+        // for this screen - a user who pressed Stop there while main was
+        // preparing is owed the same thing (see `lib/cancelIntent.ts`)
+        stopIfRequested(downloadId)
 
         if (
           isCurrentRun() &&

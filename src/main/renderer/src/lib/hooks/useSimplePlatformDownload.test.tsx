@@ -12,6 +12,7 @@ import { beforeEach, expect, test, vi } from "vitest"
 
 const mocks = vi.hoisted(() => ({
   download: vi.fn(),
+  cancelDownload: vi.fn(),
   stage: vi.fn(),
   showDownloadErrorToast: vi.fn(),
   showServerOverwhelmedToast: vi.fn(),
@@ -26,7 +27,11 @@ vi.mock("@/lib/api", () => {
 
   return {
     DownloadError,
-    downloadApi: { clearHistory: vi.fn(), removeHistory: vi.fn() },
+    downloadApi: {
+      clearHistory: vi.fn(),
+      removeHistory: vi.fn(),
+      cancelDownload: (id: string) => mocks.cancelDownload(id)
+    },
     systemApi: { openDownloadFolder: vi.fn() }
   }
 })
@@ -78,6 +83,29 @@ beforeEach(() => {
     download_id: "ignored",
     status: "started"
   })
+  mocks.cancelDownload.mockResolvedValue(true)
+})
+
+/**
+ * these two cards have no Stop of their own - the panel's row is where one is
+ * pressed, and main has not reserved the id while it is preparing the download
+ * folder. the acknowledgement is where a Stop kept from that window goes out
+ * (see `lib/cancelIntent.ts`)
+ */
+test("a Stop kept while main was preparing goes out at the acknowledgement", async () => {
+  mocks.download.mockImplementation(
+    async (request: { download_id: string }) => {
+      store().rememberCancelIntent(request.download_id)
+      return { download_id: "ignored", status: "started" }
+    }
+  )
+
+  const { result } = setup()
+
+  await click(result)
+
+  expect(mocks.cancelDownload).toHaveBeenCalledWith(sentDownloadId())
+  expect(store().cancelIntents).toEqual([])
 })
 
 test("a click adds a simple row and sends the id main will report under", async () => {
