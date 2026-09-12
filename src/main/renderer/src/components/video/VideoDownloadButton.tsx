@@ -13,10 +13,10 @@ import {
 import { useVideoDownload } from "@/lib/hooks/useVideoDownload"
 import { useT } from "@/lib/i18n"
 import { useYouTubeStore } from "@/lib/stores/youtubeStore"
-import { isTerminalReason } from "@/lib/downloadOutcome"
 import { cn } from "@/lib/utils"
 import { DownloadProgressBar } from "./DownloadProgressBar"
 import { motion } from "framer-motion"
+import { useEffect } from "react"
 import { Headphones, Scissors, Video } from "lucide-react"
 
 interface VideoDownloadButtonProps {
@@ -44,6 +44,15 @@ export function VideoDownloadButton({
   const videoDownloadMutation = useVideoDownload()
   const t = useT()
 
+  // the store's flag keeps meaning what it always meant - a download this
+  // screen started is still going - which is now a fact about the row rather
+  // than about an awaited promise
+  const { isDownloading, row } = videoDownloadMutation
+
+  useEffect(() => {
+    setIsDownloadingVideo(isDownloading)
+  }, [isDownloading, setIsDownloadingVideo])
+
   const selectedDuration = videoTimeRange.end - videoTimeRange.start
 
   if (!isVisible || !selectedTier) return null
@@ -65,8 +74,6 @@ export function VideoDownloadButton({
     if (videoDownloadMutation.isPending) return
 
     try {
-      setIsDownloadingVideo(true)
-
       await videoDownloadMutation.mutateAsync({
         url,
         height: selectedTier.height,
@@ -81,15 +88,12 @@ export function VideoDownloadButton({
         title: videoInfo?.title || "video"
       })
 
-      // the completion toast (with the filename and Open Folder) belongs to the
-      // hook's progress-event path - toasting here too would double it
+      // this resolves at main's acknowledgement now, not at the end of the
+      // download: the outcome - toast, staged report, the row settling - is
+      // DownloadEvents' to report, from anywhere in the app
     } catch (error) {
-      // terminal outcomes (failure, cancellation) are owned by the hook
-      if (!isTerminalReason(error)) {
-        console.error("Video download error:", error)
-      }
-    } finally {
-      setIsDownloadingVideo(false)
+      // the hook's onError has already toasted and staged this refusal
+      console.error("Video download error:", error)
     }
   }
 
@@ -233,17 +237,19 @@ export function VideoDownloadButton({
         )}
       </Button>
 
-      {/* Download Progress */}
-      {videoDownloadMutation.isPending && (
+      {/* Download Progress: the row this screen started, for as long as it is
+          live. it settles out of view and the toast and the panel carry the
+          outcome from there */}
+      {isDownloading && row && (
         <DownloadProgressBar
-          state={videoDownloadMutation.downloadState}
+          state={row}
           label={t("media.video")}
           onCancel={videoDownloadMutation.cancelDownload}
         />
       )}
 
       {/* Helper Text */}
-      {!videoDownloadMutation.isPending && (
+      {!isDownloading && (
         <div className="text-xs text-slate-500 dark:text-slate-500 text-center">
           {t("download.mergeHint")}
         </div>

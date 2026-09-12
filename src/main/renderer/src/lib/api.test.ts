@@ -12,12 +12,13 @@ import { afterEach, describe, expect, test, vi } from "vitest"
 
 import {
   DownloadError,
+  downloadApi,
   pinterestApi,
   playlistApi,
   tiktokApi,
   videoApi
 } from "./api"
-import type { PlaylistDownloadRequest } from "./api"
+import type { DownloadHistoryRow, PlaylistDownloadRequest } from "./api"
 
 type Responder = () => unknown
 
@@ -174,5 +175,77 @@ describe("the playlist client", () => {
     expect(error).toBeInstanceOf(DownloadError)
     expect((error as DownloadError).category).toBe("BOT_DETECTION")
     expect((error as DownloadError).details).toBe(FAILURE.error.details)
+  })
+})
+
+/**
+ * the history the panel hydrates from, and the two ways of forgetting part of
+ * it. all three answer with the rows that are left, so the panel never has to
+ * work out which of its rows survived.
+ */
+describe("the download history client", () => {
+  const ROW: DownloadHistoryRow = {
+    download_id: "d1",
+    status: "completed",
+    kind: "video",
+    platform: "youtube",
+    title: "My Holiday Video",
+    label: "1080p mp4",
+    started_at: 1000,
+    finished_at: 2000,
+    filename: "clip.mp4",
+    file_size: 999
+  }
+
+  function historyBridge(responder: Responder) {
+    const sent: unknown[] = []
+
+    ;(window as unknown as { electronAPI: unknown }).electronAPI = {
+      download: {
+        getHistory: async () => responder(),
+        clearHistory: async () => responder(),
+        removeHistory: async (downloadId: unknown) => {
+          sent.push(downloadId)
+          return responder()
+        }
+      }
+    }
+
+    return sent
+  }
+
+  test("the rows come back as they were written", async () => {
+    historyBridge(() => ({ success: true, data: [ROW] }))
+
+    await expect(downloadApi.getHistory()).resolves.toEqual([ROW])
+  })
+
+  test("clearing and removing answer with what is left", async () => {
+    const sent = historyBridge(() => ({ success: true, data: [ROW] }))
+
+    await expect(downloadApi.clearHistory()).resolves.toEqual([ROW])
+    await expect(downloadApi.removeHistory("d2")).resolves.toEqual([ROW])
+    expect(sent).toEqual(["d2"])
+  })
+
+  /**
+   * a panel with no history is a panel, and this is the one read the renderer
+   * makes: throwing here would take the downloads list down with it
+   */
+  test("an empty answer is an empty list, not a failure", async () => {
+    historyBridge(() => ({ success: true }))
+
+    await expect(downloadApi.getHistory()).resolves.toEqual([])
+  })
+
+  test("a refusal is thrown, with main's own sentence", async () => {
+    historyBridge(() => ({
+      success: false,
+      error: { message: "Failed to get the download history" }
+    }))
+
+    await expect(downloadApi.getHistory()).rejects.toThrow(
+      "Failed to get the download history"
+    )
   })
 })

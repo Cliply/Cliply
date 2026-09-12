@@ -80,6 +80,7 @@ vi.mock("sonner", () => ({
   }
 }))
 
+import { useDownloadsStore } from "@/lib/stores/downloadsStore"
 import { usePlaylistStore } from "@/lib/stores/playlistStore"
 import {
   summarizePlaylistItems,
@@ -188,6 +189,7 @@ beforeEach(() => {
   listeners.length = 0
   vi.clearAllMocks()
   usePlaylistStore.getState().reset()
+  useDownloadsStore.getState().reset()
   loadPlaylist()
   downloadPlaylist.mockResolvedValue({ downloadId: "ignored", itemsTotal: 2 })
   cancelDownload.mockResolvedValue(true)
@@ -221,6 +223,46 @@ describe("the request the hook builds", () => {
     expect(sentRequest().audio_mode).toBeUndefined()
 
     await emit({ downloadId: sentDownloadId(), status: "completed" })
+    expect((await settled).ok).toBe(true)
+  })
+
+  /**
+   * the hook's whole share of the downloads store (D9): one row, added before
+   * main is asked, so the run is in the panel from the moment it is asked for
+   * and stays there whether or not this screen is still up when it finishes.
+   */
+  test("the panel's row is there before the start ipc goes out", async () => {
+    let rowsAtCall: ReturnType<typeof useDownloadsStore.getState>["rows"] = []
+
+    downloadPlaylist.mockImplementationOnce(() => {
+      rowsAtCall = useDownloadsStore.getState().rows
+      return Promise.resolve({ downloadId: "ignored", itemsTotal: 2 })
+    })
+
+    const { result } = renderHook(() => usePlaylistDownload(), { wrapper })
+    const { settled } = await startDownload(result)
+    await waitFor(() => expect(downloadPlaylist).toHaveBeenCalled())
+
+    expect(rowsAtCall).toHaveLength(1)
+    expect(rowsAtCall[0]).toMatchObject({
+      downloadId: sentDownloadId(),
+      kind: "playlist",
+      platform: "youtube",
+      title: "a playlist",
+      // the two selectable rows of the three the listing holds
+      label: "2 videos",
+      status: "starting",
+      itemsTotal: 2
+    })
+    expect(rowsAtCall[0].request).toMatchObject({ playlist_id: "PL123" })
+
+    // ...and the global listener keeps it up to date without announcing it
+    await emit({
+      downloadId: sentDownloadId(),
+      status: "completed",
+      progress: 100,
+      items_saved: 2
+    })
     expect((await settled).ok).toBe(true)
   })
 

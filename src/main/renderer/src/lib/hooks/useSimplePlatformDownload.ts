@@ -1,13 +1,19 @@
 import { SIMPLE_QUALITY, track } from "@/lib/analytics"
-import { DownloadError, systemApi } from "@/lib/api"
+import { DownloadError } from "@/lib/api"
+import { DOWNLOAD_WORDING } from "@/lib/downloadKinds"
 import { localizeError, useT } from "@/lib/i18n"
+import {
+  downloadsActions,
+  isLiveRow,
+  useDownloadRow
+} from "@/lib/stores/downloadsStore"
 import { reportActions } from "@/lib/stores/reportStore"
 import type { Platform } from "@/lib/stores/store"
 import {
   showDownloadErrorToast,
   showServerOverwhelmedToast
 } from "@/lib/toast-utils"
-import { toast } from "sonner"
+import { useEffect, useState } from "react"
 
 /** the platforms whose whole download is one quality behind one button */
 export type SimplePlatform = Extract<Platform, "pinterest" | "tiktok">
@@ -31,7 +37,11 @@ export interface SimplePlatformDownloadOptions {
   store: () => SimpleDownloadSlice
   /** the platform's api; only the one-shot download is reached for */
   api: {
-    download: (request: { url: string; title?: string }) => Promise<unknown>
+    download: (request: {
+      url: string
+      title?: string
+      download_id?: string
+    }) => Promise<unknown>
   }
   /** the loaded media's title, which keeps it in the output filename */
   title?: string
@@ -41,11 +51,14 @@ export interface SimplePlatformDownloadOptions {
  * the one download pinterest and tiktok both have
  *
  * neither platform offers a choice of quality, of format or of a range, so a
- * download is the stored url and a click. The two differ only in the four
- * things the caller passes: everything that happens to the url afterwards -
- * the start event, the success toast, which failures are the server being
- * overwhelmed rather than this download, the report staged for the rest - is
- * one behaviour.
+ * download is the stored url and a click.
+ *
+ * these two used to be the odd ones out: main awaited the whole download and
+ * answered with the finished file, so this hook toasted "complete" on the
+ * reply. with a queue in front of the engine that reply would have had to wait
+ * out the queue as well, so they now start and report through
+ * `download:progress` like every other kind - which means the outcome belongs
+ * to `DownloadEvents`, and what is left here is the row and the click.
  */
 export function useSimplePlatformDownload({
   platform,
@@ -53,14 +66,64 @@ export function useSimplePlatformDownload({
   api,
   title
 }: SimplePlatformDownloadOptions) {
-  const { url, isDownloading, setIsDownloading } = store()
+  const { url, setIsDownloading } = store()
   const t = useT()
+
+  const [lastId, setLastId] = useState<string | undefined>(undefined)
+  const row = useDownloadRow(lastId)
+  // the row this card started is queued, starting or downloading - which is
+  // what the button has always meant by "busy", minus the await
+  const isDownloading = isLiveRow(row)
+
+  // the platform store's own flag keeps its meaning for anything that reads it,
+  // and the row is now the thing that decides what that meaning is
+  useEffect(() => {
+    setIsDownloading(isDownloading)
+  }, [isDownloading, setIsDownloading])
 
   const handleDownload = async () => {
     if (!url || isDownloading) return
-    try {
-      setIsDownloading(true)
 
+    const label = platform
+    const request = { url, ...(title ? { title } : {}) }
+
+    /**
+     * the same pin or clip, asked for twice. two processes writing one `.part`
+     * file corrupt each other, so the second click opens the panel on the first
+     * download instead of starting beside it.
+     */
+    const existing = downloadsActions.findLive({
+      kind: "simple",
+      label,
+      request
+    })
+
+    if (existing) {
+      setLastId(existing.downloadId)
+      downloadsActions.setHighlighted(existing.downloadId)
+      downloadsActions.setPanelOpen(true)
+      return
+    }
+
+    // minted here, so the row exists under it before main has answered
+    const downloadId = crypto.randomUUID()
+    setLastId(downloadId)
+
+    downloadsActions.add({
+      downloadId,
+      kind: "simple",
+      platform,
+      title: title || "",
+      // the platform is the only thing there is to say about what this download
+      // is, which is the same label main puts on its own reservation
+      label,
+      status: "starting",
+      progress: 0,
+      startedAt: Date.now(),
+      request
+    })
+
+    try {
       // main reports this download's end, so it has to hear about its start:
       // completions with no starts is a funnel that shows the impossible
       track("download_started", {
@@ -71,41 +134,46 @@ export function useSimplePlatformDownload({
         is_trimmed: false
       })
 
-      await api.download({ url, title })
-      toast.success(t("download.complete"), {
-        action: {
-          label: t("toast.openFolder"),
-          onClick: () => systemApi.openDownloadFolder()
-        }
-      })
+      // resolves at the acknowledgement; the download itself is followed on
+      // download:progress, and its outcome is announced by DownloadEvents
+      await api.download({ ...request, download_id: downloadId })
     } catch (error) {
       const message =
         error instanceof Error ? error.message : "Failed to download video"
+
+      // no event will ever come for a start main refused, so the row is settled
+      // here rather than left waiting for one
+      downloadsActions.applyEvent({
+        downloadId,
+        status: "failed",
+        progress: 0,
+        error: message,
+        category: error instanceof DownloadError ? error.category : undefined
+      })
+
       if (message.includes("network") || message.includes("fetch")) {
         showServerOverwhelmedToast()
-      } else {
-        reportActions.stage({
-          shortMessage: message,
-          details: error instanceof DownloadError ? error.details : undefined,
-          category: error instanceof DownloadError ? error.category : undefined,
-          platform,
-          downloadType: "video",
-          videoUrl: url
-        })
-        showDownloadErrorToast(
-          t("download.failed"),
-          // the staged report above keeps main's english; the toast is read
-          localizeError({
-            message,
-            category:
-              error instanceof DownloadError ? error.category : undefined
-          }).message,
-          error instanceof DownloadError ? error.category : undefined,
-          platform
-        )
+        return
       }
-    } finally {
-      setIsDownloading(false)
+
+      reportActions.stage({
+        shortMessage: message,
+        details: error instanceof DownloadError ? error.details : undefined,
+        category: error instanceof DownloadError ? error.category : undefined,
+        platform,
+        downloadType: "video",
+        videoUrl: url
+      })
+      showDownloadErrorToast(
+        t(DOWNLOAD_WORDING.simple.failed),
+        // the staged report above keeps main's english; the toast is read
+        localizeError({
+          message,
+          category: error instanceof DownloadError ? error.category : undefined
+        }).message,
+        error instanceof DownloadError ? error.category : undefined,
+        platform
+      )
     }
   }
 

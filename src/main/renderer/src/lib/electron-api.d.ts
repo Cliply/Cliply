@@ -8,17 +8,17 @@ import type {
   CookieImportResult,
   CookieStatus,
   CookieTestResult,
+  DownloadHistoryRow,
   DownloadPathInfo,
   DownloadProgress,
   DownloadStatus,
   PinterestDownloadRequest,
-  PinterestDownloadResponse,
   PinterestVideoInfoResponse,
   PlaylistDownloadRequest,
   PlaylistInfoResponse,
+  SimpleDownloadResponse,
   SystemHealth,
   TikTokDownloadRequest,
-  TikTokDownloadResponse,
   TikTokVideoInfoResponse,
   UpdateInfo,
   UpdateProgress,
@@ -85,13 +85,13 @@ declare global {
         ) => Promise<IPCResponse<PinterestVideoInfoResponse>>
         download: (
           options: PinterestDownloadRequest
-        ) => Promise<IPCResponse<PinterestDownloadResponse>>
+        ) => Promise<IPCResponse<SimpleDownloadResponse>>
       }
       tiktok: {
         getInfo: (url: string) => Promise<IPCResponse<TikTokVideoInfoResponse>>
         download: (
           options: TikTokDownloadRequest
-        ) => Promise<IPCResponse<TikTokDownloadResponse>>
+        ) => Promise<IPCResponse<SimpleDownloadResponse>>
       }
       download: {
         cancel: (
@@ -99,6 +99,17 @@ declare global {
         ) => Promise<IPCResponse<{ cancelled: boolean }>>
         getStatus: (downloadId: string) => Promise<IPCResponse<DownloadStatus>>
         getAll: () => Promise<IPCResponse<DownloadStatus[]>>
+        /**
+         * the rows this install remembers, read once at startup.
+         *
+         * all three answer with the history as it stands afterwards, so the
+         * panel never has to guess which of its rows survived a clear.
+         */
+        getHistory: () => Promise<IPCResponse<DownloadHistoryRow[]>>
+        clearHistory: () => Promise<IPCResponse<DownloadHistoryRow[]>>
+        removeHistory: (
+          downloadId: string
+        ) => Promise<IPCResponse<DownloadHistoryRow[]>>
         onProgress: (callback: (data: DownloadProgress) => void) => () => void
       }
       // optional: an older preload has no support bridge, and the dialog has

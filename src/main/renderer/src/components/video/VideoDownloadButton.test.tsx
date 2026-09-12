@@ -16,7 +16,9 @@ vi.mock("@/lib/hooks/useVideoDownload", () => ({
   useVideoDownload: () => ({
     mutateAsync: vi.fn(),
     isPending: false,
-    downloadState: { status: "idle", progress: 0 },
+    // nothing has been started, so this screen is following no row
+    row: undefined,
+    isDownloading: false,
     cancelDownload: vi.fn()
   })
 }))

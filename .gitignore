@@ -9,7 +9,9 @@
 
 build/
 dist/
-downloads/
+# anchored: unanchored, this also swallowed
+# src/main/renderer/src/components/downloads, which is source
+/downloads/
 
 # macOS
 .DS_Store

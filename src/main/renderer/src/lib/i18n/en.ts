@@ -335,6 +335,8 @@ export const en = {
   "progress.downloading": "Downloading {label}",
   "progress.processing": "Processing {label}",
   "progress.startingUp": "Starting up",
+  // three downloads run at a time; this one is next in line
+  "progress.queued": "Waiting its turn",
   "progress.trimming": "Progress isn't reported while trimming",
   "progress.stop": "Stop",
   "progress.stopTitle": "Stop this download",

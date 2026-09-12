@@ -6,6 +6,7 @@ import {
   systemApi,
   type DownloadProgress
 } from "@/lib/api"
+import { playlistLabel } from "@/lib/downloadKinds"
 import { isTerminalReason, terminalReason } from "@/lib/downloadOutcome"
 import { t } from "@/lib/i18n"
 import { deliveredByIndex } from "@/lib/playlistFiles"
@@ -18,6 +19,7 @@ import {
   summarizePlaylistItems,
   type PlaylistDownloadOptions
 } from "@/lib/playlistRequest"
+import { downloadsActions } from "@/lib/stores/downloadsStore"
 import { usePlaylistStore } from "@/lib/stores/playlistStore"
 import { reportActions } from "@/lib/stores/reportStore"
 import { showDownloadErrorToast } from "@/lib/toast-utils"
@@ -247,6 +249,32 @@ export const usePlaylistDownload = () => {
       const downloadId = crypto.randomUUID()
       downloadIdRef.current = downloadId
       setDownloadState((prev) => ({ ...prev, downloadId }))
+
+      /**
+       * the row the downloads panel draws, added before the start ipc for the
+       * same reason the id is minted before it: the run has to be visible from
+       * the moment it is asked for, whether or not this screen is still up when
+       * it finishes.
+       *
+       * this is the hook's whole share of the store. everything else a playlist
+       * needs - the per-item badges, the outcome summary, the toasts - stays
+       * here, and `DownloadEvents` keeps its hands off rows of this kind (see
+       * D9 in the tech plan). the global listener still writes this row's
+       * progress and status from the same events this one reads.
+       */
+      downloadsActions.add({
+        downloadId,
+        kind: "playlist",
+        // playlists are youtube's, and this hook only ever serves them
+        platform: "youtube",
+        title: request.title || "",
+        label: playlistLabel(request.entries.length),
+        status: "starting",
+        progress: 0,
+        itemsTotal: request.entries.length,
+        startedAt: Date.now(),
+        request
+      })
 
       const finished = new Promise<{ downloadId: string }>(
         (resolve, reject) => {

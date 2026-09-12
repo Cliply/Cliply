@@ -8,10 +8,10 @@ import { formatDuration, languageName, validateTimeRange } from "@/lib/api"
 import { useAudioDownload } from "@/lib/hooks/useAudioDownload"
 import { useT } from "@/lib/i18n"
 import { useYouTubeStore } from "@/lib/stores/youtubeStore"
-import { isTerminalReason } from "@/lib/downloadOutcome"
 import { cn } from "@/lib/utils"
 import { DownloadProgressBar } from "./DownloadProgressBar"
 import { motion } from "framer-motion"
+import { useEffect } from "react"
 import { Scissors } from "lucide-react"
 
 interface AudioDownloadButtonProps {
@@ -39,6 +39,14 @@ export function AudioDownloadButton({
   const audioDownloadMutation = useAudioDownload()
   const t = useT()
 
+  // see VideoDownloadButton: the store's flag follows the row now, so it still
+  // means "a download this screen started is still going"
+  const { isDownloading, row } = audioDownloadMutation
+
+  useEffect(() => {
+    setIsDownloadingAudio(isDownloading)
+  }, [isDownloading, setIsDownloadingAudio])
+
   const selectedDuration = audioTimeRange.end - audioTimeRange.start
 
   if (!isVisible) return null
@@ -62,8 +70,6 @@ export function AudioDownloadButton({
     // Check server status before attempting download
 
     try {
-      setIsDownloadingAudio(true)
-
       await audioDownloadMutation.mutateAsync({
         url,
         audio_mode: selectedAudioMode,
@@ -76,15 +82,11 @@ export function AudioDownloadButton({
         title: videoInfo?.title || "audio"
       })
 
-      // the completion toast (with the filename and Open Folder) belongs to the
-      // hook's progress-event path - toasting here too would double it
+      // resolves at main's acknowledgement: the outcome is DownloadEvents' to
+      // report, from wherever in the app the user happens to be by then
     } catch (error) {
-      // terminal outcomes (failure, cancellation) are owned by the hook
-      if (!isTerminalReason(error)) {
-        console.error("Audio download error:", error)
-      }
-    } finally {
-      setIsDownloadingAudio(false)
+      // the hook's onError has already toasted and staged this refusal
+      console.error("Audio download error:", error)
     }
   }
 
@@ -205,17 +207,17 @@ export function AudioDownloadButton({
         )}
       </Button>
 
-      {/* Download Progress */}
-      {audioDownloadMutation.isPending && (
+      {/* Download Progress: this screen's row, for as long as it is live */}
+      {isDownloading && row && (
         <DownloadProgressBar
-          state={audioDownloadMutation.downloadState}
+          state={row}
           label={t("media.audio")}
           onCancel={audioDownloadMutation.cancelDownload}
         />
       )}
 
       {/* Helper Text */}
-      {!audioDownloadMutation.isPending && (
+      {!isDownloading && (
         <div className="text-xs text-slate-500 dark:text-slate-500 text-center">
           {t("download.audioHint")}
         </div>

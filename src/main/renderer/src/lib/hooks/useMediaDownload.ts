@@ -8,18 +8,21 @@ import {
 import {
   DownloadError,
   downloadApi,
-  systemApi,
   videoApi,
   type AudioDownloadRequest,
-  type DownloadProgress,
   type VideoDownloadRequest
 } from "@/lib/api"
-import { isTerminalReason, terminalReason } from "@/lib/downloadOutcome"
-import { localizeError, t, type Key } from "@/lib/i18n"
+import { DOWNLOAD_WORDING, videoLabel } from "@/lib/downloadKinds"
+import { localizeError, t } from "@/lib/i18n"
+import {
+  downloadsActions,
+  isLiveRow,
+  useDownloadRow
+} from "@/lib/stores/downloadsStore"
 import { reportActions } from "@/lib/stores/reportStore"
 import { showDownloadErrorToast } from "@/lib/toast-utils"
 import { useMutation } from "@tanstack/react-query"
-import { useEffect, useRef, useState } from "react"
+import { useRef, useState } from "react"
 import { toast } from "sonner"
 
 export type MediaKind = "video" | "audio"
@@ -36,26 +39,6 @@ export interface MediaDownloadRequests {
   audio: AudioDownloadRequest
 }
 
-export interface MediaDownloadState {
-  downloadId?: string
-  status:
-    | "idle"
-    | "starting"
-    | "downloading"
-    | "completed"
-    | "failed"
-    | "cancelled"
-  progress: number
-  speed?: string
-  eta?: string
-  message?: string
-  outputFile?: string
-  fileSize?: number
-  error?: string
-  // trimmed downloads report a single sweep, so there is no live percentage
-  indeterminate?: boolean
-}
-
 interface MediaSpec<K extends MediaKind> {
   /** what the api call is, once the correlation id has been folded in */
   start: (
@@ -66,27 +49,17 @@ interface MediaSpec<K extends MediaKind> {
    * order it has always been sent in
    */
   trackFields: (request: MediaDownloadRequests[K]) => AnalyticsProperties
-  /** the five strings that name the kind to the user */
-  keys: {
-    starting: Key
-    progress: Key
-    completed: Key
-    failed: Key
-    cancelled: Key
-  }
+  /** the words that go beside the title in the panel */
+  label: (request: MediaDownloadRequests[K]) => string
 }
 
 const MEDIA: { [K in MediaKind]: MediaSpec<K> } = {
   video: {
     start: (request) => videoApi.downloadVideo(request),
     trackFields: (request) => ({ quality: videoQuality(request.height) }),
-    keys: {
-      starting: "download.startingVideo",
-      progress: "download.videoProgress",
-      completed: "download.videoCompleted",
-      failed: "download.videoFailed",
-      cancelled: "download.videoCancelled"
-    }
+    // the container the menu row displayed, so the label can never disagree
+    // with the file that lands
+    label: (request) => videoLabel(request.height, request.container)
   },
   audio: {
     start: (request) => videoApi.downloadAudio(request),
@@ -96,171 +69,86 @@ const MEDIA: { [K in MediaKind]: MediaSpec<K> } = {
       quality: audioQuality(request.audio_mode),
       audio_format: request.audio_mode
     }),
-    keys: {
-      starting: "download.startingAudio",
-      progress: "download.audioProgress",
-      completed: "download.audioCompleted",
-      failed: "download.audioFailed",
-      cancelled: "download.audioCancelled"
-    }
+    // the mode is the whole choice an audio download offers
+    label: (request) => request.audio_mode
   }
 }
 
 /**
- * one download, of whichever kind the caller asked for
+ * start one download, of whichever kind the caller asked for
  *
- * video and audio differ only in the entries of MEDIA above: the api they
- * start, the fields they name themselves by in telemetry and in a staged
- * report, and the five strings they say to the user. Everything else - the
- * correlation id, the promise the progress events settle, the cleanup - is one
- * behaviour, and `useVideoDownload` / `useAudioDownload` are the two names it
- * is reached by.
+ * this used to follow the download too: it subscribed to `download:progress`,
+ * held the promise open until a terminal event arrived, and owned the toasts.
+ * All of that now belongs to `DownloadEvents`, which is mounted once and
+ * outlives every screen - so what is left here is "build the request, put a row
+ * in the store, call main" and a view onto that row.
+ *
+ * the mutation resolves at main's acknowledgement rather than at the end of the
+ * download, which is what lets the button come back for a second link while the
+ * first one is still running.
+ *
+ * video and audio differ only in the entries of MEDIA above; `useVideoDownload`
+ * and `useAudioDownload` are the two names this is reached by.
  */
 export const useMediaDownload = <K extends MediaKind>(kind: K) => {
   const media = MEDIA[kind]
 
-  const [downloadState, setDownloadState] = useState<MediaDownloadState>({
-    status: "idle",
-    progress: 0
-  })
+  // the row this screen started, which is not "the row that is live": a second
+  // download from another screen must not move this one's bar
+  const [lastId, setLastId] = useState<string | undefined>(undefined)
+  const row = useDownloadRow(lastId)
 
-  const progressCleanupRef = useRef<(() => void) | null>(null)
+  // what a staged report says this failure was about. a ref because `onError`
+  // closes over the render the mutation was called from, which is one render
+  // behind the id that call site just minted
   const lastUrlRef = useRef<string | undefined>(undefined)
-  const settleRef = useRef<{
-    resolve: (value: { downloadId: string }) => void
-    reject: (error: Error) => void
-  } | null>(null)
-
-  // Cleanup progress listener on unmount
-  // On unmount we stop listening but deliberately do NOT cancel the engine
-  // download - it keeps running, which is what users expect when a view is
-  // swapped out. The pending mutation is settled so nothing awaits forever.
-  useEffect(() => {
-    return () => {
-      settleRef.current?.reject(
-        terminalReason("abandoned", "Download view closed")
-      )
-      settleRef.current = null
-
-      if (progressCleanupRef.current) {
-        progressCleanupRef.current()
-        progressCleanupRef.current = null
-      }
-    }
-  }, [])
 
   const mutation = useMutation({
     mutationFn: async (request: MediaDownloadRequests[K]) => {
+      const label = media.label(request)
       lastUrlRef.current = request.url
-      setDownloadState({
+
+      /**
+       * the same download, asked for twice.
+       *
+       * two yt-dlp processes writing one `.part` file corrupt each other, so
+       * the second click goes to the first download rather than beside it: the
+       * panel opens on it and the row is highlighted. nothing is sent to main,
+       * and the row this hook follows becomes that one - it is, after all, the
+       * download that was just asked for.
+       */
+      const existing = downloadsActions.findLive({ kind, label, request })
+
+      if (existing) {
+        setLastId(existing.downloadId)
+        downloadsActions.setHighlighted(existing.downloadId)
+        downloadsActions.setPanelOpen(true)
+
+        return { downloadId: existing.downloadId, duplicate: true }
+      }
+
+      // correlate on an id we generate here: the row exists under it before
+      // main has answered, so a cancel or a progress event has something to
+      // find from the first moment
+      const downloadId = crypto.randomUUID()
+      setLastId(downloadId)
+
+      downloadsActions.add({
+        downloadId,
+        kind,
+        // this hook only ever serves youtube - the other platforms have their
+        // own components and never reach it
+        platform: "youtube",
+        title: request.title || "",
+        label,
+        // main never sends this one: it is the gap between the click and the
+        // first event, and a row with no status at all cannot be drawn
         status: "starting",
         progress: 0,
-        message: t(media.keys.starting)
+        startedAt: Date.now(),
+        request
       })
 
-      // Correlate on an id we generate here: the listener can then filter from
-      // the moment it subscribes, so a concurrent download's events can never
-      // settle this mutation.
-      const downloadId = crypto.randomUUID()
-      setDownloadState((prev) => ({ ...prev, downloadId }))
-
-      // settles when a terminal event arrives, which is what keeps the caller's
-      // await (and the button's pending state) tied to the real download
-      const finished = new Promise<{ downloadId: string }>(
-        (resolve, reject) => {
-          settleRef.current = { resolve, reject }
-        }
-      )
-
-      // nothing awaits `finished` until the start ipc below resolves, so an
-      // unmount or reset in that window would reject a promise with no handler
-      // attached - which surfaces as an unhandledrejection. Observing it here
-      // is enough; the `await` further down still sees the same rejection.
-      finished.catch(() => {})
-
-      const cleanup = downloadApi.onProgress(
-        (progressData: DownloadProgress) => {
-          if (progressData.downloadId !== downloadId) return
-          {
-            setDownloadState((prev) => ({
-              ...prev,
-              downloadId,
-              status: progressData.status as MediaDownloadState["status"],
-              progress: progressData.progress || prev.progress,
-              speed: progressData.speed,
-              eta: progressData.eta,
-              indeterminate: progressData.indeterminate,
-              message:
-                progressData.error ||
-                t(media.keys.progress, {
-                  percent: (progressData.progress || 0).toFixed(1)
-                }),
-              outputFile: progressData.filename,
-              error: progressData.error
-            }))
-
-            // Handle completion
-            if (progressData.status === "completed") {
-              toast.success(t(media.keys.completed), {
-                description: progressData.filename
-                  ? t("download.saved", { filename: progressData.filename })
-                  : undefined,
-                action: {
-                  label: t("toast.openFolder"),
-                  onClick: () => systemApi.openDownloadFolder()
-                }
-              })
-
-              settleRef.current?.resolve({ downloadId })
-            }
-
-            // Handle failure
-            if (progressData.status === "failed") {
-              reportActions.stage({
-                shortMessage: progressData.error || "Download failed",
-                details: progressData.details,
-                category: progressData.category,
-                platform: "youtube",
-                downloadType: kind,
-                videoUrl: lastUrlRef.current
-              })
-              showDownloadErrorToast(
-                t(media.keys.failed),
-                // the report above keeps main's english; only what is read here
-                // is translated
-                progressData.error
-                  ? localizeError({
-                      message: progressData.error,
-                      category: progressData.category
-                    }).message
-                  : t("download.wentWrong"),
-                progressData.category,
-                "youtube"
-              )
-
-              // already surfaced here; onError must not report it twice
-              settleRef.current?.reject(
-                terminalReason(
-                  "failed",
-                  progressData.error || "Download failed"
-                )
-              )
-            }
-
-            // Handle cancellation - not a failure, nobody should report it
-            if (progressData.status === "cancelled") {
-              settleRef.current?.reject(
-                terminalReason("cancelled", "Download cancelled")
-              )
-            }
-          }
-        }
-      )
-
-      progressCleanupRef.current = cleanup
-
-      // the hook only ever serves youtube - the other platforms have their own
-      // components and never reach this mutation
       track("download_started", {
         platform: "youtube",
         media_type: kind,
@@ -269,39 +157,27 @@ export const useMediaDownload = <K extends MediaKind>(kind: K) => {
       })
 
       try {
-        // resolves once the process is running; the download itself is followed
-        // through the progress events above
+        // resolves once the download is accepted; everything after that arrives
+        // on download:progress, which DownloadEvents is listening to
         await media.start({ ...request, download_id: downloadId })
-
-        return await finished
       } catch (error) {
-        // a start failure means no terminal event is ever coming, so settle the
-        // terminal promise rather than leaving it pending forever (rejecting an
-        // already-settled promise is a no-op, so the terminal paths are safe)
-        settleRef.current?.reject(error as Error)
+        /**
+         * no event will ever come for this row, so the row has to be settled
+         * here. by id and not by "the row this hook is following": a start that
+         * rejects after the view was reset is exactly the case, and writing to
+         * whatever the hook points at now would mark somebody else's download
+         * failed.
+         */
+        failRow(downloadId, error)
         throw error
-      } finally {
-        settleRef.current = null
-        if (progressCleanupRef.current) {
-          progressCleanupRef.current()
-          progressCleanupRef.current = null
-        }
       }
+
+      return { downloadId, duplicate: false }
     },
     onError: (error: Error) => {
-      // terminal outcomes are owned by the progress-event path above, which has
-      // already updated state, toasted and staged the report
-      if (isTerminalReason(error)) {
-        return
-      }
-
-      setDownloadState((prev) => ({
-        ...prev,
-        status: "failed",
-        error: error.message,
-        message: t("download.startFailed", { message: error.message })
-      }))
-
+      // the only rejection left is a start main refused: a bad url, a folder it
+      // cannot write to, an id it already has. everything that happens after the
+      // acknowledgement is DownloadEvents' to report
       reportActions.stage({
         shortMessage: error.message,
         details: error instanceof DownloadError ? error.details : undefined,
@@ -311,7 +187,7 @@ export const useMediaDownload = <K extends MediaKind>(kind: K) => {
         videoUrl: lastUrlRef.current
       })
       showDownloadErrorToast(
-        t(media.keys.failed),
+        t(DOWNLOAD_WORDING[kind].failed),
         localizeError({
           message: error.message,
           category: error instanceof DownloadError ? error.category : undefined
@@ -322,65 +198,60 @@ export const useMediaDownload = <K extends MediaKind>(kind: K) => {
     }
   })
 
-  // Cancel download function
+  /**
+   * ask main to stop this screen's download
+   *
+   * the `cancelled` event is what actually settles the row; this only says so
+   * to the user, who asked for it and should not have to wait to hear it. main
+   * reporting false means it had nothing to cancel - usually because the
+   * download just finished - and toasting then would put "cancelled" over a
+   * download that completed.
+   */
   const cancelDownload = async () => {
-    if (downloadState.downloadId) {
-      try {
-        const cancelled = await downloadApi.cancelDownload(
-          downloadState.downloadId
-        )
+    if (!lastId) return
 
-        // main reports false when it had nothing to cancel - usually because the
-        // download just finished. Settling anyway would show "cancelled" over a
-        // completed download and discard the terminal event still in flight.
-        if (!cancelled) {
-          return
-        }
+    try {
+      const cancelled = await downloadApi.cancelDownload(lastId)
 
-        setDownloadState((prev) => ({
-          ...prev,
-          status: "cancelled",
-          message: t("download.cancelled")
-        }))
+      if (!cancelled) return
 
-        // settle the pending mutation so the button never stays stuck
-        settleRef.current?.reject(
-          terminalReason("cancelled", "Download cancelled")
-        )
-
-        toast.info(t(media.keys.cancelled))
-      } catch (error) {
-        console.error("Failed to cancel download:", error)
-      }
+      toast.info(t(DOWNLOAD_WORDING[kind].cancelled))
+    } catch (error) {
+      console.error("Failed to cancel download:", error)
     }
   }
 
-  // Reset function to clear state
-  const reset = () => {
-    settleRef.current?.reject(terminalReason("abandoned", "Download reset"))
-    settleRef.current = null
-
-    if (progressCleanupRef.current) {
-      progressCleanupRef.current()
-      progressCleanupRef.current = null
-    }
-
-    setDownloadState({
-      status: "idle",
-      progress: 0
-    })
-  }
+  /**
+   * stop following the row this screen started
+   *
+   * the download itself is untouched, here as on unmount: it keeps running, it
+   * keeps its row in the panel, and its outcome is still announced. all this
+   * clears is which row the inline bar is drawing.
+   */
+  const reset = () => setLastId(undefined)
 
   return {
     ...mutation,
-    downloadState,
+    row,
     cancelDownload,
     reset,
-    isDownloading:
-      downloadState.status === "downloading" ||
-      downloadState.status === "starting",
-    isCompleted: downloadState.status === "completed",
-    isFailed: downloadState.status === "failed",
-    isCancelled: downloadState.status === "cancelled"
+    isDownloading: isLiveRow(row),
+    isCompleted: row?.status === "completed",
+    isFailed: row?.status === "failed",
+    isCancelled: row?.status === "cancelled"
   }
+}
+
+/** mark one row as a download that never started */
+function failRow(downloadId: string, error: unknown): void {
+  const message =
+    error instanceof Error ? error.message : "Failed to start download"
+
+  downloadsActions.applyEvent({
+    downloadId,
+    status: "failed",
+    progress: 0,
+    error: message,
+    category: error instanceof DownloadError ? error.category : undefined
+  })
 }

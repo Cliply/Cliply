@@ -10,6 +10,7 @@ import {
   type CookieImportResult,
   type CookieStatus,
   type CookieTestResult,
+  type DownloadHistoryRow,
   type DownloadPathInfo,
   type DownloadProgress,
   type DownloadStatus,
@@ -313,6 +314,59 @@ export const downloadApi = {
 
     return (
       unwrap(response, "Failed to get downloads", {
+        makeError: plainError,
+        requireData: false
+      }) || []
+    )
+  },
+
+  /**
+   * The downloads this install remembers, newest first. Read once, at startup:
+   * every later change to a live row arrives on `onProgress` instead.
+   * @returns Promise<DownloadHistoryRow[]>
+   */
+  async getHistory(): Promise<DownloadHistoryRow[]> {
+    const electronAPI = getElectronAPI()
+    const response = await electronAPI.download.getHistory()
+
+    return (
+      unwrap(response, "Failed to get the download history", {
+        makeError: plainError,
+        requireData: false
+      }) || []
+    )
+  },
+
+  /**
+   * Forget every finished row. A download still queued or running keeps its
+   * row, because it has events still to come.
+   * @returns Promise<DownloadHistoryRow[]> what is left
+   */
+  async clearHistory(): Promise<DownloadHistoryRow[]> {
+    const electronAPI = getElectronAPI()
+    const response = await electronAPI.download.clearHistory()
+
+    return (
+      unwrap(response, "Failed to clear the download history", {
+        makeError: plainError,
+        requireData: false
+      }) || []
+    )
+  },
+
+  /**
+   * Forget one finished row. It says nothing about the download itself, and
+   * main ignores it for a row that is still live: cancelling one is what
+   * `cancelDownload` is for.
+   * @param downloadId Download ID
+   * @returns Promise<DownloadHistoryRow[]> what is left
+   */
+  async removeHistory(downloadId: string): Promise<DownloadHistoryRow[]> {
+    const electronAPI = getElectronAPI()
+    const response = await electronAPI.download.removeHistory(downloadId)
+
+    return (
+      unwrap(response, "Failed to remove that download", {
         makeError: plainError,
         requireData: false
       }) || []

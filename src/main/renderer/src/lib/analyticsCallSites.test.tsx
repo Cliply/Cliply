@@ -112,6 +112,7 @@ import { useAudioDownload } from "@/lib/hooks/useAudioDownload"
 import { useMediaSearch } from "@/lib/hooks/useMediaSearch"
 import { usePlaylistDownload } from "@/lib/hooks/usePlaylistDownload"
 import { useVideoDownload } from "@/lib/hooks/useVideoDownload"
+import { useDownloadsStore } from "@/lib/stores/downloadsStore"
 import { useMixedLinkStore } from "@/lib/stores/mixedLinkStore"
 import { usePinterestStore } from "@/lib/stores/pinterestStore"
 import { usePlaylistStore } from "@/lib/stores/playlistStore"
@@ -129,6 +130,10 @@ beforeEach(() => {
   // ...and a listing left loaded is a selection the next playlist download
   // would send
   usePlaylistStore.getState().reset()
+  // a row left live from the previous case is a download the duplicate rule
+  // would send the next identical click to instead of starting it - and a
+  // `download_started` that is never sent
+  useDownloadsStore.getState().reset()
 
   // handleSearchError logs every failure, and the failures below are the point
   vi.spyOn(console, "error").mockImplementation(() => {})
@@ -242,11 +247,13 @@ const simpleInfo = (duration: number | null) => ({
 })
 
 /**
- * run one download far enough to send its event, then settle it
+ * run one download far enough to send its event, then settle its row
  *
- * the mutation is only resolved by a terminal progress event, so a download
- * left running would keep a listener alive and a promise pending into the next
- * case.
+ * the mutation resolves at main's acknowledgement now, so the download is
+ * reported the moment it starts. the row is settled anyway, as DownloadEvents
+ * would settle it: a row left live is one the duplicate rule would send the
+ * next identical click to instead of starting - and a `download_started` that
+ * never happens.
  */
 async function download(
   hook: typeof useVideoDownload | typeof useAudioDownload,
@@ -264,15 +271,19 @@ async function download(
   })
   pending.catch(() => {})
 
+  await pending
+
   const downloadId = api.mock.calls.at(-1)?.[0].download_id as string
 
   await act(async () => {
-    for (const listener of [...mocks.listeners]) {
-      listener({ downloadId, status: "completed", filename: "clip.mp4" })
-    }
+    useDownloadsStore.getState().applyEvent({
+      downloadId,
+      status: "completed",
+      progress: 100,
+      filename: "clip.mp4"
+    })
   })
 
-  await pending
   unmount()
 }
 

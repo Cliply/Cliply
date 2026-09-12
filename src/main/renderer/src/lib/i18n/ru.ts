@@ -312,6 +312,7 @@ export const ru: Record<Key, string> = {
   "progress.downloading": "скачивание {label}",
   "progress.processing": "обработка {label}",
   "progress.startingUp": "запускаем",
+  "progress.queued": "ждёт своей очереди",
   "progress.trimming": "при обрезке прогресс не показывается",
   "progress.stop": "стоп",
   "progress.stopTitle": "остановить загрузку",

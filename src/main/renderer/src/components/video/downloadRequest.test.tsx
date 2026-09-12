@@ -25,7 +25,8 @@ vi.mock("@/lib/hooks/useVideoDownload", () => ({
   useVideoDownload: () => ({
     mutateAsync: mocks.downloadVideo,
     isPending: false,
-    downloadState: { status: "idle", progress: 0 },
+    row: undefined,
+    isDownloading: false,
     cancelDownload: vi.fn()
   })
 }))
@@ -34,7 +35,8 @@ vi.mock("@/lib/hooks/useAudioDownload", () => ({
   useAudioDownload: () => ({
     mutateAsync: mocks.downloadAudio,
     isPending: false,
-    downloadState: { status: "idle", progress: 0 },
+    row: undefined,
+    isDownloading: false,
     cancelDownload: vi.fn()
   })
 }))

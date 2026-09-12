@@ -1,3 +1,4 @@
+import { DownloadEvents } from "@/components/downloads"
 import { UpdateNotification } from "@/components/ui/update-notification"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { useState } from "react"
@@ -19,6 +20,9 @@ export function Providers({ children }: { children: React.ReactNode }) {
   return (
     <QueryClientProvider client={queryClient}>
       {children}
+      {/* one subscription to every download, above every screen: it has to
+          outlive the card that started the download it is reporting on */}
+      <DownloadEvents />
       <UpdateNotification />
       <Toaster position="bottom-right" />
     </QueryClientProvider>

@@ -1,5 +1,3 @@
-import { useMediaDownload, type MediaDownloadState } from "./useMediaDownload"
-
-export type AudioDownloadState = MediaDownloadState
+import { useMediaDownload } from "./useMediaDownload"
 
 export const useAudioDownload = () => useMediaDownload("audio")
