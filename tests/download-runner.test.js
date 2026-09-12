@@ -6,6 +6,7 @@ const { EventEmitter } = require("events")
 const fs = require("fs")
 
 const { DownloadRunner } = require("../src/main/services/download-runner")
+const { DownloadHistory } = require("../src/main/services/download-history")
 const { ERROR_CODES } = require("../src/main/services/ytdlp-engine")
 const { ERROR_CATEGORIES } = require("../src/main/utils/error-taxonomy")
 
@@ -1916,6 +1917,45 @@ describe("history", () => {
     expect(row).not.toHaveProperty("items_total")
     expect(row).not.toHaveProperty("items_saved")
     expect(row).not.toHaveProperty("files")
+  })
+
+  test("a removed queued row still reads as interrupted after a quit", async () => {
+    /**
+     * the reviewer's scenario, against the real history rather than a stand-in.
+     *
+     * removing a queued row used to forget it while its reservation lived on:
+     * the quit could no longer mark what it could not see, cancelAll settled
+     * it, and the row came back saying the user had cancelled a download they
+     * had only asked to be rid of.
+     */
+    const history = new DownloadHistory()
+    const { runner } = createRunner({ history, maxConcurrent: 1 })
+    const handles = [new FakeHandle(), new FakeHandle(), new FakeHandle()]
+
+    const runs = ["a", "b", "c"].map((id, index) =>
+      runner.run({ ...BASE, downloadId: id, createHandle: () => handles[index] })
+    )
+    await settle()
+
+    await history.remove("b")
+
+    // the quit: mark what is live, then kill it
+    await history.interruptLive()
+    runner.cancelAll()
+    handles[0].reject(
+      Object.assign(new Error("cancelled"), { code: ERROR_CODES.CANCELLED })
+    )
+    await Promise.all(runs)
+    await history.flush()
+
+    const statuses = Object.fromEntries(
+      history.list().map((row) => [row.download_id, row.status])
+    )
+    expect(statuses).toEqual({
+      a: "interrupted",
+      b: "interrupted",
+      c: "interrupted"
+    })
   })
 
   test("a history that throws does not fail the download", async () => {

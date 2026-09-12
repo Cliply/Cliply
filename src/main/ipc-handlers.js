@@ -1512,9 +1512,16 @@ class IPCHandlers {
    *
    * the array is the data, as it is for download:get-all: the renderer reads
    * response.data straight as the rows it hydrates from.
+   *
+   * the file has to have been read first. this is the renderer's one hydration
+   * read and nothing pushes a correction afterwards, so answering it from an
+   * in-memory list the pending read is about to replace would tell an install
+   * with a hundred rows that it has never downloaded anything.
    */
   async handleGetHistory(_event) {
     try {
+      await this.history.ready
+
       return this.createSuccess(this.history.list())
     } catch (error) {
       console.error("Get download history failed:", error.message)
@@ -2091,9 +2098,6 @@ class IPCHandlers {
       "cookies:clear",
       "download:get-status",
       "download:get-all",
-      "download:get-history",
-      "download:clear-history",
-      "download:remove-history",
       "system:open-download-folder",
       "system:select-download-folder",
       "settings:get-download-path",
@@ -2102,6 +2106,27 @@ class IPCHandlers {
 
     channels.forEach((channel) => {
       ipcMain.removeAllListeners(channel)
+    })
+
+    /**
+     * an invoke handler is not a listener, and removeAllListeners does not
+     * touch it: `ipcMain.handle` keeps its own registry, and `removeHandler` is
+     * the only thing that empties it. a channel left registered means the next
+     * `handle` for it throws, and until then the old closure - holding the old
+     * history and the old runner - is what answers the renderer.
+     *
+     * the three history channels only. every channel above has the same
+     * problem and has had it since before this branch; fixing them is its own
+     * change, with its own test for each.
+     */
+    const invokeChannels = [
+      "download:get-history",
+      "download:clear-history",
+      "download:remove-history"
+    ]
+
+    invokeChannels.forEach((channel) => {
+      ipcMain.removeHandler(channel)
     })
   }
 }

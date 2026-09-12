@@ -118,6 +118,19 @@ const helpers = require("../src/main/utils/analytics-helpers")
 // the promise chains hang several thens deep; one macrotask drains them all
 const settle = () => new Promise((resolve) => setImmediate(resolve))
 
+/**
+ * the same, for a test holding fake timers
+ *
+ * setImmediate is one of the timers jest fakes, so settle() would sit there
+ * unfired. these are real microtasks and run whatever the clock is doing; ten
+ * is well past the deepest await chain in the quit path
+ */
+async function microtasks() {
+  for (let index = 0; index < 10; index++) {
+    await Promise.resolve()
+  }
+}
+
 function toolsSubmenu() {
   const [template] = mockElectron.Menu.buildFromTemplate.mock.calls.at(-1)
   return template.find((entry) => entry.label === "Tools").submenu
@@ -1377,9 +1390,9 @@ describe("quitting", () => {
     try {
       const quitting = app.onBeforeQuit(quitEvent())
       // the history is marked before any of this, so the cap on the flush is
-      // armed one await later - advancing the clock before that would advance
-      // it past a timer that does not exist yet
-      await Promise.resolve().then().then()
+      // armed a few awaits later - advancing the clock before that would
+      // advance it past a timer that does not exist yet
+      await microtasks()
       jest.advanceTimersByTime(10000)
       await quitting
 
@@ -1462,16 +1475,49 @@ describe("quitting", () => {
     }
   })
 
-  it("still quits when the history cannot be marked", async () => {
-    // the service does not reject, but this is the last thing standing between
-    // the user and a closed app
-    const error = jest.spyOn(console, "error").mockImplementation(() => {})
+  it("does the rest of the teardown when the history cannot be marked", async () => {
+    // caught where it happens rather than by the shutdown's own catch, which
+    // would take the engine shutdown, the drain and the ipc teardown with it
+    const warn = jest.spyOn(console, "warn").mockImplementation(() => {})
     mockIpcHandlers.history.interruptLive.mockRejectedValue(new Error("no disk"))
 
     await app.onBeforeQuit(quitEvent())
 
+    expect(mockEngine.awaitShutdown).toHaveBeenCalledTimes(1)
+    expect(mockAnalytics.flush).toHaveBeenCalledTimes(1)
+    expect(mockIpcHandlers.cleanup).toHaveBeenCalledTimes(1)
     expect(mockElectron.app.quit).toHaveBeenCalledTimes(1)
-    error.mockRestore()
+    warn.mockRestore()
+  })
+
+  it("does not let a stuck history hold the app open", async () => {
+    // one rename is milliseconds. a history that never answers is stuck on
+    // something, and the wording on a row is not worth a window that will not
+    // close - so the cap gives up on it and the quit carries on
+    jest.useFakeTimers()
+    mockIpcHandlers.history.interruptLive.mockImplementation(
+      () => new Promise(() => {})
+    )
+
+    try {
+      const quitting = app.onBeforeQuit(quitEvent())
+      await microtasks()
+
+      // nothing has moved yet: the marking runs before the shutdown on purpose
+      expect(mockEngine.awaitShutdown).not.toHaveBeenCalled()
+
+      jest.advanceTimersByTime(2000)
+      await microtasks()
+      jest.advanceTimersByTime(10000)
+      await quitting
+
+      expect(mockEngine.awaitShutdown).toHaveBeenCalledTimes(1)
+      expect(mockAnalytics.flush).toHaveBeenCalledTimes(1)
+      expect(mockIpcHandlers.cleanup).toHaveBeenCalledTimes(1)
+      expect(mockElectron.app.quit).toHaveBeenCalledTimes(1)
+    } finally {
+      jest.useRealTimers()
+    }
   })
 
   it("runs the engine shutdown wait and the analytics flush concurrently", async () => {

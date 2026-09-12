@@ -15,7 +15,12 @@
  */
 
 jest.mock("electron", () => ({
-  ipcMain: { handle: jest.fn(), removeAllListeners: jest.fn() },
+  ipcMain: {
+    handle: jest.fn(),
+    removeAllListeners: jest.fn(),
+    // invoke handlers live in their own registry, and cleanup() empties it
+    removeHandler: jest.fn()
+  },
   dialog: { showOpenDialog: jest.fn() },
   app: { getVersion: jest.fn(() => "1.2.3") },
   shell: { openExternal: jest.fn(), openPath: jest.fn() }

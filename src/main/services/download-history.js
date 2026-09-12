@@ -56,6 +56,17 @@ class DownloadHistory {
      * raced.
      */
     this.chain = Promise.resolve()
+
+    /**
+     * the file having been read, for callers that answer with `rows`
+     *
+     * `list()` is synchronous and the chain is not, so a reader arriving in the
+     * window between construction and the read landing would be told this
+     * install has no history at all - and the renderer hydrates once, with no
+     * push channel to correct it afterwards. resolved until load() is called,
+     * because until then there is nothing to wait for.
+     */
+    this.ready = this.chain
   }
 
   /**
@@ -72,13 +83,15 @@ class DownloadHistory {
    * @returns {Promise<void>} settles when the file has been read and repaired
    */
   load() {
-    return this.enqueue(async () => {
+    this.ready = this.enqueue(async () => {
       this.rows = normalizeRows(await this.readFile(), this.limit)
 
       if (this.markLiveInterrupted()) {
         await this.persist()
       }
     })
+
+    return this.ready
   }
 
   /**
@@ -138,7 +151,13 @@ class DownloadHistory {
    *
    * @returns {Promise<void>} settles when the write has been attempted
    */
-  interruptLive() {
+  async interruptLive() {
+    // the rows to mark are the ones in the file, so a quit arriving while the
+    // read is still in flight has to let it land first. awaited out here rather
+    // than inside the work: the chain is fifo, and work that waits on a promise
+    // sitting further down its own chain waits forever
+    await this.ready
+
     return this.enqueue(async () => {
       if (this.markLiveInterrupted()) {
         await this.persist()
@@ -168,19 +187,30 @@ class DownloadHistory {
   }
 
   /**
-   * forget one row
+   * forget one finished row
+   *
+   * a row that is still queued or running is left exactly where it is.
+   * forgetting one does not stop the download: the reservation lives on in the
+   * runner, and the row would come back at its next status write - as
+   * `cancelled`, because the quit path can only mark rows it can still see. the
+   * user would then find a download they never cancelled, wearing a row they
+   * had asked to be rid of. stopping a queued download is what download:cancel
+   * is for, and the row that leaves behind is removable like any other.
+   *
    * @param {string} downloadId - the id the row is keyed by
    * @returns {Promise<void>} settles when the write has been attempted
    */
-  remove(downloadId) {
-    return this.enqueue(async () => {
-      const next = this.rows.filter((row) => row.download_id !== downloadId)
+  async remove(downloadId) {
+    await this.ready
 
-      if (next.length === this.rows.length) {
+    return this.enqueue(async () => {
+      const target = this.rows.find((row) => row.download_id === downloadId)
+
+      if (!target || LIVE_STATUSES.has(target.status)) {
         return
       }
 
-      this.rows = next
+      this.rows = this.rows.filter((row) => row.download_id !== downloadId)
       await this.persist()
     })
   }
@@ -194,7 +224,9 @@ class DownloadHistory {
    *
    * @returns {Promise<void>} settles when the write has been attempted
    */
-  clear() {
+  async clear() {
+    await this.ready
+
     return this.enqueue(async () => {
       const next = this.rows.filter((row) => LIVE_STATUSES.has(row.status))
 
@@ -318,15 +350,31 @@ class DownloadHistory {
  * in, which is the order the panel lists them in and the order the cap has to
  * drop from - a row that finished first is not the oldest one.
  *
+ * the cap counts finished rows only, and every live row is kept whatever the
+ * count says. a queued download evicted from the history is one the quit path
+ * can no longer find to mark, so it would settle as `cancelled` and come back
+ * as a download the user never stopped. the list can therefore be longer than
+ * `limit`, by however many downloads are in flight - which is at most the
+ * queue, and every one of them is on its way to being a finished row anyway.
+ *
  * @param {Object[]} rows - whatever was read or written
- * @param {number} limit - how many to keep
+ * @param {number} limit - how many finished rows to keep
  * @returns {Object[]}
  */
 function normalizeRows(rows, limit) {
+  let finished = 0
+
   return rows
     .filter((row) => row && typeof row.download_id === "string")
     .sort((a, b) => (b.started_at || 0) - (a.started_at || 0))
-    .slice(0, limit)
+    .filter((row) => {
+      if (LIVE_STATUSES.has(row.status)) {
+        return true
+      }
+
+      finished += 1
+      return finished <= limit
+    })
 }
 
 module.exports = {

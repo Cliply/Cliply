@@ -226,10 +226,14 @@ describe("upsert", () => {
     ])
   })
 
-  test("keeps the newest hundred and drops the rest", async () => {
+  test("keeps the newest hundred finished downloads and drops the rest", async () => {
     for (let index = 0; index < HISTORY_LIMIT + 20; index++) {
       await history.upsert(
-        row({ download_id: `d_${index}`, started_at: 1000 + index })
+        row({
+          download_id: `d_${index}`,
+          started_at: 1000 + index,
+          status: "completed"
+        })
       )
     }
 
@@ -245,15 +249,47 @@ describe("upsert", () => {
 
     // the oldest download settles last, which is exactly the case a write-order
     // cap gets wrong: it would keep this one and drop a newer download
-    await small.upsert(row({ download_id: "old", started_at: 1000 }))
-    await small.upsert(row({ download_id: "mid", started_at: 2000 }))
-    await small.upsert(row({ download_id: "new", started_at: 3000 }))
+    const done = { status: "completed" }
+    await small.upsert(row({ download_id: "old", started_at: 1000, ...done }))
+    await small.upsert(row({ download_id: "mid", started_at: 2000, ...done }))
+    await small.upsert(row({ download_id: "new", started_at: 3000, ...done }))
     await small.upsert({ download_id: "old", status: "completed" })
 
     expect(small.list().map((entry) => entry.download_id)).toEqual([
       "new",
       "mid"
     ])
+  })
+
+  test("the cap never drops a download that is still going", async () => {
+    // a live row evicted from the history is one the quit path can no longer
+    // find to mark, so it settles as `cancelled` and comes back as a download
+    // the user never stopped. the finished rows are what the cap is for
+    const small = new DownloadHistory({ filePath, limit: 3 })
+
+    await small.upsert(row({ download_id: "waiting", status: "queued", started_at: 1 }))
+
+    for (let index = 0; index < 3; index++) {
+      await small.upsert(
+        row({
+          download_id: `done_${index}`,
+          status: "completed",
+          started_at: 1000 + index
+        })
+      )
+    }
+
+    // and one more finished download, which is what pushes the cap over
+    await small.upsert(
+      row({ download_id: "done_last", status: "completed", started_at: 2000 })
+    )
+
+    const ids = small.list().map((entry) => entry.download_id)
+    // the oldest row in the file, and still the one that survives
+    expect(ids).toContain("waiting")
+    expect(ids).not.toContain("done_0")
+    // three finished rows plus the live one: the cap counts the finished
+    expect(ids).toHaveLength(4)
   })
 
   test("two writes in the same tick both land", async () => {
@@ -463,6 +499,130 @@ describe("remove", () => {
     await history.remove("not-a-download")
 
     expect(fileStamp()).toBe(before)
+  })
+})
+
+describe("readiness", () => {
+  /**
+   * a read that has not landed yet
+   *
+   * the renderer hydrates once and nothing pushes a correction afterwards, so
+   * this window is the difference between a panel with a hundred rows and a
+   * panel that says this install has never downloaded anything
+   */
+  function deferReadFile(target) {
+    let release
+    const held = new Promise((resolve) => {
+      release = resolve
+    })
+
+    target.readFile = () => held
+
+    return (rows) => release(rows)
+  }
+
+  test("load's promise is on the instance, not only in the caller's hands", async () => {
+    const release = deferReadFile(history)
+    history.load()
+
+    let loaded = false
+    history.ready.then(() => {
+      loaded = true
+    })
+
+    await Promise.resolve()
+    expect(loaded).toBe(false)
+
+    release([row({ status: "completed" })])
+    await history.ready
+
+    expect(history.list()).toHaveLength(1)
+  })
+
+  test("is already settled before anything has been loaded", async () => {
+    // a history nobody called load() on has nothing to wait for, and a caller
+    // awaiting readiness must not hang for a read that will never happen
+    await expect(history.ready).resolves.toBeUndefined()
+  })
+
+  test("clear waits for the file rather than clearing an empty list", async () => {
+    write(JSON.stringify([row({ status: "completed" })]))
+    const release = deferReadFile(history)
+    history.load()
+
+    const clearing = history.clear()
+    release(JSON.parse(fs.readFileSync(filePath, "utf8")))
+    await clearing
+
+    // the file is what says which of the two happened: a clear that ran on an
+    // empty list would have found nothing to drop and written nothing, leaving
+    // the row on disk for the next launch to read back
+    expect(history.list()).toEqual([])
+    expect(stored()).toEqual([])
+  })
+
+  test("interruptLive waits for the file rather than marking an empty list", async () => {
+    write(JSON.stringify([row({ status: "downloading" })]))
+    const release = deferReadFile(history)
+    history.load()
+
+    const marking = history.interruptLive()
+    release(JSON.parse(fs.readFileSync(filePath, "utf8")))
+    await marking
+
+    expect(stored()[0].status).toBe("interrupted")
+  })
+
+  test("remove waits for the file rather than finding nothing to remove", async () => {
+    write(JSON.stringify([row({ status: "completed" })]))
+    const release = deferReadFile(history)
+    history.load()
+
+    const removing = history.remove("combined_1")
+    release(JSON.parse(fs.readFileSync(filePath, "utf8")))
+    await removing
+
+    expect(history.list()).toEqual([])
+  })
+})
+
+describe("a live row is not removable", () => {
+  test.each(["queued", "downloading"])(
+    "leaves a %s row exactly where it is",
+    async (status) => {
+      // forgetting one does not stop the download: the reservation lives on,
+      // the row comes back at its next status write, and the quit path can no
+      // longer mark a row it cannot see - so the user would find a download
+      // they never cancelled, wearing a row they asked to be rid of
+      await history.upsert(row({ status }))
+
+      await history.remove("combined_1")
+
+      expect(history.list()).toHaveLength(1)
+      expect(history.list()[0].status).toBe(status)
+    }
+  )
+
+  test.each(["completed", "failed", "cancelled", "interrupted"])(
+    "still forgets a %s row",
+    async (status) => {
+      await history.upsert(row({ status }))
+
+      await history.remove("combined_1")
+
+      expect(history.list()).toEqual([])
+    }
+  )
+
+  test("a cancelled row left by download:cancel is removable", async () => {
+    // the panel's Remove on a queued row goes through download:cancel, and the
+    // row that settles out of it is an ordinary terminal row
+    await history.upsert(row({ status: "queued" }))
+    await history.upsert({ download_id: "combined_1", status: "cancelled" })
+
+    await history.remove("combined_1")
+
+    expect(history.list()).toEqual([])
   })
 })
 

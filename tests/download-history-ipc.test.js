@@ -9,7 +9,11 @@
  */
 
 jest.mock("electron", () => ({
-  ipcMain: { handle: jest.fn(), removeAllListeners: jest.fn() },
+  ipcMain: {
+    handle: jest.fn(),
+    removeAllListeners: jest.fn(),
+    removeHandler: jest.fn()
+  },
   dialog: { showOpenDialog: jest.fn() },
   app: { getVersion: jest.fn(() => "1.2.3") },
   shell: { openExternal: jest.fn(), openPath: jest.fn() }
@@ -22,6 +26,7 @@ const path = require("path")
 
 const { ipcMain } = require("electron")
 const IPCHandlers = require("../src/main/ipc-handlers")
+const { DownloadHistory } = require("../src/main/services/download-history")
 
 class FakeHandle extends EventEmitter {
   constructor() {
@@ -61,7 +66,7 @@ function createWorkspace() {
 }
 
 // a second launch of the app over the same userData folder
-function createHandlers({ userDataPath, outputDir }) {
+function createHandlers({ userDataPath, outputDir }, { history = null } = {}) {
   const handles = []
 
   const engine = {
@@ -83,7 +88,8 @@ function createHandlers({ userDataPath, outputDir }) {
     settingsStore: {
       ensureDownloadPath: jest.fn().mockResolvedValue(outputDir),
       setPotEnabled: jest.fn().mockResolvedValue({ success: true })
-    }
+    },
+    ...(history ? { downloadHistory: history } : null)
   })
 
   handlers.mainWindow = {
@@ -171,6 +177,49 @@ describe("where the history lives", () => {
 
     expect(response.success).toBe(true)
     expect(response.data).toEqual([])
+  })
+})
+
+describe("the hydration read", () => {
+  test("waits for the file rather than saying this install has no history", async () => {
+    // the renderer hydrates once and nothing pushes a correction afterwards, so
+    // an answer given before the read lands is the answer the panel keeps
+    const workspace = createWorkspace()
+    const saved = [
+      {
+        download_id: "combined_old",
+        kind: "video",
+        status: "completed",
+        started_at: 1000,
+        title: "From a previous run"
+      }
+    ]
+    fs.mkdirSync(path.join(workspace.userDataPath, "downloads"), { recursive: true })
+    fs.writeFileSync(
+      historyFile(workspace.userDataPath),
+      JSON.stringify(saved),
+      "utf8"
+    )
+
+    let release
+    const held = new Promise((resolve) => {
+      release = resolve
+    })
+
+    // the read the constructor's load() is waiting on, held open
+    const history = new DownloadHistory({
+      filePath: historyFile(workspace.userDataPath)
+    })
+    history.readFile = () => held
+
+    const { handlers } = createHandlers(workspace, { history })
+
+    const answering = handlers.handleGetHistory(null)
+    release(saved)
+
+    const response = await answering
+    expect(response.data).toHaveLength(1)
+    expect(response.data[0].download_id).toBe("combined_old")
   })
 })
 
@@ -271,7 +320,7 @@ describe("the three channels", () => {
   test("are registered, and are removed again on cleanup", () => {
     const workspace = createWorkspace()
     ipcMain.handle.mockClear()
-    ipcMain.removeAllListeners.mockClear()
+    ipcMain.removeHandler.mockClear()
 
     const { handlers } = createHandlers(workspace)
 
@@ -286,15 +335,18 @@ describe("the three channels", () => {
 
     handlers.cleanup()
 
-    // a channel left registered survives into the next IPCHandlers and answers
-    // out of the old one's history
-    const removed = ipcMain.removeAllListeners.mock.calls.map(([channel]) => channel)
-    expect(removed).toEqual(
-      expect.arrayContaining([
-        "download:get-history",
-        "download:clear-history",
-        "download:remove-history"
-      ])
-    )
+    /**
+     * removeHandler, not removeAllListeners: an invoke handler is not a
+     * listener and lives in its own registry, so the loop over the other
+     * channels does not touch it. a channel left registered makes the next
+     * `handle` for it throw, and until then the old closure - holding the old
+     * history and the old runner - is what answers the renderer
+     */
+    const removed = ipcMain.removeHandler.mock.calls.map(([channel]) => channel)
+    expect(removed).toEqual([
+      "download:get-history",
+      "download:clear-history",
+      "download:remove-history"
+    ])
   })
 })
