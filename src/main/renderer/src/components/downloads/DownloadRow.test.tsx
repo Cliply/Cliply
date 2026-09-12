@@ -176,8 +176,8 @@ describe("what each status offers", () => {
     expect(mocks.showInFolder).not.toHaveBeenCalled()
   })
 
-  // main refuses a path outside the download folder, and a file that has been
-  // moved or deleted cannot be revealed either. both end at the folder
+  // main refuses a path outside the download folder, and answers a file that is
+  // no longer there with `shown: false`. both end at the folder
   test("and falls back to the folder when the file cannot be revealed", async () => {
     mocks.showInFolder.mockResolvedValue(false)
 
@@ -187,6 +187,30 @@ describe("what each status offers", () => {
           status: "completed",
           progress: 100,
           filePath: "/somewhere/else/gone.mp4"
+        })}
+      />
+    )
+
+    fireEvent.click(action(en["toast.openFolder"]))
+
+    await waitFor(() => expect(mocks.openDownloadFolder).toHaveBeenCalled())
+  })
+
+  /**
+   * the channel itself failing is the same outcome for the user as a file that
+   * has moved: a button that logs and does nothing else is the one thing this
+   * must never be.
+   */
+  test("and when the reveal call itself fails", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {})
+    mocks.showInFolder.mockRejectedValue(new Error("no ipc for you"))
+
+    render(
+      <DownloadRow
+        row={row({
+          status: "completed",
+          progress: 100,
+          filePath: "/Users/me/Downloads/holiday.mp4"
         })}
       />
     )

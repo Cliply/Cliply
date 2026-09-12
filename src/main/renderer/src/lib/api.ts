@@ -423,7 +423,11 @@ export const systemApi = {
     if (!electronAPI.system.showInFolder) return false
 
     const response = await electronAPI.system.showInFolder(path)
-    return response.success === true
+
+    // `success` says the channel answered, `shown` says it revealed something:
+    // main answers a file that is no longer there with `shown: false` rather
+    // than an error, because that is the case the folder fallback is for
+    return response.success === true && response.data?.shown === true
   },
 
   /**

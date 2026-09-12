@@ -258,7 +258,9 @@ export const ru: Record<Key, string> = {
   "downloads.mediaDownloaded":
     "медиафайл скачан|медиафайла скачано|медиафайлов скачано",
   "downloads.clearHistory": "очистить историю",
-  "downloads.emptyTitle": "пока ничего не скачано",
+  // «здесь пока ничего нет» over «пока пусто»: the panel's other lines are
+  // sentences rather than labels, and this one sits alone in the middle of it
+  "downloads.nothingToShow": "здесь пока ничего нет",
   "downloads.untitled": "без названия",
   "downloads.queued": "в очереди",
   "downloads.cancelled": "отменено",

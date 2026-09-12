@@ -574,10 +574,11 @@ describe("clearing and removing", () => {
 /**
  * the one number at the top of the panel: downloads finished since install.
  *
- * main owns the counter (`downloads_completed`, written by
- * `noteCompletedDownload` in ipc-handlers.js) and this side keeps it moving, so
- * what matters here is that it is read once, bumped once per download, and
- * never walked backwards by anything else the panel does.
+ * main owns it outright: it counts the completion, stamps the new total onto
+ * the completed event and answers the hydration read from the same number. This
+ * side only ever adopts what arrives, which is what makes the replays below
+ * harmless - the first pass counted here, and every ordering hydration can
+ * produce was either one too many or one too few.
  */
 describe("the lifetime count", () => {
   test("comes in with the hydration read", () => {
@@ -586,50 +587,34 @@ describe("the lifetime count", () => {
     expect(store().lifetimeCompleted).toBe(128)
   })
 
-  test("moves with a completion, without a second read", () => {
+  test("moves with the number on a completed event", () => {
+    store().hydrate([], [], 4)
     store().add(row({ downloadId: "d1", status: "downloading" }))
 
-    store().applyEvent(event({ status: "completed", progress: 100 }))
+    store().applyEvent(
+      event({ status: "completed", progress: 100, lifetimeCompleted: 5 })
+    )
 
-    expect(store().lifetimeCompleted).toBe(1)
+    expect(store().lifetimeCompleted).toBe(5)
   })
 
-  /**
-   * `DownloadEvents` replays every event that landed during the hydration
-   * window, so the same completion is applied twice. a row that was already
-   * completed is not a download that completed twice.
-   */
-  test("and not twice for the same download", () => {
+  test("an event without one leaves it where it was", () => {
+    store().hydrate([], [], 4)
     store().add(row({ downloadId: "d1", status: "downloading" }))
-    const completed = event({ status: "completed", progress: 100 })
 
-    store().applyEvent(completed)
-    store().applyEvent(completed)
+    store().applyEvent(event({ status: "downloading", progress: 40 }))
 
-    expect(store().lifetimeCompleted).toBe(1)
+    expect(store().lifetimeCompleted).toBe(4)
   })
 
-  test("a failure or a cancel does not count", () => {
+  test("a failure or a cancel carries none, so it does not count", () => {
+    store().hydrate([], [], 4)
     store().add(row({ downloadId: "d1", status: "downloading" }))
 
     store().applyEvent(event({ status: "failed", error: "no" }))
     store().applyEvent(event({ status: "cancelled" }))
 
-    expect(store().lifetimeCompleted).toBe(0)
-  })
-
-  /**
-   * a download that finished while the three hydration reads were in flight has
-   * already been counted here, and main's answer was taken before its own write
-   * landed. the number must not go backwards under the user.
-   */
-  test("a late read cannot walk it back", () => {
-    store().add(row({ downloadId: "d1", status: "downloading" }))
-    store().applyEvent(event({ status: "completed", progress: 100 }))
-
-    store().hydrate([], [], 0)
-
-    expect(store().lifetimeCompleted).toBe(1)
+    expect(store().lifetimeCompleted).toBe(4)
   })
 
   test("clearing the history leaves it alone", () => {
@@ -640,6 +625,76 @@ describe("the lifetime count", () => {
 
     expect(store().rows).toEqual([])
     expect(store().lifetimeCompleted).toBe(12)
+  })
+})
+
+/**
+ * the three orderings the panel v2 review reproduced, each of which used to end
+ * the session with the wrong total. `DownloadEvents` applies an event on
+ * arrival, hydrates over the rows with main's snapshot, and then replays every
+ * event that landed inside that window - so a completion is applied twice, with
+ * a snapshot older than it in between.
+ */
+describe("the lifetime count across the hydration window", () => {
+  const completion = (lifetimeCompleted: number) =>
+    event({ status: "completed", progress: 100, lifetimeCompleted })
+
+  test("a completion, an older snapshot of its row, and the replay", () => {
+    store().add(row({ downloadId: "d1", status: "downloading" }))
+
+    store().applyEvent(completion(1))
+    // main's snapshot was taken before the completion: the row goes back to
+    // running, which is exactly what used to let the replay count it again
+    store().hydrate(
+      [
+        {
+          downloadId: "d1",
+          status: "downloading",
+          progress: 40
+        } as DownloadStatus
+      ],
+      [],
+      0
+    )
+    store().applyEvent(completion(1))
+
+    expect(store().lifetimeCompleted).toBe(1)
+  })
+
+  test("a reload whose read already includes the completion", () => {
+    store().hydrate(
+      [
+        {
+          downloadId: "d1",
+          status: "downloading",
+          progress: 40
+        } as DownloadStatus
+      ],
+      [],
+      1
+    )
+    store().applyEvent(completion(1))
+
+    expect(store().lifetimeCompleted).toBe(1)
+  })
+
+  /**
+   * the one a counted-id set could not have fixed: the download belongs to no
+   * snapshot at all, so nothing on this side can tell whether the number it
+   * read already includes it. The event says so itself.
+   */
+  test("a download neither snapshot knows, finishing during the reads", () => {
+    store().applyEvent(completion(129))
+    store().hydrate([], [], 128)
+
+    expect(store().lifetimeCompleted).toBe(129)
+  })
+
+  test("and the same, when the event arrives after the read", () => {
+    store().hydrate([], [], 128)
+    store().applyEvent(completion(129))
+
+    expect(store().lifetimeCompleted).toBe(129)
   })
 })
 

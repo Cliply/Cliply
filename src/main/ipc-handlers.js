@@ -82,6 +82,59 @@ function retryRequest(fields) {
   )
 }
 
+/**
+ * a whole, non-negative count, or none
+ *
+ * `settings.json` is a file on the user's disk and the panel draws whatever is
+ * in it: `Number(value) || 0` let through -5 for a hand-edited negative, 1.5
+ * for a fraction, and `Infinity` for the perfectly valid json string
+ * "Infinity". None of those is a number of downloads.
+ *
+ * @param {unknown} value - whatever `downloads_completed` held
+ * @returns {number} the count, floored, or 0 for anything that is not one
+ */
+function normalizeCount(value) {
+  const count = Number(value)
+
+  return Number.isFinite(count) && count > 0 ? Math.floor(count) : 0
+}
+
+/**
+ * whether anything between the download folder and this file is a symlink
+ *
+ * the lexical check in `handleShowInFolder` compares strings, and a string can
+ * be inside a folder while the file it names is not: a link at
+ * `<downloads>/elsewhere` pointing anywhere on disk makes every path under it
+ * pass. So each component below the root is `lstat`ed on the way down, and a
+ * link at any of them refuses the whole path.
+ *
+ * the root itself is not walked. A user whose download folder is a link chose
+ * that folder, and refusing it would break the app for them.
+ *
+ * a component that is not there at all is not an escape: the existence check
+ * on the target is what answers that, and it answers it as "gone" rather than
+ * as "refused".
+ *
+ * @param {string} root - the resolved download folder
+ * @param {string} inside - the target, relative to it
+ * @returns {Promise<boolean>} whether the walk found a link
+ */
+async function pathEscapes(root, inside) {
+  let walked = root
+
+  for (const segment of inside.split(path.sep)) {
+    walked = path.join(walked, segment)
+
+    try {
+      if ((await fs.promises.lstat(walked)).isSymbolicLink()) return true
+    } catch {
+      return false
+    }
+  }
+
+  return false
+}
+
 class IPCHandlers {
   constructor(services, autoUpdater = null) {
     this.cookieManager = services.cookieManager
@@ -128,6 +181,22 @@ class IPCHandlers {
 
     this.history.load()
 
+    /**
+     * how many downloads this install has ever finished
+     *
+     * one number, owned here: `noteCompletedDownload` increments it, the
+     * completed event carries it and settings:get-download-count answers with
+     * it, so every place it is read agrees. `downloads_completed` in
+     * settings.json is where it survives a restart, and the read that starts it
+     * is the head of the write chain.
+     */
+    this.lifetimeCompleted = 0
+    // how many of those landed in this session, which is how a queued write
+    // works out which download it is writing about
+    this.sessionCompletions = 0
+    this.lifetimeReady = this.loadLifetimeCount()
+    this.completionWrites = this.lifetimeReady
+
     // drives engine downloads and forwards their progress to the renderer
     this.runner = new DownloadRunner({
       engine: this.engine,
@@ -155,15 +224,31 @@ class IPCHandlers {
     return path.join(this.engine.getUserDataPath(), "downloads", "history.json")
   }
 
-  // send one download:progress event - the channel the renderer hooks listen on
+  /**
+   * send one download:progress event - the channel the renderer hooks listen on
+   *
+   * a completion is counted here, before the window is consulted: this is the
+   * one path every finished download takes, on every platform, whether or not
+   * there is an analytics exit point and whether or not there is still a window
+   * to tell. The new total rides out on the event itself (`lifetime_completed`),
+   * so the panel's number is main's number rather than a tally the renderer
+   * keeps - see the panel v2 review, where every renderer-side tally was either
+   * one too many or one too few after a hydration replay.
+   */
   sendDownloadEvent(downloadId, payload) {
+    const lifetimeCompleted =
+      payload && payload.status === "completed"
+        ? this.noteCompletedDownload()
+        : null
+
     if (!this.mainWindow || this.mainWindow.isDestroyed()) {
       return
     }
 
     this.mainWindow.webContents.send(IPC_CHANNELS.DOWNLOAD_PROGRESS, {
       downloadId,
-      ...payload
+      ...payload,
+      ...(lifetimeCompleted === null ? null : { lifetimeCompleted })
     })
   }
 
@@ -241,11 +326,12 @@ class IPCHandlers {
     }
 
     if (name === "download_completed") {
-      // every platform's completion passes through here, which is why the
-      // counter lives at this point rather than in the four places the
-      // renderer shows a success toast
-      this.noteCompletedDownload()
-
+      // the lifetime counter used to be incremented here. it moved to
+      // `sendDownloadEvent`, which is the path every completion takes whether
+      // or not there is an analytics exit point at all - and the completed
+      // event has to carry the new number, so it has to have been counted by
+      // the time the event goes out
+      //
       // a size of zero is a stat that failed, not an empty file: a download
       // that resolved always wrote something. sending the zero would report
       // an empty file and drag every average through it, so all three of the
@@ -377,41 +463,104 @@ class IPCHandlers {
    * and then it ends: 5, 15, 40, 60, 100, and never again however many hundreds
    * follow.
    *
-   * fire and forget on purpose: this hangs off the analytics hook, which the
-   * runner calls on the path where a download reports success. A settings write
-   * that fails must not turn a finished file into a failed one.
+   * **the count in memory is the count.** it is incremented here, synchronously,
+   * and everything else reads it: the completed event carries it to the panel
+   * (see sendDownloadEvent) and settings:get-download-count answers with it.
+   * the file is where it survives a restart, nothing more. The renderer counting
+   * for itself was the bug this replaced - hydration replays a completion over a
+   * snapshot older than it, and any number the renderer derives from its own
+   * rows is either one too many or one too few for the rest of the session.
    *
-   * the writes are chained because the engine allows concurrent downloads and
-   * each of these is a read, an increment and a write. Two finishing together
-   * both read 4, both write 5, and both announce milestone 5 - one file goes
-   * uncounted and the user is asked for a coffee twice in a second. The work is
-   * short and the chain never breaks, since the catch below resolves.
+   * fire and forget on purpose: this hangs off the path where a download reports
+   * success. A settings write that fails must not turn a finished file into a
+   * failed one.
+   *
+   * the write is still chained, behind the one read that starts the counter
+   * (loadLifetimeCount): the engine allows concurrent downloads, and two writes
+   * racing would leave the file holding whichever landed last rather than the
+   * total. Each chained write persists the total as it stands, so two downloads
+   * finishing together write 5 once and 5 again rather than 4 and 5 - and the
+   * milestone is decided from this call's own number, which is unique to it, so
+   * nobody is asked for a coffee twice in a second.
+   *
+   * @returns {number} how many downloads this install has now finished
    */
   noteCompletedDownload() {
-    if (!this.settings) return
+    const count = (this.lifetimeCompleted += 1)
+    // which completion of this session this is, so the work below can name its
+    // own total however many landed after it
+    const nth = (this.sessionCompletions += 1)
+
+    if (!this.settings) return count
 
     this.completionWrites = (this.completionWrites || Promise.resolve())
       .then(async () => {
-        const settings = await this.settings.readAll()
-        const previous = Number(settings.downloads_completed) || 0
-        const count = previous + 1
+        /**
+         * this download's own number, decided here rather than above.
+         *
+         * `count` is the total as this call saw it, which is the install's
+         * total the moment the file has been read - and it is read at
+         * construction, long before anything can finish. The subtraction is
+         * what keeps the rare exception honest: whatever was counted after this
+         * call is taken back off, so two downloads finishing in the same tick
+         * are the 4th and the 5th rather than the 5th twice, and nobody is
+         * asked for a coffee twice in one second.
+         */
+        const total = this.lifetimeCompleted - (this.sessionCompletions - nth)
 
-        await this.settings.writeSettings({ downloads_completed: count })
+        await this.settings.writeSettings({
+          downloads_completed: this.lifetimeCompleted
+        })
 
-        if (!SUPPORT_MILESTONES.includes(count)) return
+        if (!SUPPORT_MILESTONES.includes(total)) return
         if (!this.mainWindow || this.mainWindow.isDestroyed()) return
 
         this.mainWindow.webContents.send(IPC_CHANNELS.SUPPORT_MILESTONE, {
-          count
+          count: total
         })
 
         // captured here rather than in the renderer because this is the line
         // that decides a prompt happens. A shown event reported from the other
         // side could only ever say the dialog mounted
-        this.capture("support_prompt_shown", { milestone: count })
+        this.capture("support_prompt_shown", { milestone: total })
       })
       .catch((error) => {
         console.error("failed to record a completed download:", error.message)
+      })
+
+    return count
+  }
+
+  /**
+   * read the counter this install starts the session with, once
+   *
+   * added to rather than assigned, because a download could in principle finish
+   * while the read is in flight: what `lifetimeCompleted` holds before this
+   * lands is a count of this session's own completions, which is a delta on top
+   * of what the file says and not a total the file replaces.
+   *
+   * it is the head of `completionWrites`, so no write can persist a total that
+   * was assembled before the file had been read.
+   *
+   * @returns {Promise<void>} settles when the counter is the install's own
+   */
+  loadLifetimeCount() {
+    if (!this.settings || typeof this.settings.readAll !== "function") {
+      return Promise.resolve()
+    }
+
+    return this.settings
+      .readAll()
+      .then((settings) => {
+        this.lifetimeCompleted += normalizeCount(settings.downloads_completed)
+      })
+      .catch((error) => {
+        // a counter we could not read is a zero on the panel, not a broken app.
+        // the next completion still counts, and still writes
+        console.warn(
+          "the lifetime download count could not be read:",
+          describeError(error)
+        )
       })
   }
 
@@ -1919,9 +2068,21 @@ class IPCHandlers {
    * and compared against the download folder the same way: `path.relative`
    * between the two, refused when it climbs out (`..`) or when it turns out to
    * be absolute, which is what a different drive on windows looks like.
-   * `realpath` is deliberately not used - a file that has since been moved or
-   * deleted would fail the check rather than fall back to its folder, and the
-   * fallback is the whole reason the row still works when the file is gone.
+   *
+   * lexical containment is not containment on its own, which is what
+   * `pathEscapes` is for: a symlink inside the download folder pointing
+   * anywhere else would let a name under it pass the string comparison while
+   * the file it reaches is somewhere else entirely. The folder the user
+   * configured may itself be a link - that one is their own choice - so only
+   * what lies below it is walked.
+   *
+   * `realpath` on the target is deliberately not used: a file that has since
+   * been moved would fail for a reason the caller cannot tell apart from the
+   * refusals above, and the fallback to the folder is the whole reason the row
+   * still works when the file is gone. That case is answered instead by
+   * `shown: false`, which is what the row falls back on - `showItemInFolder`
+   * returns nothing at all, so a missing file would otherwise be reported as
+   * revealed and the row would do nothing at all.
    */
   async handleShowInFolder(_event, data) {
     try {
@@ -1931,12 +2092,20 @@ class IPCHandlers {
       const root = path.resolve(await this.settings.ensureDownloadPath())
       const inside = path.relative(root, target)
 
-      if (
-        !inside ||
-        inside.startsWith("..") ||
-        path.isAbsolute(inside)
-      ) {
+      if (!inside || inside.startsWith("..") || path.isAbsolute(inside)) {
         return this.createError("That file is not in the download folder")
+      }
+
+      if (await pathEscapes(root, inside)) {
+        return this.createError("That file is not in the download folder")
+      }
+
+      try {
+        await fs.promises.access(target)
+      } catch {
+        // gone, moved, or never written where the row remembers it. not a
+        // refusal: the row opens the download folder instead
+        return this.createSuccess({ shown: false, path: target })
       }
 
       const { shell } = require("electron")
@@ -1952,23 +2121,26 @@ class IPCHandlers {
   /**
    * how many downloads this install has finished, ever
    *
-   * the same counter `noteCompletedDownload` writes, read back for the number
-   * at the top of the downloads panel. Its own channel rather than a field on
-   * `download:get-history`, whose reply is the rows array itself (see
-   * handleGetHistory) - and a lifetime count is not a row, does not belong in a
-   * list "clear history" empties, and is read at exactly the same moment, so
-   * the second invoke costs nothing worth the change of shape.
+   * the counter in memory, which is the same one the completed events carry, so
+   * the panel's first number and every number after it come from one place and
+   * cannot disagree about a download that finished while this read was in
+   * flight.
+   *
+   * its own channel rather than a field on `download:get-history`, whose reply
+   * is the rows array itself (see handleGetHistory) - and a lifetime count is
+   * not a row, does not belong in a list "clear history" empties, and is read at
+   * exactly the same moment, so the second invoke costs nothing worth the change
+   * of shape.
    */
   async handleGetDownloadCount(_event) {
     try {
-      const settings =
-        this.settings && typeof this.settings.readAll === "function"
-          ? await this.settings.readAll()
-          : {}
+      // the file has to have been read: answering 0 to the one read the panel
+      // makes would put a zero on screen for an install with a hundred
+      // downloads behind it, and nothing pushes a correction until the next one
+      // finishes
+      await this.lifetimeReady
 
-      return this.createSuccess({
-        count: Number(settings.downloads_completed) || 0
-      })
+      return this.createSuccess({ count: this.lifetimeCompleted })
     } catch (error) {
       console.error("Get download count failed:", error.message)
       return this.createError("Failed to read the download count")

@@ -14,7 +14,7 @@ jest.mock("electron", () => ({
 const IPCHandlers = require("../src/main/ipc-handlers")
 const { IPC_CHANNELS } = require("../src/main/utils/constants")
 
-function harness(startingCount = 0) {
+function harness(startingCount = 0, overrides = {}) {
   const sent = []
   const captured = []
   let stored = { downloads_completed: startingCount }
@@ -24,7 +24,8 @@ function harness(startingCount = 0) {
     writeSettings: jest.fn(async (patch) => {
       stored = { ...stored, ...patch }
     }),
-    ensureDownloadPath: jest.fn().mockResolvedValue("/tmp")
+    ensureDownloadPath: jest.fn().mockResolvedValue("/tmp"),
+    ...overrides
   }
 
   const handlers = new IPCHandlers({
@@ -130,16 +131,24 @@ describe("when it must stay out of the way", () => {
     await settle()
   })
 
-  // this hangs off the hook the runner calls when a download reports success,
-  // so a failure here must never turn a finished file into a failed one
-  test("and the failure is swallowed rather than sent to the window", async () => {
-    const { handlers, sent, settingsStore } = harness(4)
-    settingsStore.readAll.mockRejectedValue(new Error("unreadable"))
+  /**
+   * the counter is read once, when the handlers are built. a read that fails
+   * leaves this install counting from zero for the session rather than
+   * refusing to count at all, and says nothing to the window about it - this
+   * hangs off the path where a download reports success, and a finished file
+   * must not be reported as a failed one.
+   */
+  test("and a counter that could not be read still counts, quietly", async () => {
+    const { handlers, sent, read } = harness(4, {
+      readAll: jest.fn().mockRejectedValue(new Error("unreadable"))
+    })
 
+    await handlers.lifetimeReady
     handlers.noteCompletedDownload()
     await settle()
 
     expect(sent).toEqual([])
+    expect(read().downloads_completed).toBe(1)
   })
 
   test("a closed window is not written to", async () => {
@@ -252,7 +261,11 @@ describe("two downloads finishing together", () => {
     ])
   })
 
-  // a failed write must not wedge every later completion behind it
+  /**
+   * a failed write must not wedge every later completion behind it - and the
+   * download it lost is not lost any more: each write persists the total as it
+   * stands, so the one that lands repairs the one that did not.
+   */
   test("a write that throws does not stop the next one counting", async () => {
     const { handlers, settingsStore, read } = harness(0)
     const realWrite = settingsStore.writeSettings
@@ -265,6 +278,6 @@ describe("two downloads finishing together", () => {
     handlers.noteCompletedDownload()
     await settle()
 
-    expect(read().downloads_completed).toBe(1)
+    expect(read().downloads_completed).toBe(2)
   })
 })

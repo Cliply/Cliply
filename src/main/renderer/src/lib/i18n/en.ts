@@ -297,7 +297,9 @@ export const en = {
    */
   "downloads.mediaDownloaded": "media downloaded|media downloaded",
   "downloads.clearHistory": "Clear history",
-  "downloads.emptyTitle": "No downloads yet",
+  // the middle of an empty list. it says nothing about downloads: the lifetime
+  // number above it has already said that, and this is the list speaking
+  "downloads.nothingToShow": "Nothing to show",
   // a row whose title main never learned, which is any download started from a
   // link that failed before the lookup answered
   "downloads.untitled": "Untitled",

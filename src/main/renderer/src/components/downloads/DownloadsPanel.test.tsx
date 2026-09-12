@@ -317,11 +317,29 @@ describe("the body", () => {
     open()
 
     // before hydration: an empty panel, but nothing claimed about it
-    expect(within(panel()).queryByText(en["downloads.emptyTitle"])).toBeNull()
+    expect(
+      within(panel()).queryByText(en["downloads.nothingToShow"])
+    ).toBeNull()
 
     act(() => store().hydrate([], []))
 
-    expect(within(panel()).getByText(en["downloads.emptyTitle"])).toBeTruthy()
+    expect(
+      within(panel()).getByText(en["downloads.nothingToShow"])
+    ).toBeTruthy()
+  })
+
+  // in the middle of the space the list was given, rather than tucked under the
+  // number: the list is the only thing on screen when there is nothing in it
+  test("and says it in the middle of the empty list", () => {
+    render(<DownloadsPanel />)
+    open()
+    act(() => store().hydrate([], []))
+
+    const line = within(panel()).getByText(en["downloads.nothingToShow"])
+
+    expect(line.parentElement?.className).toContain("items-center")
+    expect(line.parentElement?.className).toContain("justify-center")
+    expect(line.parentElement?.className).toContain("flex-1")
   })
 })
 

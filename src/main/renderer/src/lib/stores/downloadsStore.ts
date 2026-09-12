@@ -115,11 +115,11 @@ interface DownloadsState {
   /**
    * how many downloads this install has ever finished
    *
-   * main's counter (`downloads_completed` in settings.json), read once beside
-   * the history and then kept moving here: a completion bumps it locally so the
-   * number at the top of the panel changes as the download lands, without a
-   * second read. it never goes down, and clearing the history leaves it alone -
-   * it counts downloads, not rows.
+   * main's counter and only main's: read once beside the history, and then
+   * updated by the number every completed event carries, so the panel's total
+   * moves as a download lands without this side ever counting anything itself.
+   * it never goes down, and clearing the history leaves it alone - it counts
+   * downloads, not rows.
    */
   lifetimeCompleted: number
   /** the panel's own chrome, session-only: nothing about it is worth keeping */
@@ -199,37 +199,46 @@ export const useDownloadsStore = create<DownloadsState>((set, get) => ({
    * before a reload, or one started by a window that is gone, and hydration is
    * what restores those - inventing a row here would give it no title, no
    * label and no request, which is a row that can be neither read nor retried.
+   *
+   * the lifetime number it carries is taken even then: a download this window
+   * never had a row for is still a download this install finished, and the
+   * count read at hydration may have been taken before it landed.
    */
   applyEvent: (event) =>
     set((state) => {
+      const lifetimeCompleted = adoptCount(
+        state.lifetimeCompleted,
+        event.lifetimeCompleted
+      )
+
       const index = state.rows.findIndex(
         (row) => row.downloadId === event.downloadId
       )
 
-      if (index === -1) return state
+      if (index === -1) {
+        return lifetimeCompleted === state.lifetimeCompleted
+          ? state
+          : { lifetimeCompleted }
+      }
 
       const rows = [...state.rows]
-      const previous = rows[index]
-      rows[index] = mergeEvent(previous, event)
+      rows[index] = mergeEvent(rows[index], event)
 
       /**
-       * ...and the lifetime number moves with it.
+       * ...and the lifetime number is whatever main says it is.
        *
-       * main has already written its own counter by the time this event is
-       * sent (`noteCompletedDownload` in ipc-handlers.js), so this is the same
-       * download counted on this side rather than a second read of the file.
+       * main counts the completion before it sends the event and stamps the
+       * new total onto it (`sendDownloadEvent` in ipc-handlers.js), so nothing
+       * here has to work out whether this download has been counted already.
+       * Counting on this side was the bug: hydration replaces a row's status
+       * with a snapshot older than the completion and `DownloadEvents` replays
+       * the event over it, so any tally derived from the rows ends the session
+       * one too high or one too low.
        *
-       * only on the step into `completed`, which is what makes it safe to
-       * replay: `DownloadEvents` applies every event that landed during
-       * hydration a second time, and a row that was already completed is not a
-       * download that completed twice.
+       * the larger of the two, because main's number only goes up: a replay of
+       * an older event cannot walk the panel's total backwards.
        */
-      const landed =
-        event.status === "completed" && previous.status !== "completed"
-
-      return landed
-        ? { rows, lifetimeCompleted: state.lifetimeCompleted + 1 }
-        : { rows }
+      return { rows, lifetimeCompleted }
     }),
 
   /**
@@ -259,16 +268,15 @@ export const useDownloadsStore = create<DownloadsState>((set, get) => ({
         rows: rows.sort((a, b) => b.startedAt - a.startedAt),
         hydrated: true,
         /**
-         * the larger of the two, because the number only ever goes up
+         * the larger of the two, for the same reason as above
          *
-         * a download that finished while these three reads were in flight has
-         * already been counted here, and main's answer was taken before its own
-         * write landed. adopting it flatly would show the user's total going
-         * backwards a second after a download they just watched finish.
+         * main answers this read from the same counter its events carry, so the
+         * two can only disagree by a download that finished between them - and
+         * whichever of the two saw it is the one to keep.
          */
-        lifetimeCompleted: Math.max(
+        lifetimeCompleted: adoptCount(
           state.lifetimeCompleted,
-          lifetimeCompleted ?? 0
+          lifetimeCompleted
         )
       }
     }),
@@ -467,6 +475,17 @@ export const useActiveCount = (): number =>
   useDownloadsStore(
     (state) => state.rows.filter((row) => isLiveRow(row)).length
   )
+
+/**
+ * the lifetime count, given what main just said about it
+ *
+ * main owns the number and only ever raises it, so anything smaller is an older
+ * message overtaking a newer one - a replayed event, or a read taken before the
+ * completion that arrived first. a message carrying no number at all (an event
+ * that is not a completion, a preload too old to send one) leaves it alone.
+ */
+const adoptCount = (held: number, arrived?: number): number =>
+  typeof arrived === "number" ? Math.max(held, arrived) : held
 
 /**
  * merge one event into a row

@@ -140,19 +140,32 @@ function RowAction({ row, live }: { row: Row; live: boolean }) {
 /**
  * show the file where it landed, or failing that the folder it landed in
  *
- * `showInFolder` answers false rather than throwing for a file that has been
- * moved, deleted or was never on the row (a history file an older version
- * wrote keeps no path), and main refuses any path outside the download folder.
- * every one of those ends at the folder itself, which is what the completion
+ * every way the reveal can come up short ends at the folder: no path on the row
+ * (a history file an older version wrote keeps none), a file that has been moved
+ * or deleted since, a path main refuses because it is outside the download
+ * folder, or the channel rejecting outright. The folder is what the completion
  * toast offers too, so the two agree.
+ *
+ * the reveal has its own try for that last case: a rejection that fell to the
+ * outer catch would be logged and the row would do nothing at all, which is the
+ * one outcome a button must never have.
  */
 async function revealDownload(row: Row): Promise<void> {
   try {
-    if (row.filePath && (await systemApi.showInFolder(row.filePath))) return
+    if (row.filePath && (await attemptReveal(row.filePath))) return
 
     await systemApi.openDownloadFolder()
   } catch (error: unknown) {
     console.error("Failed to open the download folder:", error)
+  }
+}
+
+async function attemptReveal(filePath: string): Promise<boolean> {
+  try {
+    return await systemApi.showInFolder(filePath)
+  } catch (error: unknown) {
+    console.error("Failed to reveal that file:", error)
+    return false
   }
 }
 

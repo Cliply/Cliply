@@ -1,12 +1,12 @@
 /**
  * the monospace stack the app names inline, in one place
  *
- * Tailwind's `font-mono` resolves to `var(--font-mono)`, and that variable is
- * defined nowhere in `index.css`, so the declaration is invalid and the element
- * silently inherits its parent's family instead of a monospace one. Every
- * monospace run in the app therefore names the fonts itself (`HeroSection`,
- * `VideoLayout`, `URLInput`), and this is that stack, shared rather than copied
- * again for the downloads panel.
+ * `--font-mono` in `index.css` is this same list, which is what Tailwind's
+ * `font-mono` resolves to: the class and this constant are the one stack said
+ * twice, and they have to stay that way. This is for the call sites that set
+ * the family inline rather than through a class (`HeroSection`, `VideoLayout`,
+ * `URLInput` and the layouts), which is how they were all written before the
+ * variable existed.
  *
  * Geist Mono is not bundled or fetched (only Space Grotesk is, in `index.html`),
  * so this lands on the platform's own monospace. That matters for ru: the

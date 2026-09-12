@@ -75,6 +75,16 @@ export interface DownloadProgress {
    */
   file_path?: string
   file_size?: number
+  /**
+   * how many downloads this install has finished, counting this one.
+   *
+   * on a completed event only, and main's own count rather than anything the
+   * renderer works out for itself: it is the number the panel shows, and a
+   * tally kept on this side cannot survive hydration replaying a completion
+   * over a snapshot older than it. camelCase like the rest of the envelope
+   * main writes, rather than the snake_case fields that came off the result.
+   */
+  lifetimeCompleted?: number
   error?: string
   // failures now arrive as events rather than a rejected invoke, so the report
   // payload's technical detail rides along with them

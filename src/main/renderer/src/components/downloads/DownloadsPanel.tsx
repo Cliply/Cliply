@@ -201,7 +201,10 @@ export function DownloadsPanel() {
             </p>
           </div>
 
-          <div className="flex-1 overflow-y-auto px-4 pb-5">
+          {/* the list takes the rest of the panel, so the empty state has a
+              height to sit in the middle of rather than a line to sit at the
+              top of */}
+          <div className="flex flex-1 flex-col overflow-y-auto px-4 pb-5">
             {rows.length > 0 ? (
               <div ref={listRef} className="flex flex-col gap-2">
                 {rows.map((row) => (
@@ -225,13 +228,21 @@ export function DownloadsPanel() {
   )
 }
 
+/**
+ * the middle of the empty list, and nothing else
+ *
+ * one quiet line, centred in the height the list was given: the number above it
+ * already says what this install has downloaded, so this only has to say that
+ * there is nothing here to read. no icon, for the same reason there are no
+ * divider lines anywhere else in the panel.
+ */
 function EmptyState() {
   const t = useT()
 
   return (
-    <div className="px-1 py-6">
+    <div className="flex flex-1 items-center justify-center px-1 py-6">
       <p className="text-[13px] text-slate-500 dark:text-slate-400">
-        {t("downloads.emptyTitle")}
+        {t("downloads.nothingToShow")}
       </p>
     </div>
   )
