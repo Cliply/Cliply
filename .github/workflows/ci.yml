@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  check:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-14, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: |
+            package-lock.json
+            src/main/renderer/package-lock.json
+
+      - run: npm ci
+      - run: npm run install:renderer
+
+      - name: Lint main
+        run: npm run lint
+
+      - name: Test main
+        run: npm test
+
+      - name: Test renderer
+        run: npm run test:renderer
+
+      # tsc -b then vite build: the same step the release build runs before packaging
+      - name: Build renderer
+        run: npm run build:renderer
