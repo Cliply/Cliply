@@ -1,4 +1,5 @@
 import { HashRouter, Route, Routes } from "react-router-dom"
+import { DownloadsPanel } from "./components/downloads"
 import { ThemeProvider } from "./components/theme/theme-provider"
 import "./index.css"
 import { Providers } from "./lib/providers"
@@ -35,6 +36,11 @@ function App() {
               <Route path="/" element={<HomePage />} />
               <Route path="/disclaimer" element={<DisclaimerPage />} />
             </Routes>
+
+            {/* outside the routes, like DownloadEvents is outside the screens:
+                the list has to survive every layout swap and every reset, since
+                that is exactly when a download loses the card that started it */}
+            <DownloadsPanel />
           </div>
         </Providers>
       </ThemeProvider>

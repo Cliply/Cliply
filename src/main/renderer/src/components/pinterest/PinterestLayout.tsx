@@ -1,3 +1,4 @@
+import { DownloadsToggle } from "@/components/downloads/DownloadsToggle"
 import { ModeToggle } from "@/components/ui/mode-toggle"
 import { FeedbackCard, UnifiedDownloadCard } from "@/components/video"
 import { useDownloadPath } from "@/lib/hooks/useDownloadPath"
@@ -79,8 +80,9 @@ export function PinterestLayout() {
             <CompactSearch platform="pinterest" />
           </div>
 
-          {/* Right side: Mode toggle */}
-          <div className="flex-shrink-0">
+          {/* Right side: downloads and mode toggles */}
+          <div className="flex flex-shrink-0 items-center gap-2">
+            <DownloadsToggle />
             <ModeToggle />
           </div>
         </div>

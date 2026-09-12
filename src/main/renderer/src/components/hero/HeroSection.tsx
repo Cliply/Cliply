@@ -1,3 +1,4 @@
+import { DownloadsToggle } from "@/components/downloads/DownloadsToggle"
 import { LocaleToggle } from "@/components/ui/locale-toggle"
 import { MenuVertical } from "@/components/ui/menu-vertical"
 import { ModeToggle } from "@/components/ui/mode-toggle"
@@ -69,8 +70,9 @@ export function HeroSection() {
         />
       </div>
 
-      {/* Language and mode toggles - top right */}
+      {/* Downloads, language and mode toggles - top right */}
       <div className="absolute top-6 right-6 z-20 flex items-center gap-2">
+        <DownloadsToggle />
         <LocaleToggle />
         <ModeToggle />
       </div>

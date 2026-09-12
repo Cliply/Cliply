@@ -276,6 +276,41 @@ export const en = {
   "download.audioHint":
     "Audio will be downloaded with the selected time range and format",
 
+  /**
+   * the panel on the right edge: every download this install has started, and
+   * what each row offers to do about it
+   *
+   * the chip beside a title is assembled from the request rather than kept as
+   * a sentence, so a playlist's count reads through `playlist.videoCount` and
+   * an audio mode through the `format.*` names the dropdown already uses. only
+   * the two platform names are here, because nothing else in the app had them
+   * as words of their own.
+   */
+  "downloads.title": "Downloads",
+  "downloads.toggle": "Show downloads",
+  "downloads.close": "Close downloads",
+  "downloads.active": "{n} active",
+  "downloads.clearFinished": "Clear finished",
+  "downloads.emptyTitle": "No downloads yet",
+  "downloads.emptyBody":
+    "Whatever you download lands here and stays, even after you leave the screen that started it.",
+  // a row whose title main never learned, which is any download started from a
+  // link that failed before the lookup answered
+  "downloads.untitled": "Untitled",
+  "downloads.queued": "Queued",
+  "downloads.done": "Done",
+  "downloads.cancelled": "Cancelled",
+  "downloads.interrupted": "Interrupted",
+  // a playlist's position inside its own run: "3 of 12"
+  "downloads.itemsProgress": "{done} of {total}",
+  "downloads.remove": "Remove",
+  "downloads.retry": "Retry",
+  "downloads.retryUnavailable":
+    "We didn't keep enough about this one to start it again",
+  "downloads.retryFailed": "Couldn't start that download again",
+  "downloads.platformTiktok": "TikTok",
+  "downloads.platformPinterest": "Pinterest",
+
   "card.tabVideo": "Video Download",
   "card.tabAudio": "Audio Only",
   "card.videoIntro": "Download video with automatically paired audio",
