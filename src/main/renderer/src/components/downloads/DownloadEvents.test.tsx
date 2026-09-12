@@ -467,12 +467,18 @@ describe("a download admitted after the list was read", () => {
       store().clearFinished()
     })
 
+    // a finished row this window never held: it exists only inside the reply
+    // that was already in flight, and the clear covered it too
     await hydration.landed([
-      { download_id: "refused", status: "failed" } as DownloadHistoryRow
+      {
+        download_id: "old",
+        status: "completed",
+        finished_at: Date.now() - 60_000
+      } as DownloadHistoryRow
     ])
     await settled()
 
-    // the cleared row stays gone, and everything else the answer carried lands
+    // the cleared rows stay gone, and everything else the answer carried lands
     expect(store().rows.map((r) => r.downloadId)).toEqual(["running"])
     expect(store().lifetimeCompleted).toBe(128)
     expect(store().hydrated).toBe(true)

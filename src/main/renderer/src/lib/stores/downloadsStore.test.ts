@@ -757,6 +757,92 @@ describe("clearing and removing", () => {
     expect(store().rows.map((known) => known.downloadId)).toEqual(["late"])
   })
 
+  /**
+   * the rows the tombstones cannot name: a finished download this window never
+   * held, which exists only inside a history reply that was already in flight
+   * when the user cleared. Main cleared it at the same moment as the rest, so
+   * the only thing that can tell it apart from a download that has since
+   * finished is when it ended.
+   */
+  test("a reply's finished rows are covered by the clear too", async () => {
+    const before = Date.now() - 60_000
+    mocks.clearHistory.mockResolvedValue([])
+
+    store().add(row({ downloadId: "held", status: "completed" }))
+    store().clearFinished()
+    await flush()
+
+    store().hydrate(
+      [],
+      [
+        {
+          download_id: "never-seen",
+          status: "completed",
+          finished_at: before
+        } as DownloadHistoryRow
+      ],
+      0
+    )
+
+    expect(store().rows).toEqual([])
+  })
+
+  test("and one that finished after the clear still lands", async () => {
+    mocks.clearHistory.mockResolvedValue([])
+
+    store().add(row({ downloadId: "held", status: "completed" }))
+    store().clearFinished()
+    await flush()
+
+    store().adopt(
+      [],
+      [
+        {
+          download_id: "after",
+          status: "completed",
+          started_at: 10,
+          finished_at: Date.now() + 60_000
+        } as DownloadHistoryRow
+      ]
+    )
+
+    expect(store().rows.map((known) => known.downloadId)).toEqual(["after"])
+  })
+
+  // a row with no finish time comes from a history file written before main
+  // recorded one, which is to say from a run that is long over
+  test("and one with no finish time at all is treated as older", async () => {
+    mocks.clearHistory.mockResolvedValue([])
+
+    store().add(row({ downloadId: "held", status: "completed" }))
+    store().clearFinished()
+    await flush()
+
+    store().adopt(
+      [],
+      [{ download_id: "ancient", status: "completed" } as DownloadHistoryRow]
+    )
+
+    expect(store().rows).toEqual([])
+  })
+
+  // nothing has been cleared, so nothing in a reply is old news
+  test("and an install that has never cleared keeps everything", () => {
+    store().hydrate(
+      [],
+      [
+        {
+          download_id: "old",
+          status: "completed",
+          finished_at: 1
+        } as DownloadHistoryRow
+      ],
+      0
+    )
+
+    expect(store().rows.map((known) => known.downloadId)).toEqual(["old"])
+  })
+
   test("a history write that fails costs nothing", async () => {
     vi.spyOn(console, "error").mockImplementation(() => {})
     mocks.clearHistory.mockRejectedValue(new Error("disk full"))

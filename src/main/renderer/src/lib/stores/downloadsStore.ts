@@ -169,6 +169,21 @@ interface DownloadsState {
    * the user has cleared, and it goes with the rest of the list on a reset.
    */
   forgotten: string[]
+  /**
+   * when "clear history" was last asked for, by this window's clock
+   *
+   * the tombstones cover the rows this window was holding. They cannot cover a
+   * finished row it never held - one that exists only inside a history reply
+   * that was already in flight - and that row was cleared too, by main, at the
+   * same moment as the rest. So a reply's finished rows are read against this:
+   * anything that ended before the user pressed the button is something they
+   * have already thrown away, and a download that ends after it is not.
+   *
+   * both times come from the same machine (`finished_at` is main's `Date.now()`
+   * and this is the renderer's), so they are comparable. zero until the first
+   * clear, and zero again with the rest of the list on a reset.
+   */
+  clearedAt: number
 
   add: (row: DownloadRow) => void
   applyEvent: (event: DownloadProgress) => void
@@ -200,6 +215,7 @@ export const useDownloadsStore = create<DownloadsState>((set, get) => ({
   cancelIntents: [],
   admittedIds: [],
   forgotten: [],
+  clearedAt: 0,
 
   // newest first, which is the order the panel lists them in and the order the
   // history keeps them in
@@ -293,6 +309,7 @@ export const useDownloadsStore = create<DownloadsState>((set, get) => ({
       for (const entry of history) {
         if (seen.has(entry.download_id)) continue
         if (forgotten.has(entry.download_id)) continue
+        if (cleared(state, entry)) continue
         seen.add(entry.download_id)
         rows.push(rowFromHistory(entry))
       }
@@ -350,6 +367,7 @@ export const useDownloadsStore = create<DownloadsState>((set, get) => ({
       for (const entry of history) {
         if (seen.has(entry.download_id)) continue
         if (forgotten.has(entry.download_id)) continue
+        if (cleared(state, entry)) continue
         seen.add(entry.download_id)
         added.push(rowFromHistory(entry))
       }
@@ -415,11 +433,14 @@ export const useDownloadsStore = create<DownloadsState>((set, get) => ({
     // younger than the request and cannot be something main meant to remove
     const sent = new Set(get().rows.map((row) => row.downloadId))
 
+    const clearedAt = Date.now()
+
     set((state) => {
       const kept = state.rows.filter(isLiveRow)
 
       return {
         ...withHighlight(state, kept),
+        clearedAt,
         forgotten: remember(
           state.forgotten,
           dropped(state.rows, kept).map((row) => row.downloadId)
@@ -538,9 +559,10 @@ export const useDownloadsStore = create<DownloadsState>((set, get) => ({
   reset: () =>
     set(() => ({
       rows: [],
-      // the tombstones go with the list they belong to: nothing that comes back
-      // after this belongs to the session that wrote them
+      // the tombstones and the clear go with the list they belong to: nothing
+      // that comes back after this belongs to the session that wrote them
       forgotten: [],
+      clearedAt: 0,
       hydrated: false,
       lifetimeCompleted: 0,
       panelOpen: false,
@@ -609,6 +631,16 @@ export const useActiveCount = (): number =>
   useDownloadsStore(
     (state) => state.rows.filter((row) => isLiveRow(row)).length
   )
+
+/**
+ * whether this finished row is one the user has already cleared
+ *
+ * a row with no finish time at all cannot have ended after the clear: the only
+ * rows without one come from a history file written before main recorded it,
+ * which is to say from a previous version and therefore a previous run.
+ */
+const cleared = (state: DownloadsState, entry: DownloadHistoryRow): boolean =>
+  state.clearedAt > 0 && (entry.finished_at ?? 0) < state.clearedAt
 
 /** the ids this list held and no longer does */
 const dropped = (
