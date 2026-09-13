@@ -27,11 +27,16 @@ interface SelectionDropdownProps<T> {
 
 // a menu with nothing to say about an option leaves the slot empty rather than
 // rendering a blank line where the detail would be
+//
+// right-aligned, because a detail long enough to wrap ("Source quality, no
+// re-encode · usually WEBM/Opus") keeps its ragged edge away from the label
 function Detail({ children }: { children?: ReactNode }) {
   if (!children) return null
 
   return (
-    <p className="text-sm text-slate-500 dark:text-slate-400">{children}</p>
+    <p className="text-sm text-right text-slate-500 dark:text-slate-400">
+      {children}
+    </p>
   )
 }
 
@@ -103,8 +108,8 @@ export function SelectionDropdown<T>({
           >
             <div className="flex-1">
               {selected ? (
-                <div className="flex items-center justify-between">
-                  <p className="font-medium text-slate-900 dark:text-white">
+                <div className="flex items-center justify-between gap-4">
+                  <p className="shrink-0 font-medium text-slate-900 dark:text-white">
                     {renderLabel(selected)}
                   </p>
                   <Detail>{renderDetail?.(selected)}</Detail>
@@ -153,14 +158,14 @@ export function SelectionDropdown<T>({
                           "bg-blue-50 dark:bg-blue-950/20 border-blue-500/20"
                       )}
                     >
-                      <div className="flex justify-between items-center">
-                        <p className="font-medium text-slate-900 dark:text-white">
+                      <div className="flex justify-between items-center gap-4">
+                        <p className="shrink-0 font-medium text-slate-900 dark:text-white">
                           {renderLabel(option)}
                         </p>
-                        <div className="flex items-center gap-3">
+                        <div className="flex items-center gap-3 min-w-0">
                           <Detail>{renderDetail?.(option)}</Detail>
                           {isSelected && (
-                            <Check className="h-5 w-5 text-blue-600 dark:text-blue-400" />
+                            <Check className="h-5 w-5 shrink-0 text-blue-600 dark:text-blue-400" />
                           )}
                         </div>
                       </div>
