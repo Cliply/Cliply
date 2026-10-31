@@ -96,4 +96,3 @@ if (!process.versions.electron) {
     app.exit(0)
   }).catch(fail)
 }
-
