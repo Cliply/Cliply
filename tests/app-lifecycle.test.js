@@ -4,9 +4,8 @@
  * in and what is handed to what - never the services themselves, which have
  * their own suites.
  *
- * the module self-starts at require time, so the single instance lock is mocked
- * to refuse: the module then quits instead of constructing an app, and the
- * class it exports is ours to instantiate per test.
+ * importing the class does not start the app; each test owns its instance.
+ * use smoke:electron for the real runtime, preload and renderer boundary.
  */
 
 const mockWindow = {
@@ -29,7 +28,6 @@ const mockWindow = {
 const mockElectron = {
   app: {
     setName: jest.fn(),
-    setVersion: jest.fn(),
     getName: jest.fn(() => "Cliply"),
     getLocale: jest.fn(() => "en-US"),
     whenReady: jest.fn(() => Promise.resolve()),

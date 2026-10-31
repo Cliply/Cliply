@@ -52,7 +52,7 @@ all that does is drop the "downloaded from the internet" flag. only ever run it 
 
 ### setup
 
-node 18 or newer.
+node 22.12 or newer (npm 10 or newer). the current desktop build uses electron 45 and requires macos 13 or newer on apple silicon, or 64-bit windows 10 or newer.
 
 ```bash
 npm install && npm run install:renderer

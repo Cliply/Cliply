@@ -5,11 +5,20 @@ on:
     branches: [master]
   pull_request:
   workflow_dispatch:
+    inputs:
+      package_check:
+        description: 'Also build Mac and Windows installers without publishing'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
 
 jobs:
   check:
     name: ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
@@ -18,13 +27,17 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
           cache: 'npm'
           cache-dependency-path: |
             package-lock.json
             src/main/renderer/package-lock.json
 
       - run: npm ci
+      # Electron 42+ downloads on first use, not during npm ci. Finish that
+      # before Jest workers can require the package and start competing installs.
+      - name: Install Electron runtime
+        run: npx --no-install install-electron --no
       - run: npm run install:renderer
 
       - name: Lint main
@@ -42,3 +55,75 @@ jobs:
       # tsc -b then vite build: the same step the release build runs before packaging
       - name: Build renderer
         run: npm run build:renderer
+
+      - name: Smoke test Electron startup, preload and renderer
+        run: npm run smoke:electron
+
+      # Run explicitly for runtime/tooling upgrades. Keep the ordinary PR check
+      # quick, and never use the publishing release workflow for validation.
+      - name: Download release helpers
+        if: github.event_name == 'workflow_dispatch' && inputs.package_check
+        shell: bash
+        run: |
+          if [[ "$RUNNER_OS" == "macOS" ]]; then
+            platform=macos
+            suffix=""
+          else
+            platform=windows
+            suffix=.exe
+          fi
+          mkdir -p "binaries/$platform" "binaries/deno/$platform"
+          curl -fLsS --retry 3 --retry-delay 2 -o "binaries/$platform/ffmpeg$suffix" \
+            "https://github.com/${{ github.repository }}/releases/download/binaries/ffmpeg$suffix"
+          curl -fLsS --retry 3 --retry-delay 2 -o "binaries/deno/$platform/deno$suffix" \
+            "https://github.com/${{ github.repository }}/releases/download/binaries/deno$suffix"
+          chmod +x "binaries/$platform/ffmpeg$suffix" "binaries/deno/$platform/deno$suffix"
+
+      - name: Fetch release yt-dlp engine
+        if: github.event_name == 'workflow_dispatch' && inputs.package_check
+        run: npm run fetch:ytdlp
+        env:
+          BUILD_TARGET_PLATFORM: ${{ runner.os == 'macOS' && 'darwin-arm64' || 'win32-x64' }}
+
+      - name: Build installers without publishing
+        if: github.event_name == 'workflow_dispatch' && inputs.package_check
+        run: npx --no-install electron-builder ${{ runner.os == 'macOS' && '--mac' || '--win' }} --publish never
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+
+      - name: Verify packaged helper executables
+        if: github.event_name == 'workflow_dispatch' && inputs.package_check
+        shell: bash
+        run: |
+          node <<'JS'
+          const assert = require('node:assert/strict')
+          const path = require('node:path')
+          const { spawnSync } = require('node:child_process')
+          const { resolveExecutableIn } = require('./src/main/services/ytdlp-engine')
+          const payload = path.resolve(process.platform === 'darwin'
+            ? 'dist/mac-arm64/Cliply.app/Contents/Resources/binaries'
+            : 'dist/win-unpacked/resources/binaries')
+          const suffix = process.platform === 'win32' ? '.exe' : ''
+          const engine = resolveExecutableIn(path.join(payload, 'ytdlp'), process.platform)
+          assert.ok(engine, 'packaged yt-dlp executable is present')
+          for (const [binary, args] of [
+            [path.join(payload, 'ffmpeg' + suffix), ['-version']],
+            [path.join(payload, 'deno', 'deno' + suffix), ['--version']],
+            [engine, ['--version']]
+          ]) {
+            const result = spawnSync(binary, args, { stdio: 'inherit', timeout: 30000 })
+            assert.equal(result.status, 0, result.error?.message || binary)
+          }
+          JS
+
+      - name: Upload validation installers
+        if: github.event_name == 'workflow_dispatch' && inputs.package_check
+        uses: actions/upload-artifact@v4
+        with:
+          name: validation-${{ runner.os }}
+          path: |
+            dist/*.dmg
+            dist/*.zip
+            dist/*.exe
+          if-no-files-found: error
+          retention-days: 7

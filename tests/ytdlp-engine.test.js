@@ -1322,7 +1322,11 @@ describe("cookie file detection", () => {
         "#HttpOnly_.youtube.com\tTRUE\t/\tTRUE\t0\tSAPISID\tvalue\n"
     )
 
+    // This fixture owns its jar. Do not start background initialization against
+    // real user data, or leave it writing after the temporary directory is gone.
+    const initialize = jest.spyOn(CookieManager.prototype, "initialize").mockResolvedValue(undefined)
     const manager = new CookieManager()
+    initialize.mockRestore()
     manager.cookieDir = tempDir
     manager.cookieFile = jar
     manager.statusFile = path.join(tempDir, "manager-status.json")

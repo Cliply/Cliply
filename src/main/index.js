@@ -93,7 +93,7 @@ class CliplyApp {
 
       // set app properties
       app.setName("Cliply")
-      app.setVersion(getAppVersion())
+      // Electron reads its version from package.json; there is no setVersion API.
 
       // init services
       await this.initializeServices()
@@ -720,32 +720,29 @@ class CliplyApp {
   }
 }
 
-// single instance enforcement
-const gotTheLock = app.requestSingleInstanceLock()
+// Importing the class for checks must not start a second app or quit Electron.
+if (require.main === module) {
+  const gotTheLock = app.requestSingleInstanceLock()
 
-if (!gotTheLock) {
-  console.log("Another instance is already running. Quitting...")
-  app.quit()
-} else {
-  // create and init the app
-  const cliplyApp = new CliplyApp()
-  cliplyApp.initialize()
+  if (!gotTheLock) {
+    console.log("Another instance is already running. Quitting...")
+    app.quit()
+  } else {
+    const cliplyApp = new CliplyApp()
+    cliplyApp.initialize()
+  }
+
+  process.on("uncaughtException", (error) => {
+    console.error("Uncaught Exception:", error)
+    dialog.showErrorBox(
+      "Unexpected Error",
+      `An unexpected error occurred:\n\n${error.message}`
+    )
+  })
+
+  process.on("unhandledRejection", (reason, promise) => {
+    console.error("Unhandled Rejection at:", promise, "reason:", reason)
+  })
 }
-
-// error handling
-process.on("uncaughtException", (error) => {
-  console.error("Uncaught Exception:", error)
-
-  const sanitizedMessage = error.message
-
-  dialog.showErrorBox(
-    "Unexpected Error",
-    `An unexpected error occurred:\n\n${sanitizedMessage}`
-  )
-})
-
-process.on("unhandledRejection", (reason, promise) => {
-  console.error("Unhandled Rejection at:", promise, "reason:", reason)
-})
 
 module.exports = CliplyApp
