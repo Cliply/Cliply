@@ -62,6 +62,7 @@ screenshot_*.png
 temp-ico/
 /scripts/temp-ico/
 
+# Shared agent guidance is committed in AGENTS.md; legacy local notes stay local.
 /CLAUDE.md
 
 # Log files

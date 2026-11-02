@@ -5,7 +5,7 @@ machine. this one is for the person looking at a dashboard, and it is about how 
 read what arrives. everything here is a property of how the data is *produced*, so
 none of it is visible from inside posthog.
 
-the authority for what exists is [`src/main/services/analytics.js`](../src/main/services/analytics.js):
+the authority for what exists is [`src/main/services/analytics/schema.js`](../src/main/services/analytics/schema.js):
 `ALLOWED_PROPERTIES` is the exhaustive event and property list, `PROPERTY_KINDS`
 and `PROPERTY_VOCABULARIES` say what values are permitted, and
 [`tests/analytics-pii-guard.test.js`](../tests/analytics-pii-guard.test.js) pins the
@@ -36,13 +36,17 @@ there is no flag on the event saying a repair happened, so a low `speed_bucket`
 cannot be told from a repaired one after the fact. read the distribution's shape
 rather than its tail.
 
-### `engine_update_failed` is not a failure count
+### split engine update failures by reason and app version
 
-`update_reason` includes `busy`, which means the update check refused to run at all
-because a download held the engine gate — nothing failed, the check was skipped. it
-is on the event on purpose: an install whose engine therefore never updates is
-exactly what this event exists to find. but it is a different thing from
-`checksum-mismatch` or `download-failed`.
+older clients reported `busy` on `engine_update_failed` when a check refused to
+run because an operation held the engine gate. no update had actually failed.
+the current scheduler defers busy work and does not report `busy` or `cancelled`
+as failed updates. those values remain in the vocabulary for older clients.
+
+background checks and download-triggered repairs now share version and event
+reporting. transient check/download/swap failures have bounded retries, so multiple
+failure events can describe attempts within one session rather than separate
+installs. checksum and validation failures are not automatically retried.
 
 **always split this metric by `update_reason`.** the raw event count answers no
 question anybody has.
@@ -54,8 +58,9 @@ deliberately not merged.
 
 ### `error_message` is lossy in a way that is not uniform
 
-the sanitizer's scrub-then-refuse design (see the long comment above `TEXT_PLACEHOLDER`
-in `analytics.js`) means some messages arrive whole, some arrive with `[path]` or
+the sanitizer's scrub-then-refuse design (see `TEXT_PLACEHOLDER` and the scrub rules
+in [`analytics/redact.js`](../src/main/services/analytics/redact.js)) means some
+messages arrive whole, some arrive with `[path]` or
 `[file]` markers in them, and some arrive as the literal `[redacted]`. the split is
 not random — it depends on what shapes the message happened to contain — so
 `[redacted]` counting high for one `error_category` says something about that error's
@@ -98,7 +103,7 @@ if a chart on either of these is flat, that is why. removing them from
   those are. every unrecognised value becomes the same literal and no hostname is kept
   anywhere, so there is nothing behind the count to break down. answering "which sites"
   would take a deliberate change: adding the site to `KNOWN_PLATFORMS` in
-  [`analytics.js`](../src/main/services/analytics.js), by name, one at a time.
+  [`analytics/schema.js`](../src/main/services/analytics/schema.js), by name, one at a time.
 
 ## which builds send anything
 
