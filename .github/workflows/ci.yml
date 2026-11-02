@@ -95,6 +95,10 @@ jobs:
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
 
+      - name: Verify downloads and recovery with real release helpers
+        if: github.event_name == 'workflow_dispatch' && inputs.package_check
+        run: node scripts/smoke-download-recovery.js
+
       - name: Verify packaged helper executables
         if: github.event_name == 'workflow_dispatch' && inputs.package_check
         shell: bash
