@@ -38,6 +38,20 @@ it speaks english and russian based on your system language, updates itself, and
 
 got an idea or found something broken? [open an issue](https://github.com/Cliply/Cliply/issues).
 
+### local files — under validation
+
+this branch also has a local-file workspace: play a file, save one fast-trimmed
+section, extract one audio track, remove tracks or change a compatible container.
+these tools copy existing media without re-encoding. fast cuts can move to a
+nearby video keyframe; unsupported layouts show a reason instead of converting
+or silently dropping tracks. the original stays open and exports use a new file.
+
+production availability is pending: shared ffprobe assets and their complete
+source records are not ready, and windows/linux native acceptance is outstanding.
+normal builds without ffprobe show a readable inspection error; downloads still
+work. see the [verified profiles and limits](docs/architecture.md#local-media-validation-status)
+and [development staging instructions](third-party/ffprobe/README.md).
+
 ### get it
 
 grab it from [releases](https://github.com/Cliply/Cliply/releases/latest), or [cliply.space](https://cliply.space/downloads) if you'd rather just click a button. windows gets an `.exe` installer, macos a `.dmg` for apple silicon. intel macs aren't currently supported. linux x64 packaging is prepared for the next release: an AppImage and a `.deb` for ubuntu/debian systems. linux downloads become available when those files appear on the release page.

@@ -178,3 +178,39 @@ describe("release attachment verification", () => {
     await expect(verify()).rejects.toThrow("Missing release manifest: latest-linux.yml")
   })
 })
+
+describe("published FFprobe acquisition", () => {
+  const records = platform => ({ [platform]: { assetId: 123, sourceRecord: "verified-source.json", sha256: crypto.createHash("sha256").update(executable(platform, "probe")).digest("hex") } })
+  test.each([["darwin-arm64", "macos", "ffprobe", ""], ["linux-x64", "linux", "ffprobe-linux-x64", ""], ["win32-x64", "windows", "ffprobe.exe", ".exe"]])("pins and stages %s in its target tree", async (platform, directory, asset, suffix) => {
+    const http = { download: jest.fn(async (url, destination) => fs.writeFile(destination, executable(platform, url.endsWith(asset) ? "probe" : "other"))) }
+    await fetchHelpers({ platform, binariesDir: root, http, ffprobeRecords: records(platform), requireFfprobe: true })
+    expect(await fs.readFile(path.join(root, directory, `ffprobe${suffix}`))).toEqual(executable(platform, "probe"))
+    expect(http.download.mock.calls.some(([url]) => url.endsWith(`/binaries/${asset}`))).toBe(true)
+    await expectNoStaging()
+  })
+  test.each(["missing", "digest", "architecture"])("%s failure preserves every existing helper and removes staging", async failure => {
+    const existing = await seedLinuxHelpers(), probe = path.join(root, "linux/ffprobe")
+    await fs.writeFile(probe, "existing probe"); existing.push(probe)
+    const manifest = records("linux-x64")
+    const wrong = executable("darwin-arm64", "probe")
+    if (failure === "architecture") manifest["linux-x64"].sha256 = crypto.createHash("sha256").update(wrong).digest("hex")
+    const http = { download: jest.fn(async (url, destination) => {
+      if (url.endsWith("ffprobe-linux-x64")) {
+        if (failure === "missing") throw new Error("HTTP 404")
+        return fs.writeFile(destination, wrong)
+      }
+      await new Promise(setImmediate); return fs.writeFile(destination, executable("linux-x64"))
+    }) }
+    await expect(fetchHelpers({ platform: "linux-x64", binariesDir: root, http, ffprobeRecords: manifest })).rejects.toThrow()
+    for (const file of existing) expect(await fs.readFile(file, "utf8")).toBe(file === probe ? "existing probe" : "existing helper")
+    await expectNoStaging()
+  })
+  test("required capability refuses unpublished records before network or filesystem work", async () => {
+    const http = fakeDownloads("linux-x64"), binariesDir = path.join(root, "absent")
+    await expect(fetchHelpers({ platform: "linux-x64", binariesDir, http, ffprobeRecords: {}, requireFfprobe: true })).rejects.toThrow("No verified published FFprobe")
+    expect(http.download).not.toHaveBeenCalled(); expect(await fs.readdir(root)).toEqual([])
+  })
+  test.each([{ sha256: "latest", assetId: 1, sourceRecord: "source" }, { sha256: "a".repeat(64), sourceRecord: "source" }, { sha256: "a".repeat(64), assetId: 1 }])("malformed publication record fails closed %p", record => {
+    expect(() => require("../scripts/fetch-helpers").ffprobeRelease("linux-x64", { "linux-x64": record })).toThrow()
+  })
+})

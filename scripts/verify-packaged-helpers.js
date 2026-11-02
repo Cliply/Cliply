@@ -5,10 +5,11 @@ const path = require("node:path")
 const { spawnSync } = require("node:child_process")
 const { parseArgs } = require("node:util")
 const { resolveExecutableIn } = require("../src/main/services/ytdlp-engine")
-const { verifyArchitecture } = require("./fetch-helpers")
+const { verifyArchitecture, ffprobeRelease } = require("./fetch-helpers")
 
 async function verifyPackagedHelpers(resources, { requireFfprobe = false } = {}) {
   const platform = `${process.platform}-${process.arch}`
+  requireFfprobe ||= process.env.CLIPLY_REQUIRE_FFPROBE === "1" || Boolean(ffprobeRelease(platform))
   const binaries = path.resolve(resources, "binaries")
   const suffix = process.platform === "win32" ? ".exe" : ""
   const engine = resolveExecutableIn(path.join(binaries, "ytdlp"))

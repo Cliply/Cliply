@@ -10,7 +10,7 @@ code. Do not run a publishing workflow to test a change.
 
 | Workflow | Trigger and effect |
 | --- | --- |
-| [CI](../.github/workflows/ci.yml) | PRs and pushes to master run checks. Manual `package_check=true` also builds native installers with publishing disabled. |
+| [CI](../.github/workflows/ci.yml) | PRs and pushes to master run checks. Manual `package_check=true` also builds native installers with publishing disabled. `ffprobe_candidate_check=true` instead runs only read-only native candidate checks. |
 | [Build Release](../.github/workflows/build-release.yml) | A pushed `v*` tag or manual dispatch builds and publishes an app release. Both triggers are publishing actions. |
 | [Stage Linux helpers](../.github/workflows/stage-linux-helpers.yml) | Manual/reusable upstream verification. `publish=false` is the default; explicit publication adds Linux FFmpeg/Deno assets to the existing helper release. |
 | [Build PO token payload](../.github/workflows/build-pot-payload.yml) | Manual native payload builds for selected platforms. `publish=false` is the default; publication writes to the helper release. |
@@ -49,22 +49,86 @@ The resource argument must point to the actual native build, not a different
 platform's tree. Media/recovery checks create local fixtures and clean their
 temporary files. Ordinary mocked unit tests do not require these executables.
 
-Local inspection's FFprobe is currently optional and has no shared release
-assets. Its [staging record](../third-party/ffprobe/README.md) describes exact
-candidates and remaining source/native checks. The resource filters include a
-present FFprobe, and the helper verifier checks it when present. To require
-local-inspection capability explicitly, use:
+Local-media production acceptance is pending. No FFprobe asset is published;
+the [source/staging record](../third-party/ffprobe/README.md) lists exact candidates
+and unresolved source/native requirements. `published.json` intentionally has no
+platform records. Ordinary downloader CI can pass without local-media support.
+
+The prepared CI input `local_media_check=true` requires `package_check=true`.
+It sets `CLIPLY_REQUIRE_FFPROBE=1`, requires the published pin during fetching,
+fails packaging on a missing FFprobe, and runs packaged offline local-media UI
+plus concurrent URL/local-export recovery checks. Run it on a reviewed, pushed
+`local-media-tools` ref only when workflow/push authority and helper readiness
+are established. Do not dispatch Build Release for validation.
+
+Prepublication native evidence uses the separate read-only
+[Validate FFprobe candidates](../.github/workflows/validate-ffprobe-candidate.yml)
+workflow. An authorized actor must first review, commit and push the Stage 7
+`local-media-tools` ref, then dispatch the existing **CI** workflow on that ref
+with `ffprobe_candidate_check=true` and all other inputs false. This mode runs
+only the read-only candidate workflow; it takes precedence over other modes.
+The local reusable-workflow call uses the same commit as CI. Direct manual
+dispatch of the new workflow (no inputs) is available only once its definition
+exists on the default branch, as required by
+[GitHub's dispatch rules](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#onworkflow_dispatch).
+Its macOS ARM64, Windows x64
+and Ubuntu 24.04 x64 jobs acquire the exact `candidates.json` pins, stage/hash/check
+them and build disposable native packages. Native version/license/libraries,
+inspection, all four tools, cancel/crash recovery, packaged UI, normal-service
+startup and URL recovery run before publication. Only small evidence is uploaded.
+The workflow never writes `published.json`, publishes helpers or uses a latest
+candidate. These hosts do not establish minimum-OS support.
+
+With existing dependencies, built renderer and ordinary project helpers, the
+same candidate checks can run locally:
+
+```sh
+node scripts/validate-ffprobe-candidate.js --evidence <new-absolute-evidence-directory>
+```
+
+`--archive <absolute-pinned-archive>` avoids downloading it again. The script
+checks the same hashes either way, uses an owned project/package copy, preserves
+the production manifest and removes its temporary executables/media on exit.
+It requires a native desktop session (Linux: Xvfb/DBus is supported). Passing
+candidate checks does not satisfy the separate corresponding-source gate.
+
+For a private native package already containing verified candidate bytes:
 
 ```sh
 node scripts/verify-packaged-helpers.js --resources <actual-resources> --require-ffprobe
-node scripts/smoke-local-media.js --ffprobe <actual-resources>/binaries/ffprobe --ffmpeg <actual-resources>/binaries/ffmpeg
+node scripts/smoke-packaged-local-media.js --resources <actual-resources>
+node scripts/smoke-download-recovery.js --resources <actual-resources> --local-media
+node scripts/smoke-media.js --resources <actual-resources>
 ```
 
-Use `.exe` paths on Windows. The second command creates/deletes synthetic WAV
-and H.264/AAC MP4 fixtures and checks inspection, source preservation and failure
-drainage; it is not preview/export validation. Current downloader CI does not
-require FFprobe yet, so its success alone cannot establish local-media support.
-Do not publish candidates or dispatch native CI without the required task authorization.
+Use the native resources tree. The package UI check copies the app into an owned
+temporary directory, runs its actual ASAR/preload/renderer and bundled helpers
+without development overrides, then removes that copy and profile. Its test entry
+isolates dialogs, telemetry, updates and unrelated external services. It checks
+inspection, playback, all four exports in one session, route/file changes,
+invalid and large files, EN/RU, theme and cleanup. It is not a substitute for a
+normal installed-app startup/update check. `--idle-only` measures that isolated
+unopened workspace for comparisons; it is not cold-start product benchmarking.
+`--normal-startup` instead initializes real application services, settings,
+cookie storage, engine seeding, IPC and the renderer in a fresh owned profile.
+Analytics is opted out and external update scheduling is disabled. It records
+startup/service time, three-second idle process metrics and normal quit drainage;
+it neither clears OS caches nor proves installed-app/update behavior.
+`--long-media` runs the UI actions on a generated five-minute, 720p H.264/AAC
+file instead of the small fixture. For bounded POSIX helper CPU/RSS, temporary
+disk and sequential range measurements, use
+`node scripts/measure-local-media.js <new-absolute-directory> <ffmpeg> <ffprobe>`.
+An optional fourth argument must be a disposable small mounted volume for the
+real disk-full check. Never supply a normal user volume. Remove generated media
+after retaining the JSON evidence; CPU samples are process-lifetime averages and
+can miss short helper peaks.
+On Linux, run the UI check under an available desktop session (CI uses Xvfb/DBus).
+No sandbox bypass is added for packaged acceptance.
+
+The owner authorized new verified shared FFprobe assets and source records once
+the recorded readiness conditions pass. That does not authorize unverified
+candidates, replacement of existing assets, an app release or a workflow dispatch.
+Native Windows/Linux, minimum-OS and complete source gates remain outstanding.
 
 The Linux package smoke script runs only on an ephemeral GitHub runner. It copies
 the app into disposable test packages, installs/purges its DEB, checks X11/Wayland

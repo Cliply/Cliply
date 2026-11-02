@@ -6,8 +6,16 @@ on:
   pull_request:
   workflow_dispatch:
     inputs:
+      ffprobe_candidate_check:
+        description: 'Only validate pinned FFprobe candidates in disposable native packages; no publication'
+        type: boolean
+        default: false
       package_check:
         description: 'Also build and verify native installers without publishing'
+        type: boolean
+        default: false
+      local_media_check:
+        description: 'Require published FFprobe and validate packaged local media (also enable package_check)'
         type: boolean
         default: false
       stage_linux_helpers:
@@ -23,8 +31,12 @@ permissions:
   contents: read
 
 jobs:
+  validate-ffprobe-candidate:
+    if: github.event_name == 'workflow_dispatch' && inputs.ffprobe_candidate_check
+    uses: ./.github/workflows/validate-ffprobe-candidate.yml
+
   stage-linux-helpers:
-    if: github.event_name == 'workflow_dispatch' && inputs.stage_linux_helpers
+    if: github.event_name == 'workflow_dispatch' && inputs.stage_linux_helpers && !inputs.ffprobe_candidate_check
     permissions:
       contents: write
     uses: ./.github/workflows/stage-linux-helpers.yml
@@ -32,10 +44,12 @@ jobs:
       publish: ${{ inputs.publish_linux_helpers }}
 
   check:
-    if: ${{ !inputs.stage_linux_helpers }}
+    if: ${{ !inputs.stage_linux_helpers && !inputs.ffprobe_candidate_check }}
     name: ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: ${{ inputs.package_check && 35 || 20 }}
+    env:
+      CLIPLY_REQUIRE_FFPROBE: ${{ inputs.local_media_check && '1' || '0' }}
     strategy:
       fail-fast: false
       matrix:
@@ -61,6 +75,10 @@ jobs:
           cache-dependency-path: |
             package-lock.json
             src/main/renderer/package-lock.json
+
+      - name: Validate local-media package request
+        if: inputs.local_media_check && !inputs.package_check
+        run: node -e "throw new Error('local_media_check requires package_check=true')"
 
       - run: npm ci
       # Electron 42+ downloads on first use, not during npm ci. Finish that
@@ -123,7 +141,7 @@ jobs:
 
       - name: Verify downloads and recovery with real release helpers
         if: github.event_name == 'workflow_dispatch' && inputs.package_check
-        run: node scripts/smoke-download-recovery.js --resources "${{ matrix.resources }}"
+        run: node scripts/smoke-download-recovery.js --resources "${{ matrix.resources }}" ${{ inputs.local_media_check && '--local-media' || '' }}
 
       - name: Verify native media formats with packaged helpers
         if: github.event_name == 'workflow_dispatch' && inputs.package_check
@@ -132,6 +150,14 @@ jobs:
       - name: Verify packaged helper executables
         if: github.event_name == 'workflow_dispatch' && inputs.package_check
         run: node scripts/verify-packaged-helpers.js --resources "${{ matrix.resources }}"
+
+      - name: Verify packaged local media offline
+        if: github.event_name == 'workflow_dispatch' && inputs.package_check && inputs.local_media_check && runner.os != 'Linux'
+        run: node scripts/smoke-packaged-local-media.js --resources "${{ matrix.resources }}"
+
+      - name: Verify packaged local media offline on Linux
+        if: github.event_name == 'workflow_dispatch' && inputs.package_check && inputs.local_media_check && runner.os == 'Linux'
+        run: dbus-run-session -- xvfb-run --auto-servernum node scripts/smoke-packaged-local-media.js --resources "${{ matrix.resources }}"
 
       - name: Verify Linux AppImage launcher and installed DEB
         if: github.event_name == 'workflow_dispatch' && inputs.package_check && runner.os == 'Linux'

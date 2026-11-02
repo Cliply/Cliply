@@ -5,19 +5,22 @@ const fs = require("node:fs")
 const http = require("node:http")
 const os = require("node:os")
 const path = require("node:path")
-const { spawnSync } = require("node:child_process")
+const { spawn, spawnSync } = require("node:child_process")
 const { parseArgs } = require("node:util")
 const { YtdlpEngine } = require("../src/main/services/ytdlp-engine")
 const { DownloadRunner } = require("../src/main/services/download-runner")
+const { ownedPartialBytes } = require("./local-smoke-sampling")
 
 const repo = path.resolve(__dirname, "..")
-const { values } = parseArgs({ options: { resources: { type: "string" } } })
+const { values } = parseArgs({ options: { resources: { type: "string" }, "local-media": { type: "boolean", default: false } } })
 const resources = values.resources ? path.resolve(values.resources) : repo
 const root = fs.mkdtempSync(path.join(os.tmpdir(), "cliply-recovery-"))
 const platform = { darwin: "macos", win32: "windows", linux: "linux" }[process.platform]
 const ffmpeg = path.join(resources, "binaries", ...(values.resources ? [] : [platform]), `ffmpeg${process.platform === "win32" ? ".exe" : ""}`)
 const video = path.join(root, "source.mp4")
-const engine = new YtdlpEngine({ userDataPath: root, resourcesPath: resources, ffmpegPath: ffmpeg })
+const engine = new YtdlpEngine({ userDataPath: root, resourcesPath: resources, ffmpegPath: ffmpeg,
+  spawnFn: (binary, args, options) => spawn(binary, ["--ignore-config", "--no-cache-dir", "--proxy", "", ...args], options) })
+let localMedia, helperPid, peakPartialBytes = 0, sampleTimer, sampleError
 let attempts = 0
 let fault = "none"
 let rejectedRequests = 0
@@ -116,7 +119,45 @@ async function main() {
   closedPort = unused.address().port
   await new Promise((resolve) => unused.close(resolve))
   console.log(`yt-dlp ${await engine.getVersion()}`)
+  if (values["local-media"]) {
+    assert(values.resources, "local-media comparison requires packaged resource helpers")
+    const { LocalMediaService } = require("../src/main/services/local-media")
+    const { resolveFfprobe } = require("../src/main/services/local-media/paths")
+    const { startExportProcess } = require("../src/main/services/local-media/export-process")
+    localMedia = new LocalMediaService({ selectFile: async () => video,
+      resolveProbe: () => resolveFfprobe({ isPackaged: true, resourcesPath: resources }),
+      exportOptions: { storagePath: path.join(root, "local-state"), resolveFfmpeg: async () => ffmpeg,
+        selectDestination: async () => path.join(root, "local.aac"),
+        runProcess: (exe, args, options) => startExportProcess(exe, ["-readrate", "0.05", ...args], {
+          ...options, spawnProcess: (...args) => {
+            const worker = spawn(...args); worker.on("message", message => { if (message.helperPid) helperPid = message.helperPid }); return worker
+          }
+        }) } })
+    const { source } = await localMedia.open()
+    const { plan } = await localMedia.exports.prepare({ operation: "extractAudio", sourceId: source.sourceId, streamIndex: 1 })
+    localMedia.exports.start(plan.planId)
+    for (let i = 0; i < 250 && !helperPid; i++) await new Promise(resolve => setTimeout(resolve, 20))
+    assert(helperPid, "native local FFmpeg started")
+    sampleTimer = setInterval(() => {
+      // Count only the owned partial, excluding completed URL outputs.
+      try { peakPartialBytes = Math.max(peakPartialBytes, ownedPartialBytes(root)) }
+      catch (error) { sampleError = error; clearInterval(sampleTimer) }
+    }, 50)
+  }
   await runCase("none", true, 1)
+  if (localMedia) {
+    assert.equal(localMedia.exports.job.state, "running", "URL download completed while local export stayed active")
+    assert.equal(engine.gate.isBusy(), false, "local job does not hold yt-dlp replacement gate")
+    const began = performance.now(), done = localMedia.exports.active.done
+    localMedia.exports.cancel(localMedia.exports.job.jobId); await done
+    clearInterval(sampleTimer)
+    if (sampleError) throw sampleError
+    assert.equal(localMedia.exports.job.state, "cancelled")
+    assert.equal(fs.existsSync(path.join(root, "local.aac")), false)
+    assert.throws(() => process.kill(helperPid, 0), error => error.code === "ESRCH")
+    assert(!fs.readdirSync(root).some(name => name.startsWith(".cliply-export-")))
+    console.log(JSON.stringify({ concurrentLocalExport: true, cancelToExitAndCleanupMs: performance.now() - began, peakPartialBytes, sampleIntervalMs: 50, readrate: 0.05, helperExited: true }))
+  }
   await runCase("transient", true, 2)
   await runCase("connection", true, 2)
   await runCase("permanent", false, 2, "NETWORK_ERROR")
@@ -127,8 +168,14 @@ main().catch((error) => {
   console.error(error)
   process.exitCode = 1
 }).finally(async () => {
-  await engine.awaitShutdown()
+  clearInterval(sampleTimer)
+  const drained = await Promise.allSettled([localMedia?.shutdown(), engine.awaitShutdown()])
   server.closeAllConnections()
   await new Promise((resolve) => server.close(resolve))
+  const failed = drained.find(result => result.status === "rejected")
+  if (failed) throw failed.reason // Preserve owned files if a helper did not drain.
   fs.rmSync(root, { recursive: true, force: true })
+}).catch(error => {
+  console.error("Recovery smoke cleanup failed:", error)
+  process.exitCode = 1
 })

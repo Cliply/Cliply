@@ -43,6 +43,10 @@ seeds a runnable engine into writable user data. IPC handlers then own the runne
 and expose the request boundary. A delayed engine check gives the first download
 a head start. Production app updates use electron-updater separately.
 
+Cookie construction and application startup share the same in-flight
+initialization promise. This prevents simultaneous startup calls from replacing
+the same temporary cookie jar; a later explicit refresh still runs normally.
+
 For a download, IPC maps the request and reserves a runner entry. The runner owns
 admission and concurrency; the configured cap is in `APP_CONFIG` in
 [`constants.js`](../src/main/utils/constants.js). Queued entries remain cancellable.
@@ -85,7 +89,7 @@ When adding a channel or changing a response, inspect main handlers, preload,
 renderer declarations, API wrappers and their tests together. Keep Node/file
 access in main and expose only the required bridge operations.
 
-## Local-file inspection, preview and copy-only tools (Stages 1–6)
+## Local-file inspection, preview and copy-only tools
 
 [`local-media.js`](../src/main/services/local-media.js) owns one in-memory source
 and at most one inspection, separately from download history, slots and the
@@ -256,8 +260,9 @@ small setup window before ownership is durable can leave an empty staging
 artifact requiring inspection. File descriptors and identity checks reduce path
 races; they are not protection against a hostile local process modifying bytes
 or directories. Network-mounted local paths are not positively identified.
-Windows/Linux descriptor inheritance, hard-link behavior and packaged embedded
-Node execution still require native Stage 7 acceptance.
+Windows/Linux descriptor inheritance and hard-link behavior still require native
+acceptance. Private macOS packaged embedded-Node execution is now verified; see
+[validation status](#local-media-validation-status).
 
 ### Full-file track removal
 
@@ -307,8 +312,9 @@ The synthetic harness is `scripts/smoke-local-tracks.js <new-task-dir>
 with the existing `CLIPLY_SMOKE_FFMPEG`/`CLIPLY_SMOKE_FFPROBE` overrides to include
 the real Electron UI checks in `npm run smoke:electron` after renderer build.
 Use a task-owned directory and remove helpers/media after verification. Native
-Stage 4 evidence is macOS ARM64 development-host only; other platforms and
-packaged execution remain Stage 7 gates.
+Stage 4 evidence was macOS ARM64 development-host only. The later private
+macOS package check is recorded in [validation status](#local-media-validation-status);
+other native platforms remain pending.
 
 ### Compatible full-file container changes
 
@@ -397,6 +403,10 @@ limits. Missing/nonfinite timing, nonincreasing DTS, packets longer than 100 ms,
 PTS/DTS separation over 500 ms and unexpectedly long scans are refused. FFprobe
 seeks approximately, so the result is validated instead of trusting the interval
 request. There is no whole-file packet cache or renderer-supplied command.
+The five-minute synthetic H.264/AAC check demonstrated this limit at requested
+starts 60.3 and 180.2 seconds: approximate seeks exceeded the accepted scan span
+and returned `TRIM_TIMING`. Nearby reviewed starts 62.2 and 182.2 passed. Longer
+files do not guarantee every range is supported; these safety limits remain.
 
 Video chooses an actual preceding/following key packet within ten seconds of
 the requested start. A collapsed range is refused; requested and planned cuts
@@ -436,8 +446,55 @@ cleanup still blocks exports while allowing shutdown once helpers have exited.
 Reproduce with `node scripts/smoke-local-trim.js <new-task-dir> <project-ffmpeg>
 <verified-ffprobe>`. After renderer build, `CLIPLY_SMOKE_TRIM=1` plus the existing
 helper/evidence environment overrides runs real Electron playback, trim, repeat,
-route and cancel checks via `npm run smoke:electron`. Evidence is macOS ARM64
-development-host only; native Windows/Linux and packaged checks remain Stage 7.
+route and cancel checks via `npm run smoke:electron`. Native Windows/Linux
+acceptance is pending; macOS development and private packaged checks are below.
+
+### Local-media validation status
+
+These are narrow verified profiles, not support for every file carrying an
+extension. Main rejects unknown, incompatible or ambiguous layouts before saving.
+
+| Action | Enabled behavior | Important limits |
+| --- | --- | --- |
+| Extract audio | One actual selected AAC-LC/MP3/PCM16 track, full duration, to ADTS AAC/MP3/WAV | No conversion or batch; verified mono/stereo PCM only; preview not required |
+| Remove tracks | Full-file compatible MP4/MOV/MKV, explicit retained tracks or Remove all audio | No implicit loss; tested H.264/AAC/text-subtitle profiles only; MP4/MOV default-flag promotion refused |
+| Change container | Full-file compatible MP4/MOV/MKV, all streams selected initially | Incompatible tracks need deliberate removal; bounded chapters preserved only in compatible MKV; unsupported subtitle flags refused |
+| Fast trim | One reviewed range, original container/layout, H.264/AAC MP4/MOV, AAC MP4/MOV/M4A or PCM16 WAV | Current native playback required; keyframe/packet/block boundaries; no MP3/raw-ADTS/MKV trim, extra streams, chapters or ambiguous timestamps |
+
+All four use the same one-job lifecycle, source checks, owned partial, validated
+output and atomic no-clobber publication. Main handles destination paths and
+commands; the renderer never supplies shell text. The original remains open.
+Exports can run beside URL downloads without occupying yt-dlp's replacement gate.
+No background proxies, thumbnails, waveforms, compression, projects or multi-cut
+editing were added.
+
+| Target | Evidence established | Still required |
+| --- | --- | --- |
+| macOS ARM64 | Development checks and private candidate package: actual ASAR/preload/renderer, resource-path helpers, native playback and four exports | Complete FFprobe source/build/notices, published pin, clean-machine/normal installed acceptance, macOS 13 and broader performance evidence |
+| Windows x64 | Unit-tested platform branches; candidate archive/header hashes from staging | Native helper/license/libraries/media, complete sources, package and minimum-OS execution |
+| Ubuntu 24.04 x64 | Unit-tested platform branches; candidate archive/header hashes from staging | Native helper/license/libraries/media, complete sources and packaged desktop execution |
+
+The macOS private package check runs offline with development helper overrides
+absent. Its test entry isolates external services and dialogs; it does not claim
+normal updater/installed-app acceptance. Final production FFprobe acquisition is
+inactive while `third-party/ffprobe/published.json` is empty. Missing-helper errors
+remain readable and do not stop downloads. Native/helper readiness gates cannot
+be waived by a successful ordinary downloader build.
+
+Reproduce combined UI with `CLIPLY_SMOKE_INTEGRATION=1` and the existing verified
+helper overrides for `npm run smoke:electron`, or run
+`scripts/smoke-packaged-local-media.js --resources <native-resources>` without
+overrides. Its fixtures include a 12-second H.264/AAC source and a sparse 512 MiB
+WAV; sparse-file opening is not large-disk throughput evidence. The package
+checker has `--idle-only` for like-for-like isolated startup/idle measurements.
+Native compatibility/cancel/crash matrices remain in the individual smoke scripts.
+[Release checks](releasing.md) define the pending three-platform CI gate.
+
+Follow-up acceptance: finish exact corresponding-source/notices and native host
+verification, publish only ready pinned helpers, run native package/minimum-OS
+checks, and complete cold/warm normal-service startup, representative long media,
+helper CPU/RSS peaks, slower/removable storage and disk-exhaustion measurements.
+Do not infer zero overhead or cross-platform support from small local fixtures.
 
 ## Storage and privacy
 

@@ -48,7 +48,7 @@ test("entry opens the workspace only after successful selection; cancellation ke
   expect(screen.queryByRole("heading")).toBeNull()
   fireEvent.click(screen.getByRole("button", { name: en["media.open"] }))
   await screen.findByRole("heading", { name: en["media.title"] })
-  expect(document.activeElement).toBe(screen.getByRole("heading"))
+  await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("heading")))
   expect(screen.getByText("synthetic.mp4")).toBeTruthy()
   expect(screen.getAllByRole("columnheader")).toHaveLength(5)
   expect(screen.getByText("12")).toBeTruthy()

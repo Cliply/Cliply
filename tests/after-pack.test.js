@@ -906,3 +906,13 @@ describe("afterPack", () => {
     ).resolves.toBeUndefined()
   })
 })
+
+describe("required local media package capability", () => {
+  test.each(["darwin", "win32", "linux"])("%s refuses absent FFprobe when local media is required", async platform => {
+    const pkg = makePackage(platform, { binaries: FULL_BINARIES[platform] })
+    await expect(collectBinaries(path.join(pkg.resourcesPath, "binaries"), platform, { requireFfprobe: true })).rejects.toThrow("missing required binaries: ffprobe")
+    const probe = path.join(pkg.resourcesPath, "binaries", platform === "win32" ? "ffprobe.exe" : "ffprobe")
+    writeFile(probe)
+    expect(await collectBinaries(path.join(pkg.resourcesPath, "binaries"), platform, { requireFfprobe: true })).toContain(probe)
+  })
+})

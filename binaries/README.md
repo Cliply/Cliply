@@ -4,8 +4,8 @@ Cliply packages FFmpeg, Deno and the standalone yt-dlp engine. Users do not need
 
 Local-file inspection has a separate, optional FFprobe resolver. Shared FFprobe
 assets are not published yet, so normal builds report missing inspection support
-without disabling downloads. Resource filters and optional `after-pack` handling
-do not mean FFprobe is bundled. See the [candidate/staging record](../third-party/ffprobe/README.md)
+without disabling downloads. A local-media build must explicitly require FFprobe;
+resource filters alone do not supply it. See the [candidate/staging record](../third-party/ffprobe/README.md)
 for verified development inputs, proposed asset names and remaining platform/source gaps.
 
 ## fetch the release helpers
@@ -80,8 +80,24 @@ are different locations. See [architecture](../docs/architecture.md) and
 
 FFprobe's prepared paths are `binaries/macos/ffprobe`,
 `binaries/linux/ffprobe`, `binaries/windows/ffprobe.exe`, copied when present to
-`<resources>/binaries/ffprobe[.exe]`. `fetch:helpers` still fetches only FFmpeg and
-Deno. For explicit local development, `CLIPLY_DEV_FFPROBE` may name an absolute,
+`<resources>/binaries/ffprobe[.exe]`. The reviewed publication manifest
+[`published.json`](../third-party/ffprobe/published.json) is intentionally empty.
+Until it has a platform record, `fetch:helpers` fetches only FFmpeg and Deno.
+Each future record contains the verified shared-release asset ID, final executable
+SHA256 and source-record reference. Fetching verifies that hash and architecture
+before installing any staged helper. It never follows an upstream “latest” URL.
+A changed shared asset fails the pinned hash check; it cannot silently update the
+helper used by an app build.
+
+`node scripts/fetch-helpers.js --require-ffprobe` fails before downloading anything
+when the platform has no publication record. `CLIPLY_REQUIRE_FFPROBE=1` applies
+the same requirement to fetching, after-pack and packaged-helper validation.
+A published platform automatically requires FFprobe in all three. Local inspection
+works offline once a complete app is installed; FFprobe updates travel with app
+updates, not a separate runtime downloader. Existing installations do not change
+when a GitHub asset changes.
+
+For explicit local development, `CLIPLY_DEV_FFPROBE` may name an absolute,
 verified task-owned executable when `NODE_ENV=development`; packaged apps ignore
 this override. The resolver never uses PATH/Homebrew or downloads on file open.
 
