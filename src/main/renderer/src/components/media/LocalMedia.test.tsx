@@ -13,7 +13,7 @@ import { LocalFileEntry } from "./LocalFileEntry"
 import { NativeMediaPlayer } from "./NativeMediaPlayer"
 import MediaPage from "@/pages/MediaPage"
 
-vi.mock("@/lib/api", () => ({ mediaApi: { open: vi.fn(), close: vi.fn(), getState: vi.fn(), preview: vi.fn(), releasePreview: vi.fn() } }))
+vi.mock("@/lib/api", () => ({ mediaApi: { open: vi.fn(), close: vi.fn(), getState: vi.fn(), preview: vi.fn(), releasePreview: vi.fn(), confirmPlayback: vi.fn() } }))
 vi.mock("@/components/ui/mode-toggle", () => ({ ModeToggle: () => <button>Theme</button> }))
 
 const source = {
@@ -34,6 +34,7 @@ beforeEach(() => {
   vi.spyOn(HTMLMediaElement.prototype, "load").mockImplementation(() => {})
   vi.mocked(mediaApi.preview).mockResolvedValue(grant)
   vi.mocked(mediaApi.releasePreview).mockResolvedValue({ released: true })
+  vi.mocked(mediaApi.confirmPlayback).mockImplementation(async ({ played }) => ({ confirmed: played }))
   vi.mocked(mediaApi.close).mockResolvedValue({ closed: true })
   vi.mocked(mediaApi.getState).mockImplementation(async () => ({ source: useLocalMedia.getState().source, busy: false }))
 })
@@ -53,7 +54,7 @@ test("entry opens the workspace only after successful selection; cancellation ke
   expect(screen.getByText("12")).toBeTruthy()
   expect(screen.getByText("Captions")).toBeTruthy()
   for (const key of ["media.trim"] as const) {
-    expect((screen.getByRole("button", { name: en[key] }) as HTMLButtonElement).disabled).toBe(true)
+    expect((screen.getByRole("button", { name: en[key] }) as HTMLButtonElement).disabled).toBe(false)
   }
   expect((screen.getByRole("button", { name: en["media.remux"] }) as HTMLButtonElement).disabled).toBe(false)
   fireEvent.click(screen.getByRole("button", { name: "ru" }))

@@ -24,13 +24,17 @@ export function ExportStatus() {
     running: "media.copyRunning", validating: "media.copyValidating", completed: "media.copyCompleted",
     cancelled: "media.copyCancelled", failed: "media.copyFailed"
   }
+  const clipLabels: Partial<Record<LocalExportJob["state"], Key>> = {
+    running: "media.clipRunning", validating: "media.clipValidating", completed: "media.clipCompleted",
+    cancelled: "media.clipCancelled", failed: "media.clipFailed"
+  }
   const code = snapshot.recoveryError || job?.error
   return <div className="space-y-3" aria-label={t("media.exportStatus")}>
     {job && <>
-      <p role="status" className="break-words text-sm">{t((job.operation === "removeTracks" || job.operation === "remux") ? copyLabels[job.state] || labels[job.state] : labels[job.state])}{job.outputName ? ` · ${job.outputName}` : ""}</p>
+      <p role="status" className="break-words text-sm">{t(job.operation === "trim" ? clipLabels[job.state] || labels[job.state] : (job.operation === "removeTracks" || job.operation === "remux") ? copyLabels[job.state] || labels[job.state] : labels[job.state])}{job.outputName ? ` · ${job.outputName}` : ""}</p>
       <Progress value={job.progress} aria-label={t("media.exportProgress")} />
       <div className="flex flex-wrap gap-2">
-        {["reserved", "running", "validating", "stopping"].includes(job.state) && <Button variant="outline" disabled={pending || job.state === "stopping"} onClick={() => void localExportActions.cancel(job.jobId)}>{t((job.operation === "removeTracks" || job.operation === "remux") ? "media.cancelCopy" : "media.cancelExport")}</Button>}
+        {["reserved", "running", "validating", "stopping"].includes(job.state) && <Button variant="outline" disabled={pending || job.state === "stopping"} onClick={() => void localExportActions.cancel(job.jobId)}>{t(job.operation === "trim" ? "media.cancelClip" : (job.operation === "removeTracks" || job.operation === "remux") ? "media.cancelCopy" : "media.cancelExport")}</Button>}
         {job.state === "completed" && <Button variant="outline" onClick={() => void localExportActions.reveal(job.jobId)}>{t("media.revealOutput")}</Button>}
       </div>
     </>}

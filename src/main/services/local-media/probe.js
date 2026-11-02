@@ -22,7 +22,7 @@ function probeArgs(sourcePath) {
 // including after a failed drain; never call a killed-but-not-exited child done.
 function startProbe(executable, sourcePath, {
   spawnProcess = spawn, timeoutMs = 30000, killGraceMs = 500, drainMs = 2000,
-  maxOutput = MAX_OUTPUT, maxStderr = MAX_STDERR
+  maxOutput = MAX_OUTPUT, maxStderr = MAX_STDERR, args = probeArgs(sourcePath), normalize = normalizeProbe
 } = {}) {
   let child
   let failure
@@ -58,13 +58,13 @@ function startProbe(executable, sourcePath, {
     if (failure) settle(failure)
     else if (code !== 0) settle(new MediaError("PROBE_FAILED"))
     else {
-      try { settle(null, normalizeProbe(JSON.parse(Buffer.concat(chunks).toString("utf8")))) }
+      try { settle(null, normalize(JSON.parse(Buffer.concat(chunks).toString("utf8")))) }
       catch (error) { settle(error instanceof MediaError ? error : new MediaError("PROBE_JSON")) }
     }
     resolveClosed()
   }
   try {
-    child = spawnProcess(executable, probeArgs(sourcePath), {
+    child = spawnProcess(executable, args, {
       shell: false, windowsHide: true, stdio: ["ignore", "pipe", "pipe"],
       // Windows environment names are case-insensitive. No spelling of
       // FFREPORT may make this read-only inspection write a report file.

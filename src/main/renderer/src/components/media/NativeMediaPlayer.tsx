@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useRef, useState, type RefObject } from "react"
 import { Film, Loader2, RotateCcw } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { mediaApi } from "@/lib/api"
@@ -12,9 +12,10 @@ const statusKeys: Record<Status, Key> = {
   ended: "media.ended", failed: "media.previewUnavailable", expired: "media.expired"
 }
 
-export function NativeMediaPlayer({ source, busy }: { source: MediaSource; busy: boolean }) {
+export function NativeMediaPlayer({ source, busy, mediaRef }: { source: MediaSource; busy: boolean; mediaRef?: RefObject<HTMLMediaElement | null> }) {
   const t = useT()
   const element = useRef<HTMLVideoElement & HTMLAudioElement>(null)
+  const playbackRevision = useRef(0)
   const trackPosition = useRef(false)
   const [preview, setPreview] = useState<MediaPreview | null>(null)
   const [status, setStatus] = useState<Status>("loading")
@@ -30,6 +31,8 @@ export function NativeMediaPlayer({ source, busy }: { source: MediaSource; busy:
     setPreview(null)
     setStatus("loading")
     const reset = () => {
+      playbackRevision.current += 1
+      useLocalMedia.setState({ auditionPreviewId: null })
       // load() emits a timeupdate at zero when unloading. That is cleanup,
       // not a new playback position to restore after expiry or retry.
       const wasTracking = trackPosition.current
@@ -59,12 +62,22 @@ export function NativeMediaPlayer({ source, busy }: { source: MediaSource; busy:
     }
   }, [source.sourceId, attempt])
 
+  const reportPlayback = (played: boolean) => {
+    const current = ++playbackRevision.current
+    if (!played) useLocalMedia.setState({ auditionPreviewId: null })
+    if (!preview) return
+    void mediaApi.confirmPlayback({ previewId: preview.previewId, played }).then(result => {
+      if (current === playbackRevision.current && element.current && result.confirmed && useLocalMedia.getState().source?.sourceId === source.sourceId) {
+        useLocalMedia.setState({ auditionPreviewId: preview.previewId })
+      }
+    }).catch(() => { if (current === playbackRevision.current) useLocalMedia.setState({ auditionPreviewId: null }) })
+  }
   useEffect(() => { if (busy) element.current?.pause() }, [busy])
   const failed = status === "failed" || status === "expired"
   return <section aria-label={t("media.preview")} className="space-y-3">
     <div className="rounded-xl border border-slate-300/50 bg-slate-950 p-2 dark:border-slate-700/50">
       {!video && <div className="flex h-32 items-center justify-center gap-3 text-slate-300"><Film />{t("media.audioPreview")}</div>}
-      <Player ref={element} src={preview?.url} controls controlsList="nodownload noremoteplayback" disablePictureInPicture preload="metadata" aria-label={t("media.player")}
+      <Player ref={node => { element.current = node; if (mediaRef) mediaRef.current = node }} src={preview?.url} controls controlsList="nodownload noremoteplayback" disablePictureInPicture preload="metadata" aria-label={t("media.player")}
         className={video ? "aspect-video max-h-[50vh] w-full rounded-lg object-contain" : "w-full"}
         onLoadedMetadata={(event) => {
           const media = event.currentTarget
@@ -73,7 +86,7 @@ export function NativeMediaPlayer({ source, busy }: { source: MediaSource; busy:
           trackPosition.current = true
         }}
         onCanPlay={() => { if (preview && !failed) setStatus("ready") }}
-        onPlaying={() => setStatus("playing")}
+        onPlaying={() => { setStatus("playing"); reportPlayback(true) }}
         onPause={(event) => { if (preview && !failed) setStatus(event.currentTarget.ended ? "ended" : "ready") }}
         onWaiting={() => { if (!failed) setStatus("loading") }}
         onSeeking={() => { if (!failed) setStatus("seeking") }}
@@ -82,7 +95,7 @@ export function NativeMediaPlayer({ source, busy }: { source: MediaSource; busy:
           if (trackPosition.current) localMediaActions.rememberPosition(source.sourceId, event.currentTarget.currentTime)
         }}
         onEnded={() => setStatus("ended")}
-        onError={() => { if (preview) setStatus("failed") }}
+        onError={() => { if (preview) { setStatus("failed"); reportPlayback(false) } }}
       />
     </div>
     <div className="flex flex-wrap items-center justify-between gap-3">

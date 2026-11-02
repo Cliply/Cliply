@@ -135,10 +135,22 @@ class MediaPreview {
     return { ...this.grant }
   }
 
+  confirmPlayback(request) {
+    if (!request || Object.keys(request).sort().join(",") !== "played,previewId" || typeof request.played !== "boolean" || typeof request.previewId !== "string") throw new MediaError("REQUEST_INVALID")
+    if (this.grant?.previewId !== request.previewId || !this.valid(this.grant.url)) throw new MediaError("PREVIEW_UNAVAILABLE")
+    this.playedPreviewId = request.played ? request.previewId : null
+    return { confirmed: request.played }
+  }
+
+  hasPlayback(previewId) {
+    return Boolean(this.grant?.previewId === previewId && this.playedPreviewId === previewId && this.valid(this.grant.url))
+  }
+
   revoke(previewId) {
     if (previewId && this.grant?.previewId !== previewId) return
     this.revision += 1
     this.grant = null
+    this.playedPreviewId = null
     clearTimeout(this.timer)
     for (const stream of this.streams) stream.destroy()
     this.streams.clear()

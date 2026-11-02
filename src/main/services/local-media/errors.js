@@ -1,6 +1,12 @@
 // Stable, path-free errors. Helper stderr and source names never become telemetry.
 const MESSAGES = {
   AUDIO_UNSUPPORTED: "No verified audio extraction profile is available for this track. Choose AAC-LC, MP3 or 16-bit little-endian PCM, mono/stereo, with a known duration.",
+  TRIM_PROFILE: "Fast trim is not verified for this codec/container layout. Full-file tools may still be available.",
+  TRIM_STREAMS: "Fast trim requires one video with at most one audio track, or one audio track, without chapters or other streams.",
+  TRIM_TIMING: "This file has missing, delayed or ambiguous timing outside the verified fast-cut profile.",
+  TRIM_RANGE: "Choose an ordered range of at least 0.1 seconds within the file. The planned keyframe must be before the end.",
+  TRIM_KEYFRAME: "No usable keyframe was found within the bounded search. Adjust the start or choose the other keyframe direction.",
+  TRIM_PREVIEW: "Play or audition this source in native preview before planning and saving a clip.",
   REMUX_SOURCE: "Container changes need a verified MP4, MOV or Matroska source.",
   REMUX_TARGET: "Choose a different supported target: MP4, MOV or MKV.",
   REMUX_CHAPTERS: "Chapter preservation is verified only for compatible MKV output. Explicitly remove chapters or choose a supported target.",

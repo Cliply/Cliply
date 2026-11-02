@@ -2,7 +2,8 @@ const { trustedFrame } = require("../services/local-media/preview")
 const { MediaError } = require("../services/local-media/errors")
 
 const CHANNELS = ["media:open", "media:get-state", "media:close", "media:preview", "media:release-preview",
-  "media:prepare-export", "media:start-export", "media:cancel-export", "media:export-state", "media:reveal-output"]
+  "media:prepare-export", "media:start-export", "media:cancel-export", "media:export-state", "media:reveal-output",
+  "media:inspect-trim", "media:cancel-trim", "media:preview-playback"]
 
 function registerLocalMedia({ ipcMain, service, getWindow, isDevelopment = false }) {
   function authorized(event) {
@@ -10,7 +11,7 @@ function registerLocalMedia({ ipcMain, service, getWindow, isDevelopment = false
     return window && event.sender === window.webContents && trustedFrame(window, event.senderFrame, isDevelopment)
   }
   for (const [channel, method] of [[CHANNELS[0], "open"], [CHANNELS[1], "getState"], [CHANNELS[2], "close"], [CHANNELS[3], "preview"], [CHANNELS[4], "releasePreview"],
-    [CHANNELS[5], "prepare"], [CHANNELS[6], "start"], [CHANNELS[7], "cancel"], [CHANNELS[8], "exportState"], [CHANNELS[9], "reveal"]]) {
+    [CHANNELS[5], "prepare"], [CHANNELS[6], "start"], [CHANNELS[7], "cancel"], [CHANNELS[8], "exportState"], [CHANNELS[9], "reveal"], [CHANNELS[10], "inspectTrim"], [CHANNELS[11], "cancelTrim"], [CHANNELS[12], "playback"]]) {
     ipcMain.handle(channel, async (event, ...args) => {
       try {
         if (!authorized(event)) throw new MediaError("FORBIDDEN")
@@ -23,6 +24,9 @@ function registerLocalMedia({ ipcMain, service, getWindow, isDevelopment = false
             if (args.length !== 1 || (method !== "prepare" && (typeof args[0] !== "string" || !/^[a-f0-9-]{36}$/.test(args[0])))) throw new MediaError("REQUEST_INVALID")
             data = await service.exports[method](args[0])
           }
+        } else if (method === "inspectTrim" || method === "playback") {
+          if (args.length !== 1) throw new MediaError("REQUEST_INVALID")
+          data = method === "playback" ? service.preview.confirmPlayback(args[0]) : await service.inspectTrim(args[0])
         } else if (method === "preview" || method === "releasePreview") {
           if (args.length !== 1 || typeof args[0] !== "string" ||
               !(method === "preview" ? /^[a-f0-9-]{36}$/ : /^[a-f0-9]{64}$/).test(args[0])) throw new MediaError("REQUEST_INVALID")

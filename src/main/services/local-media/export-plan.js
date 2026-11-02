@@ -1,5 +1,6 @@
 const { MediaError } = require("./errors")
 const path = require("node:path")
+const { MP4_BRANDS } = require("./container")
 
 function trackContainer(source) {
   const extension = path.extname(source.filename || "").slice(1).toLowerCase()
@@ -76,7 +77,15 @@ function planCopy(source, request, remux) {
     expectedStreams: selected, fileTags: source.tags || {}, movInput: (remux ? source.contentContainer : container.extension) !== "mkv", ...container }
 }
 
-function planExport(source, request) { return request?.operation === "remux" ? planRemux(source, request) : request?.operation === "removeTracks" ? planTracks(source, request) : planAudio(source, request) }
+function planExport(source, request, trimPlan) {
+  if (request?.operation === "trim") {
+    if (Object.keys(request).sort().join(",") !== "operation,sourceId,trimPlanId" || typeof request.trimPlanId !== "string") throw new MediaError("REQUEST_INVALID")
+    if (!source || request.sourceId !== source.sourceId) throw new MediaError("SOURCE_UNKNOWN")
+    if (!trimPlan || trimPlan.trimPlanId !== request.trimPlanId || trimPlan.sourceId !== source.sourceId || Date.now() >= trimPlan.expiresAt) throw new MediaError("PLAN_EXPIRED")
+    return trimPlan
+  }
+  return request?.operation === "remux" ? planRemux(source, request) : request?.operation === "removeTracks" ? planTracks(source, request) : planAudio(source, request)
+}
 
 // Deliberately narrow, copy-only profiles. No generic codec/container fallback.
 function audioProfile(source, stream) {
@@ -103,7 +112,12 @@ function planAudio(source, request) {
 }
 
 function exportArgs(plan) {
-  const streams = ["removeTracks", "remux"].includes(plan.operation) ? plan.expectedStreams : null
+  const streams = ["removeTracks", "remux", "trim"].includes(plan.operation) ? plan.expectedStreams : null
+  const trim = plan.operation === "trim"
+  const inputSeek = trim && plan.seekStart > 0 && (plan.hasVideo || plan.pcm)
+    ? ["-ss", (plan.seekStart + (plan.hasVideo ? 0.000002 : 0)).toFixed(6)] : []
+  const outputSeek = trim && plan.seekStart > 0 && !plan.hasVideo && !plan.pcm ? ["-ss", plan.seekStart.toFixed(6), "-copyinkf"] : []
+  const durationArgs = trim && !plan.eof ? ["-t", plan.duration.toFixed(6)] : []
   const maps = streams ? streams.flatMap(stream => ["-map", `0:${stream.index}`]) : ["-map", `0:${plan.streamIndex}`]
   const metadata = streams ? ["-map_metadata", "0", ...streams.flatMap((stream, outputIndex) => [
     `-map_metadata:s:${outputIndex}`, `0:s:${stream.index}`,
@@ -116,12 +130,12 @@ function exportArgs(plan) {
     "-probesize", "5000000", "-analyzeduration", "5000000", "-max_streams", "128",
     // Inherited regular-file descriptors are seekable; FFmpeg never opens a
     // renderer path, the selected source path or a final output path.
-    "-fd", "0", "-i", "fd:", ...maps, "-c", "copy", ...metadata, "-map_chapters", plan.expectedChapters?.length ? "0" : "-1",
+    ...inputSeek, "-fd", "0", "-i", "fd:", ...outputSeek, ...durationArgs, ...maps, "-c", "copy", ...metadata, "-map_chapters", plan.expectedChapters?.length ? "0" : "-1",
     "-progress", "pipe:2", "-nostats", "-f", plan.muxer, "-fd", "1", "fd:"]
 }
 
 function validateOutput(plan, metadata, bytes) {
-  if (["removeTracks", "remux"].includes(plan.operation)) return validateTracks(plan, metadata, bytes)
+  if (["removeTracks", "remux", "trim"].includes(plan.operation)) return validateTracks(plan, metadata, bytes)
   const stream = metadata.streams[0]
   const family = plan.extension === "aac" ? "aac" : plan.extension
   const duration = stream?.duration ?? metadata.duration
@@ -134,9 +148,12 @@ function validateOutput(plan, metadata, bytes) {
 function validateTracks(plan, metadata, bytes) {
   const fail = () => { throw new MediaError("OUTPUT_INVALID") }
   const duration = metadata.duration
+  const containerMatches = plan.operation === "trim" ? metadata.formatNames.includes(plan.family) &&
+    (plan.family !== "mov" || (plan.extension === "mp4" ? MP4_BRANDS.has(metadata.majorBrand) : metadata.majorBrand === plan.majorBrand))
+    : (plan.operation === "remux" ? metadata.contentContainer : trackContainer({ ...metadata, filename: `output.${plan.extension}` })?.extension) === plan.extension
   if (bytes <= 0 || metadata.streams.length !== plan.expectedStreams.length || metadata.chapterCount !== (plan.expectedChapters?.length || 0) ||
-      !Number.isFinite(duration) || duration <= 0 || Math.abs(duration - plan.duration) > Math.max(0.25, plan.duration * 0.02) ||
-      (plan.operation === "remux" ? metadata.contentContainer : trackContainer({ ...metadata, filename: `output.${plan.extension}` })?.extension) !== plan.extension) fail()
+      !Number.isFinite(duration) || duration <= 0 || Math.abs(duration - plan.duration) > (plan.operation === "trim" ? plan.tolerance : Math.max(0.25, plan.duration * 0.02)) || !containerMatches) fail()
+  if (plan.operation === "trim" && (Math.abs(metadata.startTime ?? 0) > 0.05 || metadata.streams.some(stream => Math.abs(stream.startTime ?? 0) > 0.05))) fail()
   if (plan.operation === "remux") {
     if (!Number.isFinite(metadata.startTime) || Math.abs(metadata.startTime) > 0.1) fail()
     if (plan.expectedChapters.length && (!metadata.chaptersCopySafe || !Array.isArray(metadata.chapters) || metadata.chapters.length !== plan.expectedChapters.length)) fail()
@@ -162,4 +179,4 @@ function validateTracks(plan, metadata, bytes) {
   })
 }
 
-module.exports = { remuxProfiles, planRemux, audioProfile, planAudio, planTracks, planExport, trackRemovalProfile, exportArgs, validateOutput }
+module.exports = { trackSupported, remuxProfiles, planRemux, audioProfile, planAudio, planTracks, planExport, trackRemovalProfile, exportArgs, validateOutput }

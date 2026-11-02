@@ -6,6 +6,7 @@ const { planExport, exportArgs, validateOutput } = require("./export-plan")
 const { ExportOutput, destination } = require("./export-output")
 const { startExportProcess } = require("./export-process")
 const { startProbe } = require("./probe")
+const { startFrameProbe } = require("./trim-plan")
 const { detectContainer } = require("./container")
 
 const TERMINAL = new Set(["completed", "cancelled", "failed", "interrupted"])
@@ -14,8 +15,8 @@ const safeError = error => error instanceof MediaError ? error : new MediaError(
 
 class LocalExport {
   constructor({ getSource, validateSource, isInspecting, selectDestination, resolveFfmpeg, resolveProbe,
-    storagePath, revealOutput, onUpdate = () => {}, runProcess = startExportProcess, runProbe = startProbe } = {}) {
-    Object.assign(this, { getSource, validateSource, isInspecting, selectDestination, resolveFfmpeg, resolveProbe, revealOutput, onUpdate, runProcess, runProbe })
+    storagePath, revealOutput, getTrimPlan, validateTrimPlan, onUpdate = () => {}, runProcess = startExportProcess, runProbe = startProbe, runFrames = startFrameProbe } = {}) {
+    Object.assign(this, { getSource, validateSource, isInspecting, selectDestination, resolveFfmpeg, resolveProbe, revealOutput, getTrimPlan, validateTrimPlan, onUpdate, runProcess, runProbe, runFrames })
     this.output = new ExportOutput(storagePath)
     this.revision = 0; this.plan = null; this.job = null; this.active = null; this.preparing = null; this.frozen = false
     this.ready = this.output.recover().then(interrupted => {
@@ -32,7 +33,7 @@ class LocalExport {
     if (this.frozen) throw new MediaError("CLOSED")
     if (this.busy || this.isInspecting()) throw new MediaError("EXPORT_BUSY")
     const source = this.getSource()
-    const profile = planExport(source?.dto, request)
+    const profile = planExport(source?.dto, request, request?.operation === "trim" ? this.getTrimPlan?.(request.trimPlanId) : undefined)
     const reservation = {}; this.preparing = reservation; this.plan = null; this.emit()
     const check = () => {
       if (this.frozen || this.preparing !== reservation) throw new MediaError("EXPORT_CANCELLED")
@@ -46,7 +47,7 @@ class LocalExport {
       }
       await this.validateSource(source); check()
       const selected = await this.selectDestination({
-        defaultName: `${path.parse(source.dto.filename).name.slice(0, 120)}-${profile.operation === "extractAudio" ? `audio-${profile.streamIndex}` : profile.operation === "remux" ? "remux" : "tracks"}.${profile.extension}`,
+        defaultName: `${path.parse(source.dto.filename).name.slice(0, 120)}-${profile.operation === "extractAudio" ? `audio-${profile.streamIndex}` : profile.operation === "remux" ? "remux" : profile.operation === "trim" ? "clip" : "tracks"}.${profile.extension}`,
         extension: profile.extension
       })
       check()
@@ -63,6 +64,7 @@ class LocalExport {
     if (this.busy || this.isInspecting()) throw new MediaError("EXPORT_BUSY")
     const plan = this.plan
     if (!plan || plan.summary.planId !== planId || Date.now() >= plan.summary.expiresAt || plan.source !== this.getSource()) throw new MediaError("PLAN_EXPIRED")
+    if (plan.profile.operation === "trim") this.validateTrimPlan?.(plan.profile)
     this.plan = null
     const active = { cancelled: false, process: null, published: false, done: null }
     this.active = active
@@ -113,6 +115,12 @@ class LocalExport {
       check()
       await this.validateSource(plan.source)
       validateOutput(plan.profile, metadata, Number((await output.stat()).size))
+      if (plan.profile.operation === "trim" && plan.profile.hasVideo) {
+        const first = await supervise(this.runFrames(probe, owned.partial, metadata.streams.find(stream => stream.type === "video").index, 0))
+        check()
+        if (Math.abs(first.firstTime) > 0.001) throw new MediaError("OUTPUT_INVALID")
+        await this.validateSource(plan.source); check()
+      }
       await output.close(); output = null
       await input.close(); input = null
       check()

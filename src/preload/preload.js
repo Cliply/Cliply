@@ -71,6 +71,9 @@ const invoke = async (channel, data) => {
 contextBridge.exposeInMainWorld("electronAPI", {
   // Local media: opaque IDs and a selected stream; no paths or FFmpeg arguments.
   media: {
+    inspectTrim: (request) => invoke("media:inspect-trim", request),
+    cancelTrim: () => invoke("media:cancel-trim"),
+    confirmPlayback: (request) => invoke("media:preview-playback", request),
     open: () => invoke("media:open"),
     getState: () => invoke("media:get-state"),
     preview: (sourceId) => invoke("media:preview", sourceId),

@@ -28,7 +28,7 @@ import {
 } from "./api-types"
 import { localizeCode } from "./i18n"
 import type { IPCResponse } from "./electron-api"
-import type { LocalExportRequest, LocalExportState } from "./local-media-types"
+import type { LocalExportRequest, LocalExportState, TrimInspectRequest } from "./local-media-types"
 
 // the types and the pure helpers used to live here, so they are re-exported
 // under this name: every importer of this module still reads them here
@@ -132,6 +132,15 @@ const mediaError: ErrorFactory = (message, error) =>
 
 // Local inspection is separate from download state, history and telemetry.
 export const mediaApi = {
+  async inspectTrim(request: TrimInspectRequest) {
+    return unwrap(await getElectronAPI().media.inspectTrim(request), "Could not inspect cut boundaries", { makeError: mediaError })
+  },
+  async cancelTrim() {
+    return unwrap(await getElectronAPI().media.cancelTrim(), "Could not cancel timing inspection", { makeError: mediaError })
+  },
+  async confirmPlayback(request: { previewId: string; played: boolean }) {
+    return unwrap(await getElectronAPI().media.confirmPlayback(request), "Native playback unavailable", { makeError: mediaError })
+  },
   async prepareExport(request: LocalExportRequest) {
     return unwrap(await getElectronAPI().media.prepareExport(request), "Could not prepare local export", { makeError: mediaError })
   },

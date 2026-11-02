@@ -42,6 +42,7 @@ export interface MediaSource {
   contentContainer?: MediaContainer | null
   chapters?: { start: number | null; end: number | null; title: string | null }[]
   chaptersCopySafe?: boolean
+  trimProfile?: { extension: string; hasVideo: boolean } | null
   remuxProfiles?: { targetContainer: MediaContainer; extension: MediaContainer; supportedStreamIndexes: number[]; preservesChapters: boolean }[]
   chapterCount: number
   capabilities: Record<"probe" | "nativePreview" | "trim" | "extractAudio" | "removeTracks" | "remux", MediaCapability>
@@ -80,8 +81,16 @@ export interface TrackExportPlan extends TrackExportRequest {
 }
 export interface RemuxRequest extends Omit<TrackExportRequest, "operation"> { operation: "remux"; targetContainer: MediaContainer }
 export interface RemuxPlan extends Omit<TrackExportPlan, "operation"> { operation: "remux"; targetContainer: MediaContainer }
-export type LocalExportRequest = AudioExportRequest | TrackExportRequest | RemuxRequest
-export type LocalExportPlan = AudioExportPlan | TrackExportPlan | RemuxPlan
+export interface TrimInspectRequest { sourceId: string; previewId: string; start: number; end: number; mode: "before" | "after" }
+export interface TrimTiming {
+  operation: "trim"; sourceId: string; trimPlanId: string; expiresAt: number; previewId: string
+  requestedStart: number; requestedEnd: number; mode: "before" | "after"
+  plannedStart: number; plannedEnd: number; tolerance: number; duration: number; extension: string; streamIndexes: number[]
+}
+export interface TrimExportRequest { operation: "trim"; sourceId: string; trimPlanId: string }
+export interface TrimExportPlan extends TrimTiming { planId: string; outputName: string }
+export type LocalExportRequest = AudioExportRequest | TrackExportRequest | RemuxRequest | TrimExportRequest
+export type LocalExportPlan = AudioExportPlan | TrackExportPlan | RemuxPlan | TrimExportPlan
 export interface LocalExportJob {
   jobId: string; sourceId?: string; streamIndex?: number; outputName: string | null
   operation?: LocalExportRequest["operation"]

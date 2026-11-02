@@ -85,7 +85,7 @@ When adding a channel or changing a response, inspect main handlers, preload,
 renderer declarations, API wrappers and their tests together. Keep Node/file
 access in main and expose only the required bridge operations.
 
-## Local-file inspection, preview and copy-only tools (Stages 1–5)
+## Local-file inspection, preview and copy-only tools (Stages 1–6)
 
 [`local-media.js`](../src/main/services/local-media.js) owns one in-memory source
 and at most one inspection, separately from download history, slots and the
@@ -109,13 +109,18 @@ renderer `mediaApi` expose these calls:
 | `media:start-export(planId)` | Export snapshot with a unique job already reserved; plans expire after ten minutes. |
 | `media:cancel-export(jobId)` | Export snapshot; repeat cancellation is harmless. |
 | `media:export-state` | Revision, preparing flag, plan, job and cleanup error. |
+| `media:preview-playback({ previewId, played })` | `{ confirmed }`; trusted native-player event, tied to the current grant. |
+| `media:inspect-trim({ sourceId, previewId, start, end, mode })` | Main-owned five-minute timing plan; `mode` is `before` or `after`. |
+| `media:cancel-trim` | `{ cancelled }`; drains timing inspection while retaining the source. |
 | `media:reveal-output(jobId)` | `{ revealed: true }`; main revalidates its completed path before revealing it. |
 
 Requests are exactly `{ operation: "extractAudio", sourceId, streamIndex }` or
 `{ operation: "removeTracks", sourceId, streamIndexes, removeChapters }`, or
-`{ operation: "remux", sourceId, targetContainer, streamIndexes, removeChapters }`.
+`{ operation: "remux", sourceId, targetContainer, streamIndexes, removeChapters }`, or
+`{ operation: "trim", sourceId, trimPlanId }`.
 Remux targets are exactly `mp4`, `mov`, or `mkv`; main checks the destination
-extension. Arbitrary flags, paths and ranges are not accepted.
+extension. Export requests never accept arbitrary flags, paths or cut times;
+trim times go through the separate bounded timing inspection first.
 
 `media:export-updated` sends the same revisioned snapshot only to the trusted
 application main frame. Renderer subscriptions live outside the route. Requests
@@ -155,7 +160,8 @@ report loading/play/seek/end/error, support audio-only media and distinguish
 decoder failure from successful inspection. The player chooses default tracks;
 all probed tracks remain visible, including cover artwork. There is no software
 decode/transcode fallback. Audio extraction and full-file track removal are enabled for verified profiles;
-compatible full-file container changes are also enabled; trim remains disabled.
+compatible full-file container changes and validated single-section fast trims
+are also enabled. Trimming alone requires native playback confirmation.
 
 The version-1 [DTO](../src/main/renderer/src/lib/local-media-types.ts) contains an
 opaque source ID, filename/size, nullable duration/start, format-family labels,
@@ -163,8 +169,8 @@ all actual stream indexes (including unknown/unsupported types), bounded stream
 details, chapter count and bounded chapter start/end/title. It carries separate probe, native-preview, trim,
 extraction, removal and remux capabilities. Probe success enables inspection
 only; the DTO's preview capability remains unchecked until the renderer tries
-the native element. Its local playback status is not an export-capability verdict.
-Main computes separate `extractionProfiles`, `trackRemovalProfile` and `remuxProfiles` from the
+the native element. Full-file export capability remains independent of local playback status.
+Main computes separate `extractionProfiles`, `trackRemovalProfile`, `remuxProfiles` and `trimProfile` from the
 verified codecs/container, stream properties and duration. Unsupported streams
 stay in the inventory and are not silently removed from a planned copy.
 
@@ -327,7 +333,7 @@ subtitles cannot be copied to MOV/MP4, and MOV text cannot be copied to MKV.
 Unsupported streams stay selected until explicitly removed. MOV forced tracks,
 MOV/MP4 selections without a retained default of each type, and nonzero rotation
 to MKV are refused. Portrait rotation is verified for MOV↔MP4. No conversion,
-compression, trim or automatic fallback is exposed.
+compression, combined trimming or automatic fallback is exposed.
 
 Full-file chapters can be preserved into MKV when there are at most 512 bounded,
 ordered, nonoverlapping chapters, within the source duration, with exact titles
@@ -352,6 +358,86 @@ After building the renderer, set `CLIPLY_SMOKE_REMUX=1`,
 `CLIPLY_SMOKE_FFMPEG`, `CLIPLY_SMOKE_FFPROBE` and optional
 `CLIPLY_SMOKE_EVIDENCE` for `npm run smoke:electron`. Helpers must follow the
 existing verified staging process; the scripts do not download or replace them.
+
+### Single-section fast trim
+
+Trim keeps one range, the validated source container and every source stream.
+Controlled decimal-second fields accept up to six fractional digits; Set start /
+Set end read the native element's actual time. I/O set the edges and arrow keys
+seek five seconds, except while typing or using native controls. The range
+survives exports/routes, resets with the source, and is locked during planning
+or export. The user reviews requested and approximate planned content bounds,
+then chooses a destination and saves. Returning to the route retains the range
+but requires playback under the newly issued preview grant.
+
+`onPlaying` acknowledges playback through the existing trusted-main-frame IPC
+boundary. Main requires that acknowledgment and a live matching preview grant
+for timing inspection, destination planning and export admission. This is an
+attestation by the trusted renderer, not independent proof of decoded content.
+Preview error/release/expiry clears it. Full-file extraction/removal/remux do
+not require playback. A successful probe alone never enables trim.
+
+The narrow matrix is H.264 yuv420p SDR in MP4/MOV, with zero or one AAC-LC
+track, or one AAC-LC track in MP4/MOV/M4A, or PCM16 WAV. Audio is mono/stereo
+44.1/48 kHz. All MOV-family tracks must retain their default disposition with
+no other active flags. Known MOV-family starts must be within 1 ms of zero.
+Chapters, subtitle/data/artwork/attachment streams, additional audio/video,
+HDR and unsupported codecs/timing block the whole trim. Existing validated
+language/title/tags/rotation checks apply; no implicit stream removal occurs.
+MP3 and raw ADTS trimming remain refused: the native MP3 candidate exposed
+about 99 ms of decoded-start error from reservoir/skip metadata. This does not
+change full-file MP3/AAC extraction. Matroska trim is also outside this matrix.
+
+[trim-plan.js](../src/main/services/local-media/trim-plan.js) reuses the existing
+supervised FFprobe runner and single interactive-probe slot. Only explicit
+Review cut requests scan packets. The start window is at most 60 seconds for
+video or four for audio; the end window is at most four. Each process has a
+15-second timeout, 2 MiB JSON cap, 8192-packet cap and existing stderr/drain
+limits. Missing/nonfinite timing, nonincreasing DTS, packets longer than 100 ms,
+PTS/DTS separation over 500 ms and unexpectedly long scans are refused. FFprobe
+seeks approximately, so the result is validated instead of trusting the interval
+request. There is no whole-file packet cache or renderer-supplied command.
+
+Video chooses an actual preceding/following key packet within ten seconds of
+the requested start. A collapsed range is refused; requested and planned cuts
+must each be at least 100 ms. A bounded leading decode additionally checks that
+the key packet is a usable picture at the chosen time (within 1 ms). The output
+gets the same check at zero before publication. Those probes allow ten seconds,
+64 KiB JSON, 128 frames and no decoder stderr. Stuck probes retain admission
+until the process actually exits; cancellation, close and shutdown use existing
+drain rules.
+
+Video seeks before input, with a two-microsecond rounding guard for nonzero
+keyframe times; PCM seeks before input at the requested time. Audio-only AAC
+seeks after input and uses `-copyinkf`; video never gets that option. Output
+`-t` uses requested end minus seek start; EOF omits `-t`. The command keeps
+`-c copy`, actual stream maps and original-container muxing. No encoding,
+universal timestamp offset, MKV B-frame workaround or `avoid_negative_ts`
+policy is introduced.
+
+Planned video end estimates the presentation extent of packets whose DTS is
+before the requested end, accounting for B-frame reorder and VFR without FPS
+multiplication. PCM's end can round to a copy block; AAC cuts follow packet
+boundaries with priming/padding. Admission/output-duration tolerances are 500 ms
+for video, 100 ms for PCM and 50 ms for audio-only AAC; output starts must remain
+within 50 ms of zero. These are bounded acceptance limits, not frame/sample
+accuracy promises. The native fixture matrix also checks actual decoded first/
+last frames and aligned audio onset/end, fully decodes every output and verifies
+source hashes. A bounded runtime leading check does not fully decode every
+production output or prove every media timeline is correct.
+
+Main owns a five-minute timing plan and invalidates earlier destination plans
+when timing is recomputed. Source identity, current grant and plan expiry are
+rechecked. Saving reuses `LocalExport` reservation, descriptors, owned partial,
+progress/cancel, metadata validation, no-clobber publication and recovery ledger.
+No second export runner or persistent project state is introduced. Uncertain
+cleanup still blocks exports while allowing shutdown once helpers have exited.
+
+Reproduce with `node scripts/smoke-local-trim.js <new-task-dir> <project-ffmpeg>
+<verified-ffprobe>`. After renderer build, `CLIPLY_SMOKE_TRIM=1` plus the existing
+helper/evidence environment overrides runs real Electron playback, trim, repeat,
+route and cancel checks via `npm run smoke:electron`. Evidence is macOS ARM64
+development-host only; native Windows/Linux and packaged checks remain Stage 7.
 
 ## Storage and privacy
 

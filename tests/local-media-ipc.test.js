@@ -13,7 +13,8 @@ function setup() {
   const event = { sender: window.webContents, senderFrame: frame }
   const service = {
     exports: { prepare: jest.fn(async () => ({ cancelled: true, plan: null })), start: jest.fn(), cancel: jest.fn(), getState: jest.fn(), reveal: jest.fn() },
-    preview: { create: jest.fn(async () => ({ url: "opaque" })), revoke: jest.fn() },
+    inspectTrim: jest.fn(async () => ({ trimPlanId: "plan" })), cancelTrim: jest.fn(async () => ({ cancelled: true })),
+    preview: { confirmPlayback: jest.fn(async () => ({ confirmed: true })), create: jest.fn(async () => ({ url: "opaque" })), revoke: jest.fn() },
     open: jest.fn(async () => ({ cancelled: true, source: null })),
     getState: jest.fn(async () => ({ source: null, busy: false })), close: jest.fn(async () => ({ closed: true }))
   }
@@ -108,5 +109,19 @@ test("real preload forwards no path/argv input through its media methods", async
   await api.media.getState()
   await api.media.close()
   expect(invoke.mock.calls).toEqual([["media:open", undefined], ["media:get-state", undefined], ["media:close", undefined]])
-  expect(Object.keys(api.media)).toEqual(["open", "getState", "preview", "releasePreview", "close", "prepareExport", "startExport", "cancelExport", "exportState", "revealOutput", "onExportUpdated"])
+  expect(Object.keys(api.media)).toEqual(["inspectTrim", "cancelTrim", "confirmPlayback", "open", "getState", "preview", "releasePreview", "close", "prepareExport", "startExport", "cancelExport", "exportState", "revealOutput", "onExportUpdated"])
+})
+
+test("trim inspection/playback contract remains behind owning-frame IPC", async () => {
+  const { calls, event, service } = setup()
+  const request = { sourceId: "opaque", previewId: "a".repeat(64), start: 1, end: 2, mode: "before" }
+  expect((await calls.get("media:inspect-trim")(event, request)).success).toBe(true)
+  expect(service.inspectTrim).toHaveBeenCalledWith(request)
+  expect((await calls.get("media:preview-playback")(event, { previewId: request.previewId, played: true })).success).toBe(true)
+  expect((await calls.get("media:cancel-trim")(event)).success).toBe(true)
+  expect((await calls.get("media:cancel-trim")(event, { path: "/private/file" })).error.code).toBe("REQUEST_INVALID")
+  expect((await calls.get("media:inspect-trim")(event, request, "extra")).error.code).toBe("REQUEST_INVALID")
+  event.senderFrame = { url: event.senderFrame.url }
+  for (const channel of ["media:inspect-trim", "media:cancel-trim", "media:preview-playback"]) expect((await calls.get(channel)(event, request)).error.code).toBe("FORBIDDEN")
+  expect(service.inspectTrim).toHaveBeenCalledTimes(1)
 })
