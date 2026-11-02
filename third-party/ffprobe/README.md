@@ -142,8 +142,9 @@ no production manifest changes. See [release checks](../../docs/releasing.md).
 ## FFprobe-only build evaluation
 
 [`build-ffprobe-prototype.js`](../../scripts/build-ffprobe-prototype.js) evaluates
-an alternative executed locally on macOS ARM64, with unrun native Windows x64
-and Ubuntu 24.04 x64 paths prepared. It exports clean source from FFmpeg n8.1,
+an alternative executed locally on macOS ARM64. The first native Windows x64
+and Ubuntu 24.04 x64 attempts stopped at source-export/configuration guards;
+corrected recipes await another native run. It exports clean source from FFmpeg n8.1,
 commit `9047fa1b084f76b1b4d065af2d743df1b40dfb56`, and builds FFprobe with internal
 demuxers/parsers/decoders and file/pipe/fd protocols. Autodetection, network,
 external codec libraries, other programs, filters and resamplers are checked off

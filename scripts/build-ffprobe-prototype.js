@@ -8,7 +8,9 @@ const hash = file => createHash("sha256").update(fs.readFileSync(file)).digest("
 const common = ["--disable-everything", "--disable-autodetect", "--disable-network", "--disable-doc", "--disable-debug", "--disable-shared", "--enable-static", "--enable-ffprobe", "--enable-demuxers", "--enable-parsers", "--enable-decoders", "--enable-protocol=file,pipe,fd", "--disable-avdevice", "--disable-avfilter", "--disable-swscale", "--disable-swresample", "--optflags=-O1"]
 function configurationFor(platform) {
   if (platform === "darwin-arm64") return [...common, "--extra-cflags=-mmacosx-version-min=13.0", "--extra-ldflags=-mmacosx-version-min=13.0"]
-  if (platform === "linux-x64") return [...common, "--arch=x86_64", "--target-os=linux", "--cc=/usr/bin/gcc-13", "--x86asmexe=/usr/bin/nasm", "--extra-cflags=-march=x86-64"]
+  // Pinned configure still probes libc iconv with autodetection disabled.
+  // Keep the no-external-library contract explicit on glibc hosts.
+  if (platform === "linux-x64") return [...common, "--disable-iconv", "--arch=x86_64", "--target-os=linux", "--cc=/usr/bin/gcc-13", "--x86asmexe=/usr/bin/nasm", "--extra-cflags=-march=x86-64"]
   if (platform === "win32-x64") return [...common, "--arch=x86_64", "--target-os=mingw32", "--cc=/ucrt64/bin/gcc", "--x86asmexe=/ucrt64/bin/nasm", "--disable-pthreads", "--enable-w32threads", "--extra-cflags=-march=x86-64", "--extra-ldflags=-static-libgcc -Wl,--no-insert-timestamp"]
   throw new Error("Unsupported native source-build host: " + platform)
 }
@@ -52,6 +54,13 @@ function inspectArchitecture(platform, data) {
     assert(offset + 26 <= data.length && data.readUInt32LE(offset) === 0x4550 && data.readUInt16LE(offset + 4) === 0x8664 && data.readUInt16LE(offset + 24) === 0x20b, "expected x64 PE32+")
   }
 }
+function exportSourceArchive(source, archive, revision) {
+  // Git for Windows defaults to CRLF conversion, including `git archive`.
+  // Export the pinned LF source and canonical modes without changing Git config.
+  const result = spawnSync("git", ["-C", source, "-c", "core.autocrlf=false", "-c", "core.eol=lf", "-c", "tar.umask=0002",
+    "archive", "--format=tar", "--output=" + archive, revision], { encoding: "utf8" })
+  assert.equal(result.status, 0, result.stderr || result.error?.message)
+}
 function build({ source, archive: inputArchive, output, msysRoot = process.env.CLIPLY_FFPROBE_MSYS2 }) {
   const platform = process.platform + "-" + process.arch, configuration = configurationFor(platform)
   const recipeSha256 = hash(__filename), sourcePinSha256 = hash(path.join(__dirname, "../third-party/ffprobe/source-build.json"))
@@ -88,8 +97,7 @@ function build({ source, archive: inputArchive, output, msysRoot = process.env.C
   else {
     // Native Git acquisition is read-only. Every build child below uses the
     // explicit platform launcher; Mac never inherits an Intel preference.
-    const result = spawnSync("git", ["-C", source, "archive", "--format=tar", "--output=" + archive, sourcePin.commit], { encoding: "utf8" })
-    assert.equal(result.status, 0, result.stderr)
+    exportSourceArchive(source, archive, sourcePin.commit)
   }
   assert.equal(hash(archive), sourcePin.archiveSha256, "source archive checksum mismatch")
   run("extract", "tar", ["-xf", nativePath(archive), "-C", nativePath(tree)])
@@ -144,4 +152,4 @@ if (require.main === module) {
   const { values } = parseArgs({ options: { source: { type: "string" }, archive: { type: "string" }, output: { type: "string" }, "msys-root": { type: "string" } } })
   console.log(JSON.stringify(build({ ...values, msysRoot: values["msys-root"] }), null, 2))
 }
-module.exports = { build, sourcePin, configurationFor, inspectConfiguration, inspectLibraries, inspectArchitecture, hash }
+module.exports = { build, sourcePin, configurationFor, inspectConfiguration, inspectLibraries, inspectArchitecture, exportSourceArchive, hash }

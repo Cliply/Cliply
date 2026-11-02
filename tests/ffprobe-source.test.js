@@ -1,5 +1,6 @@
 const fs = require("node:fs"), os = require("node:os"), path = require("node:path")
-const { inspectArchitecture, inspectConfiguration, inspectLibraries, configurationFor } = require("../scripts/build-ffprobe-prototype")
+const { inspectArchitecture, inspectConfiguration, inspectLibraries, configurationFor, exportSourceArchive } = require("../scripts/build-ffprobe-prototype")
+const { execFileSync } = require("node:child_process")
 const { validate } = require("../scripts/validate-ffprobe-candidate")
 const configure = 'EXTERNAL_LIBRARY_GPL_LIST="\n libx264\n"\nEXTERNAL_LIBRARY_LIST="\n $EXTERNAL_LIBRARY_GPL_LIST\n"\nEXTERNAL_AUTODETECT_LIBRARY_LIST="\n zlib\n"\nHWACCEL_LIBRARY_LIST="\n libmfx\n"\nHWACCEL_AUTODETECT_LIBRARY_LIST="\n videotoolbox\n"\n'
 const required = ["STATIC", "FFPROBE", "AVCODEC", "AVFORMAT", "AVUTIL", "H264_DECODER", "AAC_DECODER", "FD_PROTOCOL", "FILE_PROTOCOL", "PIPE_PROTOCOL"]
@@ -39,6 +40,36 @@ test("library gates permit recorded system imports and reject codec or developer
 test("unsupported build host cannot silently cross-build", () => {
   expect(() => configurationFor("darwin-x64")).toThrow(/Unsupported/)
   expect(() => configurationFor("linux-arm64")).toThrow(/Unsupported/)
+})
+test("Linux explicitly disables libc iconv without relaxing the final dependency audit", () => {
+  expect(configurationFor("linux-x64")).toContain("--disable-iconv")
+  const libcConfigure = configure.replace(" zlib", " iconv\n zlib")
+  expect(() => inspectConfiguration(libcConfigure, config + "CONFIG_ICONV=yes\n")).toThrow(/external/)
+  expect(inspectConfiguration(libcConfigure, config + "!CONFIG_ICONV=yes\n").externalEnabled).toEqual([])
+})
+test("source export overrides Windows CRLF and tar mode defaults without changing local Git settings", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cliply-source-archive-"))
+  const git = args => execFileSync("git", ["-C", root, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim()
+  try {
+    git(["init"])
+    git(["config", "core.autocrlf", "false"])
+    fs.writeFileSync(path.join(root, "source.c"), "first line\nsecond line\n")
+    git(["add", "source.c"])
+    const tree = git(["write-tree"])
+    git(["config", "core.autocrlf", "true"])
+    git(["config", "core.eol", "crlf"])
+    git(["config", "tar.umask", "0000"])
+    const archive = path.join(root, "source.tar"), extracted = path.join(root, "extracted")
+    exportSourceArchive(root, archive, tree)
+    fs.mkdirSync(extracted)
+    await require("tar").x({ file: archive, cwd: extracted })
+    expect(fs.readFileSync(path.join(extracted, "source.c"), "utf8")).toBe("first line\nsecond line\n")
+    // tar header mode, independent of Windows filesystem permission semantics.
+    expect(parseInt(fs.readFileSync(archive).toString("ascii", 100, 108), 8) & 0o777).toBe(0o664)
+    expect(git(["config", "core.autocrlf"])).toBe("true")
+    expect(git(["config", "core.eol"])).toBe("crlf")
+    expect(git(["config", "tar.umask"])).toBe("0000")
+  } finally { fs.rmSync(root, { recursive: true, force: true }) }
 })
 test("source and supplier selection cannot be mixed or create an evidence directory", async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "cliply-source-test-")), evidence = path.join(root, "evidence")

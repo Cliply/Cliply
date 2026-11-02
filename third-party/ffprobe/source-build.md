@@ -11,6 +11,10 @@ The [source pin](source-build.json) records FFmpeg n8.1 commit
 export, and hashes of the upstream license files and three IJG-derived files.
 The builder accepts either that Git checkout or the exact tar export. It checks
 the archive before extracting and does not patch upstream source.
+Git exports explicitly use LF line endings and tar umask `0002`, independently
+of host Git settings. Git for Windows' CRLF conversion also affects `git archive`;
+the first native run exposed that mismatch. The canonical archive hash stays
+unchanged, and the export does not modify local or global Git configuration.
 
 `--disable-everything` disables components; it does not itself disable every
 program or internal library. The recipe requests FFprobe, demuxers, parsers,
@@ -21,6 +25,9 @@ avcodec/avformat/avutil, H.264/AAC decoding, exactly those three protocols, no
 FFmpeg/FFplay program, no GPL/version3/nonfree, no shared FFmpeg libraries and no
 avdevice/avfilter/swscale/swresample. Every external/hardware-library variable
 from the pinned configure lists is checked, not just the command-line flags.
+Linux also passes `--disable-iconv`: this pinned configure script still probes
+libc iconv when autodetection is disabled. The first Ubuntu run correctly failed
+the external-library audit on `CONFIG_ICONV=yes`; the audit remains strict.
 
 FFprobe statically includes enabled FFmpeg libraries. It still uses operating-
 system and compiler-runtime facilities. Native executable headers, compiler
@@ -163,3 +170,11 @@ toolchain reproducibility, minimum OS, clean installed/offline behavior, storage
 coverage, final per-platform notice integration and verified publication remain
 gates before production selection. Archive size is source-distribution overhead,
 not installer growth; measure the small installed notice delta separately.
+
+The first native source CI run at `afc8cae` reached Linux configuration and
+Windows source export, but stopped at the guards described above. Those are
+actual failed native attempts, not successful platform qualification. The
+corrected recipes need a fresh native run before final runtime notices, source
+packets and installed notice wiring can be accepted. Changing the recipe changes
+the source-packet manifest/hash even when a platform's executable bytes are
+unchanged; regenerate the packet from the reviewed recipe before distribution.
