@@ -25,6 +25,9 @@ if (!process.versions.electron) {
     if (process.env.CLIPLY_SMOKE_TRACKS === "1") {
       require("./smoke-local-tracks").fixtures(userData, process.env.CLIPLY_SMOKE_FFMPEG)
     }
+    if (process.env.CLIPLY_SMOKE_REMUX === "1") {
+      require("./smoke-local-remux").fixtures(userData, process.env.CLIPLY_SMOKE_FFMPEG)
+    }
     const args = [__filename, userData]
     // Source-tree Electron has no installed AppArmor profile on CI. Packaged
     // Linux checks exercise the real launchers without this test-only flag.
@@ -158,6 +161,9 @@ if (!process.versions.electron) {
     }
     if (process.env.CLIPLY_SMOKE_TRACKS === "1") {
       await require("./smoke-local-tracks").runUI({ window: cliplyApp.mainWindow, service: localMedia, userData })
+    }
+    if (process.env.CLIPLY_SMOKE_REMUX === "1") {
+      await require("./smoke-local-remux").runUI({ window: cliplyApp.mainWindow, service: localMedia, userData })
     }
     await localMedia.shutdown()
     assert.equal(state.count, 123, "preload IPC round trip")

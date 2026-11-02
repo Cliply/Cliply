@@ -1,6 +1,10 @@
 // Stable, path-free errors. Helper stderr and source names never become telemetry.
 const MESSAGES = {
   AUDIO_UNSUPPORTED: "No verified audio extraction profile is available for this track. Choose AAC-LC, MP3 or 16-bit little-endian PCM, mono/stereo, with a known duration.",
+  REMUX_SOURCE: "Container changes need a verified MP4, MOV or Matroska source.",
+  REMUX_TARGET: "Choose a different supported target: MP4, MOV or MKV.",
+  REMUX_CHAPTERS: "Chapter preservation is verified only for compatible MKV output. Explicitly remove chapters or choose a supported target.",
+  REMUX_TIMING: "This file has unknown or delayed track timing outside the verified container-change profile.",
   TRACK_CONTAINER: "Track removal needs a verified MP4, MOV or MKV file with known duration. For audio-only files, try Extract audio.",
   TRACK_EMPTY: "Keep at least one playable video or audio track.",
   TRACK_UNSUPPORTED: "A retained track has an unverified codec, metadata or disposition. Explicitly remove it to continue; no conversion is performed.",

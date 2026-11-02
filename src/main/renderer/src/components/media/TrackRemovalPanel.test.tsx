@@ -98,3 +98,75 @@ test("Russian copy status and cancellation refer to the shared local job", async
   await waitFor(() => expect(mediaApi.cancelExport).toHaveBeenCalledWith("copy"))
   await waitFor(() => expect(screen.getByRole("status").textContent).toContain(ru["media.copyCancelled"]))
 })
+
+test("container selection preserves all streams; incompatible tracks require explicit removal and target survives navigation", async () => {
+  const remuxSource = { ...source, contentContainer: "mkv", startTime: 0, streams: source.streams.map(stream => ({ ...stream, startTime: 0, disposition: { ...stream.disposition, default: 1 as const } })), remuxProfiles: [
+    { targetContainer: "mp4", extension: "mp4", supportedStreamIndexes: [3, 7], preservesChapters: false },
+    { targetContainer: "mov", extension: "mov", supportedStreamIndexes: [3, 7], preservesChapters: false }
+  ] } as MediaSource
+  useLocalExport.setState({ remuxSelection: null })
+  let view = render(<TrackRemovalPanel source={remuxSource} busy={false} operation="remux" />)
+  expect(screen.getAllByRole("checkbox").every(e => (e as HTMLInputElement).checked)).toBe(true)
+  expect(choose().disabled).toBe(true)
+  fireEvent.change(screen.getByLabelText(en["media.targetContainer"]), { target: { value: "mp4" } })
+  expect(screen.getAllByRole("checkbox").every(e => (e as HTMLInputElement).checked)).toBe(true)
+  expect(screen.getByText("Output: .MP4 · full file · original codecs")).toBeTruthy()
+  expect(screen.getByRole("alert").textContent).toBe(en["media.error.TRACK_UNSUPPORTED"])
+  fireEvent.click(screen.getByLabelText(/#11/)); expect(choose().disabled).toBe(false)
+  fireEvent.click(choose())
+  await waitFor(() => expect(mediaApi.prepareExport).toHaveBeenCalledWith({ operation: "remux", sourceId: "source", targetContainer: "mp4", streamIndexes: [3, 7], removeChapters: false }))
+  await waitFor(() => expect(useLocalExport.getState().pending).toBe(false))
+  view.unmount(); view = render(<TrackRemovalPanel source={remuxSource} busy={false} operation="remux" />)
+  expect((screen.getByRole("combobox") as HTMLSelectElement).value).toBe("mp4")
+  expect((screen.getByLabelText(/#11/) as HTMLInputElement).checked).toBe(false)
+  act(() => acceptExport({ ...empty, revision: 5, plan: { ...plan, operation: "remux", targetContainer: "mp4", streamIndexes: [3, 7], removedStreamIndexes: [11], outputName: "converted.mp4" } }))
+  expect(screen.getByText("Save as: converted.mp4")).toBeTruthy()
+  fireEvent.change(screen.getByRole("combobox"), { target: { value: "mov" } })
+  expect(screen.queryByText("Save as: converted.mp4")).toBeNull()
+  view.rerender(<TrackRemovalPanel source={{ ...remuxSource, sourceId: "new" }} busy={false} operation="remux" />)
+  expect((screen.getByRole("combobox") as HTMLSelectElement).value).toBe("")
+  expect(screen.getAllByRole("checkbox").every(e => (e as HTMLInputElement).checked)).toBe(true)
+})
+test("remux chapters default to preservation when verified; another target requires explicit removal", () => {
+  useLocalExport.setState({ remuxSelection: null })
+  const withChapters = { ...source, chapterCount: 2, startTime: 0, streams: source.streams.slice(0, 2).map(stream => ({ ...stream, startTime: 0, disposition: { default: 1 as const } })), remuxProfiles: [
+    { targetContainer: "mkv", extension: "mkv", supportedStreamIndexes: [3, 7], preservesChapters: true },
+    { targetContainer: "mov", extension: "mov", supportedStreamIndexes: [3, 7], preservesChapters: false }
+  ] } as MediaSource
+  render(<TrackRemovalPanel source={withChapters} busy={false} operation="remux" />)
+  fireEvent.change(screen.getByRole("combobox"), { target: { value: "mkv" } })
+  expect(screen.getByText("Keep all 2 chapters.")).toBeTruthy()
+  expect((screen.getByLabelText(/Remove all 2 chapters/) as HTMLInputElement).checked).toBe(false)
+  expect(choose().disabled).toBe(false)
+  fireEvent.change(screen.getByRole("combobox"), { target: { value: "mov" } })
+  expect(choose().disabled).toBe(true)
+  expect(screen.getByRole("alert").textContent).toBe(en["media.error.REMUX_CHAPTERS"])
+  fireEvent.click(screen.getByLabelText(/Remove all 2 chapters/)); expect(choose().disabled).toBe(false)
+})
+test("remux shares copy status and cancellation in Russian", async () => {
+  useLocale.setState({ locale: "ru" })
+  acceptExport({ ...empty, revision: 3, job: { jobId: "remux", operation: "remux", outputName: "copy.mp4", state: "running", progress: 20, error: null } })
+  render(<ExportStatus />)
+  expect(screen.getByRole("status").textContent).toContain(ru["media.copyRunning"])
+  fireEvent.click(screen.getByRole("button", { name: ru["media.cancelCopy"] }))
+  await waitFor(() => expect(mediaApi.cancelExport).toHaveBeenCalledWith("remux"))
+})
+
+test("switching from chapter-preserving remux to track removal still requires chapter-removal consent", () => {
+  const withChapters = { ...source, chapterCount: 2, startTime: 0,
+    streams: source.streams.slice(0, 2).map(stream => ({ ...stream, startTime: 0 })),
+    remuxProfiles: [{ targetContainer: "mkv", extension: "mkv", supportedStreamIndexes: [3, 7], preservesChapters: true }]
+  } as MediaSource
+  useLocalExport.setState({ remuxSelection: null })
+  const view = render(<TrackRemovalPanel source={withChapters} busy={false} operation="remux" />)
+  fireEvent.change(screen.getByRole("combobox"), { target: { value: "mkv" } })
+  expect(choose().disabled).toBe(false)
+  view.rerender(<TrackRemovalPanel source={withChapters} busy={false} operation="removeTracks" />)
+  expect(choose().disabled).toBe(true)
+  expect(screen.getByRole("alert").textContent).toBe(en["media.error.TRACK_CHAPTERS"])
+  fireEvent.click(screen.getByLabelText(/Remove all 2 chapters/))
+  expect(choose().disabled).toBe(false)
+  view.rerender(<TrackRemovalPanel source={withChapters} busy={false} operation="remux" />)
+  expect((screen.getByLabelText(/Remove all 2 chapters/) as HTMLInputElement).checked).toBe(false)
+  expect(screen.getByText("Keep all 2 chapters.")).toBeTruthy()
+})

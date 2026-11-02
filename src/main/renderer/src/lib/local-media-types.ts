@@ -39,6 +39,10 @@ export interface MediaSource {
   startTime: number | null
   formatNames: string[]
   streams: MediaStream[]
+  contentContainer?: MediaContainer | null
+  chapters?: { start: number | null; end: number | null; title: string | null }[]
+  chaptersCopySafe?: boolean
+  remuxProfiles?: { targetContainer: MediaContainer; extension: MediaContainer; supportedStreamIndexes: number[]; preservesChapters: boolean }[]
   chapterCount: number
   capabilities: Record<"probe" | "nativePreview" | "trim" | "extractAudio" | "removeTracks" | "remux", MediaCapability>
   extractionProfiles?: { streamIndex: number; extension: "aac" | "mp3" | "wav" }[]
@@ -65,6 +69,7 @@ export interface MediaPreview {
   expiresAt: number
 }
 
+export type MediaContainer = "mp4" | "mov" | "mkv"
 export interface AudioExportRequest { operation: "extractAudio"; sourceId: string; streamIndex: number }
 export interface AudioExportPlan extends AudioExportRequest {
   planId: string; outputName: string; extension: string; codec: string; language: string | null; title: string | null; duration: number; expiresAt: number
@@ -73,8 +78,10 @@ export interface TrackExportRequest { operation: "removeTracks"; sourceId: strin
 export interface TrackExportPlan extends TrackExportRequest {
   planId: string; outputName: string; extension: string; duration: number; expiresAt: number; removedStreamIndexes: number[]
 }
-export type LocalExportRequest = AudioExportRequest | TrackExportRequest
-export type LocalExportPlan = AudioExportPlan | TrackExportPlan
+export interface RemuxRequest extends Omit<TrackExportRequest, "operation"> { operation: "remux"; targetContainer: MediaContainer }
+export interface RemuxPlan extends Omit<TrackExportPlan, "operation"> { operation: "remux"; targetContainer: MediaContainer }
+export type LocalExportRequest = AudioExportRequest | TrackExportRequest | RemuxRequest
+export type LocalExportPlan = AudioExportPlan | TrackExportPlan | RemuxPlan
 export interface LocalExportJob {
   jobId: string; sourceId?: string; streamIndex?: number; outputName: string | null
   operation?: LocalExportRequest["operation"]

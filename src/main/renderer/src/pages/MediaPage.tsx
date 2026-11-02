@@ -82,11 +82,11 @@ export default function MediaPage() {
         <section aria-label={t("media.tools")} className="space-y-3">
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
             <Button variant="outline" disabled><Scissors />{t("media.trim")}</Button><Button variant={action === "extractAudio" ? "secondary" : "outline"} disabled={exporting} onClick={() => useLocalExport.setState({ action: "extractAudio" })}><Music2 />{t("media.extract")}</Button>
-            <Button variant={action === "removeTracks" ? "secondary" : "outline"} disabled={exporting} onClick={() => useLocalExport.setState({ action: "removeTracks" })}><ListVideo />{t("media.remove")}</Button><Button variant="outline" disabled><FileVideo />{t("media.remux")}</Button>
+            <Button variant={action === "removeTracks" ? "secondary" : "outline"} disabled={exporting} onClick={() => useLocalExport.setState({ action: "removeTracks" })}><ListVideo />{t("media.remove")}</Button><Button variant={action === "remux" ? "secondary" : "outline"} disabled={exporting} onClick={() => useLocalExport.setState({ action: "remux" })}><FileVideo />{t("media.remux")}</Button>
           </div>
           <p className="text-sm text-slate-500 dark:text-slate-400">{t("media.toolsUnavailable")}</p>
         </section>
-        {action === "extractAudio" ? <AudioExtractionPanel source={source} busy={busy} /> : <TrackRemovalPanel source={source} busy={busy} />}
+        {action === "extractAudio" ? <AudioExtractionPanel source={source} busy={busy} /> : <TrackRemovalPanel source={source} busy={busy} operation={action} />}
       </>}
       <p className="pb-6 text-xs text-slate-500 dark:text-slate-400">{t("media.sessionOnly")}</p>
     </div>

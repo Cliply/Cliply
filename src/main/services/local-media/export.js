@@ -6,6 +6,7 @@ const { planExport, exportArgs, validateOutput } = require("./export-plan")
 const { ExportOutput, destination } = require("./export-output")
 const { startExportProcess } = require("./export-process")
 const { startProbe } = require("./probe")
+const { detectContainer } = require("./container")
 
 const TERMINAL = new Set(["completed", "cancelled", "failed", "interrupted"])
 const safeError = error => error instanceof MediaError ? error : new MediaError(
@@ -45,7 +46,7 @@ class LocalExport {
       }
       await this.validateSource(source); check()
       const selected = await this.selectDestination({
-        defaultName: `${path.parse(source.dto.filename).name.slice(0, 120)}-${profile.operation === "removeTracks" ? "tracks" : `audio-${profile.streamIndex}`}.${profile.extension}`,
+        defaultName: `${path.parse(source.dto.filename).name.slice(0, 120)}-${profile.operation === "extractAudio" ? `audio-${profile.streamIndex}` : profile.operation === "remux" ? "remux" : "tracks"}.${profile.extension}`,
         extension: profile.extension
       })
       check()
@@ -107,6 +108,8 @@ class LocalExport {
       await output.sync()
       this.update({ state: "validating", progress: 99 })
       const metadata = await supervise(this.runProbe(probe, owned.partial))
+      check()
+      if (plan.profile.operation === "remux") metadata.contentContainer = await detectContainer(metadata, owned.partial)
       check()
       await this.validateSource(plan.source)
       validateOutput(plan.profile, metadata, Number((await output.stat()).size))

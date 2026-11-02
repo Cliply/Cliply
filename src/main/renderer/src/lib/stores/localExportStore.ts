@@ -1,13 +1,14 @@
 import { create } from "zustand"
 import { mediaApi } from "../api"
-import type { LocalExportRequest, LocalExportState, TrackExportRequest } from "../local-media-types"
+import type { LocalExportRequest, LocalExportState, TrackExportRequest, MediaContainer } from "../local-media-types"
 
 export const useLocalExport = create<{
   snapshot: LocalExportState; pending: boolean; error: string | null
   selection: { sourceId: string; streamIndex: number } | null
   trackSelection: Omit<TrackExportRequest, "operation"> | null
+  remuxSelection: (Omit<TrackExportRequest, "operation"> & { targetContainer: MediaContainer | "" }) | null
   action: LocalExportRequest["operation"]
-}>(() => ({ snapshot: { revision: -1, preparing: false, plan: null, job: null, recoveryError: null }, pending: false, error: null, selection: null, trackSelection: null, action: "extractAudio" }))
+}>(() => ({ snapshot: { revision: -1, preparing: false, plan: null, job: null, recoveryError: null }, pending: false, error: null, selection: null, trackSelection: null, remuxSelection: null, action: "extractAudio" }))
 export const exportActive = (state: LocalExportState) => state.preparing || Boolean(state.job && ["reserved", "running", "validating", "publishing", "stopping"].includes(state.job.state))
 export function acceptExport(state: LocalExportState) {
   if (state.revision > useLocalExport.getState().snapshot.revision) useLocalExport.setState({ snapshot: state })

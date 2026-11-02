@@ -147,13 +147,20 @@ function normalizeProbe(raw) {
       rotation: finite(sideData.find((item) => item?.rotation !== undefined)?.rotation ?? stream.tags?.rotate)
     }
   })
+  const chapters = (raw.chapters || []).map(chapter => ({
+    start: finite(chapter?.start_time, 0), end: finite(chapter?.end_time, 0), title: text(Object.entries(chapter?.tags || {}).find(([key]) => key.toLowerCase() === "title")?.[1])
+  }))
+  const chaptersCopySafe = chapters.every((chapter, index) => chapter.start !== null && chapter.end !== null &&
+    chapter.end > chapter.start && chapter.end <= (finite(raw.format.duration, 0) ?? 0) + 0.25 &&
+    (index === 0 || chapter.start >= chapters[index - 1].end) &&
+    Object.entries(raw.chapters[index]?.tags || {}).every(([key, value]) => key.toLowerCase() === "title" && value === chapter.title))
   return {
     duration: finite(raw.format.duration, 0), startTime: finite(raw.format.start_time),
     // FFprobe can name a family; never pretend its first label proves MP4/MOV.
     formatNames: (text(raw.format.format_name, 256) || "").split(",").filter(Boolean),
     majorBrand: text(raw.format.tags?.major_brand, 16)?.trim() || null,
     tags: tags(raw.format.tags, ["title", "artist", "comment"]),
-    streams, chapterCount: raw.chapters?.length || 0
+    streams, chapterCount: chapters.length, chapters, chaptersCopySafe
   }
 }
 

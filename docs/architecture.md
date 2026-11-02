@@ -85,7 +85,7 @@ When adding a channel or changing a response, inspect main handlers, preload,
 renderer declarations, API wrappers and their tests together. Keep Node/file
 access in main and expose only the required bridge operations.
 
-## Local-file inspection, preview and copy-only tools (Stages 1–4)
+## Local-file inspection, preview and copy-only tools (Stages 1–5)
 
 [`local-media.js`](../src/main/services/local-media.js) owns one in-memory source
 and at most one inspection, separately from download history, slots and the
@@ -112,8 +112,10 @@ renderer `mediaApi` expose these calls:
 | `media:reveal-output(jobId)` | `{ revealed: true }`; main revalidates its completed path before revealing it. |
 
 Requests are exactly `{ operation: "extractAudio", sourceId, streamIndex }` or
-`{ operation: "removeTracks", sourceId, streamIndexes, removeChapters }`. Container
-changes, arbitrary flags, paths and ranges are not accepted.
+`{ operation: "removeTracks", sourceId, streamIndexes, removeChapters }`, or
+`{ operation: "remux", sourceId, targetContainer, streamIndexes, removeChapters }`.
+Remux targets are exactly `mp4`, `mov`, or `mkv`; main checks the destination
+extension. Arbitrary flags, paths and ranges are not accepted.
 
 `media:export-updated` sends the same revisioned snapshot only to the trusted
 application main frame. Renderer subscriptions live outside the route. Requests
@@ -153,16 +155,16 @@ report loading/play/seek/end/error, support audio-only media and distinguish
 decoder failure from successful inspection. The player chooses default tracks;
 all probed tracks remain visible, including cover artwork. There is no software
 decode/transcode fallback. Audio extraction and full-file track removal are enabled for verified profiles;
-trim and container changes remain disabled.
+compatible full-file container changes are also enabled; trim remains disabled.
 
 The version-1 [DTO](../src/main/renderer/src/lib/local-media-types.ts) contains an
 opaque source ID, filename/size, nullable duration/start, format-family labels,
 all actual stream indexes (including unknown/unsupported types), bounded stream
-details and chapter count. It carries separate probe, native-preview, trim,
+details, chapter count and bounded chapter start/end/title. It carries separate probe, native-preview, trim,
 extraction, removal and remux capabilities. Probe success enables inspection
 only; the DTO's preview capability remains unchecked until the renderer tries
 the native element. Its local playback status is not an export-capability verdict.
-Main computes separate `extractionProfiles` and `trackRemovalProfile` from the
+Main computes separate `extractionProfiles`, `trackRemovalProfile` and `remuxProfiles` from the
 verified codecs/container, stream properties and duration. Unsupported streams
 stay in the inventory and are not silently removed from a planned copy.
 
@@ -301,6 +303,55 @@ the real Electron UI checks in `npm run smoke:electron` after renderer build.
 Use a task-owned directory and remove helpers/media after verification. Native
 Stage 4 evidence is macOS ARM64 development-host only; other platforms and
 packaged execution remain Stage 7 gates.
+
+### Compatible full-file container changes
+
+Change format reuses the track selection panel and the same export lifecycle.
+Every stream starts selected. Target changes never silently remove tracks or
+convert codecs; incompatible selections require explicit removal. The original
+source and in-memory options stay open after export and navigation. The UI
+explains that quality/codecs remain unchanged and smaller size is not guaranteed.
+
+Source container evidence is independent of filename: FFprobe's MOV-family
+major brand identifies verified MP4 (`isom`, `iso2`, `mp41`, `mp42`, `avc1`) or
+MOV (`qt`). For the shared Matroska/WebM family, a bounded 4096-byte EBML Header
+DocType check accepts only `matroska`; WebM/unknown/malformed headers are refused.
+This small check in [container.js](../src/main/services/local-media/container.js)
+is not a general media detector. Same-container track removal keeps its existing
+source-profile policy.
+
+The tested cross-container matrix is H.264 yuv420p SDR and AAC-LC mono/stereo
+at 44.1/48 kHz, with known near-zero starts (within 100 ms). MP4/MOV `mov_text`
+can be retained between those two containers when flags survive. MKV text
+subtitles cannot be copied to MOV/MP4, and MOV text cannot be copied to MKV.
+Unsupported streams stay selected until explicitly removed. MOV forced tracks,
+MOV/MP4 selections without a retained default of each type, and nonzero rotation
+to MKV are refused. Portrait rotation is verified for MOV↔MP4. No conversion,
+compression, trim or automatic fallback is exposed.
+
+Full-file chapters can be preserved into MKV when there are at most 512 bounded,
+ordered, nonoverlapping chapters, within the source duration, with exact titles
+up to 256 characters and no additional chapter tags. `-map_chapters 0` copies
+them; source chapter data tracks still require explicit removal. MOV/MP4 chapter
+output is not enabled because its muxer can create an implicit chapter data
+track. Other cases require separate explicit chapter-removal consent. Chapter
+editing and trimmed chapter rewriting remain out of scope.
+
+Before publication, remux validation checks content container, stream order/count,
+codec, tested tags/language/default/forced/rotation and ordinary properties,
+plus duration, start offsets and chapter count/timing/title. Start and chapter
+differences are bounded to 50 ms for the measured AAC priming/container rounding;
+whole duration retains the existing 250 ms / 2% tolerance. Native acceptance
+compares decoded video exactly and decoded audio's aligned overlap exactly,
+allowing up to 2048 sample frames of priming/padding at the edges. These checks
+do not claim universal codec, complex timestamp or arbitrary metadata support.
+
+Reproduce the synthetic cross-container matrix with
+`node scripts/smoke-local-remux.js <new-task-dir> <project-ffmpeg> <verified-ffprobe>`.
+After building the renderer, set `CLIPLY_SMOKE_REMUX=1`,
+`CLIPLY_SMOKE_FFMPEG`, `CLIPLY_SMOKE_FFPROBE` and optional
+`CLIPLY_SMOKE_EVIDENCE` for `npm run smoke:electron`. Helpers must follow the
+existing verified staging process; the scripts do not download or replace them.
 
 ## Storage and privacy
 

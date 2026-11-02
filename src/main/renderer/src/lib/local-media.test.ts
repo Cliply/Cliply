@@ -39,3 +39,12 @@ test("missing helper is readable without changing download state", async () => {
   }
   await expect(mediaApi.open()).rejects.toThrow("Local inspection needs FFprobe. Downloads are still available.")
 })
+
+test("remux stays on the narrow export bridge and localizes main refusals", async () => {
+  const prepareExport = vi.fn(async () => ({ success: false, error: { code: "REMUX_CHAPTERS", message: "Chapters cannot be kept" } }))
+  ;(window as unknown as { electronAPI: unknown }).electronAPI = { media: { prepareExport } }
+  useLocale.setState({ locale: "ru" })
+  const request = { operation: "remux" as const, sourceId: "opaque", targetContainer: "mov" as const, streamIndexes: [3, 7], removeChapters: false }
+  await expect(mediaApi.prepareExport(request)).rejects.toThrow("Главы сохраняются только")
+  expect(prepareExport).toHaveBeenCalledWith(request)
+})

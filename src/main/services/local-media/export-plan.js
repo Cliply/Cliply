@@ -30,34 +30,53 @@ function trackRemovalProfile(source) {
   return { extension: container.extension, supportedStreamIndexes: source.streams.filter(stream => trackSupported(container, stream)).map(stream => stream.index) }
 }
 
-function planTracks(source, request) {
+const REMUX_CONTAINERS = { mp4: "mp4", mov: "mov", mkv: "matroska" }
+function remuxSupported(container, stream) {
+  return trackSupported(container, stream) && !(container.extension === "mov" && stream.disposition?.forced) && (stream.type !== "audio" || [44100, 48000].includes(stream.sampleRate))
+}
+function remuxProfiles(source) {
+  if (!Object.hasOwn(REMUX_CONTAINERS, source.contentContainer || "") || !Number.isFinite(source.duration) || source.duration <= 0) return []
+  return Object.keys(REMUX_CONTAINERS).filter(target => target !== source.contentContainer).map(targetContainer => ({
+    targetContainer, extension: targetContainer,
+    supportedStreamIndexes: source.streams.filter(stream => remuxSupported({ extension: targetContainer }, stream)).map(stream => stream.index),
+    preservesChapters: targetContainer === "mkv" && source.chaptersCopySafe === true
+  }))
+}
+function planTracks(source, request) { return planCopy(source, request, false) }
+function planRemux(source, request) { return planCopy(source, request, true) }
+function planCopy(source, request, remux) {
   if (!request || typeof request !== "object" || Array.isArray(request) ||
-      Object.keys(request).sort().join(",") !== "operation,removeChapters,sourceId,streamIndexes" ||
-      request.operation !== "removeTracks" || typeof request.removeChapters !== "boolean" ||
+      Object.keys(request).sort().join(",") !== (remux ? "operation,removeChapters,sourceId,streamIndexes,targetContainer" : "operation,removeChapters,sourceId,streamIndexes") ||
+      request.operation !== (remux ? "remux" : "removeTracks") || typeof request.removeChapters !== "boolean" ||
       !Array.isArray(request.streamIndexes) || request.streamIndexes.length > 128 ||
       request.streamIndexes.some(index => !Number.isSafeInteger(index) || index < 0) ||
       new Set(request.streamIndexes).size !== request.streamIndexes.length) throw new MediaError("REQUEST_INVALID")
   if (!source || request.sourceId !== source.sourceId) throw new MediaError("SOURCE_UNKNOWN")
-  const container = trackContainer(source)
-  if (!container || !Number.isFinite(source.duration) || source.duration <= 0) throw new MediaError("TRACK_CONTAINER")
+  const capability = remux ? remuxProfiles(source).find(profile => profile.targetContainer === request.targetContainer) : null
+  const container = remux ? capability && { extension: capability.extension, muxer: REMUX_CONTAINERS[capability.extension] } : trackContainer(source)
+  if (!container || !Number.isFinite(source.duration) || source.duration <= 0) throw new MediaError(remux ? "REMUX_TARGET" : "TRACK_CONTAINER")
   const selected = source.streams.filter(stream => request.streamIndexes.includes(stream.index)).sort((a, b) => a.index - b.index)
   if (selected.length !== request.streamIndexes.length) throw new MediaError("REQUEST_INVALID")
   if (!selected.some(stream => ["video", "audio"].includes(stream.type) && !stream.disposition?.attached_pic)) throw new MediaError("TRACK_EMPTY")
-  if (selected.some(stream => !trackSupported(container, stream))) throw new MediaError("TRACK_UNSUPPORTED")
+  if (selected.some(stream => !(remux ? remuxSupported : trackSupported)(container, stream))) throw new MediaError("TRACK_UNSUPPORTED")
   if (selected.filter(stream => stream.type === "video").length > 1) throw new MediaError("TRACK_VIDEO_LIMIT")
-  if (source.chapterCount > 0 && !request.removeChapters) throw new MediaError("TRACK_CHAPTERS")
+  if (source.chapterCount > 0 && !request.removeChapters && !capability?.preservesChapters) throw new MediaError(remux ? "REMUX_CHAPTERS" : "TRACK_CHAPTERS")
+  // Only the measured near-zero start timeline is supported for cross-container
+  // copies. Large edit lists / delayed tracks need a separate verified profile.
+  if (remux && [source, ...selected.filter(stream => ["audio", "video"].includes(stream.type))].some(item =>
+    !Number.isFinite(item.startTime) || Math.abs(item.startTime) > 0.1)) throw new MediaError("REMUX_TIMING")
   // MOV/MP4 promotes the first remaining track of a type when none is default.
   // Refuse that unrequested disposition change; Matroska supports passthrough.
   if (container.extension !== "mkv" && selected.some(stream => !selected.some(other => other.type === stream.type && other.disposition?.default))) throw new MediaError("TRACK_DEFAULT")
   const duration = Math.max(...selected.filter(stream => ["video", "audio"].includes(stream.type)).map(stream => stream.duration ?? source.duration))
   if (!Number.isFinite(duration) || duration <= 0) throw new MediaError("TRACK_CONTAINER")
-  return { operation: "removeTracks", sourceId: source.sourceId, streamIndexes: selected.map(stream => stream.index),
+  return { operation: remux ? "remux" : "removeTracks", ...(remux ? { targetContainer: container.extension, expectedChapters: request.removeChapters ? [] : source.chapters || [] } : {}), sourceId: source.sourceId, streamIndexes: selected.map(stream => stream.index),
     removeChapters: request.removeChapters, removedStreamIndexes: source.streams.filter(stream => !request.streamIndexes.includes(stream.index)).map(stream => stream.index),
     duration,
-    expectedStreams: selected, fileTags: source.tags || {}, movInput: container.extension !== "mkv", ...container }
+    expectedStreams: selected, fileTags: source.tags || {}, movInput: (remux ? source.contentContainer : container.extension) !== "mkv", ...container }
 }
 
-function planExport(source, request) { return request?.operation === "removeTracks" ? planTracks(source, request) : planAudio(source, request) }
+function planExport(source, request) { return request?.operation === "remux" ? planRemux(source, request) : request?.operation === "removeTracks" ? planTracks(source, request) : planAudio(source, request) }
 
 // Deliberately narrow, copy-only profiles. No generic codec/container fallback.
 function audioProfile(source, stream) {
@@ -84,7 +103,7 @@ function planAudio(source, request) {
 }
 
 function exportArgs(plan) {
-  const streams = plan.operation === "removeTracks" ? plan.expectedStreams : null
+  const streams = ["removeTracks", "remux"].includes(plan.operation) ? plan.expectedStreams : null
   const maps = streams ? streams.flatMap(stream => ["-map", `0:${stream.index}`]) : ["-map", `0:${plan.streamIndex}`]
   const metadata = streams ? ["-map_metadata", "0", ...streams.flatMap((stream, outputIndex) => [
     `-map_metadata:s:${outputIndex}`, `0:s:${stream.index}`,
@@ -97,12 +116,12 @@ function exportArgs(plan) {
     "-probesize", "5000000", "-analyzeduration", "5000000", "-max_streams", "128",
     // Inherited regular-file descriptors are seekable; FFmpeg never opens a
     // renderer path, the selected source path or a final output path.
-    "-fd", "0", "-i", "fd:", ...maps, "-c", "copy", ...metadata, "-map_chapters", "-1",
+    "-fd", "0", "-i", "fd:", ...maps, "-c", "copy", ...metadata, "-map_chapters", plan.expectedChapters?.length ? "0" : "-1",
     "-progress", "pipe:2", "-nostats", "-f", plan.muxer, "-fd", "1", "fd:"]
 }
 
 function validateOutput(plan, metadata, bytes) {
-  if (plan.operation === "removeTracks") return validateTracks(plan, metadata, bytes)
+  if (["removeTracks", "remux"].includes(plan.operation)) return validateTracks(plan, metadata, bytes)
   const stream = metadata.streams[0]
   const family = plan.extension === "aac" ? "aac" : plan.extension
   const duration = stream?.duration ?? metadata.duration
@@ -115,9 +134,17 @@ function validateOutput(plan, metadata, bytes) {
 function validateTracks(plan, metadata, bytes) {
   const fail = () => { throw new MediaError("OUTPUT_INVALID") }
   const duration = metadata.duration
-  if (bytes <= 0 || metadata.streams.length !== plan.expectedStreams.length || metadata.chapterCount !== 0 ||
+  if (bytes <= 0 || metadata.streams.length !== plan.expectedStreams.length || metadata.chapterCount !== (plan.expectedChapters?.length || 0) ||
       !Number.isFinite(duration) || duration <= 0 || Math.abs(duration - plan.duration) > Math.max(0.25, plan.duration * 0.02) ||
-      trackContainer({ ...metadata, filename: `output.${plan.extension}` })?.extension !== plan.extension) fail()
+      (plan.operation === "remux" ? metadata.contentContainer : trackContainer({ ...metadata, filename: `output.${plan.extension}` })?.extension) !== plan.extension) fail()
+  if (plan.operation === "remux") {
+    if (!Number.isFinite(metadata.startTime) || Math.abs(metadata.startTime) > 0.1) fail()
+    if (plan.expectedChapters.length && (!metadata.chaptersCopySafe || !Array.isArray(metadata.chapters) || metadata.chapters.length !== plan.expectedChapters.length)) fail()
+    plan.expectedChapters.forEach((before, index) => {
+      const after = metadata.chapters[index]
+      if (before.title !== after.title || Math.abs(before.start - after.start) > 0.05 || Math.abs(before.end - after.end) > 0.05) fail()
+    })
+  }
   const containsTags = (before, after) => Object.entries(before || {}).every(([key, value]) => after?.[key] === value)
   if (!containsTags(plan.fileTags, metadata.tags)) fail()
   plan.expectedStreams.forEach((before, index) => {
@@ -128,9 +155,11 @@ function validateTracks(plan, metadata, bytes) {
         (before.language || "und") !== (after.language || "und") || !containsTags(before.tags, after.tags) ||
         Object.entries(after.disposition || {}).some(([flag, value]) => value === 1 && before.disposition?.[flag] !== 1) ||
         ["default", "forced"].some(flag => (before.disposition?.[flag] || 0) !== (after.disposition?.[flag] || 0))) fail()
+    if (plan.operation === "remux" && ["video", "audio"].includes(before.type) &&
+        (!Number.isFinite(after.startTime) || Math.abs(before.startTime - after.startTime) > 0.05)) fail()
     if (before.type === "video" && (!same(["width", "height", "pixelFormat", "colorTransfer", "colorPrimaries", "hasHdrMetadata"]) || angle(before.rotation) !== angle(after.rotation))) fail()
     if (before.type === "audio" && !same(["profile", "sampleRate", "channels"])) fail()
   })
 }
 
-module.exports = { audioProfile, planAudio, planTracks, planExport, trackRemovalProfile, exportArgs, validateOutput }
+module.exports = { remuxProfiles, planRemux, audioProfile, planAudio, planTracks, planExport, trackRemovalProfile, exportArgs, validateOutput }

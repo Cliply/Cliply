@@ -6,7 +6,8 @@ const { startProbe } = require("./local-media/probe")
 const { MediaPreview } = require("./local-media/preview")
 const { MediaError } = require("./local-media/errors")
 const { LocalExport } = require("./local-media/export")
-const { audioProfile, trackRemovalProfile } = require("./local-media/export-plan")
+const { audioProfile, trackRemovalProfile, remuxProfiles } = require("./local-media/export-plan")
+const { detectContainer } = require("./local-media/container")
 
 async function identify(sourcePath) {
   try {
@@ -94,6 +95,8 @@ class LocalMediaService {
     job.process = this.runProbe(executable, identity.realPath)
     const metadata = await job.process.result
     checkCancelled()
+    metadata.contentContainer = await detectContainer(metadata, identity.realPath)
+    checkCancelled()
     await assertUnchanged(source)
     checkCancelled()
     source.dto = {
@@ -112,6 +115,10 @@ class LocalMediaService {
       ["video", "audio"].includes(stream.type) && source.dto.trackRemovalProfile.supportedStreamIndexes.includes(stream.index))
       ? { status: "available", reason: null, message: null }
       : { status: "unavailable", reason: "TRACK_CONTAINER", message: "Track removal needs a verified MP4, MOV or MKV source and playable retained tracks." }
+    source.dto.remuxProfiles = remuxProfiles(source.dto)
+    source.dto.capabilities.remux = source.dto.remuxProfiles.length
+      ? { status: "available", reason: null, message: null }
+      : { status: "unavailable", reason: "REMUX_SOURCE", message: "Container changes need a verified MP4, MOV or Matroska source with compatible tracks." }
     this.preview.revoke()
     this.source = source
     this.sourceError = null
