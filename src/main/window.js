@@ -6,6 +6,7 @@
 
 const { app, BrowserWindow, dialog } = require("electron")
 const path = require("path")
+const { pathToFileURL } = require("node:url")
 const { trustedUrl } = require("./services/local-media/preview")
 const isDev = process.env.NODE_ENV === "development"
 
@@ -17,7 +18,7 @@ const EMBED_REFERER = "https://cliply.space/"
 /**
  * give youtube's embed player a referer to read
  *
- * the packaged app is served with loadFile(), so the renderer runs under
+ * the packaged app is served from a local file URL, so the renderer runs under
  * file:// - and chromium sends no Referer at all from a file:// page. the
  * embed player decides playability from that header server-side: without it
  * the response carries an errorScreen instead of a video, which is what the
@@ -121,7 +122,7 @@ function createWindow(cliplyApp) {
 function loadApplication(cliplyApp) {
   if (isDev) {
     // development: load from vite dev server
-    const startUrl = "http://localhost:5173"
+    const startUrl = trustedUrl(true)
     cliplyApp.mainWindow.loadURL(startUrl)
   } else {
     // production: load from packaged files
@@ -133,7 +134,10 @@ function loadApplication(cliplyApp) {
     )
 
     try {
-      cliplyApp.mainWindow.loadFile(rendererPath).catch((error) => {
+      // Use the exact URL accepted by IPC/navigation. Electron's loadFile uses
+      // legacy URL formatting, which leaves '~' unescaped (e.g. RUNNER~1), unlike
+      // pathToFileURL. Keep strict authorization; canonicalize the load instead.
+      cliplyApp.mainWindow.loadURL(trustedUrl(false)).catch((error) => {
         console.error(`Failed to load renderer: ${error.message}`)
 
         // fallback path
@@ -148,7 +152,7 @@ function loadApplication(cliplyApp) {
         )
 
         return cliplyApp.mainWindow
-          .loadFile(fallbackPath)
+          .loadURL(pathToFileURL(fallbackPath).href)
           .catch((fallbackError) => {
             console.error(`Fallback also failed: ${fallbackError.message}`)
 

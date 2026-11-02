@@ -136,6 +136,12 @@ renderer-supplied paths/options are refused. The shared host now requires
 and `allowRunningInsecureContent:false`. Top-level external navigation and new
 Electron windows are denied; app website links use the existing external-browser
 bridge. The scoped YouTube embed referer is preserved in the same session hook.
+The window loads the same canonical `pathToFileURL` URL used for authorization,
+including encoded Windows short-name tildes and literal percent signs. Electron's
+legacy `loadFile` formatting can differ. Authorization remains an exact URL
+comparison after removing only the route fragment; queries and foreign frames,
+windows, file paths and remote origins are still rejected. The existing fallback
+load also uses `pathToFileURL` and does not expand the trusted URL set.
 
 [`preview.js`](../src/main/services/local-media/preview.js) registers the
 `cliply-media` scheme before app readiness and its handler only in the owner's

@@ -13,7 +13,7 @@ const mockWindow = {
   once: jest.fn(),
   show: jest.fn(),
   isDestroyed: jest.fn(() => false),
-  loadURL: jest.fn(),
+  loadURL: jest.fn(() => Promise.resolve()),
   loadFile: jest.fn(() => Promise.resolve()),
   webContents: {
     on: jest.fn(),
@@ -389,7 +389,7 @@ describe("the youtube embed referer", () => {
     handler({ url: "cliply-media://source/" + "a".repeat(64) }, callback)
     expect(callback).toHaveBeenCalledWith({ cancel: true })
   })
-  // the regression this guards: the packaged app is served with loadFile(),
+  // the regression this guards: the packaged app is served from a file URL,
   // so the renderer runs under file:// and chromium sends no Referer at all.
   // youtube's embed player reads that header server-side to decide
   // playability, and without it the response is an errorScreen rather than a
