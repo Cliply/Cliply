@@ -550,7 +550,7 @@ class CliplyApp {
       if (this.ipcHandlers?.localMedia) await this.ipcHandlers.localMedia.shutdown()
     } catch {
       this.quitDrainInProgress = false
-      dialog.showErrorBox("Local inspection is still stopping", "FFprobe has not exited. Wait and close the app again.")
+      dialog.showErrorBox("Local media is still stopping", "A local media helper has not stopped. Wait and close the app again.")
       return
     }
 

@@ -12,6 +12,7 @@ function setup() {
   const window = { isDestroyed: () => false, webContents: { mainFrame: frame } }
   const event = { sender: window.webContents, senderFrame: frame }
   const service = {
+    exports: { prepare: jest.fn(async () => ({ cancelled: true, plan: null })), start: jest.fn(), cancel: jest.fn(), getState: jest.fn(), reveal: jest.fn() },
     preview: { create: jest.fn(async () => ({ url: "opaque" })), revoke: jest.fn() },
     open: jest.fn(async () => ({ cancelled: true, source: null })),
     getState: jest.fn(async () => ({ source: null, busy: false })), close: jest.fn(async () => ({ closed: true }))
@@ -27,6 +28,19 @@ test("main-frame open, state and close expose only the narrow contract; cleanup 
   expect(await calls.get("media:close")(event)).toEqual({ success: true, data: { closed: true } })
   cleanup()
   expect(calls.size).toBe(0)
+})
+
+test("export actions refuse foreign frames before calling the destination picker or writer", async () => {
+  const { calls, event, service } = setup()
+  const request = { sourceId: "11111111-1111-4111-8111-111111111111", operation: "extractAudio", streamIndex: 7 }
+  expect((await calls.get("media:prepare-export")(event, request)).success).toBe(true)
+  expect(service.exports.prepare).toHaveBeenCalledWith(request)
+  event.senderFrame = { url: event.senderFrame.url }
+  for (const channel of ["media:prepare-export", "media:start-export", "media:cancel-export", "media:export-state", "media:reveal-output"]) {
+    expect((await calls.get(channel)(event, request)).error.code).toBe("FORBIDDEN")
+  }
+  expect(service.exports.prepare).toHaveBeenCalledTimes(1)
+  expect(service.exports.start).not.toHaveBeenCalled()
 })
 
 test("preview bridge validates opaque IDs and owning sender; arbitrary paths never reach the service", async () => {
@@ -94,5 +108,5 @@ test("real preload forwards no path/argv input through its media methods", async
   await api.media.getState()
   await api.media.close()
   expect(invoke.mock.calls).toEqual([["media:open", undefined], ["media:get-state", undefined], ["media:close", undefined]])
-  expect(Object.keys(api.media)).toEqual(["open", "getState", "preview", "releasePreview", "close"])
+  expect(Object.keys(api.media)).toEqual(["open", "getState", "preview", "releasePreview", "close", "prepareExport", "startExport", "cancelExport", "exportState", "revealOutput", "onExportUpdated"])
 })

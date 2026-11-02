@@ -567,6 +567,7 @@ describe("the list main pushes and answers with", () => {
       "media:close",
       "media:preview",
       "media:release-preview",
+      "media:prepare-export", "media:start-export", "media:cancel-export", "media:export-state", "media:reveal-output",
       "download:get-list",
       "download:clear-history",
       "download:remove-history",

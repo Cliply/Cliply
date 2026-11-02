@@ -126,7 +126,7 @@ function normalizeProbe(raw) {
       .filter(([key, value]) => /^[a-z_]{1,40}$/.test(key) && (value === 0 || value === 1)).slice(0, 32))
     const sideData = Array.isArray(stream.side_data_list) ? stream.side_data_list : []
     return {
-      index: stream.index, type: text(stream.codec_type, 40) || "unknown", codec: text(stream.codec_name, 80),
+      index: stream.index, type: text(stream.codec_type, 40) || "unknown", codec: text(stream.codec_name, 80), profile: text(stream.profile, 80),
       duration: finite(stream.duration, 0), startTime: finite(stream.start_time), timeBase: rational(stream.time_base),
       width: finite(stream.width, 0), height: finite(stream.height, 0), pixelFormat: text(stream.pix_fmt, 80),
       sampleRate: finite(stream.sample_rate, 0), channels: finite(stream.channels, 0),

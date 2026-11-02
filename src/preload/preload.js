@@ -69,13 +69,23 @@ const invoke = async (channel, data) => {
 
 // expose ipc api to renderer process
 contextBridge.exposeInMainWorld("electronAPI", {
-  // Local media: opaque IDs only; no renderer paths, file bytes or export arguments.
+  // Local media: opaque IDs and a selected stream; no paths or FFmpeg arguments.
   media: {
     open: () => invoke("media:open"),
     getState: () => invoke("media:get-state"),
     preview: (sourceId) => invoke("media:preview", sourceId),
     releasePreview: (previewId) => invoke("media:release-preview", previewId),
-    close: () => invoke("media:close")
+    close: () => invoke("media:close"),
+    prepareExport: (request) => invoke("media:prepare-export", request),
+    startExport: (planId) => invoke("media:start-export", planId),
+    cancelExport: (jobId) => invoke("media:cancel-export", jobId),
+    exportState: () => invoke("media:export-state"),
+    revealOutput: (jobId) => invoke("media:reveal-output", jobId),
+    onExportUpdated: (callback) => {
+      const handler = (_event, snapshot) => callback(snapshot)
+      ipcRenderer.on("media:export-updated", handler)
+      return () => ipcRenderer.removeListener("media:export-updated", handler)
+    }
   },
   // video operations
   video: {

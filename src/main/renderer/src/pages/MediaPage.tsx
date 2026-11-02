@@ -7,6 +7,9 @@ import { DownloadsToggle } from "@/components/downloads/DownloadsToggle"
 import { LocaleToggle } from "@/components/ui/locale-toggle"
 import { ModeToggle } from "@/components/ui/mode-toggle"
 import { NativeMediaPlayer } from "@/components/media/NativeMediaPlayer"
+import { AudioExtractionPanel } from "@/components/media/AudioExtractionPanel"
+import { ExportStatus } from "@/components/media/LocalExportStatus"
+import { exportActive, useLocalExport } from "@/lib/stores/localExportStore"
 import { useT } from "@/lib/i18n"
 import { localMediaActions, useLocalMedia } from "@/lib/stores/localMediaStore"
 
@@ -14,6 +17,7 @@ export default function MediaPage() {
   const t = useT()
   const source = useLocalMedia((s) => s.source)
   const busy = useLocalMedia((s) => s.busy)
+  const exporting = useLocalExport(s => exportActive(s.snapshot) || s.pending)
   const error = useLocalMedia((s) => s.error)
   const heading = useRef<HTMLHeadingElement>(null)
   useEffect(() => {
@@ -38,11 +42,12 @@ export default function MediaPage() {
         <div className="min-w-0 flex-1"><h1 ref={heading} tabIndex={-1} className="break-words text-2xl font-medium tracking-tight outline-none">{t("media.title")}</h1>
           <p className="mt-2 break-all text-slate-600 dark:text-slate-300">{source?.filename || t("media.empty")}</p></div>
         <div className="flex gap-2">
-          <Button variant="outline" disabled={busy} onClick={() => void localMediaActions.open()}>{busy ? <Loader2 className="animate-spin" /> : <FolderOpen />}{t(source ? "media.change" : "media.open")}</Button>
-          {(source || busy) && <Button variant="ghost" onClick={() => void localMediaActions.close()}><X />{t(busy ? "media.cancel" : "media.close")}</Button>}
+          <Button variant="outline" disabled={busy || exporting} onClick={() => void localMediaActions.open()}>{busy ? <Loader2 className="animate-spin" /> : <FolderOpen />}{t(source ? "media.change" : "media.open")}</Button>
+          {(source || busy) && <Button variant="ghost" disabled={exporting} onClick={() => void localMediaActions.close()}><X />{t(busy ? "media.cancel" : "media.close")}</Button>}
         </div>
       </div>
       {busy && <p role="status" className="text-sm">{t("media.opening")}</p>}
+      <ExportStatus />
       {error && <p role="alert" className="rounded-lg border border-red-300 bg-red-50 p-4 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300">{error}</p>}
       {!source && <Card><CardContent className="pt-6 text-sm text-slate-600 dark:text-slate-300">{t("media.emptyBody")}</CardContent></Card>}
       {source && <>
@@ -74,11 +79,12 @@ export default function MediaPage() {
         </Card>
         <section aria-label={t("media.tools")} className="space-y-3">
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            <Button variant="outline" disabled><Scissors />{t("media.trim")}</Button><Button variant="outline" disabled><Music2 />{t("media.extract")}</Button>
+            <Button variant="outline" disabled><Scissors />{t("media.trim")}</Button><Button variant="secondary" onClick={() => document.getElementById("local-audio-track")?.focus()}><Music2 />{t("media.extract")}</Button>
             <Button variant="outline" disabled><ListVideo />{t("media.remove")}</Button><Button variant="outline" disabled><FileVideo />{t("media.remux")}</Button>
           </div>
           <p className="text-sm text-slate-500 dark:text-slate-400">{t("media.toolsUnavailable")}</p>
         </section>
+        <AudioExtractionPanel source={source} busy={busy} />
       </>}
       <p className="pb-6 text-xs text-slate-500 dark:text-slate-400">{t("media.sessionOnly")}</p>
     </div>

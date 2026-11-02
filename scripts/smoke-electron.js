@@ -19,6 +19,9 @@ if (!process.versions.electron) {
     if (process.env.CLIPLY_SMOKE_PREVIEW === "1") {
       require("./smoke-local-preview").fixtures(userData)
     }
+    if (process.env.CLIPLY_SMOKE_EXPORT === "1") {
+      require("./smoke-local-export").fixtures(userData, process.env.CLIPLY_SMOKE_FFMPEG)
+    }
     const args = [__filename, userData]
     // Source-tree Electron has no installed AppArmor profile on CI. Packaged
     // Linux checks exercise the real launchers without this test-only flag.
@@ -79,6 +82,12 @@ if (!process.versions.electron) {
       const { registerLocalMedia } = require(path.join(appRoot, "src/main/ipc/local-media"))
       const fixture = path.join(userData, "inspection.wav")
       localMedia = new LocalMediaService({
+        exportOptions: {
+          storagePath: path.join(userData, "local-media"),
+          resolveFfmpeg: async () => process.env.CLIPLY_SMOKE_FFMPEG,
+          selectDestination: async () => path.join(userData, "extracted.aac"),
+          onUpdate: snapshot => cliplyApp.mainWindow?.webContents.send("media:export-updated", snapshot)
+        },
         selectFile: async () => fixture,
         resolveProbe: () => resolveFfprobe({
           isPackaged: false, developmentPath: process.env.CLIPLY_SMOKE_FFPROBE,
@@ -140,6 +149,9 @@ if (!process.versions.electron) {
     assert.equal(state.mediaSourceAfterClose, null)
     if (process.env.CLIPLY_SMOKE_PREVIEW === "1") {
       await require("./smoke-local-preview").run({ window: cliplyApp.mainWindow, service: localMedia, userData, cliplyApp })
+    }
+    if (process.env.CLIPLY_SMOKE_EXPORT === "1") {
+      await require("./smoke-local-export").runUI({ window: cliplyApp.mainWindow, service: localMedia, userData })
     }
     await localMedia.shutdown()
     assert.equal(state.count, 123, "preload IPC round trip")

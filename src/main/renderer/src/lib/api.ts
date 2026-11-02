@@ -28,6 +28,7 @@ import {
 } from "./api-types"
 import { localizeCode } from "./i18n"
 import type { IPCResponse } from "./electron-api"
+import type { AudioExportRequest, LocalExportState } from "./local-media-types"
 
 // the types and the pure helpers used to live here, so they are re-exported
 // under this name: every importer of this module still reads them here
@@ -131,6 +132,22 @@ const mediaError: ErrorFactory = (message, error) =>
 
 // Local inspection is separate from download state, history and telemetry.
 export const mediaApi = {
+  async prepareExport(request: AudioExportRequest) {
+    return unwrap(await getElectronAPI().media.prepareExport(request), "Could not prepare audio extraction", { makeError: mediaError })
+  },
+  async startExport(planId: string) {
+    return unwrap(await getElectronAPI().media.startExport(planId), "Could not start audio extraction", { makeError: mediaError })
+  },
+  async cancelExport(jobId: string) {
+    return unwrap(await getElectronAPI().media.cancelExport(jobId), "Could not cancel audio extraction", { makeError: mediaError })
+  },
+  async exportState() {
+    return unwrap(await getElectronAPI().media.exportState(), "Could not read local export status", { makeError: mediaError })
+  },
+  async revealOutput(jobId: string) {
+    return unwrap(await getElectronAPI().media.revealOutput(jobId), "Could not reveal audio output", { makeError: mediaError })
+  },
+  onExportUpdated(callback: (state: LocalExportState) => void) { return getElectronAPI().media.onExportUpdated(callback) },
   async preview(sourceId: string) {
     return unwrap(await getElectronAPI().media.preview(sourceId), "Native preview is unavailable", { makeError: mediaError })
   },

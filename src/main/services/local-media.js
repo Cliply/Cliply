@@ -5,6 +5,8 @@ const { resolveFfprobe } = require("./local-media/paths")
 const { startProbe } = require("./local-media/probe")
 const { MediaPreview } = require("./local-media/preview")
 const { MediaError } = require("./local-media/errors")
+const { LocalExport } = require("./local-media/export")
+const { audioProfile } = require("./local-media/export-plan")
 
 async function identify(sourcePath) {
   try {
@@ -44,7 +46,7 @@ function capabilities() {
 }
 
 class LocalMediaService {
-  constructor({ selectFile, resolveProbe = resolveFfprobe, runProbe = startProbe } = {}) {
+  constructor({ selectFile, resolveProbe = resolveFfprobe, runProbe = startProbe, exportOptions = {} } = {}) {
     this.selectFile = selectFile
     this.resolveProbe = resolveProbe
     this.runProbe = runProbe
@@ -52,6 +54,8 @@ class LocalMediaService {
     this.sourceError = null
     this.pending = null
     this.frozen = false
+    this.exports = new LocalExport({ ...exportOptions, getSource: () => this.source,
+      validateSource: assertUnchanged, isInspecting: () => Boolean(this.pending), resolveProbe })
     this.preview = new MediaPreview({
       getSource: () => this.source, validate: assertUnchanged,
       invalidate: () => { this.source = null; this.sourceError = new MediaError("SOURCE_CHANGED") }
@@ -61,7 +65,9 @@ class LocalMediaService {
   // Only main supplies selectFile. There is no renderer path/argv input.
   open() {
     if (this.frozen) return Promise.reject(new MediaError("CLOSED"))
+    if (this.exports.busy) return Promise.reject(new MediaError("EXPORT_BUSY"))
     if (this.pending) return Promise.reject(new MediaError("BUSY"))
+    this.exports.invalidatePlan()
     const job = { cancelled: false, process: null, done: null }
     this.pending = job
     job.done = this.openSelected(job).finally(() => {
@@ -94,6 +100,13 @@ class LocalMediaService {
       schemaVersion: 1, sourceId: randomUUID(), filename: path.basename(selectedPath).slice(0, 512),
       bytes: identity.bytes, ...metadata, capabilities: capabilities()
     }
+    source.dto.extractionProfiles = source.dto.streams.flatMap(stream => {
+      const profile = audioProfile(source.dto, stream)
+      return profile && (stream.duration ?? source.dto.duration) > 0 ? [{ streamIndex: stream.index, extension: profile.extension }] : []
+    })
+    source.dto.capabilities.extractAudio = source.dto.extractionProfiles.length
+      ? { status: "available", reason: null, message: null }
+      : { status: "unavailable", reason: "AUDIO_UNSUPPORTED", message: "Select a verified AAC-LC, MP3 or 16-bit PCM audio track with a known duration." }
     this.preview.revoke()
     this.source = source
     this.sourceError = null
@@ -115,6 +128,7 @@ class LocalMediaService {
   }
 
   async close() {
+    await this.exports.drain()
     this.preview.revoke()
     this.source = null
     this.sourceError = null
@@ -130,6 +144,7 @@ class LocalMediaService {
   }
 
   freeze() {
+    this.exports.freeze()
     this.preview.revoke()
     this.frozen = true
   }

@@ -183,6 +183,23 @@ class IPCHandlers {
     this.autoUpdater = autoUpdater
     this.mainWindow = null
     this.localMedia = new LocalMediaService({
+      exportOptions: {
+        storagePath: app.getPath?.("userData") ? path.join(app.getPath("userData"), "local-media") : undefined,
+        resolveFfmpeg: () => this.engine.getFfmpegPath(),
+        selectDestination: async ({ defaultName, extension }) => {
+          const result = await dialog.showSaveDialog(this.mainWindow, {
+            title: "Extract selected audio", defaultPath: defaultName,
+            filters: [{ name: extension.toUpperCase(), extensions: [extension] }],
+            properties: ["createDirectory", "showOverwriteConfirmation"]
+          })
+          return result.canceled ? null : result.filePath
+        },
+        revealOutput: (file) => require("electron").shell.showItemInFolder(file),
+        onUpdate: (snapshot) => {
+          const { trustedFrame } = require("./services/local-media/preview")
+          if (trustedFrame(this.mainWindow, this.mainWindow?.webContents.mainFrame)) this.mainWindow.webContents.send("media:export-updated", snapshot)
+        }
+      },
       resolveProbe: () => resolveFfprobe({
         isPackaged: app.isPackaged,
         developmentPath: process.env.NODE_ENV === "development" ? process.env.CLIPLY_DEV_FFPROBE : undefined
@@ -2390,7 +2407,7 @@ class IPCHandlers {
         )
       }
 
-      // Read-only probes still need to exit before installer handoff.
+      // Both inspection and local writers must drain before installer handoff.
       await this.localMedia.shutdown()
 
       // set a flag to indicate we're updating

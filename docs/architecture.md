@@ -85,17 +85,18 @@ When adding a channel or changing a response, inspect main handlers, preload,
 renderer declarations, API wrappers and their tests together. Keep Node/file
 access in main and expose only the required bridge operations.
 
-## Local-file inspection and preview (Stages 1–2)
+## Local-file inspection, preview and audio extraction (Stages 1–3)
 
 [`local-media.js`](../src/main/services/local-media.js) owns one in-memory source
 and at most one inspection, separately from download history, slots and the
 yt-dlp update gate. The home entry opens the `/media` workspace after a successful
 native selection. The separate session-only store retains source/position across
 routes; global download subscriptions and the panel remain mounted. No startup
-scan, saved project, media-writing operation or new analytics is introduced.
+scan, saved project or new analytics is introduced. One local audio export has its
+own reservation and status; it does not use downloader queue admission.
 
 The narrow [`media` IPC handlers](../src/main/ipc/local-media.js), preload and
-renderer `mediaApi` expose these calls (only the two preview calls take an ID):
+renderer `mediaApi` expose these calls:
 
 | Call | Successful data |
 | --- | --- |
@@ -104,6 +105,15 @@ renderer `mediaApi` expose these calls (only the two preview calls take an ID):
 | `media:close` | `{ closed: true }`; revokes the source and cancels/drains a running probe. A pending dialog's eventual result is discarded. |
 | `media:preview(sourceId)` | `{ sourceId, previewId, url, mime, expiresAt }`; one temporary access grant for the currently registered source. |
 | `media:release-preview(previewId)` | `{ released: true }`; revokes that grant without closing the inspected source. |
+| `media:prepare-export({ operation: "extractAudio", sourceId, streamIndex })` | `{ cancelled, plan }`; main validates the actual stream ID and owns the native save dialog. |
+| `media:start-export(planId)` | Export snapshot with a unique job already reserved; plans expire after ten minutes. |
+| `media:cancel-export(jobId)` | Export snapshot; repeat cancellation is harmless. |
+| `media:export-state` | Revision, preparing flag, plan, job and cleanup error. |
+| `media:reveal-output(jobId)` | `{ revealed: true }`; main revalidates its completed path before revealing it. |
+
+`media:export-updated` sends the same revisioned snapshot only to the trusted
+application main frame. Renderer subscriptions live outside the route. Requests
+never accept destination paths, executable names or FFmpeg arguments.
 
 Only the application window's main frame at its expected local URL is accepted;
 renderer-supplied paths/options are refused. The shared host now requires
@@ -138,7 +148,8 @@ The workspace rechecks identity every two seconds while mounted. Native controls
 report loading/play/seek/end/error, support audio-only media and distinguish
 decoder failure from successful inspection. The player chooses default tracks;
 all probed tracks remain visible, including cover artwork. There is no software
-decode/transcode fallback. All four editing/export actions remain disabled.
+decode/transcode fallback. Audio extraction is enabled for verified profiles;
+trim, track removal and container changes remain disabled.
 
 The version-1 [DTO](../src/main/renderer/src/lib/local-media-types.ts) contains an
 opaque source ID, filename/size, nullable duration/start, format-family labels,
@@ -166,14 +177,15 @@ truncated. Errors carry stable codes and path-free messages, not raw stderr.
 
 Cancel/timeout/overflow sends TERM, escalates to KILL after 500 ms and waits for
 close. A further 2-second drain failure reports `PROBE_STUCK` while keeping the
-slot occupied until actual exit. Quit freezes admission and drains inspection;
+slot occupied until actual exit. Quit freezes admission and drains local exports and inspection;
 repeated quit requests cannot bypass that drain. Installer handoff drains first
-and refuses to proceed if a probe is stuck. Source selection/state are discarded
+and refuses to proceed if a helper is still active. A cleanup warning after all
+helpers exit retains its recovery record without preventing quit/install. Source selection/state are discarded
 on close or app exit; nothing is written to the source.
 
-An ordinary quit drains local inspection before committing downloader teardown.
+An ordinary quit drains local media before committing downloader teardown.
 If that drain fails, download admission, the engine and update scheduling remain
-operational; local inspection stays frozen until the app closes. After a
+operational; local media stays frozen until the app closes. After a
 successful drain, queue admission and the engine freeze together before the
 first asynchronous history write. Downloads are cancelled before an updater
 abort can release its gate.
@@ -184,6 +196,54 @@ window available for the error and a later retry.
 See [FFprobe staging](../third-party/ffprobe/README.md) for the development-only
 verified candidates. Missing FFprobe returns `PROBE_MISSING` on open, with no
 download or startup failure.
+
+### One-track audio export
+
+The main-owned [planner](../src/main/services/local-media/export-plan.js) accepts
+one full-duration track: AAC-LC to ADTS `.aac`, MP3 to `.mp3`, or signed 16-bit
+little-endian PCM to `.wav`. Only mono/stereo and the tested source families are
+enabled. Other tracks, artwork, chapters and source tags are omitted with an
+explicit UI notice. There is no codec conversion, batch, range or preview
+requirement. The original source stays open after success or cancellation.
+
+[LocalExport](../src/main/services/local-media/export.js) reserves before replying,
+allows one local job, maps `0:<actual index>` and uses `-c copy`. Input and exclusive
+temporary output are opened in main and inherited as seekable descriptors. The
+[supervisor](../src/main/services/local-media/export-worker.js) uses Electron's
+embedded Node and owns one FFmpeg child. Parent IPC loss stops and drains FFmpeg;
+no separately installed Node or Python is needed. Machine progress is bounded,
+monotonic and capped below 100 until publication. Diagnostics are bounded and
+never sent to the renderer. Cancellation escalates TERM to KILL; a helper that
+has not actually closed keeps admission held and prevents quit/install success.
+
+[ExportOutput](../src/main/services/local-media/export-output.js) places an
+exclusive partial in a private random directory in the chosen destination.
+Before publication, main rechecks source identity and validates nonempty output,
+one audio stream, codec/sample rate/channels, output family, absent chapters and
+duration within the larger of 250 ms or 2%. Native acceptance additionally decodes
+and compares the selected encoded audio; this is not sample-accurate editing.
+
+The final file is created with an atomic, no-clobber hard link. Existing files,
+symlinks, hardlink aliases and collision races are refused. Unsupported
+filesystems fail without an overwrite/copy fallback. Entering `publishing` is the
+cancel commit point: cancellation is then ignored, so a saved file cannot also
+be reported cancelled. Cleanup removes the temporary link, never the final file.
+
+A bounded `<userData>/local-media/partial.json` record stores the owned paths,
+random marker and directory/file identities. Restart marks interrupted work and
+cleans only a matching recorded partial; it never scans folders, resumes work or
+removes unknown files. Uncertain ownership or a changed destination blocks new
+exports until cleanup can be verified; it does not trap shutdown/install once
+the writer and validation probe have exited. Recovery can finish removing an
+empty staging directory after an interrupted cleanup when its durable identity
+still matches; missing markers never authorize deleting remaining contents or
+replacement directories. A hard crash in the
+small setup window before ownership is durable can leave an empty staging
+artifact requiring inspection. File descriptors and identity checks reduce path
+races; they are not protection against a hostile local process modifying bytes
+or directories. Network-mounted local paths are not positively identified.
+Windows/Linux descriptor inheritance, hard-link behavior and packaged embedded
+Node execution still require native Stage 7 acceptance.
 
 ## Storage and privacy
 

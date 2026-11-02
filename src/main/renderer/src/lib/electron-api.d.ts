@@ -1,6 +1,7 @@
 // the preload bridge as the renderer sees it
 
 import type { ReportEnvironment } from "@/lib/report"
+import type { AudioExportRequest, AudioExportPlan, LocalExportState } from "./local-media-types"
 
 import type {
   ApiError,
@@ -40,6 +41,12 @@ declare global {
   interface Window {
     electronAPI?: {
       media: {
+        prepareExport: (request: AudioExportRequest) => Promise<IPCResponse<{ cancelled: boolean; plan: AudioExportPlan | null }>>
+        startExport: (planId: string) => Promise<IPCResponse<LocalExportState>>
+        cancelExport: (jobId: string) => Promise<IPCResponse<LocalExportState>>
+        exportState: () => Promise<IPCResponse<LocalExportState>>
+        revealOutput: (jobId: string) => Promise<IPCResponse<{ revealed: boolean }>>
+        onExportUpdated: (callback: (state: LocalExportState) => void) => () => void
         open: () => Promise<IPCResponse<MediaOpenResult>>
         preview: (sourceId: string) => Promise<IPCResponse<MediaPreview>>
         releasePreview: (previewId: string) => Promise<IPCResponse<{ released: boolean }>>

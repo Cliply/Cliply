@@ -1,6 +1,7 @@
 import { create } from "zustand"
 import { mediaApi } from "../api"
 import type { MediaSource } from "../local-media-types"
+import { useLocalExport } from "./localExportStore"
 
 // Session-only state, deliberately separate from URL/download stores and history.
 export const useLocalMedia = create<{
@@ -18,6 +19,7 @@ export const localMediaActions = {
       const result = await mediaApi.open()
       if (current !== revision || result.cancelled || !result.source) return false
       useLocalMedia.setState({ source: result.source, position: 0 })
+      useLocalExport.setState({ selection: null })
       return true
     } catch (error) {
       if (current === revision) useLocalMedia.setState({ error: message(error) })
@@ -33,6 +35,7 @@ export const localMediaActions = {
       if (current !== revision || useLocalMedia.getState().busy) return
       if (state.source?.sourceId !== useLocalMedia.getState().source?.sourceId) {
         useLocalMedia.setState({ source: state.source, position: 0 })
+        useLocalExport.setState({ selection: null })
       }
     } catch (error) {
       if (current !== revision) return
@@ -42,6 +45,7 @@ export const localMediaActions = {
   async close() {
     const current = ++revision
     useLocalMedia.setState({ source: null, position: 0, error: null, busy: true })
+    useLocalExport.setState({ selection: null })
     try {
       await mediaApi.close()
       if (current === revision) useLocalMedia.setState({ busy: false })

@@ -9,6 +9,7 @@ export interface MediaStream {
   index: number
   type: string
   codec: string | null
+  profile?: string | null
   duration: number | null
   startTime: number | null
   timeBase: string | null
@@ -35,6 +36,7 @@ export interface MediaSource {
   streams: MediaStream[]
   chapterCount: number
   capabilities: Record<"probe" | "nativePreview" | "trim" | "extractAudio" | "removeTracks" | "remux", MediaCapability>
+  extractionProfiles?: { streamIndex: number; extension: "aac" | "mp3" | "wav" }[]
 }
 
 export interface MediaOpenResult {
@@ -53,4 +55,17 @@ export interface MediaPreview {
   url: string
   mime: string
   expiresAt: number
+}
+
+export interface AudioExportRequest { operation: "extractAudio"; sourceId: string; streamIndex: number }
+export interface AudioExportPlan extends AudioExportRequest {
+  planId: string; outputName: string; extension: string; codec: string; language: string | null; title: string | null; duration: number; expiresAt: number
+}
+export interface LocalExportJob {
+  jobId: string; sourceId?: string; streamIndex?: number; outputName: string | null
+  state: "reserved" | "running" | "validating" | "publishing" | "stopping" | "completed" | "cancelled" | "failed" | "interrupted"
+  progress: number; error: string | null; cleanupWarning?: boolean
+}
+export interface LocalExportState {
+  revision: number; preparing: boolean; plan: AudioExportPlan | null; job: LocalExportJob | null; recoveryError: string | null
 }
