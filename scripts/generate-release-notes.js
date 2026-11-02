@@ -48,7 +48,9 @@ function generateReleaseNotes({ tag, repo = "Cliply/Cliply", target, execute = r
       return `- ${escapeSubject(subject)} ([${sha.slice(0, 7)}](https://github.com/${repo}/commit/${sha}))`
     })
   const installation = fs.readFileSync(path.join(__dirname, "../.github/RELEASE_NOTES.md"), "utf8").trim()
-  const summary = generated.body.trim() || "## What's changed\n\nSee commit details below."
+  const body = generated.body.replace(/<!--[\s\S]*?-->/g, "").trim()
+  const summary = /^## /m.test(body) ? body :
+    ["## What's changed", "See commit details below.", body].filter(Boolean).join("\n\n")
   const details = ["<details>", `<summary>Commit details (${commits.length})</summary>`, "",
     commits.length ? commits.join("\n") : "No new commits in this range.", "", "</details>"].join("\n")
   return [installation, summary, details].join("\n\n")

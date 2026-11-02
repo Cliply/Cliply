@@ -162,6 +162,20 @@ test("empty ranges stay readable and GitHub's summary needs no fabricated change
   expect(notes).toContain("No new commits in this range.")
 })
 
+test("direct-commit releases still have a clean changes section when GitHub lists no PRs", () => {
+  commit("baseline")
+  git("tag", "v1.0.0")
+  commit("fix: direct commit")
+  generated = { body: "<!-- generated from config -->\n\n**Full Changelog**: https://github.com/Cliply/Cliply/compare/v1.0.0...v1.1.0" }
+
+  const notes = generate()
+
+  expect(notes).toContain("## What's changed\n\nSee commit details below.")
+  expect(notes).toContain("**Full Changelog**:")
+  expect(notes).not.toContain("generated from config")
+  expect(notes).toContain("fix: direct commit")
+})
+
 test("commit messages cannot break the details layout and em dashes are removed", () => {
   commit("baseline")
   git("tag", "v1.0.0")
