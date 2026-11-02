@@ -12,7 +12,7 @@ export function AudioExtractionPanel({ source, busy }: { source: MediaSource; bu
   const selected = selection?.sourceId === source.sourceId ? selection.streamIndex : null
   const profile = source.extractionProfiles?.find(p => p.streamIndex === selected)
   const locked = busy || pending || exportActive(state)
-  const plan = state.plan?.sourceId === source.sourceId && state.plan.streamIndex === selected ? state.plan : null
+  const plan = state.plan?.operation === "extractAudio" && state.plan.sourceId === source.sourceId && state.plan.streamIndex === selected ? state.plan : null
   const audio = source.streams.filter(s => s.type === "audio")
   return <Card id="audio-extraction" className="border-slate-300/50 bg-white/80 dark:border-slate-700/50 dark:bg-slate-800/60">
     <CardHeader><CardTitle>{t("media.extract")}</CardTitle></CardHeader>

@@ -1,11 +1,13 @@
 import { create } from "zustand"
 import { mediaApi } from "../api"
-import type { AudioExportRequest, LocalExportState } from "../local-media-types"
+import type { LocalExportRequest, LocalExportState, TrackExportRequest } from "../local-media-types"
 
 export const useLocalExport = create<{
   snapshot: LocalExportState; pending: boolean; error: string | null
   selection: { sourceId: string; streamIndex: number } | null
-}>(() => ({ snapshot: { revision: -1, preparing: false, plan: null, job: null, recoveryError: null }, pending: false, error: null, selection: null }))
+  trackSelection: Omit<TrackExportRequest, "operation"> | null
+  action: LocalExportRequest["operation"]
+}>(() => ({ snapshot: { revision: -1, preparing: false, plan: null, job: null, recoveryError: null }, pending: false, error: null, selection: null, trackSelection: null, action: "extractAudio" }))
 export const exportActive = (state: LocalExportState) => state.preparing || Boolean(state.job && ["reserved", "running", "validating", "publishing", "stopping"].includes(state.job.state))
 export function acceptExport(state: LocalExportState) {
   if (state.revision > useLocalExport.getState().snapshot.revision) useLocalExport.setState({ snapshot: state })
@@ -18,7 +20,7 @@ async function action(run: () => Promise<unknown>) {
   finally { useLocalExport.setState({ pending: false }) }
 }
 export const localExportActions = {
-  prepare: (request: AudioExportRequest) => action(async () => { await mediaApi.prepareExport(request); acceptExport(await mediaApi.exportState()) }),
+  prepare: (request: LocalExportRequest) => action(async () => { await mediaApi.prepareExport(request); acceptExport(await mediaApi.exportState()) }),
   start: (planId: string) => action(async () => { acceptExport(await mediaApi.startExport(planId)) }),
   cancel: (jobId: string) => action(async () => { acceptExport(await mediaApi.cancelExport(jobId)) }),
   reveal: (jobId: string) => action(() => mediaApi.revealOutput(jobId))

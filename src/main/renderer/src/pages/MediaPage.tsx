@@ -7,6 +7,7 @@ import { DownloadsToggle } from "@/components/downloads/DownloadsToggle"
 import { LocaleToggle } from "@/components/ui/locale-toggle"
 import { ModeToggle } from "@/components/ui/mode-toggle"
 import { NativeMediaPlayer } from "@/components/media/NativeMediaPlayer"
+import { TrackRemovalPanel } from "@/components/media/TrackRemovalPanel"
 import { AudioExtractionPanel } from "@/components/media/AudioExtractionPanel"
 import { ExportStatus } from "@/components/media/LocalExportStatus"
 import { exportActive, useLocalExport } from "@/lib/stores/localExportStore"
@@ -17,6 +18,7 @@ export default function MediaPage() {
   const t = useT()
   const source = useLocalMedia((s) => s.source)
   const busy = useLocalMedia((s) => s.busy)
+  const action = useLocalExport(s => s.action)
   const exporting = useLocalExport(s => exportActive(s.snapshot) || s.pending)
   const error = useLocalMedia((s) => s.error)
   const heading = useRef<HTMLHeadingElement>(null)
@@ -61,7 +63,7 @@ export default function MediaPage() {
             <NativeMediaPlayer key={source.sourceId} source={source} busy={busy} />
           </CardContent>
         </Card>
-        <Card className="border-slate-300/50 bg-white/80 dark:border-slate-700/50 dark:bg-slate-800/60">
+        {action === "extractAudio" && <Card className="border-slate-300/50 bg-white/80 dark:border-slate-700/50 dark:bg-slate-800/60">
           <CardHeader><CardTitle>{t("media.tracks")}</CardTitle></CardHeader>
           <CardContent className="space-y-4">
             <div className="overflow-x-auto"><table className="w-full text-left text-sm">
@@ -76,15 +78,15 @@ export default function MediaPage() {
             </table></div>
             <p className="text-xs text-slate-500 dark:text-slate-400">{t("media.chapters", { count: source.chapterCount })}</p>
           </CardContent>
-        </Card>
+        </Card>}
         <section aria-label={t("media.tools")} className="space-y-3">
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            <Button variant="outline" disabled><Scissors />{t("media.trim")}</Button><Button variant="secondary" onClick={() => document.getElementById("local-audio-track")?.focus()}><Music2 />{t("media.extract")}</Button>
-            <Button variant="outline" disabled><ListVideo />{t("media.remove")}</Button><Button variant="outline" disabled><FileVideo />{t("media.remux")}</Button>
+            <Button variant="outline" disabled><Scissors />{t("media.trim")}</Button><Button variant={action === "extractAudio" ? "secondary" : "outline"} disabled={exporting} onClick={() => useLocalExport.setState({ action: "extractAudio" })}><Music2 />{t("media.extract")}</Button>
+            <Button variant={action === "removeTracks" ? "secondary" : "outline"} disabled={exporting} onClick={() => useLocalExport.setState({ action: "removeTracks" })}><ListVideo />{t("media.remove")}</Button><Button variant="outline" disabled><FileVideo />{t("media.remux")}</Button>
           </div>
           <p className="text-sm text-slate-500 dark:text-slate-400">{t("media.toolsUnavailable")}</p>
         </section>
-        <AudioExtractionPanel source={source} busy={busy} />
+        {action === "extractAudio" ? <AudioExtractionPanel source={source} busy={busy} /> : <TrackRemovalPanel source={source} busy={busy} />}
       </>}
       <p className="pb-6 text-xs text-slate-500 dark:text-slate-400">{t("media.sessionOnly")}</p>
     </div>

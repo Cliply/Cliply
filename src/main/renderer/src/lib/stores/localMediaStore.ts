@@ -19,7 +19,7 @@ export const localMediaActions = {
       const result = await mediaApi.open()
       if (current !== revision || result.cancelled || !result.source) return false
       useLocalMedia.setState({ source: result.source, position: 0 })
-      useLocalExport.setState({ selection: null })
+      useLocalExport.setState({ selection: null, trackSelection: null, action: "extractAudio" })
       return true
     } catch (error) {
       if (current === revision) useLocalMedia.setState({ error: message(error) })
@@ -35,7 +35,7 @@ export const localMediaActions = {
       if (current !== revision || useLocalMedia.getState().busy) return
       if (state.source?.sourceId !== useLocalMedia.getState().source?.sourceId) {
         useLocalMedia.setState({ source: state.source, position: 0 })
-        useLocalExport.setState({ selection: null })
+        useLocalExport.setState({ selection: null, trackSelection: null, action: "extractAudio" })
       }
     } catch (error) {
       if (current !== revision) return
@@ -45,7 +45,7 @@ export const localMediaActions = {
   async close() {
     const current = ++revision
     useLocalMedia.setState({ source: null, position: 0, error: null, busy: true })
-    useLocalExport.setState({ selection: null })
+    useLocalExport.setState({ selection: null, trackSelection: null, action: "extractAudio" })
     try {
       await mediaApi.close()
       if (current === revision) useLocalMedia.setState({ busy: false })

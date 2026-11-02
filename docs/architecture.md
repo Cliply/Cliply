@@ -85,14 +85,14 @@ When adding a channel or changing a response, inspect main handlers, preload,
 renderer declarations, API wrappers and their tests together. Keep Node/file
 access in main and expose only the required bridge operations.
 
-## Local-file inspection, preview and audio extraction (Stages 1–3)
+## Local-file inspection, preview and copy-only tools (Stages 1–4)
 
 [`local-media.js`](../src/main/services/local-media.js) owns one in-memory source
 and at most one inspection, separately from download history, slots and the
 yt-dlp update gate. The home entry opens the `/media` workspace after a successful
 native selection. The separate session-only store retains source/position across
 routes; global download subscriptions and the panel remain mounted. No startup
-scan, saved project or new analytics is introduced. One local audio export has its
+scan, saved project or new analytics is introduced. One local export has its
 own reservation and status; it does not use downloader queue admission.
 
 The narrow [`media` IPC handlers](../src/main/ipc/local-media.js), preload and
@@ -105,11 +105,15 @@ renderer `mediaApi` expose these calls:
 | `media:close` | `{ closed: true }`; revokes the source and cancels/drains a running probe. A pending dialog's eventual result is discarded. |
 | `media:preview(sourceId)` | `{ sourceId, previewId, url, mime, expiresAt }`; one temporary access grant for the currently registered source. |
 | `media:release-preview(previewId)` | `{ released: true }`; revokes that grant without closing the inspected source. |
-| `media:prepare-export({ operation: "extractAudio", sourceId, streamIndex })` | `{ cancelled, plan }`; main validates the actual stream ID and owns the native save dialog. |
+| `media:prepare-export(request)` | `{ cancelled, plan }`; main validates the operation and actual stream IDs, derives the output format, and owns the native save dialog. |
 | `media:start-export(planId)` | Export snapshot with a unique job already reserved; plans expire after ten minutes. |
 | `media:cancel-export(jobId)` | Export snapshot; repeat cancellation is harmless. |
 | `media:export-state` | Revision, preparing flag, plan, job and cleanup error. |
 | `media:reveal-output(jobId)` | `{ revealed: true }`; main revalidates its completed path before revealing it. |
+
+Requests are exactly `{ operation: "extractAudio", sourceId, streamIndex }` or
+`{ operation: "removeTracks", sourceId, streamIndexes, removeChapters }`. Container
+changes, arbitrary flags, paths and ranges are not accepted.
 
 `media:export-updated` sends the same revisioned snapshot only to the trusted
 application main frame. Renderer subscriptions live outside the route. Requests
@@ -148,8 +152,8 @@ The workspace rechecks identity every two seconds while mounted. Native controls
 report loading/play/seek/end/error, support audio-only media and distinguish
 decoder failure from successful inspection. The player chooses default tracks;
 all probed tracks remain visible, including cover artwork. There is no software
-decode/transcode fallback. Audio extraction is enabled for verified profiles;
-trim, track removal and container changes remain disabled.
+decode/transcode fallback. Audio extraction and full-file track removal are enabled for verified profiles;
+trim and container changes remain disabled.
 
 The version-1 [DTO](../src/main/renderer/src/lib/local-media-types.ts) contains an
 opaque source ID, filename/size, nullable duration/start, format-family labels,
@@ -157,8 +161,10 @@ all actual stream indexes (including unknown/unsupported types), bounded stream
 details and chapter count. It carries separate probe, native-preview, trim,
 extraction, removal and remux capabilities. Probe success enables inspection
 only; the DTO's preview capability remains unchecked until the renderer tries
-the native element. Its local playback status is not an export-capability verdict;
-writing operations remain unavailable.
+the native element. Its local playback status is not an export-capability verdict.
+Main computes separate `extractionProfiles` and `trackRemovalProfile` from the
+verified codecs/container, stream properties and duration. Unsupported streams
+stay in the inventory and are not silently removed from a planned copy.
 
 Canonical path plus device/inode/size/nanosecond mtime/ctime stay in main. They
 are checked before/after probing and on state access, and changes revoke the
@@ -244,6 +250,57 @@ races; they are not protection against a hostile local process modifying bytes
 or directories. Network-mounted local paths are not positively identified.
 Windows/Linux descriptor inheritance, hard-link behavior and packaged embedded
 Node execution still require native Stage 7 acceptance.
+
+### Full-file track removal
+
+The same planner and `LocalExport` lifecycle accept one `removeTracks` request.
+The workspace's action choice and selections are session-only and survive route
+changes; switching/closing the source resets them. All streams start checked,
+including unsupported attachments, artwork and data. “Remove all audio” changes
+only audio selection. Unchecking an unsupported stream is explicit consent to
+omit it; chapters require a separate removal checkbox when present. Chapter,
+attachment, data and cover-art preservation are not advertised for this action.
+The source remains open, and decoder/preview failure does not block planning.
+
+The initial same-container matrix is H.264 `yuv420p` SDR video (at most one
+retained), mono/stereo AAC-LC audio, and compatible text subtitles: `mov_text`
+for MP4/MOV or `subrip` for MKV. Retained subtitle codecs are never converted.
+Require at least one playable video/audio stream and positive known duration.
+Same-container audio-only AAC results are tested for all three containers;
+other audio-only formats should use Extract audio. Nonzero MKV rotation, HDR,
+other active disposition flags, unsafe-to-round-trip titles and unverified
+streams are refused unless removed. Container detection checks both demuxer
+family and filename extension; MOV additionally requires QuickTime brand and
+MP4 a recognized MP4 brand, rather than trusting the shared `mov,mp4,...` label.
+
+Maps use actual input IDs sorted in ascending order. Output ordinals then scope
+stream metadata and disposition arguments. File metadata is copied, and the
+runtime validator checks ordinary `title`, `artist`, `comment` tags, stream
+title/handler name, language, default/forced flags and rotation. MOV/MP4's `name`
+tag is normalized as a displayed track title and passed back as the muxer's
+`title` option; values altered by display sanitization/truncation are refused.
+Other format-specific metadata may vary; this is not privacy sanitization.
+Matroska uses `-default_mode passthrough` so zero default flags stay zero.
+MOV/MP4 automatically promotes a retained track when its type has no default;
+that selection is refused with `TRACK_DEFAULT`, rather than silently changing
+the flag. Keep the existing default track too, or use Extract audio.
+
+The validator checks nonempty data, container family/brand, exact stream count,
+order, codec and tested properties, video dimensions/pixel/color/rotation,
+audio profile/rate/channels, expected tags/flags, absent chapters and duration
+within the larger of 250 ms or 2%. Native acceptance additionally compares each
+retained stream's encoded-content hash and fully decodes video/audio. There is
+no new runner or publication path. The reviewed cleanup rule remains: uncertain
+ownership blocks new exports but does not trap shutdown/install after helpers
+have actually exited; live helpers still block drainage.
+
+The synthetic harness is `scripts/smoke-local-tracks.js <new-task-dir>
+<absolute-project-ffmpeg> <absolute-verified-ffprobe>`. Set `CLIPLY_SMOKE_TRACKS=1`
+with the existing `CLIPLY_SMOKE_FFMPEG`/`CLIPLY_SMOKE_FFPROBE` overrides to include
+the real Electron UI checks in `npm run smoke:electron` after renderer build.
+Use a task-owned directory and remove helpers/media after verification. Native
+Stage 4 evidence is macOS ARM64 development-host only; other platforms and
+packaged execution remain Stage 7 gates.
 
 ## Storage and privacy
 

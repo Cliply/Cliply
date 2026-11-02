@@ -113,6 +113,14 @@ function rational(value) {
   return Number.isSafeInteger(a) && Number.isSafeInteger(b) ? value : null
 }
 
+function tags(raw, keys) {
+  const entries = Object.entries(raw || {})
+  return Object.fromEntries(keys.flatMap(key => {
+    const value = text(entries.find(([name]) => name.toLowerCase() === key)?.[1], 1024)
+    return value === null ? [] : [[key, value]]
+  }))
+}
+
 function normalizeProbe(raw) {
   if (!raw || typeof raw !== "object" || Array.isArray(raw) || !raw.format || typeof raw.format !== "object" || Array.isArray(raw.format) ||
       !Array.isArray(raw.streams) || raw.streams.length === 0 ||
@@ -131,7 +139,11 @@ function normalizeProbe(raw) {
       width: finite(stream.width, 0), height: finite(stream.height, 0), pixelFormat: text(stream.pix_fmt, 80),
       sampleRate: finite(stream.sample_rate, 0), channels: finite(stream.channels, 0),
       averageFrameRate: rational(stream.avg_frame_rate),
-      language: text(stream.tags?.language, 80), title: text(stream.tags?.title), disposition,
+      language: text(stream.tags?.language, 80), title: text(stream.tags?.title ?? stream.tags?.name), disposition,
+      titleCopySafe: (stream.tags?.title ?? stream.tags?.name) == null || text(stream.tags?.title ?? stream.tags?.name) === (stream.tags?.title ?? stream.tags?.name),
+      tags: tags(stream.tags, ["handler_name"]),
+      colorTransfer: text(stream.color_transfer, 40), colorPrimaries: text(stream.color_primaries, 40),
+      hasHdrMetadata: sideData.some(item => /Mastering display|Content light|HDR Dynamic|DOVI/.test(item?.side_data_type || "")),
       rotation: finite(sideData.find((item) => item?.rotation !== undefined)?.rotation ?? stream.tags?.rotate)
     }
   })
@@ -139,6 +151,8 @@ function normalizeProbe(raw) {
     duration: finite(raw.format.duration, 0), startTime: finite(raw.format.start_time),
     // FFprobe can name a family; never pretend its first label proves MP4/MOV.
     formatNames: (text(raw.format.format_name, 256) || "").split(",").filter(Boolean),
+    majorBrand: text(raw.format.tags?.major_brand, 16)?.trim() || null,
+    tags: tags(raw.format.tags, ["title", "artist", "comment"]),
     streams, chapterCount: raw.chapters?.length || 0
   }
 }

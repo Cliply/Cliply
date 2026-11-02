@@ -2,7 +2,7 @@ const fs = require("node:fs/promises")
 const path = require("node:path")
 const { randomUUID } = require("node:crypto")
 const { MediaError } = require("./errors")
-const { planAudio, exportArgs, validateOutput } = require("./export-plan")
+const { planExport, exportArgs, validateOutput } = require("./export-plan")
 const { ExportOutput, destination } = require("./export-output")
 const { startExportProcess } = require("./export-process")
 const { startProbe } = require("./probe")
@@ -31,7 +31,7 @@ class LocalExport {
     if (this.frozen) throw new MediaError("CLOSED")
     if (this.busy || this.isInspecting()) throw new MediaError("EXPORT_BUSY")
     const source = this.getSource()
-    const profile = planAudio(source?.dto, request)
+    const profile = planExport(source?.dto, request)
     const reservation = {}; this.preparing = reservation; this.plan = null; this.emit()
     const check = () => {
       if (this.frozen || this.preparing !== reservation) throw new MediaError("EXPORT_CANCELLED")
@@ -45,7 +45,7 @@ class LocalExport {
       }
       await this.validateSource(source); check()
       const selected = await this.selectDestination({
-        defaultName: `${path.parse(source.dto.filename).name.slice(0, 120)}-audio-${profile.streamIndex}.${profile.extension}`,
+        defaultName: `${path.parse(source.dto.filename).name.slice(0, 120)}-${profile.operation === "removeTracks" ? "tracks" : `audio-${profile.streamIndex}`}.${profile.extension}`,
         extension: profile.extension
       })
       check()
@@ -65,7 +65,7 @@ class LocalExport {
     this.plan = null
     const active = { cancelled: false, process: null, published: false, done: null }
     this.active = active
-    this.job = { jobId: randomUUID(), sourceId: plan.profile.sourceId, streamIndex: plan.profile.streamIndex,
+    this.job = { jobId: randomUUID(), sourceId: plan.profile.sourceId, operation: plan.profile.operation, streamIndex: plan.profile.streamIndex,
       outputName: plan.summary.outputName, state: "reserved", progress: 0, error: null, cleanupWarning: false }
     this.emit()
     active.done = new Promise(resolve => setImmediate(resolve)).then(() => this.execute(active, plan))

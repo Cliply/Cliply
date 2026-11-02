@@ -20,13 +20,17 @@ export function ExportStatus() {
   const pending = useLocalExport(s => s.pending)
   const error = useLocalExport(s => s.error)
   const job = snapshot.job
+  const copyLabels: Partial<Record<LocalExportJob["state"], Key>> = {
+    running: "media.copyRunning", validating: "media.copyValidating", completed: "media.copyCompleted",
+    cancelled: "media.copyCancelled", failed: "media.copyFailed"
+  }
   const code = snapshot.recoveryError || job?.error
   return <div className="space-y-3" aria-label={t("media.exportStatus")}>
     {job && <>
-      <p role="status" className="break-words text-sm">{t(labels[job.state])}{job.outputName ? ` · ${job.outputName}` : ""}</p>
+      <p role="status" className="break-words text-sm">{t(job.operation === "removeTracks" ? copyLabels[job.state] || labels[job.state] : labels[job.state])}{job.outputName ? ` · ${job.outputName}` : ""}</p>
       <Progress value={job.progress} aria-label={t("media.exportProgress")} />
       <div className="flex flex-wrap gap-2">
-        {["reserved", "running", "validating", "stopping"].includes(job.state) && <Button variant="outline" disabled={pending || job.state === "stopping"} onClick={() => void localExportActions.cancel(job.jobId)}>{t("media.cancelExport")}</Button>}
+        {["reserved", "running", "validating", "stopping"].includes(job.state) && <Button variant="outline" disabled={pending || job.state === "stopping"} onClick={() => void localExportActions.cancel(job.jobId)}>{t(job.operation === "removeTracks" ? "media.cancelCopy" : "media.cancelExport")}</Button>}
         {job.state === "completed" && <Button variant="outline" onClick={() => void localExportActions.reveal(job.jobId)}>{t("media.revealOutput")}</Button>}
       </div>
     </>}

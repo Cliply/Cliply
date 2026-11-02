@@ -52,7 +52,7 @@ test("entry opens the workspace only after successful selection; cancellation ke
   expect(screen.getAllByRole("columnheader")).toHaveLength(5)
   expect(screen.getByText("12")).toBeTruthy()
   expect(screen.getByText("Captions")).toBeTruthy()
-  for (const key of ["media.trim", "media.remove", "media.remux"] as const) {
+  for (const key of ["media.trim", "media.remux"] as const) {
     expect((screen.getByRole("button", { name: en[key] }) as HTMLButtonElement).disabled).toBe(true)
   }
   fireEvent.click(screen.getByRole("button", { name: "ru" }))

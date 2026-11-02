@@ -188,7 +188,7 @@ class IPCHandlers {
         resolveFfmpeg: () => this.engine.getFfmpegPath(),
         selectDestination: async ({ defaultName, extension }) => {
           const result = await dialog.showSaveDialog(this.mainWindow, {
-            title: "Extract selected audio", defaultPath: defaultName,
+            title: "Save local media", defaultPath: defaultName,
             filters: [{ name: extension.toUpperCase(), extensions: [extension] }],
             properties: ["createDirectory", "showOverwriteConfirmation"]
           })

@@ -6,7 +6,7 @@ const { startProbe } = require("./local-media/probe")
 const { MediaPreview } = require("./local-media/preview")
 const { MediaError } = require("./local-media/errors")
 const { LocalExport } = require("./local-media/export")
-const { audioProfile } = require("./local-media/export-plan")
+const { audioProfile, trackRemovalProfile } = require("./local-media/export-plan")
 
 async function identify(sourcePath) {
   try {
@@ -107,6 +107,11 @@ class LocalMediaService {
     source.dto.capabilities.extractAudio = source.dto.extractionProfiles.length
       ? { status: "available", reason: null, message: null }
       : { status: "unavailable", reason: "AUDIO_UNSUPPORTED", message: "Select a verified AAC-LC, MP3 or 16-bit PCM audio track with a known duration." }
+    source.dto.trackRemovalProfile = trackRemovalProfile(source.dto)
+    source.dto.capabilities.removeTracks = source.dto.trackRemovalProfile && source.dto.streams.some(stream =>
+      ["video", "audio"].includes(stream.type) && source.dto.trackRemovalProfile.supportedStreamIndexes.includes(stream.index))
+      ? { status: "available", reason: null, message: null }
+      : { status: "unavailable", reason: "TRACK_CONTAINER", message: "Track removal needs a verified MP4, MOV or MKV source and playable retained tracks." }
     this.preview.revoke()
     this.source = source
     this.sourceError = null
