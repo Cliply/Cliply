@@ -125,6 +125,10 @@ jobs:
         if: github.event_name == 'workflow_dispatch' && inputs.package_check
         run: node scripts/smoke-download-recovery.js --resources "${{ matrix.resources }}"
 
+      - name: Verify native media formats with packaged helpers
+        if: github.event_name == 'workflow_dispatch' && inputs.package_check
+        run: node scripts/smoke-media.js --resources "${{ matrix.resources }}"
+
       - name: Verify packaged helper executables
         if: github.event_name == 'workflow_dispatch' && inputs.package_check
         run: node scripts/verify-packaged-helpers.js --resources "${{ matrix.resources }}"
@@ -147,3 +151,21 @@ jobs:
             dist/latest*.yml
           if-no-files-found: error
           retention-days: 7
+
+  verify-release-inputs:
+    if: github.event_name == 'workflow_dispatch' && inputs.package_check && !inputs.stage_linux_helpers
+    needs: check
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+      - run: npm ci --ignore-scripts
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: validation-*
+          path: artifacts
+      - name: Validate all installer attachments and real update manifests
+        run: node scripts/verify-release-artifacts.js artifacts

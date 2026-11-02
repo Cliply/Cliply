@@ -528,11 +528,13 @@ describe("audio mode args", () => {
     expect(args).not.toContain("--audio-format")
   })
 
-  test("m4a maps onto the aac preset", () => {
+  test("m4a extracts AAC into an M4A container instead of raw AAC", () => {
     const args = buildArgs("audio", { ...AUDIO, audioMode: "m4a" })
 
-    expect(valueAfter(args, "-t")).toBe("aac")
-    expect(args).not.toContain("-f")
+    expect(args).toContain("-x")
+    expect(valueAfter(args, "--audio-format")).toBe("m4a")
+    expect(valueAfter(args, "-f")).toBe("ba[acodec^=aac]/ba[acodec^=mp4a.40.]/ba/b")
+    expect(args).not.toContain("-t")
   })
 
   // "original" is the absence of a preset: whatever youtube served, untouched
@@ -629,18 +631,20 @@ describe("audio language args", () => {
     }
   })
 
-  // -t mp3 / -t aac carry their own selector; a later -f replaces just that,
-  // leaving the extraction and container flags the preset brought with it
-  test("a converted audio mode keeps its preset and takes the selector", () => {
-    for (const [mode, preset] of [
-      ["mp3", "mp3"],
-      ["m4a", "aac"]
-    ]) {
+  test("converted audio keeps its output format when a language is selected", () => {
+    for (const mode of ["mp3", "m4a"]) {
       const args = buildArgs("audio", { ...AUDIO, audioMode: mode, audioLanguage: "hi" })
 
-      expect(valueAfter(args, "-t")).toBe(preset)
       expect(valueAfter(args, "-f")).toBe("ba[language=hi]/ba/b")
-      expect(args.indexOf("-t")).toBeLessThan(args.indexOf("-f"))
+      expect(args.filter((arg) => arg === "-f")).toHaveLength(1)
+      if (mode === "mp3") {
+        expect(valueAfter(args, "-t")).toBe("mp3")
+        expect(args.indexOf("-t")).toBeLessThan(args.indexOf("-f"))
+      } else {
+        expect(valueAfter(args, "--audio-format")).toBe("m4a")
+        expect(args).toContain("-x")
+        expect(args).not.toContain("-t")
+      }
     }
   })
 

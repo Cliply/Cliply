@@ -46,7 +46,7 @@ const DEFAULT_BASE_URL =
  * and it is refused rather than fetched - see checksumFor(), and canInstall(),
  * which is that same question asked before a user is told a fix is coming.
  * the entries are therefore the whole list of platforms this feature works on:
- * build-pot-payload.yml publishes exactly these two, and an install on any
+ * build-pot-payload.yml publishes these targets, and an install on any
  * other platform declines quietly rather than trusting whatever answers the
  * url. adding a platform means publishing its payload and pinning it here, in
  * that order.
@@ -55,7 +55,9 @@ const POT_CHECKSUMS = {
   "pot-1.3.2-darwin-arm64.zip":
     "7357586086aaf6b116af1acbc3051723c8e98104777764efe9a54dd2e233a240",
   "pot-1.3.2-win32-x64.zip":
-    "57d9db2a1494becf7e434292cbec30fa05577661da31f2ed013bbc92bca932de"
+    "57d9db2a1494becf7e434292cbec30fa05577661da31f2ed013bbc92bca932de",
+  "pot-1.3.2-linux-x64.zip":
+    "ae8c1582638693e1bf3951c64d176cdebfcf939dce704a872697952a9269ddcf"
 }
 
 // the payload is a node_modules tree; a slow connection needs room for ~70 mb

@@ -87,6 +87,14 @@ afterEach(() => {
   fs.rmSync(root, { recursive: true, force: true })
 })
 
+test.each([
+  ["darwin", "arm64", "pot-1.3.2-darwin-arm64.zip"],
+  ["win32", "x64", "pot-1.3.2-win32-x64.zip"],
+  ["linux", "x64", "pot-1.3.2-linux-x64.zip"]
+])("selects the %s %s payload", (platform, arch, asset) => {
+  expect(payloadAssetFor(platform, arch)).toBe(asset)
+})
+
 test("installs a payload whose bytes match what we vouched for", async () => {
   const { installer } = createInstaller({ archive: makeZip(PAYLOAD_ENTRIES) })
 
@@ -151,7 +159,8 @@ describe("nothing unverified is ever installed", () => {
   test("every platform we ship has a digest pinned", () => {
     for (const platform of [
       ["win32", "x64"],
-      ["darwin", "arm64"]
+      ["darwin", "arm64"],
+      ["linux", "x64"]
     ]) {
       expect(POT_CHECKSUMS[payloadAssetFor(...platform)]).toMatch(/^[0-9a-f]{64}$/)
     }

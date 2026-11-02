@@ -392,9 +392,13 @@ describe("playlist download args", () => {
 describe("playlist audio args", () => {
   const AUDIO = { ...PLAYLIST }
 
-  test("mp3 and m4a ask for the presets, exactly as one video does", () => {
+  test("mp3 keeps its preset and m4a requests an actual M4A container", () => {
     expect(valueAfter(buildArgs("playlist-audio", { ...AUDIO, audioMode: "mp3" }), "-t")).toBe("mp3")
-    expect(valueAfter(buildArgs("playlist-audio", { ...AUDIO, audioMode: "m4a" }), "-t")).toBe("aac")
+    const args = buildArgs("playlist-audio", { ...AUDIO, audioMode: "m4a" })
+    expect(args).toContain("-x")
+    expect(valueAfter(args, "--audio-format")).toBe("m4a")
+    expect(valueAfter(args, "-f")).toBe("ba[acodec^=aac]/ba[acodec^=mp4a.40.]/ba/b")
+    expect(args).not.toContain("-t")
   })
 
   test("original means no preset at all, just the selector", () => {

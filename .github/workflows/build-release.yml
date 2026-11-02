@@ -32,19 +32,8 @@ jobs:
           node-version: '22'
           cache: 'npm'
 
-      - name: Download FFmpeg for macOS
-        run: |
-          mkdir -p binaries/macos
-          curl -fL --retry 3 --retry-delay 2 -o binaries/macos/ffmpeg \
-            "https://github.com/${{ github.repository }}/releases/download/binaries/ffmpeg"
-          chmod +x binaries/macos/ffmpeg
-
-      - name: Download Deno for macOS
-        run: |
-          mkdir -p binaries/deno/macos
-          curl -fL --retry 3 --retry-delay 2 -o binaries/deno/macos/deno \
-            "https://github.com/${{ github.repository }}/releases/download/binaries/deno"
-          chmod +x binaries/deno/macos/deno
+      - name: Download macOS helpers
+        run: node scripts/fetch-helpers.js --platform darwin-arm64
 
       - run: npm ci
       - run: npm run install:renderer
@@ -90,17 +79,8 @@ jobs:
           node-version: '22'
           cache: 'npm'
 
-      - name: Download FFmpeg for Windows
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Force -Path "binaries/windows"
-          Invoke-WebRequest -Uri "https://github.com/${{ github.repository }}/releases/download/binaries/ffmpeg.exe" -OutFile "binaries/windows/ffmpeg.exe"
-
-      - name: Download Deno for Windows
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Force -Path "binaries/deno/windows"
-          Invoke-WebRequest -Uri "https://github.com/${{ github.repository }}/releases/download/binaries/deno.exe" -OutFile "binaries/deno/windows/deno.exe"
+      - name: Download Windows helpers
+        run: node scripts/fetch-helpers.js --platform win32-x64
 
       - run: npm ci
       - run: npm run install:renderer
@@ -160,6 +140,17 @@ jobs:
 
       - name: Verify packaged helpers
         run: node scripts/verify-packaged-helpers.js --resources dist/linux-unpacked/resources
+
+      - name: Verify native Linux media operations and recovery
+        run: |
+          node scripts/smoke-media.js --resources dist/linux-unpacked/resources
+          node scripts/smoke-download-recovery.js --resources dist/linux-unpacked/resources
+
+      - name: Install Linux GUI test dependencies
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends xvfb xauth dbus-x11 libgtk-3-0t64 libasound2t64 libgbm1 libnss3
+
+      - name: Verify Linux AppImage launcher and installed DEB
+        run: dbus-run-session -- xvfb-run --auto-servernum node scripts/smoke-packaged-linux.js
 
       - uses: actions/upload-artifact@v4
         with:

@@ -208,10 +208,7 @@ function buildTrimArgs({ timeRange, preciseCut } = {}) {
 // an unvetted value from the renderer must never reach it
 const TIER_CONTAINERS = ["mp4", "mkv"]
 
-// the whole audio vocabulary: our wording -> yt-dlp's preset name. `original`
-// maps to null because it *is* the absence of a preset - the stream youtube
-// served, unconverted. the keys are also the valid-mode list
-const AUDIO_MODE_PRESETS = { mp3: "mp3", m4a: "aac", original: null }
+const AUDIO_MODES = ["mp3", "m4a", "original"]
 
 // a language code is interpolated straight into an -f expression, so it is
 // whitelisted for the same reason TIER_CONTAINERS is: nothing arriving over
@@ -384,7 +381,22 @@ function normalizeAudioMode(params = {}) {
 
   // mp3 is the fallback for anything unrecognised - the same universal mode the
   // menu opens on, so a malformed payload can never produce an unplayable file
-  return Object.hasOwn(AUDIO_MODE_PRESETS, mode) ? mode : "mp3"
+  return AUDIO_MODES.includes(mode) ? mode : "mp3"
+}
+
+function buildAudioModeArgs(params, language) {
+  const mode = normalizeAudioMode(params)
+  const selector = language ? audioLanguageSelector(language, true) : "ba/b"
+  if (mode === "original") return ["-f", selector]
+  if (mode === "m4a") {
+    // yt-dlp's aac preset writes raw ADTS AAC. Keep its preference for AAC
+    // streams, but request an actual M4A container (AAC can be copied into it).
+    return ["-f", language ? selector : "ba[acodec^=aac]/ba[acodec^=mp4a.40.]/ba/b",
+      "-x", "--audio-format", "m4a"]
+  }
+  const args = ["-t", "mp3"]
+  if (language) args.push("-f", selector)
+  return args
 }
 
 /**
@@ -464,25 +476,7 @@ function buildArgs(operation, params = {}) {
     }
 
     case "audio": {
-      const preset = AUDIO_MODE_PRESETS[normalizeAudioMode(params)]
-      const language = normalizeAudioLanguage(params)
-
-      if (!preset) {
-        // no -x on purpose: "original" means the stream in the container
-        // youtube served it in, and the /b tail keeps sites that only offer
-        // muxed formats from failing outright
-        args.push("-f", language ? audioLanguageSelector(language, true) : "ba/b")
-      } else {
-        // -t mp3 / -t aac carry their own selector, extraction and container
-        args.push("-t", preset)
-
-        // a later -f replaces the preset's own selector while its extraction
-        // and container flags stay - verified: `-t mp3 -f "ba[language=hi]/ba/b"`
-        // produces an mp3 whose %(language)s reads hi
-        if (language) {
-          args.push("-f", audioLanguageSelector(language, true))
-        }
-      }
+      args.push(...buildAudioModeArgs(params, normalizeAudioLanguage(params)))
 
       args.push("--no-playlist")
       // a converted mode hands the fetch to ffmpeg afterwards, but the fetch
@@ -516,13 +510,11 @@ function buildArgs(operation, params = {}) {
           args.push("-S", `res:${height}`)
         }
       } else {
-        const preset = AUDIO_MODE_PRESETS[normalizeAudioMode(params)]
-
-        // the same two shapes `audio` has, minus the dub picker: the languages
+        // The same audio modes, minus the dub picker: the languages
         // a video carries are read out of *its* format list, and a playlist
         // has one list per video. so every item gets its original track, which
         // is yt-dlp's own default anyway
-        args.push(...(preset ? ["-t", preset] : ["-f", "ba/b"]))
+        args.push(...buildAudioModeArgs(params))
       }
 
       args.push(...buildPlaylistArgs(params))
