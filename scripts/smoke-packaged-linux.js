@@ -119,10 +119,13 @@ async function main() {
       fs.renameSync(path.join(resources, "app.asar.unpacked"), path.join(resources, "cliply-under-test.asar.unpacked"))
     }
     fs.mkdirSync(path.join(resources, "app"))
+    // Electron resolves package.main relative to this directory, even when
+    // given an absolute path. Keep the isolated entry inside the test package.
+    fs.copyFileSync(path.join(repo, "scripts", "smoke-electron.js"), path.join(resources, "app", "smoke-electron.js"))
     fs.writeFileSync(path.join(resources, "app", "package.json"), JSON.stringify({
       name: metadata.name,
       version: metadata.version,
-      main: path.join(repo, "scripts", "smoke-electron.js")
+      main: "smoke-electron.js"
     }))
 
     const output = path.join(root, "out")
@@ -165,12 +168,12 @@ async function main() {
     ], { env, timeout: 10 * 60 * 1000 })
 
     const artifacts = fs.readdirSync(output)
-    function artifact(extension) {
+    const artifact = (extension) => {
       const matches = artifacts.filter((name) => name.endsWith(extension))
       assert.equal(matches.length, 1, `expected one disposable ${extension}`)
       return path.join(output, matches[0])
     }
-    function launch(binary, label, displayEnv = env, args = []) {
+    const launch = (binary, label, displayEnv = env, args = []) => {
       const userData = path.join(root, `user-data-${label}`)
       fs.mkdirSync(userData)
       const stdout = run(binary, args, {
