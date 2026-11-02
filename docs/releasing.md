@@ -49,6 +49,23 @@ The resource argument must point to the actual native build, not a different
 platform's tree. Media/recovery checks create local fixtures and clean their
 temporary files. Ordinary mocked unit tests do not require these executables.
 
+Local inspection's FFprobe is currently optional and has no shared release
+assets. Its [staging record](../third-party/ffprobe/README.md) describes exact
+candidates and remaining source/native checks. The resource filters include a
+present FFprobe, and the helper verifier checks it when present. To require
+local-inspection capability explicitly, use:
+
+```sh
+node scripts/verify-packaged-helpers.js --resources <actual-resources> --require-ffprobe
+node scripts/smoke-local-media.js --ffprobe <actual-resources>/binaries/ffprobe --ffmpeg <actual-resources>/binaries/ffmpeg
+```
+
+Use `.exe` paths on Windows. The second command creates/deletes synthetic WAV
+and H.264/AAC MP4 fixtures and checks inspection, source preservation and failure
+drainage; it is not preview/export validation. Current downloader CI does not
+require FFprobe yet, so its success alone cannot establish local-media support.
+Do not publish candidates or dispatch native CI without the required task authorization.
+
 The Linux package smoke script runs only on an ephemeral GitHub runner. It copies
 the app into disposable test packages, installs/purges its DEB, checks X11/Wayland
 launch, verifies updater selection and exercises AppImage filesystem replacement.

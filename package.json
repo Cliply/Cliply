@@ -122,7 +122,8 @@
           "from": "binaries/macos/",
           "to": "binaries/",
           "filter": [
-            "ffmpeg"
+            "ffmpeg",
+            "ffprobe"
           ]
         },
         {
@@ -174,7 +175,8 @@
           "from": "binaries/windows/",
           "to": "binaries/",
           "filter": [
-            "ffmpeg.exe"
+            "ffmpeg.exe",
+            "ffprobe.exe"
           ]
         },
         {
@@ -215,7 +217,8 @@
           "from": "binaries/linux/",
           "to": "binaries/",
           "filter": [
-            "ffmpeg"
+            "ffmpeg",
+            "ffprobe"
           ]
         },
         {

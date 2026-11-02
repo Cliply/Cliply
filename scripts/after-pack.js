@@ -41,8 +41,8 @@ const ARCH_UNIVERSAL = 4
  * youtube's javascript challenges. a package missing either installs happily
  * and then fails the moment the user asks for anything.
  *
- * optional: genuinely not always shipped. ffprobe is not in any platform's
- * extraResources today - it is listed so that a build which does start
+ * optional: genuinely not always shipped. ffprobe has resource filters but
+ * no published shared assets yet - it is listed so that a build which does start
  * bundling it gets chmod'd and signed rather than silently skipped.
  */
 const REQUIRED_BINARIES = {

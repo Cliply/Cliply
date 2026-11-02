@@ -85,6 +85,68 @@ When adding a channel or changing a response, inspect main handlers, preload,
 renderer declarations, API wrappers and their tests together. Keep Node/file
 access in main and expose only the required bridge operations.
 
+## Local-file inspection (Stage 1)
+
+[`local-media.js`](../src/main/services/local-media.js) owns one in-memory source
+and at most one inspection, separately from download history, slots and the
+yt-dlp update gate. There is no local workspace/player/export UI yet. No startup
+scan, saved project, file-byte endpoint or new analytics is introduced.
+
+The narrow [`media` IPC handlers](../src/main/ipc/local-media.js), preload and
+renderer `mediaApi` expose three argument-free calls:
+
+| Call | Successful data |
+| --- | --- |
+| `media:open` | `{ cancelled, source }`; main selects one file through a native dialog. Cancel leaves the existing source open. |
+| `media:get-state` | `{ source, busy }`; rechecks source identity before returning metadata. |
+| `media:close` | `{ closed: true }`; revokes the source and cancels/drains a running probe. A pending dialog's eventual result is discarded. |
+
+Only the application window's main frame at its expected local URL is accepted;
+renderer-supplied paths/options are refused. The current host is still unsuitable
+for local preview: Stage 2 must establish its secure context and session before
+any protocol or file bytes are exposed. These inspection checks do not claim to
+solve the existing `webSecurity:false` window's remote-content risks.
+
+The version-1 [DTO](../src/main/renderer/src/lib/local-media-types.ts) contains an
+opaque source ID, filename/size, nullable duration/start, format-family labels,
+all actual stream indexes (including unknown/unsupported types), bounded stream
+details and chapter count. It carries separate probe, native-preview, trim,
+extraction, removal and remux capabilities. Probe success enables inspection
+only; preview is unchecked and writing operations remain unavailable.
+
+Canonical path plus device/inode/size/nanosecond mtime/ctime stay in main. They
+are checked before/after probing and on state access, and changes revoke the
+registration. This is a stat change detector, not a cryptographic identity or a
+defence against a hostile local process racing file replacement. Devices,
+directories, relative paths, URLs and UNC inputs are refused. Mounted network
+filesystems that present ordinary local paths are not identified by this check.
+
+The [probe runner](../src/main/services/local-media/probe.js) uses shell-free
+argv, file-only protocols, a small self-contained demuxer allow-list and disabled
+MOV external references. It limits JSON to 1 MiB, stderr to 64 KiB, streams to
+128, chapters to 512, probing analysis to 5 MB/5 seconds, and wall time to
+30 seconds. A 64 MiB single-allocation cap is not a total-RSS limit. Invalid or
+missing numeric fields remain `null`; inventories are refused, never silently
+truncated. Errors carry stable codes and path-free messages, not raw stderr.
+
+Cancel/timeout/overflow sends TERM, escalates to KILL after 500 ms and waits for
+close. A further 2-second drain failure reports `PROBE_STUCK` while keeping the
+slot occupied until actual exit. Quit freezes admission and drains inspection;
+repeated quit requests cannot bypass that drain. Installer handoff drains first
+and refuses to proceed if a probe is stuck. Source selection/state are discarded
+on close or app exit; nothing is written to the source.
+
+An ordinary quit drains local inspection before committing downloader teardown.
+If that drain fails, download admission, the engine and update scheduling remain
+operational; local inspection stays frozen until the app closes. After a
+successful drain, queue admission and the engine freeze together before the
+first asynchronous history write. Downloads are cancelled before an updater
+abort can release its gate.
+
+See [FFprobe staging](../third-party/ffprobe/README.md) for the development-only
+verified candidates. Missing FFprobe returns `PROBE_MISSING` on open, with no
+download or startup failure.
+
 ## Storage and privacy
 
 | Data | Location / behavior |

@@ -2,6 +2,12 @@
 
 Cliply packages FFmpeg, Deno and the standalone yt-dlp engine. Users do not need to install Python, FFmpeg or Deno separately. The large executables stay out of git.
 
+Local-file inspection has a separate, optional FFprobe resolver. Shared FFprobe
+assets are not published yet, so normal builds report missing inspection support
+without disabling downloads. Resource filters and optional `after-pack` handling
+do not mean FFprobe is bundled. See the [candidate/staging record](../third-party/ffprobe/README.md)
+for verified development inputs, proposed asset names and remaining platform/source gaps.
+
 ## fetch the release helpers
 
 From the project root, with Node 22.12 or newer:
@@ -71,6 +77,13 @@ macOS and Linux require executable permissions; the downloader and packaging hoo
 writable copy under Electron user data. Packaged resources and the writable engine
 are different locations. See [architecture](../docs/architecture.md) and
 [release validation](../docs/releasing.md) for their lifecycles.
+
+FFprobe's prepared paths are `binaries/macos/ffprobe`,
+`binaries/linux/ffprobe`, `binaries/windows/ffprobe.exe`, copied when present to
+`<resources>/binaries/ffprobe[.exe]`. `fetch:helpers` still fetches only FFmpeg and
+Deno. For explicit local development, `CLIPLY_DEV_FFPROBE` may name an absolute,
+verified task-owned executable when `NODE_ENV=development`; packaged apps ignore
+this override. The resolver never uses PATH/Homebrew or downloads on file open.
 
 ## build and check
 

@@ -31,6 +31,10 @@ const {
 const { getSimplePlatformOptions } = require("./utils/ytdlp-formats")
 const { resolveDownloadId } = require("./utils/download-id")
 
+const { LocalMediaService } = require("./services/local-media")
+const { resolveFfprobe } = require("./services/local-media/paths")
+const { registerLocalMedia } = require("./ipc/local-media")
+
 const { DownloadRunner } = require("./services/download-runner")
 const { DownloadHistory } = require("./services/download-history")
 const { SettingsStore } = require("./services/settings-store")
@@ -178,6 +182,19 @@ class IPCHandlers {
     this.analytics = services.analytics || null
     this.autoUpdater = autoUpdater
     this.mainWindow = null
+    this.localMedia = new LocalMediaService({
+      resolveProbe: () => resolveFfprobe({
+        isPackaged: app.isPackaged,
+        developmentPath: process.env.NODE_ENV === "development" ? process.env.CLIPLY_DEV_FFPROBE : undefined
+      }),
+      selectFile: async () => {
+        const result = await dialog.showOpenDialog(this.mainWindow, {
+          title: "Inspect local media", properties: ["openFile"],
+          filters: [{ name: "Media", extensions: ["mp4", "mov", "mkv", "webm", "wav", "mp3", "aac", "m4a"] }]
+        })
+        return result.canceled ? null : result.filePaths[0]
+      }
+    })
 
     // audit logging
     this.auditLog = []
@@ -861,6 +878,10 @@ class IPCHandlers {
 
   // register all ipc handlers
   registerHandlers() {
+    this.removeLocalMediaHandlers = registerLocalMedia({
+      ipcMain, service: this.localMedia, getWindow: () => this.mainWindow,
+      isDevelopment: process.env.NODE_ENV === "development"
+    })
     // video operations
     ipcMain.handle(
       IPC_CHANNELS.VIDEO_GET_INFO,
@@ -2350,6 +2371,16 @@ class IPCHandlers {
 
   // handle install update
   async handleInstallUpdate(_event) {
+    if (!this.installUpdatePromise) {
+      this.installUpdatePromise = this.installAfterMediaDrain()
+      const result = await this.installUpdatePromise
+      if (!result.success) this.installUpdatePromise = null
+      return result
+    }
+    return this.installUpdatePromise
+  }
+
+  async installAfterMediaDrain() {
     try {
       if (!this.autoUpdater) {
         return this.createError(
@@ -2357,6 +2388,9 @@ class IPCHandlers {
           "Updates are only available in production builds"
         )
       }
+
+      // Read-only probes still need to exit before installer handoff.
+      await this.localMedia.shutdown()
 
       // set a flag to indicate we're updating
       global.isUpdating = true
@@ -2433,6 +2467,8 @@ class IPCHandlers {
 
   // cleanup ipc handlers
   cleanup() {
+    this.removeLocalMediaHandlers?.()
+
     // stop any process still running
     this.runner.cancelAll()
 

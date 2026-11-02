@@ -1431,6 +1431,69 @@ describe("the engine version in the Tools menu", () => {
 describe("quitting", () => {
   const quitEvent = () => ({ preventDefault: jest.fn() })
 
+  it("freezes local inspection immediately and waits for its child before quitting", async () => {
+    let drained
+    const shutdown = new Promise((resolve) => { drained = resolve })
+    app.ipcHandlers.localMedia = { freeze: jest.fn(), shutdown: jest.fn(() => shutdown) }
+    mockIpcHandlers.runner = { freeze: jest.fn(), cancelAll: jest.fn(() => 0) }
+    app.services.ytdlpUpdater = { shutdown: jest.fn() }
+    const quit = app.onBeforeQuit(quitEvent())
+    expect(app.ipcHandlers.localMedia.freeze).toHaveBeenCalledTimes(1)
+    // Until the helper drains, this quit can still fail. Do not freeze the
+    // engine while the live runner can hand a completed slot to queued work.
+    expect(mockEngine.freeze).not.toHaveBeenCalled()
+    expect(mockIpcHandlers.runner.freeze).not.toHaveBeenCalled()
+    expect(app.services.ytdlpUpdater.shutdown).not.toHaveBeenCalled()
+    expect(app.isQuitting).toBe(false)
+    expect(mockElectron.app.quit).not.toHaveBeenCalled()
+    const repeated = quitEvent()
+    await app.onBeforeQuit(repeated)
+    expect(repeated.preventDefault).toHaveBeenCalledTimes(1)
+    expect(app.ipcHandlers.localMedia.shutdown).toHaveBeenCalledTimes(1)
+    expect(mockElectron.app.quit).not.toHaveBeenCalled()
+    drained()
+    await quit
+    expect(mockIpcHandlers.runner.freeze.mock.invocationCallOrder[0]).toBeLessThan(
+      mockEngine.freeze.mock.invocationCallOrder[0]
+    )
+    expect(mockElectron.app.quit).toHaveBeenCalledTimes(1)
+  })
+
+  it("keeps downloads and update scheduling usable after a failed local drain, then allows a retry", async () => {
+    app.ipcHandlers.localMedia = { freeze: jest.fn(), shutdown: jest.fn().mockRejectedValue(new Error("stuck")) }
+    mockIpcHandlers.runner = { freeze: jest.fn(), cancelAll: jest.fn(() => 0) }
+    app.services.ytdlpUpdater = { shutdown: jest.fn() }
+    app.engineUpdateTimer = setTimeout(() => {}, 60000)
+    app.periodicUpdateTimer = setInterval(() => {}, 60000)
+    const engineTimer = app.engineUpdateTimer
+    const periodicTimer = app.periodicUpdateTimer
+    try {
+      await app.onBeforeQuit(quitEvent())
+      expect(mockElectron.app.quit).not.toHaveBeenCalled()
+      expect(mockElectron.dialog.showErrorBox).toHaveBeenCalled()
+      expect(app.hasShutDown).toBe(false)
+      expect(app.isQuitting).toBe(false)
+      expect(app.quitDrainInProgress).toBe(false)
+      expect(mockEngine.freeze).not.toHaveBeenCalled()
+      expect(mockIpcHandlers.runner.freeze).not.toHaveBeenCalled()
+      expect(mockIpcHandlers.runner.cancelAll).not.toHaveBeenCalled()
+      expect(mockIpcHandlers.history.interruptLive).not.toHaveBeenCalled()
+      expect(app.services.ytdlpUpdater.shutdown).not.toHaveBeenCalled()
+      expect(app.engineUpdateTimer).toBe(engineTimer)
+      expect(app.periodicUpdateTimer).toBe(periodicTimer)
+
+      app.ipcHandlers.localMedia.shutdown.mockResolvedValueOnce({ closed: true })
+      await app.onBeforeQuit(quitEvent())
+      expect(mockElectron.app.quit).toHaveBeenCalledTimes(1)
+      expect(mockEngine.freeze).toHaveBeenCalledTimes(1)
+      expect(app.engineUpdateTimer).toBeNull()
+      expect(app.periodicUpdateTimer).toBeNull()
+    } finally {
+      clearTimeout(engineTimer)
+      clearInterval(periodicTimer)
+    }
+  })
+
   it("drains queued events before the ipc handlers go", async () => {
     await app.onBeforeQuit(quitEvent())
 

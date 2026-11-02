@@ -26,6 +26,8 @@ import type {
   VideoInfoResponse
 } from "./api-types"
 
+import type { MediaOpenResult, MediaState } from "./local-media-types"
+
 // IPC Response wrapper
 export interface IPCResponse<T> {
   success: boolean
@@ -37,6 +39,11 @@ export interface IPCResponse<T> {
 declare global {
   interface Window {
     electronAPI?: {
+      media: {
+        open: () => Promise<IPCResponse<MediaOpenResult>>
+        getState: () => Promise<IPCResponse<MediaState>>
+        close: () => Promise<IPCResponse<{ closed: boolean }>>
+      }
       video: {
         getInfo: (
           options: { url: string; platform?: string } | string

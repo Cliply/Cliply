@@ -125,6 +125,19 @@ const listSnapshot = (
   rows: data?.rows ?? []
 })
 
+// Local inspection is separate from download state, history and telemetry.
+export const mediaApi = {
+  async open() {
+    return unwrap(await getElectronAPI().media.open(), "Could not inspect the local file")
+  },
+  async getState() {
+    return unwrap(await getElectronAPI().media.getState(), "Could not read local media state")
+  },
+  async close() {
+    return unwrap(await getElectronAPI().media.close(), "Could not close the local file")
+  }
+}
+
 // Video API functions
 export const videoApi = {
   /**

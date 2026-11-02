@@ -13,6 +13,9 @@ if (!process.versions.electron) {
   delete env.ELECTRON_RUN_AS_NODE
   let result
   try {
+    if (process.env.CLIPLY_SMOKE_FFPROBE) {
+      fs.writeFileSync(path.join(userData, "inspection.wav"), require("./smoke-local-media").wavFixture())
+    }
     const args = [__filename, userData]
     // Source-tree Electron has no installed AppArmor profile on CI. Packaged
     // Linux checks exercise the real launchers without this test-only flag.
@@ -65,7 +68,20 @@ if (!process.versions.electron) {
       console.log("packaged Linux updater selected:", expected)
     }
     const cliplyApp = new CliplyApp()
+    let localMedia
     cliplyApp.initializeServices = async () => {
+      const { LocalMediaService } = require(path.join(appRoot, "src/main/services/local-media"))
+      const { resolveFfprobe } = require(path.join(appRoot, "src/main/services/local-media/paths"))
+      const { registerLocalMedia } = require(path.join(appRoot, "src/main/ipc/local-media"))
+      const fixture = path.join(userData, "inspection.wav")
+      localMedia = new LocalMediaService({
+        selectFile: async () => fixture,
+        resolveProbe: () => resolveFfprobe({
+          isPackaged: false, developmentPath: process.env.CLIPLY_SMOKE_FFPROBE,
+          projectRoot: userData // absent by default: proves graceful missing support
+        })
+      })
+      registerLocalMedia({ ipcMain, service: localMedia, getWindow: () => cliplyApp.mainWindow })
       ipcMain.handle("settings:get-download-count", () => ({ success: true, data: { count: 123 } }))
       ipcMain.handle("settings:get-download-path", () => ({
         success: true, data: { path: userData, exists: true, writable: true }
@@ -94,8 +110,12 @@ if (!process.versions.electron) {
     const state = await cliplyApp.mainWindow.webContents.executeJavaScript(
       `(async () => {
         const response = await window.electronAPI.settings.getDownloadCount()
+        const media = await window.electronAPI.media.open()
+        const closed = await window.electronAPI.media.close()
+        const mediaState = await window.electronAPI.media.getState()
         return {
           count: response.data.count,
+          media, mediaClosed: closed.data?.closed, mediaSourceAfterClose: mediaState.data?.source,
           platform: window.electronAPI.platform.platform,
           electron: window.electronAPI.platform.versions.electron,
           rendered: document.getElementById("root")?.childElementCount > 0,
@@ -103,6 +123,17 @@ if (!process.versions.electron) {
         }
       })()`
     )
+    if (process.env.CLIPLY_SMOKE_FFPROBE) {
+      assert.equal(state.media.success, true)
+      assert.equal(state.media.data.source.duration, 1)
+      assert.equal(state.media.data.source.streams[0].codec, "pcm_s16le")
+    } else {
+      assert.equal(state.media.success, false)
+      assert.equal(state.media.error.code, "PROBE_MISSING")
+    }
+    assert.equal(state.mediaClosed, true)
+    assert.equal(state.mediaSourceAfterClose, null)
+    await localMedia.shutdown()
     assert.equal(state.count, 123, "preload IPC round trip")
     assert.equal(state.rendered, true, "React mounted from the built file")
     assert.equal(state.nodeIsolated, true, "renderer has no Node require")
