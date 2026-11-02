@@ -246,6 +246,7 @@ class IPCHandlers {
     this.runner = new DownloadRunner({
       engine: this.engine,
       updater: this.updater,
+      reportEngineUpdate: services.reportEngineUpdate,
       history: this.history,
       sendEvent: (downloadId, payload) =>
         this.sendDownloadEvent(downloadId, payload),

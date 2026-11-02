@@ -49,6 +49,10 @@ jobs:
         if: runner.os != 'Windows'
         run: npm test
 
+      - name: Test download recovery on Windows
+        if: runner.os == 'Windows'
+        run: npm test -- --runInBand tests/download-recovery.test.js tests/error-taxonomy.test.js
+
       - name: Test renderer
         run: npm run test:renderer
 

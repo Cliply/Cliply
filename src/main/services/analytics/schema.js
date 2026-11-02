@@ -500,9 +500,8 @@ const PROPERTY_VOCABULARIES = {
   // cannot reach this property, because runUpdateLocked ignores what
   // seedLocked said and returns its own.
   //
-  // "busy" is one of these on purpose: the check refused because a download
-  // held the engine gate, so it never ran - and an install whose engine
-  // therefore never updates is exactly what this event exists to find
+  // Keep busy/cancelled readable for older clients. New clients defer busy
+  // checks and do not report either outcome as a failure.
   update_reason: new Set([
     "asset-layout-unexpected",
     "busy",

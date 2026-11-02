@@ -28,6 +28,7 @@ const ERROR_CATEGORIES = Object.freeze({
   EXTRACTION_FAILED: "EXTRACTION_FAILED",
   INVALID_URL: "INVALID_URL",
   NETWORK_ERROR: "NETWORK_ERROR",
+  HTTP_FORBIDDEN: "HTTP_FORBIDDEN",
   // youtube refusing us for asking too often, which is not a network fault and
   // is made worse by retrying - see the pattern entry for why it must be read
   // before NETWORK_ERROR
@@ -189,7 +190,13 @@ const CATEGORY_PATTERNS = [
     // retryable and says "check your connection" - so we told the user to do
     // the one thing that deepens a rate limit. this entry has to stay above it.
     category: ERROR_CATEGORIES.RATE_LIMITED,
-    patterns: [/http error 429/i, /too many requests/i]
+    patterns: [/http error[: ]+429\b/i, /server returned 429\b/i, /too many requests/i]
+  },
+  {
+    // A refusal is not evidence of bot detection. Keep it ahead of the
+    // generic webpage/network and FFmpeg patterns.
+    category: ERROR_CATEGORIES.HTTP_FORBIDDEN,
+    patterns: [/http error[: ]+403\b/i, /server returned 403\b/i]
   },
   {
     category: ERROR_CATEGORIES.NETWORK_ERROR,
@@ -203,8 +210,11 @@ const CATEGORY_PATTERNS = [
       /network is unreachable/i,
       /temporary failure in name resolution/i,
       /getaddrinfo/i,
-      /http error 5\d\d/i,
-      /remote end closed connection/i
+      /http error[: ]+5\d\d\b/i,
+      /server returned 5\d\d\b/i,
+      /remote end closed connection/i,
+      /failed to read handshake response/i,
+      /connection to tcp:\/\/[^\n]+ failed:/i
     ]
   },
 

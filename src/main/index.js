@@ -38,6 +38,9 @@ const {
 
 // let the user get their first download going before we check for updates
 const UPDATE_CHECK_DELAY_MS = 90 * 1000
+const ENGINE_BUSY_DELAY_MS = 30 * 1000
+const ENGINE_RETRY_DELAYS_MS = [60 * 1000, 5 * 60 * 1000]
+const ENGINE_TRANSIENT_FAILURES = new Set(["check-failed", "download-failed", "swap-failed"])
 
 // what getAppVersion() reports when it cannot read package.json. persisting it
 // would poison the launch after this one: it comes back as previous_version,
@@ -53,13 +56,8 @@ const QUIT_FLUSH_TIMEOUT_MS = 2000
 // user holding a closed window is paying for a row's wording
 const QUIT_HISTORY_TIMEOUT_MS = 2000
 
-/**
- * what an update check reports when nothing went wrong: the engine was already
- * current, or it just became current without the version changing. every other
- * reason is one the engine did not update, which is what engine_update_failed
- * exists to explain - including "busy", where the check never ran at all.
- */
-const ENGINE_CURRENT_REASONS = new Set(["up-to-date", "completed"])
+// Busy checks are deferred work, not failed updates.
+const ENGINE_NON_FAILURE_REASONS = new Set(["up-to-date", "completed", "busy", "cancelled"])
 
 class CliplyApp {
   constructor() {
@@ -72,6 +70,9 @@ class CliplyApp {
     this.hasShutDown = false
     // the 12-hour update-check interval, held so the quit can clear it
     this.periodicUpdateTimer = null
+    this.engineUpdateTimer = null
+    this.engineUpdateChecking = false
+    this.engineUpdateRetries = 0
 
     // update handling
     this.updateState = {
@@ -219,19 +220,10 @@ class CliplyApp {
 
       // init ipc handlers
       this.autoUpdater = autoUpdater
+      this.services.reportEngineUpdate = (result) => this.reportEngineUpdate(result)
       this.ipcHandlers = new IPCHandlers(this.services, this.autoUpdater)
 
-      // background update check, deferred
-      //
-      // the update holds the engine gate until it finishes, and the user's very
-      // first action would otherwise queue behind it - which reads as a frozen
-      // app on a slow connection. giving them a head start costs nothing: if
-      // they are busy when the timer fires the check simply refuses and runs
-      // next launch.
-      const updateCheckTimer = setTimeout(() => {
-        this.checkForEngineUpdate()
-      }, UPDATE_CHECK_DELAY_MS)
-      updateCheckTimer.unref()
+      this.scheduleEngineUpdate(UPDATE_CHECK_DELAY_MS)
     } catch (error) {
       console.error("Service initialization failed:", error)
       throw error
@@ -277,18 +269,38 @@ class CliplyApp {
     }
   }
 
-  /**
-   * run the deferred engine update check and say what came of it
-   * @returns {Promise<void>} resolves however the check went
-   */
-  checkForEngineUpdate() {
-    return this.services.ytdlpUpdater
-      .checkForUpdate()
-      .then((result) => {
-        console.log("yt-dlp update check:", result)
-        this.reportEngineUpdate(result)
-      })
-      .catch((error) => {
+  // One timer for deferred work; neither busy sessions nor retries accumulate timers.
+  scheduleEngineUpdate(delay) {
+    clearTimeout(this.engineUpdateTimer)
+    this.engineUpdateTimer = null
+    if (this.isQuitting || this.hasShutDown) return
+
+    this.engineUpdateTimer = setTimeout(() => {
+      this.engineUpdateTimer = null
+      void this.checkForEngineUpdate()
+    }, delay)
+    this.engineUpdateTimer.unref()
+  }
+
+  /** Run a check without competing with downloads or overlapping another check. */
+  async checkForEngineUpdate() {
+    if (this.isQuitting || this.hasShutDown || this.engineUpdateChecking) return
+    clearTimeout(this.engineUpdateTimer)
+    this.engineUpdateTimer = null
+
+    // Include queued downloads and retry delays, which may hold no engine
+    // read lease yet. The updater's gate remains the final, atomic safeguard.
+    if (this.ipcHandlers?.runner?.size > 0) {
+      this.scheduleEngineUpdate(ENGINE_BUSY_DELAY_MS)
+      return
+    }
+
+    this.engineUpdateChecking = true
+    try {
+      let result
+      try {
+        result = await this.services.ytdlpUpdater.checkForUpdate()
+      } catch (error) {
         // the check threw rather than reporting - probeVersion rejecting, a
         // rename that could not be recovered. an install that cannot even ask
         // whether its engine is stale is the silent degradation this event
@@ -301,21 +313,39 @@ class CliplyApp {
         const message = error ? describeError(error) : null
 
         console.warn("yt-dlp update check failed:", message)
-        this.reportEngineUpdate({ reason: "check-rejected", error: message })
-      })
+        result = { reason: "check-rejected", error: message }
+      }
+
+      this.reportEngineUpdate(result)
+      if (result?.reason === "busy") {
+        this.scheduleEngineUpdate(ENGINE_BUSY_DELAY_MS)
+      } else if (ENGINE_TRANSIENT_FAILURES.has(result?.reason)) {
+        const delay = ENGINE_RETRY_DELAYS_MS[this.engineUpdateRetries]
+        if (delay !== undefined) {
+          this.engineUpdateRetries += 1
+          this.scheduleEngineUpdate(delay)
+        }
+      } else {
+        this.engineUpdateRetries = 0
+      }
+    } finally {
+      this.engineUpdateChecking = false
+    }
   }
 
   /**
    * turn an update check's result into at most one event
    *
-   * a stale engine is what breaks downloads, so the question here is not "did
-   * the update work" but "is there a reason this install is not on the newest
-   * engine". a refusal counts as one; being current already does not.
+   * Shared by the background check and download-triggered engine repairs.
    *
    * @param {Object} result - what checkForUpdate() returned
    */
   reportEngineUpdate(result) {
     if (!result) return
+
+    // Also refresh after a rollback or a no-op check. Seeding during repair
+    // can change the runnable version without producing updated:true.
+    this.noteEngineVersion(result.to)
 
     if (result.updated) {
       this.services.analytics.capture("engine_updated", {
@@ -324,11 +354,10 @@ class CliplyApp {
         ...(result.from ? { from_version: result.from } : {}),
         to_version: result.to
       })
-      this.noteEngineVersion(result.to)
       return
     }
 
-    if (!result.reason || ENGINE_CURRENT_REASONS.has(result.reason)) return
+    if (!result.reason || ENGINE_NON_FAILURE_REASONS.has(result.reason)) return
 
     this.services.analytics.capture("engine_update_failed", {
       update_reason: result.reason,
@@ -512,6 +541,9 @@ class CliplyApp {
     }
 
     this.hasShutDown = true
+    clearTimeout(this.engineUpdateTimer)
+    this.engineUpdateTimer = null
+    this.services.ytdlpUpdater?.shutdown?.()
 
     // cleared unconditionally, install or not: the check it would fire is
     // already refused by the isQuitting flag above, so all an armed interval

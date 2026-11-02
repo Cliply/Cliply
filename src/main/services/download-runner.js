@@ -13,6 +13,8 @@ const { classify, ERROR_STAGES } = require("../utils/error-taxonomy")
 const { isSimplePlatform } = require("../utils/ytdlp-formats")
 const { APP_CONFIG } = require("../utils/constants")
 
+const NETWORK_RETRY_DELAY_MS = 1500
+
 // the statuses the renderer hooks already understand, plus `queued`, which is
 // new: a download that has been accepted and is waiting for a slot. it is a
 // state the renderer has never had to draw before, and an older consumer that
@@ -28,7 +30,7 @@ const STATUS = {
 class DownloadRunner {
   /**
    * @param {Object} options - {engine, updater, sendEvent, trackEvent,
-   *   logAudit, history, maxConcurrent}
+   *   logAudit, history, maxConcurrent, reportEngineUpdate}
    */
   constructor({
     engine,
@@ -38,6 +40,7 @@ class DownloadRunner {
     logAudit = () => {},
     history = null,
     listChanged = null,
+    reportEngineUpdate = () => {},
     maxConcurrent = APP_CONFIG.MAX_CONCURRENT_DOWNLOADS
   }) {
     this.engine = engine
@@ -45,6 +48,7 @@ class DownloadRunner {
     this.sendEvent = sendEvent
     this.trackEvent = trackEvent
     this.logAudit = logAudit
+    this.reportEngineUpdate = reportEngineUpdate
     /**
      * say that the list of downloads has changed
      *
@@ -229,7 +233,6 @@ class DownloadRunner {
     const holdsSlot = await this.acquireSlot(downloadId)
 
     let lastError = null
-    let repaired = false
 
     try {
       // a cancel landing while this was parked wakes it without handing it a
@@ -242,8 +245,7 @@ class DownloadRunner {
         return this.settleCancelled(downloadId)
       }
 
-      // at most two passes: the second only happens when an update actually
-      // changed the binary version (repair-on-failure)
+      // One shared retry budget: a transient trim failure OR an engine repair.
       for (let attempt = 0; attempt < 2; attempt++) {
         let handle
 
@@ -257,7 +259,7 @@ class DownloadRunner {
          * this the update resolving mid-quit starts a second yt-dlp process
          * while the app is closing.
          */
-        if (this.frozen) {
+        if (this.frozen || this.active.get(downloadId)?.cancelled) {
           return this.settleCancelled(downloadId)
         }
 
@@ -343,25 +345,39 @@ class DownloadRunner {
           return this.settleCompleted({ downloadId, type, platform, formatId, trimmed, result })
         } catch (error) {
           lastError = error
+          entry.handle = null
 
-          if (error.code === ERROR_CODES.CANCELLED) {
+          if (error.code === ERROR_CODES.CANCELLED || entry.cancelled || this.frozen) {
             // the engine attaches the tally to the rejection, so a cancel can
             // still say which files it left on disk
             return this.settleCancelled(downloadId, error)
           }
 
-          // an extraction-signature break is exactly what a newer yt-dlp fixes.
-          //
-          // a playlist retry re-runs the whole operation rather than resuming
-          // where it broke, which sounds worse than it is: --download-archive
-          // holds every item that already landed, so the second pass skips them
-          // and picks up at the one that failed
-          if (error.updateMayFix && !repaired && this.updater) {
-            repaired = true
+          if (attempt === 0 && trimmed && error.code === ERROR_CODES.NETWORK_ERROR) {
+            // Normal downloads already use yt-dlp's native retries. Section
+            // downloads use FFmpeg; recreate the operation to resolve fresh
+            // media URLs, keeping the same slot and cancellation state.
+            await this.waitForRetry(entry)
+            continue
+          }
+
+          // Signature changes and access refusals may need a newer engine.
+          // Playlist retries preserve saved items through --download-archive.
+          if (attempt === 0 && error.updateMayFix && this.updater) {
             // the slot is held across this, on purpose. it is still one
             // download, and freeing it for the length of an update would let a
             // fourth process start beside the three already running
-            const update = await this.updater.updateNow().catch(() => null)
+            const update = await this.updater.updateNow().catch((error) => ({
+              updated: false,
+              reason: "check-rejected",
+              error: describeError(error)
+            }))
+            // Reporting must not change the download's outcome.
+            try {
+              this.reportEngineUpdate(update)
+            } catch (error) {
+              console.warn("Could not report engine repair:", describeError(error))
+            }
 
             const stillWanted = this.active.get(downloadId)
 
@@ -390,6 +406,20 @@ class DownloadRunner {
         this.releaseSlot()
       }
     }
+  }
+
+  waitForRetry(entry) {
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        entry.cancelRetry = null
+        resolve()
+      }, NETWORK_RETRY_DELAY_MS)
+      entry.cancelRetry = () => {
+        clearTimeout(timer)
+        entry.cancelRetry = null
+        resolve()
+      }
+    })
   }
 
   /**
@@ -810,6 +840,7 @@ class DownloadRunner {
     // exist yet.
     const alreadyCancelled = entry.cancelled
     entry.cancelled = true
+    if (entry.cancelRetry) entry.cancelRetry()
 
     // a queued download has no process to kill, so cancelling one is only ever
     // waking it: run() re-reads the flag it was just given and settles through

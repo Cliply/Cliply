@@ -193,6 +193,37 @@ const {
   mapError
 } = require("../src/main/services/ytdlp-engine")
 
+describe("reported download failures", () => {
+  it.each([
+    "[tls @ 00000192c46a9300] Failed to read handshake response\nError opening input: Error number -10054 occurred\nERROR: ffmpeg exited with code 4294957242",
+    "[tcp @ 000001e3b9c39580] Connection to tcp://host:443 failed: Error number -138 occurred\nERROR: ffmpeg exited with code 4294967158"
+  ])("recognises the transport failure underneath FFmpeg: %s", (stderr) => {
+    expect(mapError({ stderrLines: stderr.split("\n") })).toMatchObject({
+      code: "NETWORK_ERROR", retryable: true, updateMayFix: false
+    })
+  })
+
+  it.each([
+    "ERROR: unable to download video data: HTTP Error 403: Forbidden",
+    "ERROR: unable to download webpage: HTTP Error 403: Forbidden",
+    "[https @ 123] HTTP error 403 Forbidden\nERROR: ffmpeg exited with code 1",
+    "Server returned 403 Forbidden (access denied)"
+  ])("does not assume a 403 is bot detection: %s", (stderr) => {
+    expect(mapError({ stderrLines: stderr.split("\n") })).toMatchObject({
+      code: "HTTP_FORBIDDEN", needsCookies: false, retryable: false, updateMayFix: true
+    })
+  })
+
+  it("still honours explicit bot and rate-limit evidence", () => {
+    expect(mapError({ stderrLines: ["HTTP Error 403: Sign in to confirm you're not a bot"] }).code)
+      .toBe("BOT_DETECTION")
+    expect(mapError({ stderrLines: ["HTTP error 429 Too Many Requests", "ffmpeg exited with code 1"] }).code)
+      .toBe("RATE_LIMITED")
+    expect(mapError({ stderrLines: ["ERROR: ffmpeg exited with code 1"] }).code)
+      .toBe("FFMPEG_ERROR")
+  })
+})
+
 describe("NOT_A_VIDEO", () => {
   // "there was never a video here" is a different failure from "there was a
   // video and it is gone": one is content that went away, the other is somebody
