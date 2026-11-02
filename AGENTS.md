@@ -1,8 +1,9 @@
 # Working on Cliply
 
 Cliply is an Electron desktop downloader for YouTube, TikTok and Pinterest.
-The renderer is React/TypeScript; the main process runs standalone yt-dlp through
-IPC. There is no FastAPI server or separately installed Python requirement.
+The React/TypeScript renderer calls main through preload/IPC. Main spawns
+standalone yt-dlp processes. There is no FastAPI server or separately installed
+Python requirement.
 The marketing website lives in the separate `cliply-web` repository.
 
 ## Find the right context
