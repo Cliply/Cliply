@@ -6,15 +6,18 @@ const http = require("node:http")
 const os = require("node:os")
 const path = require("node:path")
 const { spawnSync } = require("node:child_process")
+const { parseArgs } = require("node:util")
 const { YtdlpEngine } = require("../src/main/services/ytdlp-engine")
 const { DownloadRunner } = require("../src/main/services/download-runner")
 
 const repo = path.resolve(__dirname, "..")
+const { values } = parseArgs({ options: { resources: { type: "string" } } })
+const resources = values.resources ? path.resolve(values.resources) : repo
 const root = fs.mkdtempSync(path.join(os.tmpdir(), "cliply-recovery-"))
 const platform = { darwin: "macos", win32: "windows", linux: "linux" }[process.platform]
-const ffmpeg = path.join(repo, "binaries", platform, `ffmpeg${process.platform === "win32" ? ".exe" : ""}`)
+const ffmpeg = path.join(resources, "binaries", ...(values.resources ? [] : [platform]), `ffmpeg${process.platform === "win32" ? ".exe" : ""}`)
 const video = path.join(root, "source.mp4")
-const engine = new YtdlpEngine({ userDataPath: root, resourcesPath: repo, ffmpegPath: ffmpeg })
+const engine = new YtdlpEngine({ userDataPath: root, resourcesPath: resources, ffmpegPath: ffmpeg })
 let attempts = 0
 let fault = "none"
 let rejectedRequests = 0

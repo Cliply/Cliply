@@ -1,0 +1,133 @@
+name: Stage Linux helpers
+
+on:
+  workflow_call:
+    inputs:
+      publish:
+        type: boolean
+        default: false
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: 'Add the verified Linux helpers to the existing binaries release'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      FFMPEG_BASE: https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-11-01-12-49
+      FFMPEG_ASSET: ffmpeg-n8.1.3-29-gad3b795b72-linux64-gpl-8.1.tar.xz
+      DENO_BASE: https://github.com/denoland/deno/releases/download/v2.5.6
+      DENO_ASSET: deno-x86_64-unknown-linux-gnu.zip
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Download the upstream archives and checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fL --retry 3 -o "$FFMPEG_ASSET" "$FFMPEG_BASE/$FFMPEG_ASSET"
+          curl -fL --retry 3 -o ffmpeg.sha256 "$FFMPEG_BASE/checksums.sha256"
+          curl -fL --retry 3 -o "$DENO_ASSET" "$DENO_BASE/$DENO_ASSET"
+          curl -fL --retry 3 -o deno.sha256 "$DENO_BASE/$DENO_ASSET.sha256sum"
+
+      - name: Verify and extract only the Linux x64 executables
+        shell: bash
+        run: |
+          python3 <<'PY'
+          import hashlib, json, os, pathlib, re, tarfile, zipfile
+          output = pathlib.Path("linux-helpers")
+          output.mkdir()
+          records = {}
+          for kind in ("ffmpeg", "deno"):
+              asset = os.environ[f"{kind.upper()}_ASSET"]
+              lines = pathlib.Path(f"{kind}.sha256").read_text().splitlines()
+              matches = [line.split()[0] for line in lines if line.split() and
+                         (len(line.split()) == 1 or line.split()[-1].lstrip("*").removeprefix("./") == asset)]
+              if len(matches) != 1 or not re.fullmatch(r"[0-9a-fA-F]{64}", matches[0]):
+                  raise RuntimeError(f"Expected one upstream SHA256 for {asset}")
+              with open(asset, "rb") as source:
+                  archive_hash = hashlib.file_digest(source, "sha256").hexdigest()
+              if archive_hash != matches[0].lower():
+                  raise RuntimeError(f"Upstream checksum mismatch: {asset}")
+              if kind == "ffmpeg":
+                  with tarfile.open(asset, "r:xz") as archive:
+                      members = [m for m in archive.getmembers() if m.isfile() and m.name.endswith("/bin/ffmpeg")]
+                      if len(members) != 1:
+                          raise RuntimeError("Expected one FFmpeg executable")
+                      data = archive.extractfile(members[0]).read()
+              else:
+                  with zipfile.ZipFile(asset) as archive:
+                      data = archive.read("deno")
+              if data[:6] != b"\x7fELF\x02\x01" or int.from_bytes(data[18:20], "little") != 62:
+                  raise RuntimeError(f"{kind} is not a Linux x86-64 ELF executable")
+              target = output / f"{kind}-linux-x64"
+              target.write_bytes(data)
+              target.chmod(0o755)
+              records[kind] = {"source": f"{os.environ[f'{kind.upper()}_BASE']}/{asset}",
+                               "checksum_source": f"{os.environ[f'{kind.upper()}_BASE']}/" +
+                               ("checksums.sha256" if kind == "ffmpeg" else f"{asset}.sha256sum"),
+                               "archive_sha256": archive_hash,
+                               "sha256": hashlib.sha256(data).hexdigest(), "bytes": len(data)}
+          (output / "linux-helpers.json").write_text(json.dumps(records, indent=2) + "\n")
+          PY
+
+      - name: Check native execution and shared libraries
+        shell: bash
+        run: |
+          set -euo pipefail
+          linux-helpers/ffmpeg-linux-x64 -version
+          linux-helpers/ffmpeg-linux-x64 -buildconf
+          linux-helpers/ffmpeg-linux-x64 -L
+          linux-helpers/deno-linux-x64 --version
+          for binary in linux-helpers/*-linux-x64; do
+            if ldd "$binary" > libraries.txt 2>&1; then
+              if grep -q 'not found' libraries.txt; then cat libraries.txt; exit 1; fi
+            elif ! grep -Eq 'not a dynamic executable|statically linked' libraries.txt; then
+              cat libraries.txt
+              exit 1
+            fi
+            cat libraries.txt
+          done
+          python3 <<'PY'
+          import json, pathlib, subprocess
+          report = pathlib.Path("linux-helpers/linux-helpers.json")
+          records = json.loads(report.read_text())
+          for kind, flags in (("ffmpeg", ["-version"]), ("deno", ["--version"])):
+              result = subprocess.check_output([f"linux-helpers/{kind}-linux-x64", *flags], text=True)
+              records[kind]["version"] = result.splitlines()[0]
+          report.write_text(json.dumps(records, indent=2) + "\n")
+          print(report.read_text())
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-helpers
+          path: linux-helpers/
+          retention-days: 1
+
+  publish:
+    needs: verify
+    if: ${{ inputs.publish }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: linux-helpers
+          path: linux-helpers
+      - name: Add only the new Linux helpers
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload binaries linux-helpers/ffmpeg-linux-x64 linux-helpers/deno-linux-x64 \
+            --repo "${{ github.repository }}"

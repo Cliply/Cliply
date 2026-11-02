@@ -7,7 +7,15 @@ on:
   workflow_dispatch:
     inputs:
       package_check:
-        description: 'Also build Mac and Windows installers without publishing'
+        description: 'Also build and verify native installers without publishing'
+        type: boolean
+        default: false
+      stage_linux_helpers:
+        description: 'Validate upstream Linux helpers instead of running app checks'
+        type: boolean
+        default: false
+      publish_linux_helpers:
+        description: 'Add validated Linux helpers to the existing binaries release (staging mode only)'
         type: boolean
         default: false
 
@@ -15,14 +23,35 @@ permissions:
   contents: read
 
 jobs:
+  stage-linux-helpers:
+    if: github.event_name == 'workflow_dispatch' && inputs.stage_linux_helpers
+    permissions:
+      contents: write
+    uses: ./.github/workflows/stage-linux-helpers.yml
+    with:
+      publish: ${{ inputs.publish_linux_helpers }}
+
   check:
+    if: ${{ !inputs.stage_linux_helpers }}
     name: ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-26, windows-latest]
+        include:
+          - os: macos-26
+            platform: darwin-arm64
+            builder: --mac
+            resources: dist/mac-arm64/Cliply.app/Contents/Resources
+          - os: windows-latest
+            platform: win32-x64
+            builder: --win
+            resources: dist/win-unpacked/resources
+          - os: ubuntu-24.04
+            platform: linux-x64
+            builder: --linux
+            resources: dist/linux-unpacked/resources
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -44,7 +73,7 @@ jobs:
         run: npm run lint
 
       # The main suite asserts posix file modes and process-group signals
-      # (the win32 code paths have their own branches), so it runs on macOS only.
+      # (the win32 code paths have their own branches), so it runs on POSIX hosts.
       - name: Test main
         if: runner.os != 'Windows'
         run: npm test
@@ -60,69 +89,49 @@ jobs:
       - name: Build renderer
         run: npm run build:renderer
 
+      - name: Install Linux GUI test dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends xvfb xauth dbus-x11 libgtk-3-0t64 libasound2t64 libgbm1 libnss3
+
       - name: Smoke test Electron startup, preload and renderer
+        if: runner.os != 'Linux'
         run: npm run smoke:electron
+
+      - name: Smoke test Linux startup, preload and renderer
+        if: runner.os == 'Linux'
+        run: dbus-run-session -- xvfb-run --auto-servernum npm run smoke:electron
+        env:
+          CLIPLY_SMOKE_NO_SANDBOX: '1' 
 
       # Run explicitly for runtime/tooling upgrades. Keep the ordinary PR check
       # quick, and never use the publishing release workflow for validation.
       - name: Download release helpers
         if: github.event_name == 'workflow_dispatch' && inputs.package_check
-        shell: bash
-        run: |
-          if [[ "$RUNNER_OS" == "macOS" ]]; then
-            platform=macos
-            suffix=""
-          else
-            platform=windows
-            suffix=.exe
-          fi
-          mkdir -p "binaries/$platform" "binaries/deno/$platform"
-          curl -fLsS --retry 3 --retry-delay 2 -o "binaries/$platform/ffmpeg$suffix" \
-            "https://github.com/${{ github.repository }}/releases/download/binaries/ffmpeg$suffix"
-          curl -fLsS --retry 3 --retry-delay 2 -o "binaries/deno/$platform/deno$suffix" \
-            "https://github.com/${{ github.repository }}/releases/download/binaries/deno$suffix"
-          chmod +x "binaries/$platform/ffmpeg$suffix" "binaries/deno/$platform/deno$suffix"
+        run: node scripts/fetch-helpers.js --platform ${{ matrix.platform }}
 
       - name: Fetch release yt-dlp engine
         if: github.event_name == 'workflow_dispatch' && inputs.package_check
         run: npm run fetch:ytdlp
         env:
-          BUILD_TARGET_PLATFORM: ${{ runner.os == 'macOS' && 'darwin-arm64' || 'win32-x64' }}
+          BUILD_TARGET_PLATFORM: ${{ matrix.platform }}
 
       - name: Build installers without publishing
         if: github.event_name == 'workflow_dispatch' && inputs.package_check
-        run: npx --no-install electron-builder ${{ runner.os == 'macOS' && '--mac' || '--win' }} --publish never
+        run: npx --no-install electron-builder ${{ matrix.builder }} --publish never
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
 
       - name: Verify downloads and recovery with real release helpers
         if: github.event_name == 'workflow_dispatch' && inputs.package_check
-        run: node scripts/smoke-download-recovery.js
+        run: node scripts/smoke-download-recovery.js --resources "${{ matrix.resources }}"
 
       - name: Verify packaged helper executables
         if: github.event_name == 'workflow_dispatch' && inputs.package_check
-        shell: bash
-        run: |
-          node <<'JS'
-          const assert = require('node:assert/strict')
-          const path = require('node:path')
-          const { spawnSync } = require('node:child_process')
-          const { resolveExecutableIn } = require('./src/main/services/ytdlp-engine')
-          const payload = path.resolve(process.platform === 'darwin'
-            ? 'dist/mac-arm64/Cliply.app/Contents/Resources/binaries'
-            : 'dist/win-unpacked/resources/binaries')
-          const suffix = process.platform === 'win32' ? '.exe' : ''
-          const engine = resolveExecutableIn(path.join(payload, 'ytdlp'), process.platform)
-          assert.ok(engine, 'packaged yt-dlp executable is present')
-          for (const [binary, args] of [
-            [path.join(payload, 'ffmpeg' + suffix), ['-version']],
-            [path.join(payload, 'deno', 'deno' + suffix), ['--version']],
-            [engine, ['--version']]
-          ]) {
-            const result = spawnSync(binary, args, { stdio: 'inherit', timeout: 30000 })
-            assert.equal(result.status, 0, result.error?.message || binary)
-          }
-          JS
+        run: node scripts/verify-packaged-helpers.js --resources "${{ matrix.resources }}"
+
+      - name: Verify Linux AppImage launcher and installed DEB
+        if: github.event_name == 'workflow_dispatch' && inputs.package_check && runner.os == 'Linux'
+        run: dbus-run-session -- xvfb-run --auto-servernum node scripts/smoke-packaged-linux.js
 
       - name: Upload validation installers
         if: github.event_name == 'workflow_dispatch' && inputs.package_check
@@ -133,5 +142,8 @@ jobs:
             dist/*.dmg
             dist/*.zip
             dist/*.exe
+            dist/*.AppImage
+            dist/*.deb
+            dist/latest*.yml
           if-no-files-found: error
           retention-days: 7
