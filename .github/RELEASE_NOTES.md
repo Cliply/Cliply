@@ -2,7 +2,7 @@
 
 Linux downloads are available as an AppImage and a `.deb`. FFmpeg, Deno and yt-dlp are bundled; no separate runtime installation is needed.
 
-For the AppImage, allow execution in your file manager, or run `chmod +x Cliply-*-x64.AppImage`, then open it. For Ubuntu/Debian, install the `.deb` through your software installer or `sudo apt install ./Cliply-*-x64.deb` so system dependencies are resolved.
+For the AppImage, allow execution in your file manager, or run `chmod +x Cliply-*.AppImage`, then open it. For Ubuntu/Debian, install the `.deb` through your software installer or `sudo apt install ./Cliply-*.deb` so system dependencies are resolved.
 
 Builds are checked on Ubuntu 24.04 x64. Other distributions and desktop environments may behave differently. Linux ARM builds are not included.
 
