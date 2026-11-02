@@ -213,7 +213,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_TAG: ${{ steps.info.outputs.tag }}
-        run: node scripts/generate-release-notes.js --tag "$RELEASE_TAG" > "$RUNNER_TEMP/cliply-release-notes.md"
+        run: node scripts/generate-release-notes.js --tag "$RELEASE_TAG" --target HEAD > "$RUNNER_TEMP/cliply-release-notes.md"
 
       - name: Create GitHub Release
         run: |
