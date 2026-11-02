@@ -836,6 +836,50 @@ describe("update pipeline", () => {
     expect(new YtdlpUpdater({ engine }).terminateUpdate()).toBe(false)
   })
 
+  test("shutdown during a tag lookup cannot start a later engine download", async () => {
+    const engine = installedEngine()
+    const http = createFakeHttp()
+    const updater = new YtdlpUpdater({ engine, http })
+    let finishTag
+    let lookupStarted
+    const started = new Promise((resolve) => { lookupStarted = resolve })
+    updater.fetchLatestTag = () => new Promise((resolve) => {
+      finishTag = resolve
+      lookupStarted()
+    })
+    const stage = jest.spyOn(updater, "stageRelease")
+    const running = updater.checkForUpdate()
+    await started
+    updater.shutdown()
+    finishTag("2026.09.01")
+    expect(await running).toMatchObject({ reason: "cancelled" })
+    expect(stage).not.toHaveBeenCalled()
+    expect(engine.gate.isBusy()).toBe(false)
+    expect(await updater.updateNow()).toMatchObject({ reason: "cancelled" })
+    expect(await updater.checkForUpdate()).toMatchObject({ started: false, reason: "cancelled" })
+    expect(fs.readFileSync(engine.installedExecutable, "utf8")).toContain("installed engine")
+  })
+
+  test("shutdown aborts staging and leaves the previous engine runnable", async () => {
+    const engine = installedEngine()
+    let downloadStarted
+    const started = new Promise((resolve) => { downloadStarted = resolve })
+    const http = createFakeHttp({
+      onDownload: ({ signal }) => new Promise((_resolve, reject) => {
+        signal.addEventListener("abort", () => reject(new Error("aborted")))
+        downloadStarted()
+      })
+    })
+    const updater = new YtdlpUpdater({ engine, http })
+    const running = updater.updateNow()
+    await started
+    updater.shutdown()
+    expect(await running).toMatchObject({ reason: "cancelled" })
+    expect(engine.gate.isBusy()).toBe(false)
+    expect(stagingDirs(engine)).toEqual([])
+    expect(fs.readFileSync(engine.installedExecutable, "utf8")).toContain("installed engine")
+  })
+
   test("the gate stays shut for the whole update and reopens after it", async () => {
     const engine = installedEngine()
 

@@ -45,7 +45,12 @@ const ERROR_METADATA = {
   [ERROR_CODES.EXTRACTION_FAILED]: {
     message: "YouTube changed something the downloader needs to catch up with.",
     suggestion: "Updating the downloader usually fixes this.",
-    // the download flow retries these once after running yt-dlp -U
+    // Retry once only if installing a newer engine succeeds.
+    updateMayFix: true
+  },
+  [ERROR_CODES.HTTP_FORBIDDEN]: {
+    message: "The site refused access to this download (HTTP 403).",
+    suggestion: "Try opening the link again. If it keeps failing, check that you can play it in your browser.",
     updateMayFix: true
   },
   [ERROR_CODES.NETWORK_ERROR]: {

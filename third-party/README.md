@@ -1,14 +1,14 @@
 # third-party source code
 
-this directory contains source code for third-party components included in cliply, as required by their respective licenses.
+this directory contains third-party source snapshots and build information for components included in cliply.
 
 ## ffmpeg
 
-- license: gplv3
+- license: depends on the platform build; see the build information
 - usage: video processing, format conversion, media handling
-- source: complete source code provided in ffmpeg/ directory
-- more info: see ffmpeg/build-info.md
+- source: the archive in `ffmpeg/` is a historical snapshot, not the exact source for every currently bundled binary
+- platform versions, source revisions and build provenance: [ffmpeg/build-info.md](ffmpeg/build-info.md)
 
-## license compliance
+## source records
 
-all source code is provided in compliance with gpl and other open source license requirements. for questions about licensing, see the license file in project root or contact the project maintainers.
+use each binary's source and build records rather than treating the historical archive as a complete current source bundle. cliply's application license is in the [project license](../LICENSE).

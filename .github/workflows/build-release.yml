@@ -10,7 +10,7 @@ on:
         description: 'Release tag (e.g. v0.2.5). If set, checkout uses this ref; must exist on the remote.'
         required: false
 
-# One release at a time — avoids two runs deleting/recreating the same GitHub Release
+# One release at a time: avoids two runs deleting/recreating the same GitHub Release
 concurrency:
   group: cliply-build-release
   cancel-in-progress: false
@@ -20,7 +20,7 @@ permissions:
 
 jobs:
   build-macos:
-    runs-on: macos-14
+    runs-on: macos-26
     outputs:
       app_version: ${{ steps.versions.outputs.app_version }}
     steps:
@@ -32,19 +32,8 @@ jobs:
           node-version: '22'
           cache: 'npm'
 
-      - name: Download FFmpeg for macOS
-        run: |
-          mkdir -p binaries/macos
-          curl -fL --retry 3 --retry-delay 2 -o binaries/macos/ffmpeg \
-            "https://github.com/${{ github.repository }}/releases/download/binaries/ffmpeg"
-          chmod +x binaries/macos/ffmpeg
-
-      - name: Download Deno for macOS
-        run: |
-          mkdir -p binaries/deno/macos
-          curl -fL --retry 3 --retry-delay 2 -o binaries/deno/macos/deno \
-            "https://github.com/${{ github.repository }}/releases/download/binaries/deno"
-          chmod +x binaries/deno/macos/deno
+      - name: Download macOS helpers
+        run: node scripts/fetch-helpers.js --platform darwin-arm64
 
       - run: npm ci
       - run: npm run install:renderer
@@ -66,11 +55,16 @@ jobs:
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: false
 
+      - name: Verify packaged helpers
+        run: node scripts/verify-packaged-helpers.js --resources dist/mac-arm64/Cliply.app/Contents/Resources
+
       - uses: actions/upload-artifact@v4
         with:
           name: cliply-macos
           path: |
             dist/*.dmg
+            dist/*.zip
+            dist/*.blockmap
             dist/latest-mac.yml
           retention-days: 30
 
@@ -85,17 +79,8 @@ jobs:
           node-version: '22'
           cache: 'npm'
 
-      - name: Download FFmpeg for Windows
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Force -Path "binaries/windows"
-          Invoke-WebRequest -Uri "https://github.com/${{ github.repository }}/releases/download/binaries/ffmpeg.exe" -OutFile "binaries/windows/ffmpeg.exe"
-
-      - name: Download Deno for Windows
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Force -Path "binaries/deno/windows"
-          Invoke-WebRequest -Uri "https://github.com/${{ github.repository }}/releases/download/binaries/deno.exe" -OutFile "binaries/deno/windows/deno.exe"
+      - name: Download Windows helpers
+        run: node scripts/fetch-helpers.js --platform win32-x64
 
       - run: npm ci
       - run: npm run install:renderer
@@ -115,21 +100,81 @@ jobs:
 
       - run: npx electron-builder --win --publish never
 
+      - name: Verify packaged helpers
+        run: node scripts/verify-packaged-helpers.js --resources dist/win-unpacked/resources
+
       - uses: actions/upload-artifact@v4
         with:
           name: cliply-windows
           path: |
             dist/*Setup*.exe
+            dist/*.exe.blockmap
             dist/latest.yml
           retention-days: 30
 
+  build-linux:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag != '' && inputs.tag || github.ref }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - run: npm ci
+      - run: npm run install:renderer
+      - run: npm run build:renderer
+
+      - name: Download Linux helpers
+        run: node scripts/fetch-helpers.js --platform linux-x64
+
+      - name: Fetch yt-dlp engine
+        run: npm run fetch:ytdlp
+        env:
+          BUILD_TARGET_PLATFORM: linux-x64
+
+      - name: Build Linux installers without publishing
+        run: npx electron-builder --linux AppImage deb --x64 --publish never
+
+      - name: Verify packaged helpers
+        run: node scripts/verify-packaged-helpers.js --resources dist/linux-unpacked/resources
+
+      - name: Verify native Linux media operations and recovery
+        run: |
+          node scripts/smoke-media.js --resources dist/linux-unpacked/resources
+          node scripts/smoke-download-recovery.js --resources dist/linux-unpacked/resources
+
+      - name: Install Linux GUI test dependencies
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends xvfb xauth dbus-x11 weston libgtk-3-0t64 libasound2t64 libgbm1 libnss3
+
+      - name: Verify Linux AppImage launcher and installed DEB
+        run: dbus-run-session -- xvfb-run --auto-servernum node scripts/smoke-packaged-linux.js
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cliply-linux
+          path: |
+            dist/*.AppImage
+            dist/*.deb
+            dist/latest-linux.yml
+          if-no-files-found: error
+          retention-days: 30
+
   create-release:
-    needs: [build-macos, build-windows]
+    needs: [build-macos, build-windows, build-linux]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag != '' && inputs.tag || github.ref }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+      - run: npm ci --ignore-scripts
 
       - name: Determine tag
         id: info
@@ -153,8 +198,22 @@ jobs:
           name: cliply-windows
           path: artifacts/windows
 
+      - uses: actions/download-artifact@v4
+        with:
+          name: cliply-linux
+          path: artifacts/linux
+
       - name: List downloaded artifacts
         run: find artifacts -type f
+
+      - name: Verify update manifests and attached files
+        run: node scripts/verify-release-artifacts.js artifacts
+
+      - name: Generate release notes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ steps.info.outputs.tag }}
+        run: node scripts/generate-release-notes.js --tag "$RELEASE_TAG" --target HEAD > "$RUNNER_TEMP/cliply-release-notes.md"
 
       - name: Create GitHub Release
         run: |
@@ -163,7 +222,7 @@ jobs:
           FILES=()
           while IFS= read -r f; do
             FILES+=("$f")
-          done < <(find artifacts -type f \( -name "*.dmg" -o -name "*Setup*.exe" -o -name "latest*.yml" \))
+          done < <(find artifacts -type f \( -name "*.dmg" -o -name "*.zip" -o -name "*Setup*.exe" -o -name "*.blockmap" -o -name "*.AppImage" -o -name "*.deb" -o -name "latest*.yml" \))
 
           if [ ${#FILES[@]} -eq 0 ]; then
             echo "::error::No release files found in artifacts"
@@ -177,7 +236,7 @@ jobs:
 
           gh release create "$TAG" \
             --title "Cliply ${{ needs.build-macos.outputs.app_version }}" \
-            --notes-file .github/RELEASE_NOTES.md \
+            --notes-file "$RUNNER_TEMP/cliply-release-notes.md" \
             --latest \
             "${FILES[@]}"
         env:

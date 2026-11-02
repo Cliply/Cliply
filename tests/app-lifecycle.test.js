@@ -198,6 +198,7 @@ beforeEach(() => {
   let knownVersion = null
 
   mockEngine = {
+    freeze: jest.fn(),
     getBinaryPath: jest.fn(() => "/tmp/yt-dlp"),
     cancelAll: jest.fn(() => 0),
     // the real awaitShutdown calls cancelAll and resolves to what it
@@ -234,6 +235,10 @@ beforeEach(() => {
   app.services.analytics = mockAnalytics
   app.services.settingsStore = mockSettingsStore
   app.services.ytdlpEngine = mockEngine
+})
+
+afterEach(() => {
+  clearTimeout(app.engineUpdateTimer)
 })
 
 describe("the aptabase bootstrap is gone", () => {
@@ -745,13 +750,12 @@ describe("the deferred engine update check", () => {
     expect(Object.keys(properties)).not.toContain("error_message")
   })
 
-  it("reports a check that never ran because a download held the gate", async () => {
-    // the update did not happen and this is why - which is the whole question
+  it("defers a busy check without counting it as a failed update", async () => {
     await check({ started: false, reason: "busy" })
 
-    const [event, properties] = captured()[0]
-    expect(event).toBe("engine_update_failed")
-    expect(properties.update_reason).toBe("busy")
+    expect(captured()).toHaveLength(0)
+    expect(app.engineUpdateTimer).not.toBeNull()
+    clearTimeout(app.engineUpdateTimer)
   })
 
   it("reports a check that rejected instead of reporting", async () => {
@@ -815,6 +819,147 @@ describe("the deferred engine update check", () => {
  * through the real one, where update_reason is a vocabulary that has to have
  * been told about each value before it will send it.
  */
+describe("engine update scheduling", () => {
+  beforeEach(() => {
+    jest.useFakeTimers()
+    app.services.ytdlpUpdater = mockUpdater
+  })
+
+  afterEach(() => {
+    clearTimeout(app.engineUpdateTimer)
+    jest.useRealTimers()
+  })
+
+  it("keeps the startup grace period and checks once it elapses", async () => {
+    await app.initializeServices()
+    await jest.advanceTimersByTimeAsync(89999)
+    expect(mockUpdater.checkForUpdate).not.toHaveBeenCalled()
+    await jest.advanceTimersByTimeAsync(1)
+    expect(mockUpdater.checkForUpdate).toHaveBeenCalledTimes(1)
+    expect(jest.getTimerCount()).toBe(0)
+  })
+
+  it("waits through a busy queue, then updates in this session", async () => {
+    mockIpcHandlers.runner = { size: 2 }
+    await app.checkForEngineUpdate()
+    await jest.advanceTimersByTimeAsync(90000)
+    expect(mockUpdater.checkForUpdate).not.toHaveBeenCalled()
+    expect(mockAnalytics.capture).not.toHaveBeenCalled()
+    expect(jest.getTimerCount()).toBe(1)
+    mockIpcHandlers.runner.size = 0
+    await jest.advanceTimersByTimeAsync(30000)
+    expect(mockUpdater.checkForUpdate).toHaveBeenCalledTimes(1)
+    expect(jest.getTimerCount()).toBe(0)
+  })
+
+  it("also defers when a metadata operation holds the engine gate", async () => {
+    mockUpdater.checkForUpdate.mockResolvedValueOnce({ reason: "busy" })
+    await app.checkForEngineUpdate()
+    await jest.advanceTimersByTimeAsync(30000)
+    expect(mockUpdater.checkForUpdate).toHaveBeenCalledTimes(2)
+    expect(mockAnalytics.capture).not.toHaveBeenCalled()
+  })
+
+  it.each(["check-failed", "download-failed", "swap-failed"])(
+    "backs off %s twice and then stops", async (reason) => {
+      mockUpdater.checkForUpdate.mockResolvedValue({ reason })
+      await app.checkForEngineUpdate()
+      await jest.advanceTimersByTimeAsync(59999)
+      expect(mockUpdater.checkForUpdate).toHaveBeenCalledTimes(1)
+      await jest.advanceTimersByTimeAsync(1)
+      expect(mockUpdater.checkForUpdate).toHaveBeenCalledTimes(2)
+      await jest.advanceTimersByTimeAsync(300000)
+      expect(mockUpdater.checkForUpdate).toHaveBeenCalledTimes(3)
+      expect(jest.getTimerCount()).toBe(0)
+    }
+  )
+
+  it("busy deferrals do not consume the failure retry budget", async () => {
+    mockUpdater.checkForUpdate.mockResolvedValueOnce({ reason: "check-failed" })
+      .mockResolvedValueOnce({ reason: "busy" })
+      .mockResolvedValue({ reason: "check-failed" })
+    await app.checkForEngineUpdate()
+    await jest.advanceTimersByTimeAsync(60000 + 30000 + 300000)
+    expect(mockUpdater.checkForUpdate).toHaveBeenCalledTimes(4)
+    expect(jest.getTimerCount()).toBe(0)
+  })
+
+  it.each(["checksum-mismatch", "probe-failed", "unsupported-platform", "cancelled"])(
+    "does not automatically repeat %s", async (reason) => {
+      mockUpdater.checkForUpdate.mockResolvedValue({ reason })
+      await app.checkForEngineUpdate()
+      expect(jest.getTimerCount()).toBe(0)
+    }
+  )
+
+  it("does not start overlapping checks", async () => {
+    let finish
+    mockUpdater.checkForUpdate.mockReturnValue(new Promise((resolve) => { finish = resolve }))
+    const pending = app.checkForEngineUpdate()
+    await app.checkForEngineUpdate()
+    expect(mockUpdater.checkForUpdate).toHaveBeenCalledTimes(1)
+    finish({ reason: "up-to-date" })
+    await pending
+  })
+
+  it("clears deferred work on quit and cannot re-arm from an in-flight check", async () => {
+    let finish
+    mockUpdater.shutdown = jest.fn()
+    mockUpdater.checkForUpdate.mockReturnValue(new Promise((resolve) => { finish = resolve }))
+    app.scheduleEngineUpdate(90000)
+    const pending = app.checkForEngineUpdate()
+    await app.onBeforeQuit({ preventDefault: jest.fn() })
+    finish({ reason: "check-failed" })
+    await pending
+    expect(mockUpdater.shutdown).toHaveBeenCalledTimes(1)
+    expect(jest.getTimerCount()).toBe(0)
+    await app.checkForEngineUpdate()
+    expect(mockUpdater.checkForUpdate).toHaveBeenCalledTimes(1)
+  })
+
+  it("hands repairs the same version reporting path as background checks", async () => {
+    await app.initializeServices()
+    app.createMenu()
+    const report = servicesAtIpcConstruction.reportEngineUpdate
+    report({ updated: true, from: "2026.08.19", to: "2026.10.26" })
+    expect(mockAnalytics.setEngineVersion).toHaveBeenLastCalledWith("2026.10.26")
+    expect(engineVersionMenuItem().label).toBe("Video engine: yt-dlp 2026.10.26")
+    expect(mockAnalytics.capture).toHaveBeenCalledWith("engine_updated", {
+      from_version: "2026.08.19", to_version: "2026.10.26"
+    })
+  })
+
+  it("cancels waiting downloads before an update abort can release their gate", async () => {
+    const { OperationGate } = jest.requireActual("../src/main/services/ytdlp-engine")
+    const gate = new OperationGate()
+    const release = gate.tryAcquireWrite()
+    let cancelled = false
+    const spawn = jest.fn()
+    const waiting = gate.acquireRead().then((releaseRead) => {
+      if (!cancelled) spawn()
+      releaseRead()
+    })
+    let finishHistory
+    app.markDownloadsInterrupted = jest.fn(() => new Promise((resolve) => { finishHistory = resolve }))
+    mockIpcHandlers.runner = {
+      freeze: jest.fn(),
+      cancelAll: jest.fn(() => { cancelled = true; return 1 })
+    }
+    mockUpdater.shutdown = jest.fn(({ abort = true } = {}) => { if (abort) release() })
+    mockUpdater.terminateUpdate = jest.fn(release)
+    const quitting = app.onBeforeQuit({ preventDefault: jest.fn() })
+    await microtasks()
+    expect(mockEngine.freeze).toHaveBeenCalledTimes(1)
+    expect(mockUpdater.shutdown).toHaveBeenCalledWith({ abort: false })
+    expect(mockUpdater.terminateUpdate).not.toHaveBeenCalled()
+    finishHistory()
+    await quitting
+    await waiting
+    expect(mockUpdater.terminateUpdate).toHaveBeenCalledTimes(1)
+    expect(spawn).not.toHaveBeenCalled()
+  })
+})
+
 describe("the engine payloads survive the real validator", () => {
   const { Analytics: RealAnalytics } = jest.requireActual(
     "../src/main/services/analytics"
@@ -941,8 +1086,6 @@ describe("the engine payloads survive the real validator", () => {
     // it will send, and an empty vocabulary is what fails this loudly
     const reasons = [
       "asset-layout-unexpected",
-      "busy",
-      "cancelled",
       "check-failed",
       "checksum-mismatch",
       "checksum-missing",

@@ -16,6 +16,7 @@
     "dev:main": "cross-env NODE_ENV=development nodemon --watch src/main --exec electron .",
     "dev:renderer": "cd src/main/renderer && npm run dev",
     "fetch:ytdlp": "node scripts/fetch-ytdlp.js",
+    "fetch:helpers": "node scripts/fetch-helpers.js",
     "smoke:ytdlp": "node scripts/smoke-ytdlp.js",
     "smoke:electron": "node scripts/smoke-electron.js",
     "install:renderer": "cd src/main/renderer && npm install",
@@ -33,7 +34,7 @@
     "dist:linux": "cross-env BUILD_TARGET_PLATFORM=linux-x64 npm run prepare:full && electron-builder --linux",
     "dist:win:safe": "cross-env BUILD_TARGET_PLATFORM=win32-x64 npm run prepare:full && electron-builder --win --publish never && node scripts/create-update-files.js",
     "dist:mac:safe": "cross-env BUILD_TARGET_PLATFORM=darwin-arm64 npm run prepare:full && electron-builder --mac --publish never && node scripts/create-update-files.js",
-    "dist:linux:safe": "cross-env BUILD_TARGET_PLATFORM=linux-x64 npm run prepare:full && electron-builder --linux --publish never && node scripts/create-update-files.js",
+    "dist:linux:safe": "cross-env BUILD_TARGET_PLATFORM=linux-x64 npm run prepare:full && electron-builder --linux AppImage deb --x64 --publish never",
     "postinstall": "electron-builder install-app-deps",
     "test": "jest",
     "test:renderer": "cd src/main/renderer && npm test",
@@ -206,12 +207,6 @@
           "arch": [
             "x64"
           ]
-        },
-        {
-          "target": "tar.gz",
-          "arch": [
-            "x64"
-          ]
         }
       ],
       "category": "AudioVideo",
@@ -236,6 +231,10 @@
           "filter": [
             "**/*"
           ]
+        },
+        {
+          "from": "assets/icon.png",
+          "to": "assets/icon.png"
         }
       ]
     },
@@ -279,20 +278,22 @@
     "deb": {
       "artifactName": "Cliply-${version}-${arch}.${ext}",
       "depends": [
-        "libgtk-3-0",
+        "libgtk-3-0 | libgtk-3-0t64",
         "libnotify4",
         "libnss3",
         "libxss1",
         "libxtst6",
         "xdg-utils",
-        "libatspi2.0-0",
+        "libatspi2.0-0 | libatspi2.0-0t64",
         "libdrm2",
         "libxcomposite1",
         "libxdamage1",
         "libxrandr2",
         "libgbm1",
         "libxkbcommon0",
-        "libasound2"
+        "libasound2 | libasound2t64",
+        "libuuid1",
+        "libsecret-1-0"
       ]
     },
     "generateUpdatesFilesForAllChannels": true,
@@ -302,7 +303,10 @@
       "repo": "Cliply",
       "releaseType": "release"
     },
-    "compression": "normal"
+    "compression": "normal",
+    "toolsets": {
+      "appimage": "1.0.3"
+    }
   },
   "engines": {
     "node": ">=22.12.0",

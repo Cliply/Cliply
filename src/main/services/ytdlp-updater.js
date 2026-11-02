@@ -108,6 +108,7 @@ class YtdlpUpdater {
     this.lastCheck = null
     this.lastResult = null
     this.abortController = null
+    this.stopped = false
 
     if (!this.engine) {
       throw new Error("YtdlpUpdater requires a YtdlpEngine instance")
@@ -135,6 +136,7 @@ class YtdlpUpdater {
 
   // take the exclusive half of the shared gate, synchronously
   acquire() {
+    if (this.stopped) return null
     const release = this.engine.gate.tryAcquireWrite()
 
     if (release) {
@@ -317,6 +319,7 @@ class YtdlpUpdater {
    * @returns {Promise<Object>} {started, ...update result}
    */
   async checkForUpdate() {
+    if (this.stopped) return { started: false, reason: "cancelled" }
     const release = this.acquire()
 
     if (!release) {
@@ -341,6 +344,7 @@ class YtdlpUpdater {
    * @returns {Promise<Object>} {updated, from, to, reason}
    */
   async updateNow() {
+    if (this.stopped) return { updated: false, reason: "cancelled" }
     const release = this.acquire()
 
     if (!release) {
@@ -360,6 +364,7 @@ class YtdlpUpdater {
    */
   async runUpdateLocked() {
     const seeded = await this.seedLocked()
+    if (this.stopped) return { updated: false, reason: "cancelled" }
     const installedDir = this.engine.getInstalledEngineDir()
 
     if (!resolveExecutableIn(installedDir)) {
@@ -381,6 +386,8 @@ class YtdlpUpdater {
       console.warn("yt-dlp update check failed:", error.message)
       return { updated: false, reason: "check-failed", from, to: from, error: error.message }
     }
+
+    if (this.stopped) return { updated: false, reason: "cancelled", from, to: from }
 
     if (from && compareVersions(tag, from) <= 0) {
       this.lastResult = { updated: false, from, to: from, tag }
@@ -697,6 +704,12 @@ class YtdlpUpdater {
 
     this.abortController.abort()
     return true
+  }
+
+  // Prevent a tag lookup finishing during quit from starting a new download.
+  shutdown({ abort = true } = {}) {
+    this.stopped = true
+    if (abort) this.terminateUpdate()
   }
 
   /**

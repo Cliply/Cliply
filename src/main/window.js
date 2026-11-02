@@ -162,6 +162,9 @@ function onWindowClosed(cliplyApp) {
 // get app icon path
 function getAppIcon() {
   const iconName = process.platform === "win32" ? "icon.ico" : "icon.png"
+  if (app.isPackaged && process.platform === "linux") {
+    return path.join(process.resourcesPath, "assets", iconName)
+  }
   return path.join(__dirname, "..", "..", "assets", iconName)
 }
 
