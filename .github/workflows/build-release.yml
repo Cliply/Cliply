@@ -10,7 +10,7 @@ on:
         description: 'Release tag (e.g. v0.2.5). If set, checkout uses this ref; must exist on the remote.'
         required: false
 
-# One release at a time — avoids two runs deleting/recreating the same GitHub Release
+# One release at a time: avoids two runs deleting/recreating the same GitHub Release
 concurrency:
   group: cliply-build-release
   cancel-in-progress: false
@@ -169,6 +169,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag != '' && inputs.tag || github.ref }}
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
@@ -208,6 +209,12 @@ jobs:
       - name: Verify update manifests and attached files
         run: node scripts/verify-release-artifacts.js artifacts
 
+      - name: Generate release notes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ steps.info.outputs.tag }}
+        run: node scripts/generate-release-notes.js --tag "$RELEASE_TAG" > "$RUNNER_TEMP/cliply-release-notes.md"
+
       - name: Create GitHub Release
         run: |
           TAG="${{ steps.info.outputs.tag }}"
@@ -229,7 +236,7 @@ jobs:
 
           gh release create "$TAG" \
             --title "Cliply ${{ needs.build-macos.outputs.app_version }}" \
-            --notes-file .github/RELEASE_NOTES.md \
+            --notes-file "$RUNNER_TEMP/cliply-release-notes.md" \
             --latest \
             "${FILES[@]}"
         env:

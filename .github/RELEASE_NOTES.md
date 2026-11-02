@@ -1,26 +1,12 @@
-### Linux x64
+## Installation
 
-Linux downloads are available as an AppImage and a `.deb`. FFmpeg, Deno and yt-dlp are bundled; no separate runtime installation is needed.
+Download the matching installer from **Assets** below. FFmpeg, Deno and yt-dlp are included.
 
-For the AppImage, allow execution in your file manager, or run `chmod +x Cliply-*.AppImage`, then open it. For Ubuntu/Debian, install the `.deb` through your software installer or `sudo apt install ./Cliply-*.deb` so system dependencies are resolved.
+- **macOS:** Apple Silicon, macOS 13 or newer. Open the `.dmg` and move Cliply to Applications. If Gatekeeper blocks this unsigned app, run this only for your trusted official download:
 
-Builds are checked on Ubuntu 24.04 x64. Other distributions and desktop environments may behave differently. Linux ARM builds are not included.
+  ```sh
+  sudo xattr -rd com.apple.quarantine /Applications/Cliply.app
+  ```
 
-### macOS
-
-When opening Cliply for the first time, you might see a security warning because macOS Gatekeeper blocks unsigned apps by default. This is because we haven't added code signing yet. It requires a paid certificate, and as a small project, we're prioritizing what matters most first.
-
-To open the app, you can safely run this command in Terminal to remove the security restriction:
-
-```bash
-sudo xattr -rd com.apple.quarantine /Applications/Cliply.app
-```
-
-**What this does:** It removes the "downloaded from the internet" flag from Cliply, telling macOS that you trust the app.
-
-**Safety tips:**
-
-* Only run this command on apps from trusted sources, like the official GitHub release.
-* Optionally, scan the downloaded file with VirusTotal or similar tools.
-
-For a **detailed, step-by-step explanation of this command and why it's safe**, see this guide: [Google Gemini](https://g.co/gemini/share/14f63c8b12b6)
+- **Windows:** Windows 10 or newer, x64. Run `Cliply.Setup.*.exe`.
+- **Linux:** x64, tested on Ubuntu 24.04. Make the `.AppImage` executable in file properties or run `chmod +x Cliply-*.AppImage`, then open it. For Ubuntu/Debian, run `sudo apt install ./Cliply-*.deb` from the download folder. Other distributions are not yet verified.

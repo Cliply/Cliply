@@ -79,6 +79,10 @@ cliply depends on yt-dlp, it's what powers the downloading engine. i'm not affil
 
 this is open source, so bugs, ideas and pull requests are all welcome. just keep it simple and clean like the rest of the project.
 
+### release notes
+
+the Build Release workflow generates notes before publishing: short installation instructions, github's merged-pr summary, and a collapsed list of commits since the previous published stable app version. it requires the full git history and an authenticated github cli. preview without creating a tag or release with `node scripts/generate-release-notes.js --tag v0.4.1`; use `--tag v0.4.0 --target v0.4.0` to inspect a historical release. `.github/release.yml` groups prs by label, and `.github/RELEASE_NOTES.md` owns the installation text.
+
 ### support
 
 cliply is free and it's staying that way. if you'd like to help it along you can [sponsor it](https://github.com/sponsors/devansh1401) or [buy me a coffee](https://buymeacoffee.com/itssdevk), and that's also what would pay for the macos certificate.
