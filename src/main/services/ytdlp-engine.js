@@ -125,6 +125,7 @@ class YtdlpEngine {
     this.killFn = options.killFn || process.kill
 
     this.operations = new Map()
+    this.frozen = false
 
     // {path, version} - see getVersion()
     this.cachedVersion = null
@@ -461,6 +462,7 @@ class YtdlpEngine {
       // marker would over-count the sweeps
       trackStreamMarker: !resolved.timeRange,
       gate: this.gate,
+      isShuttingDown: () => this.frozen,
       killGraceMs: options.killGraceMs || this.killGraceMs,
       spawnFn: this.spawnFn,
       killFn: this.killFn
@@ -736,6 +738,12 @@ class YtdlpEngine {
   }
 
   // used on app quit - nothing should outlive the window
+  // Prevent operations waiting behind an update from spawning during quit.
+  // Running operations are left alone until the history has been saved.
+  freeze() {
+    this.frozen = true
+  }
+
   cancelAll() {
     let cancelled = 0
 

@@ -198,6 +198,7 @@ beforeEach(() => {
   let knownVersion = null
 
   mockEngine = {
+    freeze: jest.fn(),
     getBinaryPath: jest.fn(() => "/tmp/yt-dlp"),
     cancelAll: jest.fn(() => 0),
     // the real awaitShutdown calls cancelAll and resolves to what it
@@ -926,6 +927,36 @@ describe("engine update scheduling", () => {
     expect(mockAnalytics.capture).toHaveBeenCalledWith("engine_updated", {
       from_version: "2026.08.19", to_version: "2026.10.26"
     })
+  })
+
+  it("cancels waiting downloads before an update abort can release their gate", async () => {
+    const { OperationGate } = jest.requireActual("../src/main/services/ytdlp-engine")
+    const gate = new OperationGate()
+    const release = gate.tryAcquireWrite()
+    let cancelled = false
+    const spawn = jest.fn()
+    const waiting = gate.acquireRead().then((releaseRead) => {
+      if (!cancelled) spawn()
+      releaseRead()
+    })
+    let finishHistory
+    app.markDownloadsInterrupted = jest.fn(() => new Promise((resolve) => { finishHistory = resolve }))
+    mockIpcHandlers.runner = {
+      freeze: jest.fn(),
+      cancelAll: jest.fn(() => { cancelled = true; return 1 })
+    }
+    mockUpdater.shutdown = jest.fn(({ abort = true } = {}) => { if (abort) release() })
+    mockUpdater.terminateUpdate = jest.fn(release)
+    const quitting = app.onBeforeQuit({ preventDefault: jest.fn() })
+    await microtasks()
+    expect(mockEngine.freeze).toHaveBeenCalledTimes(1)
+    expect(mockUpdater.shutdown).toHaveBeenCalledWith({ abort: false })
+    expect(mockUpdater.terminateUpdate).not.toHaveBeenCalled()
+    finishHistory()
+    await quitting
+    await waiting
+    expect(mockUpdater.terminateUpdate).toHaveBeenCalledTimes(1)
+    expect(spawn).not.toHaveBeenCalled()
   })
 })
 

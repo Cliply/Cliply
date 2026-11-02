@@ -88,6 +88,22 @@ const DOWNLOAD = {
 }
 
 describe("successful run", () => {
+  test("freeze prevents a waiting operation from spawning when an update releases its gate", async () => {
+    const spawnFn = createSpawner()
+    const engine = createEngine(spawnFn)
+    const releaseUpdate = engine.gate.tryAcquireWrite()
+    const waiting = engine.downloadCombined(DOWNLOAD)
+    engine.freeze()
+    releaseUpdate()
+    await expect(waiting.promise).rejects.toMatchObject({ code: ERROR_CODES.CANCELLED })
+    expect(spawnFn.calls).toHaveLength(0)
+    expect(engine.operations.size).toBe(0)
+    expect(engine.gate.isBusy()).toBe(false)
+    const later = engine.downloadCombined(DOWNLOAD)
+    await expect(later.promise).rejects.toMatchObject({ code: ERROR_CODES.CANCELLED })
+    expect(spawnFn.calls).toHaveLength(0)
+  })
+
   test("resolves with the destination once the process exits cleanly", async () => {
     const spawnFn = createSpawner()
     const engine = createEngine(spawnFn)

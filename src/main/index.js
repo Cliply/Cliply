@@ -543,7 +543,10 @@ class CliplyApp {
     this.hasShutDown = true
     clearTimeout(this.engineUpdateTimer)
     this.engineUpdateTimer = null
-    this.services.ytdlpUpdater?.shutdown?.()
+    // Stop new update work now. Abort staging only after downloads have been
+    // cancelled: releasing its gate earlier could wake a waiting operation.
+    this.services.ytdlpEngine?.freeze?.()
+    this.services.ytdlpUpdater?.shutdown?.({ abort: false })
 
     // cleared unconditionally, install or not: the check it would fire is
     // already refused by the isQuitting flag above, so all an armed interval
@@ -600,6 +603,7 @@ class CliplyApp {
         // kill the shutdown would have sent, and every process that exists by
         // then is in the snapshot awaitShutdown waits on below
         this.cancelDownloads()
+        this.services.ytdlpUpdater?.terminateUpdate?.()
 
         // kill any running yt-dlp process and actually wait for the tree to
         // exit - partial .part files stay resumable either way, but a wait

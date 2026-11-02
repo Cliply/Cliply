@@ -116,6 +116,7 @@ class YtdlpOperation extends EventEmitter {
     reusedIndices = [],
     trackStreamMarker = true,
     gate = null,
+    isShuttingDown = () => false,
     killGraceMs = KILL_GRACE_MS,
     spawnFn = spawn,
     killFn = process.kill
@@ -123,6 +124,7 @@ class YtdlpOperation extends EventEmitter {
     super()
 
     this.gate = gate
+    this.isShuttingDown = isShuttingDown
     this.killGraceMs = killGraceMs
     this.spawnFn = spawnFn
     this.killFn = killFn
@@ -227,6 +229,10 @@ class YtdlpOperation extends EventEmitter {
   }
 
   start() {
+    if (this.isShuttingDown()) {
+      this.fail({ code: ERROR_CODES.CANCELLED })
+      return
+    }
     try {
       this.child = this.spawnFn(this.binaryPath, this.args, {
         cwd: this.cwd,

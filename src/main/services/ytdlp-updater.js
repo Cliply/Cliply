@@ -707,9 +707,9 @@ class YtdlpUpdater {
   }
 
   // Prevent a tag lookup finishing during quit from starting a new download.
-  shutdown() {
+  shutdown({ abort = true } = {}) {
     this.stopped = true
-    this.terminateUpdate()
+    if (abort) this.terminateUpdate()
   }
 
   /**
