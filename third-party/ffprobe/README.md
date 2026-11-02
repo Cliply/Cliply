@@ -142,16 +142,19 @@ no production manifest changes. See [release checks](../../docs/releasing.md).
 ## FFprobe-only build evaluation
 
 [`build-ffprobe-prototype.js`](../../scripts/build-ffprobe-prototype.js) evaluates
-an alternative on macOS ARM64 only. It exports clean source from FFmpeg n8.1,
+an alternative executed locally on macOS ARM64, with unrun native Windows x64
+and Ubuntu 24.04 x64 paths prepared. It exports clean source from FFmpeg n8.1,
 commit `9047fa1b084f76b1b4d065af2d743df1b40dfb56`, and builds FFprobe with internal
 demuxers/parsers/decoders and file/pipe/fd protocols. Autodetection, network,
-external codec libraries, other programs, filters and resamplers are disabled.
+external codec libraries, other programs, filters and resamplers are checked off
+in the final configuration. `--disable-everything` alone is not proof of those
+properties, and requested decoders with unmet dependencies remain disabled.
 This retains the leading-video decoding needed for trim validation. `--enable-small`
 was rejected because it removes codec profile names needed by existing gates.
 The recipe uses `-O1`: repeated Apple clang 16 default-optimization builds emitted
 different instruction bytes. It targets macOS 13 and records the actual compiler,
 SDK, configuration, source/executable hashes, license and system libraries.
-All build commands, including configure and make, are launched through
+On Mac, all build commands, including configure and make, are launched through
 `/usr/bin/arch -arm64`. An ARM64 Node process can otherwise pass an inherited
 Intel preference to universal child executables. The recipe checks ARM64 child
 execution, an ARM64 Darwin Apple clang target and a thin ARM64 final executable;
@@ -167,5 +170,11 @@ upstream license files; native `-L` reports LGPL 2.1 or later for this configura
 This is an evaluation, not a production pin or a change to Cliply's GPL license.
 The candidate-validation workflow tests the existing supplier pins; it does not
 build or test this alternative prototype.
-Windows/Linux recipes, native/minimum-OS execution, final source/notices packaging
-and reviewer selection remain required before any production use or publication.
+The separate source-built CI mode tests the exact built artifact through the
+existing package/media/UI harness. The Mac draft corresponding-source packet
+includes full source, hashed recipes/toolchain/configuration, all source notices,
+IJG attribution and offline rebuild instructions. See the
+[source-build and distribution specification](source-build.md) for exact commands,
+official toolchain evidence and deterministic source-asset preparation.
+Windows/Linux native execution and runtime notices, minimum OS, final per-platform
+source/notice integration and reviewer selection remain required before production.

@@ -6,6 +6,10 @@ on:
   pull_request:
   workflow_dispatch:
     inputs:
+      ffprobe_source_check:
+        description: 'Only build pinned FFprobe source and validate exact artifacts; no publication'
+        type: boolean
+        default: false
       ffprobe_candidate_check:
         description: 'Only validate pinned FFprobe candidates in disposable native packages; no publication'
         type: boolean
@@ -31,12 +35,16 @@ permissions:
   contents: read
 
 jobs:
+  validate-ffprobe-source:
+    if: github.event_name == 'workflow_dispatch' && inputs.ffprobe_source_check && !inputs.ffprobe_candidate_check
+    uses: ./.github/workflows/validate-ffprobe-source.yml
+
   validate-ffprobe-candidate:
     if: github.event_name == 'workflow_dispatch' && inputs.ffprobe_candidate_check
     uses: ./.github/workflows/validate-ffprobe-candidate.yml
 
   stage-linux-helpers:
-    if: github.event_name == 'workflow_dispatch' && inputs.stage_linux_helpers && !inputs.ffprobe_candidate_check
+    if: github.event_name == 'workflow_dispatch' && inputs.stage_linux_helpers && !inputs.ffprobe_candidate_check && !inputs.ffprobe_source_check
     permissions:
       contents: write
     uses: ./.github/workflows/stage-linux-helpers.yml
@@ -44,7 +52,7 @@ jobs:
       publish: ${{ inputs.publish_linux_helpers }}
 
   check:
-    if: ${{ !inputs.stage_linux_helpers && !inputs.ffprobe_candidate_check }}
+    if: ${{ !inputs.stage_linux_helpers && !inputs.ffprobe_candidate_check && !inputs.ffprobe_source_check }}
     name: ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: ${{ inputs.package_check && 35 || 20 }}

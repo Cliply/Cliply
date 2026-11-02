@@ -79,6 +79,25 @@ startup and URL recovery run before publication. Only small evidence is uploaded
 The workflow never writes `published.json`, publishes helpers or uses a latest
 candidate. These hosts do not establish minimum-OS support.
 
+The alternative **source-built** path is separate: dispatch existing CI with
+`ffprobe_source_check=true` and all other inputs false after the reviewed ref is
+authorized and pushed. It calls
+[Validate source-built FFprobe](../.github/workflows/validate-ffprobe-source.yml)
+at the same commit, builds the exact pinned FFmpeg-only design and validates
+that executable in a disposable native app. Supplier mode retains priority if
+both flags are set; ordinary app/helper-publication jobs are excluded in either
+mode. Only small evidence is uploaded. The Mac draft source packet is assembled
+and checked twice in scratch, then removed. Windows/Linux recipes and dependency
+checks are prepared but unrun locally; their first native run must pass all
+architecture/configuration/library/media gates before any support claim.
+See [source-build commands, notices and packet specification](../third-party/ffprobe/source-build.md).
+
+Locally, `node scripts/validate-ffprobe-source.js --source <pinned-checkout>
+--evidence <new-absolute-directory>` builds and exercises this whole path.
+`validate-ffprobe-candidate.js --source-build <absolute-build> --evidence
+<new-absolute-directory>` validates an already built, hash-bound artifact.
+Neither command changes the production manifest or replaces project helpers.
+
 With existing dependencies, built renderer and ordinary project helpers, the
 same candidate checks can run locally:
 
