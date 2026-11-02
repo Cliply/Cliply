@@ -147,7 +147,7 @@ jobs:
           node scripts/smoke-download-recovery.js --resources dist/linux-unpacked/resources
 
       - name: Install Linux GUI test dependencies
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends xvfb xauth dbus-x11 libgtk-3-0t64 libasound2t64 libgbm1 libnss3
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends xvfb xauth dbus-x11 weston libgtk-3-0t64 libasound2t64 libgbm1 libnss3
 
       - name: Verify Linux AppImage launcher and installed DEB
         run: dbus-run-session -- xvfb-run --auto-servernum node scripts/smoke-packaged-linux.js

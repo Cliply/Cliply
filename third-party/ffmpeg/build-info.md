@@ -7,11 +7,13 @@ Cliply bundles one FFmpeg executable for each supported platform. They are separ
 - Upstream builder: [BtbN/FFmpeg-Builds](https://github.com/BtbN/FFmpeg-Builds).
 - Upstream release: [`autobuild-2026-11-01-12-49`](https://github.com/BtbN/FFmpeg-Builds/releases/tag/autobuild-2026-11-01-12-49).
 - Archive: `ffmpeg-n8.1.3-29-gad3b795b72-linux64-gpl-8.1.tar.xz`.
-- FFmpeg version: `n8.1.3-29-gad3b795b72`; source commit prefix: `ad3b795b72`.
+- FFmpeg version: `n8.1.3-29-gad3b795b72-20261101`; source commit: `ad3b795b72388fbb2b216e1e6fd38fba994e1df0`.
 - Build family: Linux x86-64, GPL, static FFmpeg 8.1 branch.
 - Cliply asset: `ffmpeg-linux-x64`. Packaging copies only the `ffmpeg` executable, not the upstream archive or ffplay/ffprobe.
+- Executable SHA256: `63eb9897fb1c8f201a6c60a0074751801f928b847fa4596ed764c35d6b52280e` (173,080,104 bytes).
+- Upstream archive SHA256: `378639650544dfca48e2a3f7b4e5da2071ca1d91a59b7588bd188f7219ea2d7b`.
 
-The helper-staging workflow prints the actual executable's version, build configuration and license before publication, verifies media operations natively, and checks its archive against the upstream SHA256 listing. Keep that provenance with the release asset when replacing it. BtbN's repository contains its build scripts and third-party dependency definitions; the exact FFmpeg revision can be resolved in the [official source repository](https://github.com/FFmpeg/FFmpeg/commit/ad3b795b72).
+The helper-staging workflow prints the actual executable's version, build configuration and license before publication, verifies native execution, and checks its archive against the upstream SHA256 listing. Package validation separately exercises real media operations. Keep that provenance with the release asset when replacing it. BtbN's repository contains its build scripts and third-party dependency definitions; the exact FFmpeg revision is in the [official source repository](https://github.com/FFmpeg/FFmpeg/commit/ad3b795b72388fbb2b216e1e6fd38fba994e1df0).
 
 ## macOS Apple Silicon
 

@@ -5,7 +5,9 @@ const assert = require("node:assert/strict")
 const fs = require("node:fs")
 const os = require("node:os")
 const path = require("node:path")
-const { spawnSync } = require("node:child_process")
+const crypto = require("node:crypto")
+const { spawn, spawnSync } = require("node:child_process")
+const { setTimeout: delay } = require("node:timers/promises")
 
 const repo = path.resolve(__dirname, "..")
 const metadata = require("../package.json")
@@ -47,7 +49,42 @@ function findExecutable(directory) {
   return candidates[0].name
 }
 
-function main() {
+async function verifyAppImageReplacement(image, root, env, launch) {
+  const { AppImageUpdater } = require("electron-updater")
+  const { DownloadedUpdateHelper } = require("electron-updater/out/DownloadedUpdateHelper")
+  const previous = path.join(root, "Cliply.AppImage")
+  const incoming = path.join(root, "replacement.AppImage")
+  fs.copyFileSync(image, previous)
+  fs.copyFileSync(image, incoming)
+  async function sha512(file) {
+    const hash = crypto.createHash("sha512")
+    for await (const chunk of fs.createReadStream(file)) hash.update(chunk)
+    return hash.digest("base64")
+  }
+  const digest = await sha512(incoming)
+  const updater = new AppImageUpdater(null, { name: metadata.name, version: metadata.version })
+  updater.downloadedUpdateHelper = new DownloadedUpdateHelper(path.join(root, "update-cache"))
+  await updater.downloadedUpdateHelper.setDownloadedFile(incoming, null,
+    { version: metadata.version }, { info: { sha512: digest } }, path.basename(incoming), false)
+  const overrides = { APPIMAGE: previous }
+  for (const key of ["TMPDIR", "XDG_CONFIG_HOME", "XDG_CACHE_HOME", "XDG_DATA_HOME"]) overrides[key] = env[key]
+  const saved = Object.fromEntries(Object.keys(overrides).map((key) => [key, process.env[key]]))
+  try {
+    Object.assign(process.env, overrides)
+    assert.equal(updater.install(true, false), true, "AppImage filesystem replacement failed")
+  } finally {
+    for (const [key, value] of Object.entries(saved)) {
+      if (value === undefined) delete process.env[key]
+      else process.env[key] = value
+    }
+  }
+  assert.ok(!fs.existsSync(incoming), "replacement AppImage was not moved")
+  assert.equal(await sha512(previous), digest, "installed AppImage differs from the supplied update")
+  launch(previous, "appimage-replaced")
+  console.log("AppImage filesystem replacement passed; version discovery and DEB authorization are not exercised")
+}
+
+async function main() {
   assert.equal(process.platform, "linux", "packaged Linux smoke requires Linux")
   assert.equal(process.arch, "x64", "packaged Linux smoke requires x64")
   assert.equal(process.env.GITHUB_ACTIONS, "true", "DEB installation is restricted to an ephemeral GitHub runner")
@@ -67,10 +104,16 @@ function main() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "cliply-linux-package-"))
   let packageName
   let installAttempted = false
+  let compositor
+  let compositorClosed
   try {
     const appDir = path.join(root, "appdir")
     fs.cpSync(source, appDir, { recursive: true, mode: fs.constants.COPYFILE_FICLONE })
     const resources = path.join(appDir, "resources")
+    // The production unpacked tree was last used to build DEB. The AppImage
+    // must start without that marker; FpmTarget writes it after AppImage has
+    // finished, just as it does in a fresh production build.
+    fs.rmSync(path.join(resources, "package-type"), { force: true })
     fs.renameSync(path.join(resources, "app.asar"), path.join(resources, "cliply-under-test.asar"))
     if (fs.existsSync(path.join(resources, "app.asar.unpacked"))) {
       fs.renameSync(path.join(resources, "app.asar.unpacked"), path.join(resources, "cliply-under-test.asar.unpacked"))
@@ -98,7 +141,7 @@ function main() {
       },
       appImage: metadata.build.appImage,
       deb: metadata.build.deb,
-      publish: null
+      publish: metadata.build.publish
     }, null, 2))
 
     const env = {
@@ -127,11 +170,11 @@ function main() {
       assert.equal(matches.length, 1, `expected one disposable ${extension}`)
       return path.join(output, matches[0])
     }
-    function launch(binary, label) {
+    function launch(binary, label, displayEnv = env, args = []) {
       const userData = path.join(root, `user-data-${label}`)
       fs.mkdirSync(userData)
-      const stdout = run(binary, [], {
-        env: { ...env, CLIPLY_SMOKE_USER_DATA: userData }, timeout: 90000
+      const stdout = run(binary, args, {
+        env: { ...displayEnv, CLIPLY_SMOKE_USER_DATA: userData }, timeout: 90000
       })
       assert.ok(stdout.includes(successMarker), `${label} did not execute the isolated Electron smoke`)
       console.log(`packaged Linux ${label} startup passed`)
@@ -147,25 +190,57 @@ function main() {
       "--no-install-recommends", deb
     ], { timeout: 3 * 60 * 1000 })
     launch(path.join(installDirectory, executable), "deb")
+    await verifyAppImageReplacement(artifact(".AppImage"), root, env, launch)
+
+    const runtime = path.join(root, "runtime")
+    fs.mkdirSync(runtime, { mode: 0o700 })
+    const waylandEnv = { ...env, XDG_SESSION_TYPE: "wayland", XDG_RUNTIME_DIR: runtime, WAYLAND_DISPLAY: "cliply-smoke" }
+    delete waylandEnv.DISPLAY
+    delete waylandEnv.WAYLAND_SOCKET
+    const compositorLog = path.join(root, "weston.log")
+    compositor = spawn("weston", ["--backend=headless-backend.so", "--renderer=pixman", "--no-config",
+      "--socket=cliply-smoke", "--idle-time=0", `--log=${compositorLog}`
+    ], { env: waylandEnv, stdio: ["ignore", "ignore", "inherit"] })
+    let compositorError
+    compositor.on("error", (error) => { compositorError = error })
+    compositorClosed = new Promise((resolve) => compositor.once("close", resolve))
+    const socket = path.join(runtime, waylandEnv.WAYLAND_DISPLAY)
+    const deadline = Date.now() + 15000
+    while (!fs.existsSync(socket) && !compositorError && compositor.exitCode === null &&
+      compositor.signalCode === null && Date.now() < deadline) {
+      await delay(100)
+    }
+    if (compositorError) throw compositorError
+    assert.ok(fs.existsSync(socket) && fs.statSync(socket).isSocket() && compositor.exitCode === null &&
+      compositor.signalCode === null, "Weston did not become ready: " +
+      (fs.existsSync(compositorLog) ? fs.readFileSync(compositorLog, "utf8") : "no compositor log"))
+    launch(artifact(".AppImage"), "appimage-wayland", waylandEnv, ["--ozone-platform=wayland"])
+    launch(path.join(installDirectory, executable), "deb-wayland", waylandEnv, ["--ozone-platform=wayland"])
   } finally {
     try {
-      if (installAttempted) {
-        run("sudo", ["-n", "env", "DEBIAN_FRONTEND=noninteractive", "apt-get", "purge", "-y", packageName], {
-          timeout: 2 * 60 * 1000
-        })
-        assert.ok(!installedPackage(packageName), "disposable DEB package was not removed")
+      if (compositor) {
+        compositor.kill("SIGTERM")
+        const killTimer = setTimeout(() => compositor.kill("SIGKILL"), 5000)
+        try { await compositorClosed } finally { clearTimeout(killTimer) }
       }
     } finally {
-      fs.rmSync(root, { recursive: true, force: true })
+      try {
+        if (installAttempted) {
+          run("sudo", ["-n", "env", "DEBIAN_FRONTEND=noninteractive", "apt-get", "purge", "-y", packageName], {
+            timeout: 2 * 60 * 1000
+          })
+          assert.ok(!installedPackage(packageName), "disposable DEB package was not removed")
+        }
+      } finally {
+        fs.rmSync(root, { recursive: true, force: true })
+      }
     }
   }
 }
 
 if (require.main === module) {
-  try {
-    main()
-  } catch (error) {
+  main().catch((error) => {
     console.error(error)
     process.exitCode = 1
-  }
+  })
 }

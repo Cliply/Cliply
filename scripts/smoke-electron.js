@@ -54,6 +54,16 @@ if (!process.versions.electron) {
       (_details, callback) => callback({ cancel: true })
     )
     const CliplyApp = require(path.join(appRoot, "src/main/index"))
+    if (process.platform === "linux" && process.env.CLIPLY_SMOKE_APP_ROOT === "bundled") {
+      const bundledRequire = require("node:module").createRequire(path.join(appRoot, "package.json"))
+      const updater = bundledRequire("electron-updater").autoUpdater
+      const marker = path.join(process.resourcesPath, "package-type")
+      const packageType = fs.existsSync(marker) ? fs.readFileSync(marker, "utf8").trim() : null
+      const expected = process.env.APPIMAGE ? "AppImageUpdater" : "DebUpdater"
+      assert.equal(updater.constructor.name, expected, "updater matches the installed package format")
+      assert.equal(packageType, process.env.APPIMAGE ? null : "deb")
+      console.log("packaged Linux updater selected:", expected)
+    }
     const cliplyApp = new CliplyApp()
     cliplyApp.initializeServices = async () => {
       ipcMain.handle("settings:get-download-count", () => ({ success: true, data: { count: 123 } }))
