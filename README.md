@@ -79,6 +79,8 @@ cliply depends on yt-dlp, it's what powers the downloading engine. i'm not affil
 
 this is open source, so bugs, ideas and pull requests are all welcome. just keep it simple and clean like the rest of the project.
 
+for coding agents, start with [AGENTS.md](AGENTS.md). the [engineering docs](docs/README.md) map the current architecture, binary sources, tests and release workflows. keep those guides current when changing how the app works.
+
 ### release notes
 
 the Build Release workflow generates notes before publishing: short installation instructions, github's merged-pr summary, and a collapsed list of commits since the previous published stable app version. it requires the full git history and an authenticated github cli. preview without creating a tag or release with `node scripts/generate-release-notes.js --tag v0.4.1`; use `--tag v0.4.0 --target v0.4.0` to inspect a historical release. `.github/release.yml` groups prs by label, and `.github/RELEASE_NOTES.md` owns the installation text.

@@ -20,6 +20,23 @@ BUILD_TARGET_PLATFORM=linux-x64 npm run fetch:ytdlp
 
 The `BUILD_TARGET_PLATFORM` example uses a POSIX shell. In PowerShell, set `$env:BUILD_TARGET_PLATFORM = 'linux-x64'` before running `npm run fetch:ytdlp`. The engine fetcher checks upstream SHA256 sums and keeps the complete standalone directory, including its Python runtime and modules.
 
+## where the files come from
+
+| Component | Build source and update ownership |
+| --- | --- |
+| FFmpeg | CI fetches the platform executable from Cliply's helper release. Linux staging verifies a dated BtbN upstream archive; Mac and Windows have their own existing provenance. Exact records belong in [build-info.md](../third-party/ffmpeg/build-info.md). |
+| Deno | CI fetches the platform executable from the same helper release. Linux staging extracts the official [denoland/deno](https://github.com/denoland/deno/releases) archive, using the version selected in the staging workflow. |
+| yt-dlp | [fetch-ytdlp.js](../scripts/fetch-ytdlp.js) downloads official [yt-dlp releases](https://github.com/yt-dlp/yt-dlp/releases), verifies SHA256 and preserves the onedir payload. [YtdlpUpdater](../src/main/services/ytdlp-updater.js) independently owns the writable runtime copy and later upstream updates. |
+| PO token recovery | [Build PO token payload](../.github/workflows/build-pot-payload.yml) assembles the [bgutil provider](https://github.com/Brainicism/bgutil-ytdlp-pot-provider) plugin and generator with native dependencies per platform. Published `pot-<version>-<platform>.zip` files live in the helper release; the installer verifies the selected hash in `pot-installer.js`. This is downloaded on demand, not bundled into every installer. |
+
+[fetch-helpers.js](../scripts/fetch-helpers.js) stages FFmpeg/Deno downloads,
+checks their native executable architecture and sets permissions before installing
+them. It does not pin their content digests. The Linux upstream staging workflow
+checks archive SHA256, while yt-dlp and PO installations have their own checksum
+gates. Do not mistake these different checks for one universal verification path.
+
+## asset names and resource layout
+
 | Target | FFmpeg release asset | Deno release asset | Local platform directory |
 | --- | --- | --- | --- |
 | macOS Apple Silicon | `ffmpeg` | `deno` | `macos` |
@@ -46,6 +63,14 @@ binaries/
 ```
 
 macOS and Linux require executable permissions; the downloader and packaging hook set these. Linux binaries cannot be substituted with macOS or Windows executables. Copying a Homebrew FFmpeg executable is not a portable release build: it can depend on libraries installed only on the development machine.
+
+`package.json` maps those platform trees into packaged
+`<resources>/binaries/ffmpeg[.exe]`, `<resources>/binaries/deno/deno[.exe]` and
+`<resources>/binaries/ytdlp/`. Keep the entire yt-dlp directory, including
+`_internal/`; the executable alone is incomplete. At startup the app seeds a
+writable copy under Electron user data. Packaged resources and the writable engine
+are different locations. See [architecture](../docs/architecture.md) and
+[release validation](../docs/releasing.md) for their lifecycles.
 
 ## build and check
 
