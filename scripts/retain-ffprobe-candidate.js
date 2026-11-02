@@ -1,22 +1,11 @@
 // Opt-in, short-lived CI handoff. Never selects production pins or uploads releases.
 const fs = require("node:fs"), path = require("node:path"), assert = require("node:assert/strict")
 const { spawnSync } = require("node:child_process")
-const { readBuild } = require("./package-ffprobe-source")
+const { readBuild, requirePassedValidation, verifyRuntimeNotices } = require("./package-ffprobe-source")
 const { hash, sourcePin } = require("./build-ffprobe-prototype")
 const { validateRecord, serialize } = require("./ffprobe-notices")
 const { createHash } = require("node:crypto")
 const repo = path.resolve(__dirname, "..")
-const checks = ["package", "helpers", "libraries", "inspection", "export", "tracks", "remux", "trim", "packaged-ui", "normal-startup", "download-recovery", "url-media"]
-function requirePassedValidation(evidence, facts) {
-  const commands = JSON.parse(fs.readFileSync(path.join(evidence, "commands.json"), "utf8"))
-  assert(commands.length && commands.every(command => command.status === 0 && !command.error), "cannot retain a failed validation")
-  for (const name of checks) assert.equal(commands.filter(command => command.name === name).length, 1, "missing or repeated validation: " + name)
-  const artifact = JSON.parse(fs.readFileSync(path.join(evidence, "artifact.json"), "utf8"))
-  assert.equal(artifact.evidenceKind, "source-built")
-  assert.equal(artifact.platform, facts.platform)
-  assert.equal(artifact.inputSha256, facts.executableSha256, "validation used a different source-built helper")
-  return artifact
-}
 function collectRuntimeNotices(output, platform, msysRoot = process.env.CLIPLY_FFPROBE_MSYS2) {
   fs.mkdirSync(output)
   const files = [], metadata = { platform, reviewed: platform === "darwin-arm64", files }
@@ -104,7 +93,7 @@ function retainCandidate({ buildDirectory, evidence, packetDirectory, output }) 
     const record = { schema: 1, evaluationOnly: true, publicationReady: false, platform: facts.platform,
       nativeValidationPassed: true, executableSha256: facts.executableSha256, packagedSha256: artifact.packagedSha256,
       sourceCommit: facts.commit, sourceArchiveSha256: facts.archiveSha256, recipeSha256: facts.recipeSha256,
-      runtimeNoticesReviewed: runtime.reviewed, installedNoticesValidated: fs.existsSync(installed), sourcePacketReadyForReview: Boolean(sourcePacket),
+      runtimeNoticesReviewed: runtime.reviewed || Boolean(sourcePacket && verifyRuntimeNotices(facts, path.join(staging, "runtime-notices"))), installedNoticesValidated: fs.existsSync(installed), sourcePacketReadyForReview: Boolean(sourcePacket),
       remainingGates: ["review native/platform and minimum-OS evidence", "review complete source/runtime notices and installed mapping", "verify NEW shared assets before production pins"], files: inventory(staging) }
     fs.writeFileSync(path.join(staging, "REVIEW.json"), JSON.stringify(record, null, 2) + "\n")
     fs.renameSync(staging, output)

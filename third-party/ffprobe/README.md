@@ -145,8 +145,10 @@ no production manifest changes. See [release checks](../../docs/releasing.md).
 an alternative executed locally on macOS ARM64. The first native Windows x64
 and Ubuntu 24.04 x64 attempts exposed source-export/configuration issues. A second
 run compiled Windows but refused its winpthread DLL dependency; Linux passed
-backend checks and stopped at the copied test app sandbox setup. Further corrected
-recipes/harnesses await native rerun. It exports clean source from FFmpeg n8.1,
+backend checks and stopped at the copied test app sandbox setup. Run 41503566940
+then passed all 12 Linux and Mac native commands. Windows passed the strict DLL
+and backend checks but failed the packaged UI initial inspection; acceptance
+remains pending. It exports clean source from FFmpeg n8.1,
 commit `9047fa1b084f76b1b4d065af2d743df1b40dfb56`, and builds FFprobe with internal
 demuxers/parsers/decoders and file/pipe/fd protocols. Autodetection, network,
 external codec libraries, other programs, filters and resamplers are checked off
@@ -174,19 +176,21 @@ This is an evaluation, not a production pin or a change to Cliply's GPL license.
 The candidate-validation workflow tests the existing supplier pins; it does not
 build or test this alternative prototype.
 The separate source-built CI mode tests the exact built artifact through the
-existing package/media/UI harness. The Mac draft corresponding-source packet
-includes full source, hashed recipes/toolchain/configuration, all source notices,
+existing package/media/UI harness. The Mac and Linux draft corresponding-source packets
+include full source, hashed recipes/toolchain/configuration, all source notices,
 IJG attribution and offline rebuild instructions. See the
 [source-build and distribution specification](source-build.md) for exact commands,
 official toolchain evidence and deterministic source-asset preparation.
-Windows/Linux native execution and runtime notices, minimum OS, final per-platform
+Complete Windows native execution/runtime notices, minimum OS, final per-platform
 source/notice integration and reviewer selection remain required before production.
 
 
-Source validation now stages the verified Mac packet's installed NOTICE,
+Source validation stages verified Mac and Linux packet-derived installed NOTICE,
 [LGPL text](COPYING.LGPLv2.1) and exact source/binary mapping, with post-signing
-hash verification. Production notice records remain absent until final review.
+hash verification. Linux adds pinned GCC/glibc notices and the full GPLv3 text;
+the new installed Linux notice path still needs a native rerun. Production notice
+records remain absent until final review.
 An explicit source-CI retention option preserves only a successfully validated
 helper and exact source/build/notice inputs as a two-day reviewer artifact;
-incomplete Windows/Linux runtime packets stay unapproved. See the
+incomplete Windows runtime packets stay unapproved. See the
 [source guide](source-build.md#optional-short-lived-reviewer-artifact).

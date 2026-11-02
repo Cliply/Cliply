@@ -1,0 +1,38 @@
+{
+  "schema": 1,
+  "linux-x64": {
+    "evidence": "https://github.com/Cliply/Cliply/actions/runs/41503566940",
+    "systemLibraries": [
+      "libc.so.6",
+      "libm.so.6"
+    ],
+    "toolchainPackages": "binutils\t2.42-4ubuntu2.10\ngcc-13\t13.3.0-6ubuntu2~24.04.1\nlibc6-dev:amd64\t2.39-0ubuntu8.9\nlibgcc-13-dev:amd64\t13.3.0-6ubuntu2~24.04.1\nmake\t4.3-4.1build2\nnasm\t2.16.01-1build1\n",
+    "toolchainHashes": {
+      "gcc-13": "1b99826121ae6682a634e5efe09bd3e3df58ce58e0b28f849114ab5b89139c26",
+      "nasm": "9b9ed9dd9a5ed930a57e32ebd1556415376e73028f17fa5b4bf43afdb61972e9",
+      "ld": "e9ceb054c12207970f2726dfc07e9a66b411602748628baf27399f02a9bbb31b"
+    },
+    "files": {
+      "gcc-13-base-copyright.txt": "08c6f3dee4c19aa1e57eb7d4ad45829b2e99656313bd07fa0922e2553f500be5",
+      "libgcc-13-dev-copyright.txt": "08c6f3dee4c19aa1e57eb7d4ad45829b2e99656313bd07fa0922e2553f500be5",
+      "libc6-dev-copyright.txt": "d3c95b56fa33e28b57860580f0baf4e4f4de2a268a2b80f1d031a5191bade265"
+    },
+    "installedFiles": {
+      "GCC-RUNTIME-NOTICES.txt": "gcc-13-base-copyright.txt",
+      "GLIBC-NOTICES.txt": "libc6-dev-copyright.txt"
+    },
+    "sourcePackages": [
+      {
+        "name": "gcc-13",
+        "version": "13.3.0-6ubuntu2~24.04.1",
+        "record": "https://launchpad.net/ubuntu/+source/gcc-13/13.3.0-6ubuntu2~24.04.1"
+      },
+      {
+        "name": "glibc",
+        "version": "2.39-0ubuntu8.9",
+        "record": "https://launchpad.net/ubuntu/+source/glibc/2.39-0ubuntu8.9"
+      }
+    ],
+    "publicationReady": false
+  }
+}

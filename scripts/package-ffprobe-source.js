@@ -1,14 +1,29 @@
-// Deterministic draft source asset for the locally audited Mac build.
-// Never publishes or modifies project binaries. Windows/Linux notices need native review.
+// Deterministic source/notice evaluation packets for explicitly reviewed inputs.
+// Never publishes or modifies project binaries. Windows runtime review is pending.
 const fs = require("node:fs"), path = require("node:path"), assert = require("node:assert/strict")
 const { parseArgs } = require("node:util")
 const { sourcePin, hash, configurationFor, inspectArchitecture, inspectConfiguration, inspectLibraries } = require("./build-ffprobe-prototype")
 const repo = path.resolve(__dirname, "..")
-function readBuild(directory) {
+const runtimePins = require("../third-party/ffprobe/runtime-notices.json")
+const checks = ["package", "helpers", "libraries", "inspection", "export", "tracks", "remux", "trim", "packaged-ui", "normal-startup", "download-recovery", "url-media"]
+function requirePassedValidation(evidence, facts) {
+  const commands = JSON.parse(fs.readFileSync(path.join(evidence, "commands.json"), "utf8"))
+  assert(commands.length && commands.every(command => command.status === 0 && !command.error), "cannot retain a failed validation")
+  for (const name of checks) assert.equal(commands.filter(command => command.name === name).length, 1, "missing or repeated validation: " + name)
+  const artifact = JSON.parse(fs.readFileSync(path.join(evidence, "artifact.json"), "utf8"))
+  assert.equal(artifact.evidenceKind, "source-built")
+  assert.equal(artifact.platform, facts.platform)
+  assert.equal(artifact.inputSha256, facts.executableSha256, "validation used a different source-built helper")
+  return artifact
+}
+function readBuild(directory, { validationDirectory } = {}) {
   assert(path.isAbsolute(directory), "use an absolute source-build directory")
   const facts = JSON.parse(fs.readFileSync(path.join(directory, "prototype.json"), "utf8"))
-  const platform = process.platform + "-" + process.arch
-  assert.equal(facts.platform, platform, "source build must match the native validation host")
+  const platform = facts.platform
+  // Source assembly may use verified retained native inputs on another host;
+  // it never executes that target. Normal validation still requires a native host.
+  if (validationDirectory) requirePassedValidation(validationDirectory, facts)
+  else assert.equal(platform, process.platform + "-" + process.arch, "source build must match the native validation host")
   assert.equal(facts.commit, sourcePin.commit)
   assert.equal(facts.archiveSha256, sourcePin.archiveSha256)
   assert.equal(hash(path.join(directory, "source.tar")), sourcePin.archiveSha256)
@@ -26,9 +41,23 @@ function readBuild(directory) {
   for (const [name, digest] of Object.entries(sourcePin.licenseFiles)) assert.equal(hash(path.join(directory, "source", name)), digest)
   return { facts, executable }
 }
-async function packageSource({ buildDirectory, output }) {
-  const { facts } = readBuild(buildDirectory)
-  assert.equal(facts.platform, "darwin-arm64", "only the Mac source/notices packet is locally audited; review native runtime notices before extending")
+function verifyRuntimeNotices(facts, directory) {
+  if (facts.platform === "darwin-arm64") return null
+  const pin = runtimePins[facts.platform]
+  assert(pin, "native runtime notice review is required before extending source packets")
+  assert(directory && path.isAbsolute(directory), "pass exact native runtime notice inputs")
+  assert.deepEqual([...facts.systemLibraries].sort(), pin.systemLibraries, "runtime imports changed; review required")
+  assert.equal(facts.toolchain.packages, pin.toolchainPackages, "native toolchain packages changed; review required")
+  for (const [name, digest] of Object.entries(pin.toolchainHashes)) assert.equal(facts.toolchain.files[name]?.sha256, digest, "native tool changed: " + name)
+  for (const [name, digest] of Object.entries(pin.files)) {
+    assert(fs.lstatSync(path.join(directory, name)).isFile(), "runtime notice must be a regular file")
+    assert.equal(hash(path.join(directory, name)), digest, "runtime notice changed: " + name)
+  }
+  return pin
+}
+async function packageSource({ buildDirectory, output, runtimeDirectory, validationDirectory }) {
+  const { facts } = readBuild(buildDirectory, { validationDirectory })
+  const runtime = verifyRuntimeNotices(facts, runtimeDirectory)
   assert(path.isAbsolute(output)); fs.mkdirSync(output)
   const packet = path.join(output, "packet"); fs.mkdirSync(packet)
   function copy(input, relative) {
@@ -38,15 +67,16 @@ async function packageSource({ buildDirectory, output }) {
   }
   copy(path.join(buildDirectory, "source.tar"), "upstream/source.tar")
   copy(path.join(repo, "LICENSE"), "licenses/Cliply-GPL-3.0.txt")
-  for (const file of ["scripts/build-ffprobe-prototype.js", "scripts/package-ffprobe-source.js", "third-party/ffprobe/source-build.json", "third-party/ffprobe/NOTICE.source-build.txt", "third-party/ffprobe/source-build.md"]) copy(path.join(repo, file), file)
+  for (const file of ["scripts/build-ffprobe-prototype.js", "scripts/package-ffprobe-source.js", "third-party/ffprobe/source-build.json", "third-party/ffprobe/runtime-notices.json", "third-party/ffprobe/NOTICE.source-build.txt", "third-party/ffprobe/source-build.md"]) copy(path.join(repo, file), file)
   for (const file of Object.keys(sourcePin.licenseFiles)) copy(path.join(buildDirectory, "source", file), "notices/" + file)
+  if (runtime) for (const name of Object.keys(runtime.files)) copy(path.join(runtimeDirectory, name), "runtime-notices/" + name)
   // Fixed inputs => fixed packet. Remove task-specific path spelling, not toolchain
   // versions, hashes, configuration, licenses or library identities.
   const normalize = text => text.split(buildDirectory).join("$BUILD")
   fs.mkdirSync(path.join(packet, "build"))
   fs.writeFileSync(path.join(packet, "build/record.json"), normalize(JSON.stringify(facts, null, 2)) + "\n", { mode: 0o644 })
   fs.writeFileSync(path.join(packet, "build/config.mak"), normalize(fs.readFileSync(path.join(buildDirectory, "source/ffbuild/config.mak"), "utf8")), { mode: 0o644 })
-  fs.writeFileSync(path.join(packet, "REPRODUCE.txt"), "Draft evaluation source packet; no publication approval.\n\nInstall the recorded native Apple toolchain and Node 22. Extract this packet.\nFrom its root, rebuild offline into a NEW absolute directory:\nnode scripts/build-ffprobe-prototype.js --archive /absolute/packet/upstream/source.tar --output /absolute/new-build\n\nNo Cliply dependencies, Python, external codec library or network is needed for that build.\nCompare source, recipe, toolchain, configuration and executable hashes in build/record.json.\nThe full original upstream source, including all per-file license notices, is in upstream/source.tar.\nSee third-party/ffprobe/source-build.md for distribution and packaging prerequisites.\n", { mode: 0o644 })
+  fs.writeFileSync(path.join(packet, "REPRODUCE.txt"), "Draft evaluation source packet; no publication approval.\n\nInstall the recorded native " + facts.platform + " toolchain and Node 22. Extract this packet.\nFrom its root, rebuild offline into a NEW absolute directory:\nnode scripts/build-ffprobe-prototype.js --archive /absolute/packet/upstream/source.tar --output /absolute/new-build\n\nNo Cliply dependencies, Python, external codec library or network is needed for that build.\nCompare source, recipe, toolchain, configuration and executable hashes in build/record.json.\nThe full original upstream source, including all per-file license notices, is in upstream/source.tar.\nSee third-party/ffprobe/source-build.md for distribution and packaging prerequisites.\n", { mode: 0o644 })
   function files(root, prefix = "") {
     return fs.readdirSync(path.join(root, prefix), { withFileTypes: true }).flatMap(entry => {
       const name = prefix ? prefix + "/" + entry.name : entry.name
@@ -71,9 +101,8 @@ async function packageSource({ buildDirectory, output }) {
   fs.writeFileSync(path.join(output, "source-packet.json"), JSON.stringify(result, null, 2) + "\n")
   return result
 }
-function stageInstalledNotices({ buildDirectory, packetDirectory, output }) {
-  const { facts } = readBuild(buildDirectory)
-  assert.equal(facts.platform, "darwin-arm64", "native runtime notice review is required before extending installed notices")
+function stageInstalledNotices({ buildDirectory, packetDirectory, output, validationDirectory }) {
+  const { facts } = readBuild(buildDirectory, { validationDirectory })
   const packet = JSON.parse(fs.readFileSync(path.join(packetDirectory, "source-packet.json"), "utf8"))
   assert.equal(packet.manifest.executableSha256, facts.executableSha256)
   assert.equal(packet.manifest.sourceCommit, facts.commit)
@@ -81,6 +110,11 @@ function stageInstalledNotices({ buildDirectory, packetDirectory, output }) {
   assert.equal(path.basename(packet.assetName), packet.assetName)
   assert.equal(hash(path.join(packetDirectory, packet.assetName)), packet.sha256, "source packet changed")
   const inputs = { "NOTICE.txt": "third-party/ffprobe/NOTICE.source-build.txt", "COPYING.LGPLv2.1": "notices/COPYING.LGPLv2.1" }
+  const runtime = verifyRuntimeNotices(facts, path.join(packetDirectory, "packet/runtime-notices"))
+  if (runtime) {
+    inputs["COPYING.GPLv3"] = "notices/COPYING.GPLv3"
+    for (const [name, input] of Object.entries(runtime.installedFiles)) inputs[name] = "runtime-notices/" + input
+  }
   assert(path.isAbsolute(output)); fs.mkdirSync(output)
   const files = {}
   for (const [name, relative] of Object.entries(inputs)) {
@@ -97,7 +131,7 @@ function stageInstalledNotices({ buildDirectory, packetDirectory, output }) {
   return recordFile
 }
 if (require.main === module) {
-  const { values } = parseArgs({ options: { build: { type: "string" }, output: { type: "string" } } })
-  packageSource({ buildDirectory: values.build, output: values.output }).then(result => console.log(JSON.stringify(result, null, 2))).catch(error => { console.error(error); process.exitCode = 1 })
+  const { values } = parseArgs({ options: { build: { type: "string" }, output: { type: "string" }, "runtime-notices": { type: "string" }, validation: { type: "string" } } })
+  packageSource({ buildDirectory: values.build, output: values.output, runtimeDirectory: values["runtime-notices"], validationDirectory: values.validation }).then(result => console.log(JSON.stringify(result, null, 2))).catch(error => { console.error(error); process.exitCode = 1 })
 }
-module.exports = { readBuild, packageSource, stageInstalledNotices }
+module.exports = { readBuild, packageSource, stageInstalledNotices, requirePassedValidation, verifyRuntimeNotices }

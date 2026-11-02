@@ -1,4 +1,4 @@
-jest.mock("../scripts/package-ffprobe-source", () => ({ readBuild: jest.fn() }))
+jest.mock("../scripts/package-ffprobe-source", () => ({ ...jest.requireActual("../scripts/package-ffprobe-source"), readBuild: jest.fn() }))
 jest.mock("node:child_process", () => ({ spawnSync: jest.fn() }))
 const fs = require("node:fs"), path = require("node:path"), os = require("node:os")
 const { readBuild } = require("../scripts/package-ffprobe-source")

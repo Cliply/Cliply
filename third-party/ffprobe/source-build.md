@@ -40,8 +40,8 @@ Mac behavior and avoids the observed Apple clang default-optimization variance.
 | Target | Explicit toolchain/target | Evidence boundary |
 | --- | --- | --- |
 | macOS ARM64 | Apple clang; all commands through `/usr/bin/arch -arm64`; target macOS 13 | Locally executed; compiler, SDK and actual tool hashes recorded |
-| Ubuntu 24.04 x64 | `/usr/bin/gcc-13`, NASM, `--arch=x86_64 --target-os=linux`, baseline x86-64 | Prepared for native CI; no Linux execution claimed from the Mac host |
-| Windows x64 | MSYS2 UCRT64 GCC/NASM, `--arch=x86_64 --target-os=mingw32`, native Win32 threads | Prepared for native CI; no Windows execution claimed from the Mac host |
+| Ubuntu 24.04 x64 | `/usr/bin/gcc-13`, NASM, `--arch=x86_64 --target-os=linux`, baseline x86-64 | All 12 native commands passed on Ubuntu 24.04 in run 41503566940; new installed runtime notices await rerun |
+| Windows x64 | MSYS2 UCRT64 GCC/NASM, `--arch=x86_64 --target-os=mingw32`, native Win32 threads | Run 41503566940 passed build/import/backend checks; packaged UI failed its first inspection |
 
 Windows uses an explicitly supplied MSYS2 root and its UCRT64 compiler rather
 than the MSYS compiler. It requests static compiler/runtime archives, disables PE linker timestamps
@@ -51,8 +51,9 @@ FFmpeg pthreads being disabled and `-static-libgcc`. The corrected link adds
 `-static`; the DLL allow-list remains unchanged. [GCC's link documentation](https://gcc.gnu.org/onlinedocs/gcc/Link-Options.html)
 distinguishes static library selection from the libgcc-only option, and the
 [UCRT64 winpthreads package](https://packages.msys2.org/packages/mingw-w64-ucrt-x86_64-winpthreads)
-contains both static and DLL import archives. Native rerun must prove the resulting
-imports. Static runtime selection does not establish the licensing/source
+contains both static and DLL import archives. Run 41503566940 passed the strict
+DLL gate and backend media checks; its packaged UI failed initial inspection.
+That failure did not retain a candidate, and is not Windows acceptance. Static runtime selection does not establish the licensing/source
 requirements of those objects: inspect the first native link/toolchain evidence and
 retain the matching runtime notices before distributing a Windows asset.
 Linux permits only the recorded standard libc/libm/pthread/dl/rt/libgcc/loader
@@ -112,9 +113,9 @@ node scripts/validate-ffprobe-source.js --source <absolute-pinned-checkout> --ev
 ```
 
 Omit `--source` to fetch only the pinned commit into owned scratch. The script
-builds, prepares the Mac draft source packet twice, checks packet determinism,
+builds, prepares the Mac or reviewed Linux draft source packet twice, checks packet determinism,
 runs native validation and removes large scratch artifacts. By default it retains
-only small build/log/configuration/package evidence. On Mac, it also stages and
+only small build/log/configuration/package evidence. On Mac and Linux, it also stages and
 verifies the packet-derived installed notices in the actual private package. Source acquisition and native
 build failures remain failures; no supplier or platform fallback exists.
 
@@ -126,13 +127,14 @@ and helper-publication jobs. No workflow is dispatched by this change.
 
 ## Corresponding-source packet specification
 
-The Mac draft asset is produced with existing developer tooling:
+Mac and reviewed Linux draft assets use existing developer tooling:
 
 ```sh
 node scripts/package-ffprobe-source.js --build <absolute-verified-build> --output <new-owned-packet-directory>
 ```
 
-Name: `ffprobe-source-<commit12>-darwin-arm64-<unsigned-executable-sha12>-<packet-sha12>.tar.gz`.
+For Linux, also pass `--runtime-notices <absolute-native-notice-directory>`.
+Name: `ffprobe-source-<commit12>-<platform>-<unsigned-executable-sha12>-<packet-sha12>.tar.gz`.
 The content digest keeps source/notice revisions from colliding even if the
 executable bytes stay unchanged.
 This is a proposed NEW source asset, not an upload or production manifest entry.
@@ -173,9 +175,9 @@ Provide the verified source asset beside the new helper
 release asset. Final source URLs, signed binary hashes and source asset hashes
 belong in the reviewed publication record after actual upload verification.
 
-Only Mac packet assembly is locally audited. Packet generation deliberately
-refuses Windows/Linux records until native runtime/dependency/notices review.
-No codec source gap is hidden by that refusal. Native Windows/Linux evidence,
+Mac and Linux packet assembly is audited against retained native inputs from
+run 41503566940. Windows packet generation remains refused pending runtime review.
+No codec source gap is hidden by that refusal. Complete Windows native evidence,
 toolchain reproducibility, minimum OS, clean installed/offline behavior, storage
 coverage, final per-platform notice integration and verified publication remain
 gates before production selection. Archive size is source-distribution overhead,
@@ -199,10 +201,12 @@ existing signing/audit steps. `verify-packaged-helpers.js --require-ffprobe-noti
 requires that mapping and the actual files. Wrong binaries, missing/altered licenses,
 unsafe notice filenames and altered source mappings fail the check.
 
-The evaluated Mac packet supplies these files through an explicit private-build
-`CLIPLY_FFPROBE_NOTICE_RECORD` path. This is independent of supplier validation.
-Windows/Linux installed notices are not staged yet: their compiler/runtime
-material needs native review first. No production selection is implied.
+The evaluated Mac and Linux packets supply these files through an explicit
+private-build `CLIPLY_FFPROBE_NOTICE_RECORD` path, independent of supplier validation.
+Linux additionally requires the exact GCC runtime and glibc notices plus the
+full GPLv3 text; dropping or altering them fails installed-record verification.
+Windows runtime material still requires native review. No production selection
+is implied.
 
 For a future verified production platform, the published record must name
 `distributions/<platform>/SOURCE.json` relative to this directory and pin its
@@ -245,3 +249,40 @@ finish runtime/source/installed/minimum-OS review, and only then consider NEW
 shared assets under the existing publication authority. Remove temporary remote
 artifacts after verification and remove local downloads. Retention is not an app
 release, automatic production activation or publication approval.
+
+## Linux runtime review and retained-input assembly
+
+Run [41503566940](https://github.com/Cliply/Cliply/actions/runs/41503566940)
+passed all 12 native commands on Ubuntu 24.04, including the sandboxed UI. Its
+12,892,520-byte FFprobe SHA256 is
+`65e92c06ffb12a455a229a2cff419721f2ff2897b52a9122cd638452777875c7`; imports are
+only `libc.so.6` and `libm.so.6`. This run predates the installed Linux notice
+extension; the next native run must exercise those installed files.
+
+[runtime-notices.json](runtime-notices.json) freezes the observed package versions,
+GCC/NASM/linker hashes, imports and three complete Ubuntu copyright files. Changed
+inputs fail packet assembly and require review. GCC 13.3.0-6ubuntu2~24.04.1 and
+glibc 2.39-0ubuntu8.9 source-package locations are recorded there. The two GCC
+copyright files have identical bytes and are deduplicated only in the installed
+notices. Their GCC Runtime Library Exception 3.1 and the full GPLv3 text accompany
+the installed helper. The glibc copyright file's historical 2.23 heading is
+preserved verbatim; actual package identity comes from the recorded dpkg output.
+No compiler/glibc source archive or shared OS library is copied into the packet.
+The complete pinned FFmpeg source and original per-file notices remain included.
+
+Source-only assembly on a different host may pass
+`--validation <absolute-native-validation-directory>` with the retained native
+`commands.json` and `artifact.json`. Every required command must have passed
+exactly once, and platform/helper identity must match. All source/recipe/config/
+helper/runtime checks still apply. Reconstruct the build tree from the retained
+exact source tar, raw helper, prototype record and config.mak before using it.
+This does not execute a foreign binary or replace native installed-notice tests.
+Normal build/validation still requires the matching native host.
+
+Small runtime notices are now collected immediately after a successful source
+build into the evidence directory, even if a later native UI check fails. Such
+evidence is not a retained candidate: failed validation still cannot retain the
+helper or report a successful source packet. The Windows inspection assertion
+now records the safe IPC error code/message, trusted-main-frame result and
+synthetic fixture existence to distinguish the observed failure on its rerun.
+No production security or lifecycle check is bypassed.

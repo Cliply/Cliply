@@ -3,6 +3,7 @@ const fs = require("node:fs"), path = require("node:path"), assert = require("no
 const { createHash } = require("node:crypto")
 const { ffprobeRelease } = require("./fetch-helpers")
 const sourcePin = require("../third-party/ffprobe/source-build.json")
+const runtimePins = require("../third-party/ffprobe/runtime-notices.json")
 const digest = data => createHash("sha256").update(data).digest("hex")
 const hash = file => digest(fs.readFileSync(file))
 const serialize = record => JSON.stringify(record, null, 2) + "\n"
@@ -18,6 +19,13 @@ function validateRecord(record, platform, published) {
   assert.equal(asset.name, `ffprobe-source-${record.sourceCommit.slice(0, 12)}-${platform}-${record.binarySha256.slice(0, 12)}-${asset.sha256.slice(0, 12)}.tar.gz`)
   assert(record.files && validHash(record.files["NOTICE.txt"]), "missing FFprobe notice")
   assert.equal(record.files["COPYING.LGPLv2.1"], sourcePin.licenseFiles["COPYING.LGPLv2.1"], "missing or altered upstream LGPL text")
+  const runtime = runtimePins[platform]
+  if (runtime) {
+    assert.equal(record.files["COPYING.GPLv3"], sourcePin.licenseFiles["COPYING.GPLv3"], "missing runtime GPL text")
+    for (const [name, input] of Object.entries(runtime.installedFiles)) {
+      assert.equal(record.files[name], runtime.files[input], "missing or altered runtime notice: " + name)
+    }
+  }
   for (const [name, sha256] of Object.entries(record.files)) {
     assert(/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(name) && name !== "SOURCE.json" && validHash(sha256), "invalid notice filename or checksum")
   }

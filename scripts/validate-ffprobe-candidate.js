@@ -51,7 +51,7 @@ async function validate({ archive, evidence, sourceBuild, noticeRecord }) {
     // trees. Never copy unrelated untracked user files (such as python/).
     const tracked = spawnSync("git", ["ls-files", "-z"], { cwd: repo, encoding: "utf8" })
     assert.equal(tracked.status, 0)
-    for (const relative of new Set([...tracked.stdout.split("\0").filter(Boolean), "third-party/ffprobe/published.json", "scripts/ffprobe-notices.js"])) {
+    for (const relative of new Set([...tracked.stdout.split("\0").filter(Boolean), "third-party/ffprobe/published.json", "third-party/ffprobe/runtime-notices.json", "scripts/ffprobe-notices.js"])) {
       const destination = path.join(project, relative)
       fs.mkdirSync(path.dirname(destination), { recursive: true }); fs.copyFileSync(path.join(repo, relative), destination)
     }

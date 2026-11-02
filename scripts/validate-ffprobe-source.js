@@ -4,7 +4,7 @@ const { spawnSync } = require("node:child_process"), { parseArgs } = require("no
 const { build, sourcePin } = require("./build-ffprobe-prototype")
 const { packageSource, stageInstalledNotices } = require("./package-ffprobe-source")
 const { validate } = require("./validate-ffprobe-candidate")
-const { retainCandidate } = require("./retain-ffprobe-candidate")
+const { retainCandidate, collectRuntimeNotices } = require("./retain-ffprobe-candidate")
 async function validateSource({ source, evidence, retain }) {
   assert(evidence && path.isAbsolute(evidence), "pass a new absolute --evidence directory")
   assert(!retain || (path.isAbsolute(retain) && !fs.existsSync(retain)), "retention needs a new absolute directory")
@@ -21,18 +21,23 @@ async function validateSource({ source, evidence, retain }) {
       }
     }
     build({ source, output })
-    let noticeRecord
-    if (process.platform === "darwin") {
-      const first = await packageSource({ buildDirectory: output, output: path.join(scratch, "packet-a") })
-      const second = await packageSource({ buildDirectory: output, output: path.join(scratch, "packet-b") })
+    let noticeRecord, packetDirectory
+    // Preserve small runtime inputs even if a later UI check fails. Failed
+    // validation still cannot retain a helper or a successful candidate record.
+    const runtimeDirectory = path.join(evidence, "runtime-notices")
+    collectRuntimeNotices(runtimeDirectory, process.platform + "-" + process.arch)
+    if (process.platform === "darwin" || process.platform === "linux") {
+      packetDirectory = path.join(scratch, "packet-a")
+      const first = await packageSource({ buildDirectory: output, runtimeDirectory, output: packetDirectory })
+      const second = await packageSource({ buildDirectory: output, runtimeDirectory, output: path.join(scratch, "packet-b") })
       assert.equal(first.sha256, second.sha256, "same-input source packet must be deterministic")
       fs.writeFileSync(path.join(evidence, "source-packet.json"), JSON.stringify({ ...first, identicalRepeat: true }, null, 2) + "\n")
-      noticeRecord = stageInstalledNotices({ buildDirectory: output, packetDirectory: path.join(scratch, "packet-a"), output: path.join(scratch, "installed-notices") })
+      noticeRecord = stageInstalledNotices({ buildDirectory: output, packetDirectory, output: path.join(scratch, "installed-notices") })
     }
     await validate({ sourceBuild: output, noticeRecord, evidence: path.join(evidence, "native-validation") })
     if (retain) {
       const record = retainCandidate({ buildDirectory: output, evidence: path.join(evidence, "native-validation"),
-        packetDirectory: process.platform === "darwin" ? path.join(scratch, "packet-a") : undefined, output: retain })
+        packetDirectory, output: retain })
       fs.writeFileSync(path.join(evidence, "retained-candidate.json"), JSON.stringify(record, null, 2) + "\n")
     }
     console.log("Source-built FFprobe native/package validation passed; source selection/publication remain separate review gates")

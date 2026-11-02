@@ -1,5 +1,5 @@
 const fs = require("node:fs"), path = require("node:path"), os = require("node:os"), crypto = require("node:crypto")
-const { prepareNotices, finishNotices, verifyInstalledNotices, serialize } = require("../scripts/ffprobe-notices")
+const { prepareNotices, finishNotices, verifyInstalledNotices, validateRecord, serialize } = require("../scripts/ffprobe-notices")
 const pin = require("../third-party/ffprobe/source-build.json")
 const hash = data => crypto.createHash("sha256").update(data).digest("hex")
 let root, resources, directory, record, recordFile
@@ -60,4 +60,18 @@ test("installed notice or record tampering is rejected", () => {
   finishNotices(prepare()); const file = path.join(resources, "third-party/ffprobe/SOURCE.json"), installed = JSON.parse(fs.readFileSync(file))
   installed.record.sourceAsset.sha256 = "b".repeat(64); fs.writeFileSync(file, serialize(installed))
   expect(() => verifyInstalledNotices(resources, "darwin-arm64", { required: true, published: null })).toThrow(/record checksum/)
+})
+test("Linux records require the reviewed runtime notices and full GPL text", () => {
+  record.platform = "linux-x64"
+  record.sourceAsset.name = record.sourceAsset.name.replace("darwin-arm64", "linux-x64")
+  const runtime = require("../third-party/ffprobe/runtime-notices.json")["linux-x64"]
+  record.files["COPYING.GPLv3"] = pin.licenseFiles["COPYING.GPLv3"]
+  for (const [name, input] of Object.entries(runtime.installedFiles)) record.files[name] = runtime.files[input]
+  expect(() => validateRecord(record, "linux-x64", null)).not.toThrow()
+  for (const name of ["COPYING.GPLv3", ...Object.keys(runtime.installedFiles)]) {
+    const missing = structuredClone(record); delete missing.files[name]
+    expect(() => validateRecord(missing, "linux-x64", null)).toThrow(/runtime/)
+    missing.files[name] = "b".repeat(64)
+    expect(() => validateRecord(missing, "linux-x64", null)).toThrow(/runtime/)
+  }
 })

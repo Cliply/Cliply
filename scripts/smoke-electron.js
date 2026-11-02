@@ -176,6 +176,18 @@ if (!process.versions.electron) {
       })()`
     )
     if (process.env.CLIPLY_SMOKE_FFPROBE || process.env.CLIPLY_SMOKE_LOCAL_PACKAGE === "1") {
+      if (!state.media.success) {
+        const { trustedFrame } = require(path.join(appRoot, "src/main/services/local-media/preview"))
+        const window = cliplyApp.mainWindow
+        // Synthetic fixture only; keep failure evidence without printing paths or
+        // weakening the same frame/origin gate exercised by production IPC.
+        console.error("Local inspection failure:", JSON.stringify({
+          code: state.media.error?.code, message: state.media.error?.message,
+          trustedMainFrame: trustedFrame(window, window.webContents.mainFrame, false),
+          fixtureExists: fs.existsSync(path.join(userData, "inspection.wav")),
+          packaged: app.isPackaged
+        }))
+      }
       assert.equal(state.media.success, true)
       assert.equal(state.media.data.source.duration, 1)
       assert.equal(state.media.data.source.streams[0].codec, "pcm_s16le")
