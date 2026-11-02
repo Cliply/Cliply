@@ -66,11 +66,16 @@ jobs:
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: false
 
+      - name: Verify packaged helpers
+        run: node scripts/verify-packaged-helpers.js --resources dist/mac-arm64/Cliply.app/Contents/Resources
+
       - uses: actions/upload-artifact@v4
         with:
           name: cliply-macos
           path: |
             dist/*.dmg
+            dist/*.zip
+            dist/*.blockmap
             dist/latest-mac.yml
           retention-days: 30
 
@@ -115,21 +120,69 @@ jobs:
 
       - run: npx electron-builder --win --publish never
 
+      - name: Verify packaged helpers
+        run: node scripts/verify-packaged-helpers.js --resources dist/win-unpacked/resources
+
       - uses: actions/upload-artifact@v4
         with:
           name: cliply-windows
           path: |
             dist/*Setup*.exe
+            dist/*.exe.blockmap
             dist/latest.yml
           retention-days: 30
 
+  build-linux:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag != '' && inputs.tag || github.ref }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - run: npm ci
+      - run: npm run install:renderer
+      - run: npm run build:renderer
+
+      - name: Download Linux helpers
+        run: node scripts/fetch-helpers.js --platform linux-x64
+
+      - name: Fetch yt-dlp engine
+        run: npm run fetch:ytdlp
+        env:
+          BUILD_TARGET_PLATFORM: linux-x64
+
+      - name: Build Linux installers without publishing
+        run: npx electron-builder --linux AppImage deb --x64 --publish never
+
+      - name: Verify packaged helpers
+        run: node scripts/verify-packaged-helpers.js --resources dist/linux-unpacked/resources
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cliply-linux
+          path: |
+            dist/*.AppImage
+            dist/*.deb
+            dist/latest-linux.yml
+          if-no-files-found: error
+          retention-days: 30
+
   create-release:
-    needs: [build-macos, build-windows]
+    needs: [build-macos, build-windows, build-linux]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag != '' && inputs.tag || github.ref }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+      - run: npm ci --ignore-scripts
 
       - name: Determine tag
         id: info
@@ -153,8 +206,16 @@ jobs:
           name: cliply-windows
           path: artifacts/windows
 
+      - uses: actions/download-artifact@v4
+        with:
+          name: cliply-linux
+          path: artifacts/linux
+
       - name: List downloaded artifacts
         run: find artifacts -type f
+
+      - name: Verify update manifests and attached files
+        run: node scripts/verify-release-artifacts.js artifacts
 
       - name: Create GitHub Release
         run: |
@@ -163,7 +224,7 @@ jobs:
           FILES=()
           while IFS= read -r f; do
             FILES+=("$f")
-          done < <(find artifacts -type f \( -name "*.dmg" -o -name "*Setup*.exe" -o -name "latest*.yml" \))
+          done < <(find artifacts -type f \( -name "*.dmg" -o -name "*.zip" -o -name "*Setup*.exe" -o -name "*.blockmap" -o -name "*.AppImage" -o -name "*.deb" -o -name "latest*.yml" \))
 
           if [ ${#FILES[@]} -eq 0 ]; then
             echo "::error::No release files found in artifacts"

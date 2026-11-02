@@ -40,7 +40,7 @@ got an idea or found something broken? [open an issue](https://github.com/Cliply
 
 ### get it
 
-grab it from [releases](https://github.com/Cliply/Cliply/releases/latest), or [cliply.space](https://cliply.space/downloads) if you'd rather just click a button. windows gets an `.exe` installer, macos a `.dmg` for apple silicon. an intel mac has to build from source for now, and linux isn't packaged yet, though it builds and runs fine if you want to.
+grab it from [releases](https://github.com/Cliply/Cliply/releases/latest), or [cliply.space](https://cliply.space/downloads) if you'd rather just click a button. windows gets an `.exe` installer, macos a `.dmg` for apple silicon. intel macs aren't currently supported. linux x64 packaging is prepared for the next release: an AppImage and a `.deb` for ubuntu/debian systems. linux downloads become available when those files appear on the release page.
 
 the first launch on macos shows a warning that says the app can't be checked for malicious software. that's gatekeeper, and it isn't about cliply specifically. apple only stops showing it once the app is signed with a paid developer certificate, and cliply doesn't make any money. so for now, this clears it:
 
@@ -52,17 +52,18 @@ all that does is drop the "downloaded from the internet" flag. only ever run it 
 
 ### setup
 
-node 22.12 or newer (npm 10 or newer). the current desktop build uses electron 45 and requires macos 13 or newer on apple silicon, or 64-bit windows 10 or newer.
+node 22.12 or newer (npm 10 or newer). the current desktop build uses electron 45 and requires macos 13 or newer on apple silicon, or 64-bit windows 10 or newer. linux builds target x64, with native build and package checks on ubuntu 24.04; this does not promise compatibility with every distribution.
 
 ```bash
 npm install && npm run install:renderer
+npm run fetch:helpers
 npm run fetch:ytdlp
 npm run dev
 ```
 
-`fetch:ytdlp` pulls the official yt-dlp build for your platform into `binaries/`, checksum-verified. no python needed, the app spawns the binary directly and keeps it current on its own. you'll want ffmpeg and deno as well, and [binaries/README.md](binaries/README.md) walks through both.
+`fetch:helpers` downloads the platform's ffmpeg and deno from cliply's shared `binaries` release. `fetch:ytdlp` pulls the official yt-dlp build for your platform into `binaries/`, checksum-verified. no python needed, the app spawns the binary directly and keeps it current on its own. [binaries/README.md](binaries/README.md) explains the layout and platform selection.
 
-`npm run dist` packages it for your platform. `npm test` runs the main process suite and `npm run test:renderer` runs the interface one, and both run on every pull request. the main suite is macos only, since it asserts posix file modes and process signals.
+`npm run dist` packages it for your platform. on linux, `npm run dist:linux:safe` creates an AppImage and `.deb` without publishing. update manifests come from electron-builder and must reference the actual attached installers. `npm test` runs the main process suite and `npm run test:renderer` runs the interface one. CI runs the main suite on posix systems and focused recovery tests on windows, where process signals and file modes differ.
 
 ### how it works
 
@@ -84,4 +85,4 @@ cliply is free and it's staying that way. if you'd like to help it along you can
 
 ### license
 
-[GPL-3.0-only](LICENSE). ffmpeg ships with it under the same terms, and its source is in [`third-party/`](third-party/).
+[GPL-3.0-only](LICENSE). ffmpeg ships with it; platform-specific source and build provenance are documented in [`third-party/ffmpeg/build-info.md`](third-party/ffmpeg/build-info.md).

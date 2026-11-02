@@ -101,7 +101,7 @@ jobs:
         if: runner.os == 'Linux'
         run: dbus-run-session -- xvfb-run --auto-servernum npm run smoke:electron
         env:
-          CLIPLY_SMOKE_NO_SANDBOX: '1' 
+          CLIPLY_SMOKE_NO_SANDBOX: '1'
 
       # Run explicitly for runtime/tooling upgrades. Keep the ordinary PR check
       # quick, and never use the publishing release workflow for validation.

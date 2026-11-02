@@ -1,125 +1,67 @@
-# binaries go here
+# bundled helper binaries
 
-this app needs ffmpeg and deno to work properly. we can't include the actual binary files in git because they're huge, so you'll need to grab them yourself.
+Cliply packages FFmpeg, Deno and the standalone yt-dlp engine. Users do not need to install Python, FFmpeg or Deno separately. The large executables stay out of git.
 
-## what you need
+## fetch the release helpers
 
+From the project root, with Node 22.12 or newer:
+
+```sh
+npm run fetch:helpers
+npm run fetch:ytdlp
 ```
+
+The helper downloader uses the same [Cliply `binaries` release](https://github.com/Cliply/Cliply/releases/tag/binaries) as the release workflow. It chooses the current supported platform by default. To prepare another platform explicitly:
+
+```sh
+npm run fetch:helpers -- --platform linux-x64
+BUILD_TARGET_PLATFORM=linux-x64 npm run fetch:ytdlp
+```
+
+The `BUILD_TARGET_PLATFORM` example uses a POSIX shell. In PowerShell, set `$env:BUILD_TARGET_PLATFORM = 'linux-x64'` before running `npm run fetch:ytdlp`. The engine fetcher checks upstream SHA256 sums and keeps the complete standalone directory, including its Python runtime and modules.
+
+| Target | FFmpeg release asset | Deno release asset | Local platform directory |
+| --- | --- | --- | --- |
+| macOS Apple Silicon | `ffmpeg` | `deno` | `macos` |
+| Windows x64 | `ffmpeg.exe` | `deno.exe` | `windows` |
+| Linux x64 | `ffmpeg-linux-x64` | `deno-linux-x64` | `linux` |
+
+The resulting layout is:
+
+```text
 binaries/
 ├── deno/
 │   ├── linux/deno
 │   ├── macos/deno
 │   └── windows/deno.exe
-├── ffmpeg
-├── linux/ffmpeg
-├── macos/ffmpeg
-└── windows/ffmpeg.exe
+├── linux/
+│   ├── ffmpeg
+│   └── ytdlp/...
+├── macos/
+│   ├── ffmpeg
+│   └── ytdlp/...
+└── windows/
+    ├── ffmpeg.exe
+    └── ytdlp/...
 ```
 
-## ffmpeg setup
+macOS and Linux require executable permissions; the downloader and packaging hook set these. Linux binaries cannot be substituted with macOS or Windows executables. Copying a Homebrew FFmpeg executable is not a portable release build: it can depend on libraries installed only on the development machine.
 
-for complete installation details, check out the [yt-dlp documentation](https://github.com/yt-dlp/yt-dlp/wiki/Installation) which covers everything in detail.
+## build and check
 
-## what you need to do
+Install dependencies and build the renderer before packaging. `npm run prepare:full` prepares icons, the app and yt-dlp; fetch FFmpeg and Deno first as above.
 
-grab ffmpeg for your system and drop it in the right folder:
+On a Linux x64 machine:
 
-```
-binaries/
-├── linux/ffmpeg
-├── macos/ffmpeg
-└── windows/ffmpeg.exe
+```sh
+npm run dist:linux:safe
+node scripts/verify-packaged-helpers.js --resources dist/linux-unpacked/resources
 ```
 
-## getting ffmpeg
+This creates AppImage and DEB packages without publishing. Release CI builds each platform natively, executes all three packaged helpers, and checks that update metadata references files attached to the release. AppImage uses electron-builder's static runtime toolset; Linux tarballs and ARM builds are not part of the initial release.
 
-**linux & windows**
+For Linux token-recovery payloads, the `Build PO token payload` workflow builds natively on Linux x64 so its canvas native module matches the packaged runtime. It is downloaded on demand rather than added to every installer. The workflow defaults to verification only; publishing to the shared release is an explicit option.
 
-yt-dlp has optimized builds that work best with this app:
+## updating helpers
 
-- visit: https://github.com/yt-dlp/FFmpeg-Builds/releases/latest
-- download for your system:
-  - linux: `ffmpeg-master-latest-linux64-gpl.tar.xz`
-  - windows: `ffmpeg-master-latest-win64-gpl.zip`
-- extract and copy the ffmpeg binary here
-
-**macos**
-
-yt-dlp doesn't provide mac builds, so use homebrew:
-
-```bash
-brew install ffmpeg
-cp /opt/homebrew/bin/ffmpeg binaries/macos/
-```
-
-if you're on intel mac, try `/usr/local/bin/ffmpeg` instead.
-
-**already have ffmpeg?**
-
-just copy it over:
-
-```bash
-which ffmpeg
-# then copy to the right binaries/ folder
-```
-
-## make it work
-
-linux and mac need execute permissions:
-
-```bash
-chmod +x binaries/linux/ffmpeg
-chmod +x binaries/macos/ffmpeg
-```
-
-## deno setup
-
-yt-dlp 2025.11.12+ requires deno for javascript runtime support (needed for youtube downloads).
-
-### download deno
-
-**macos arm64** (for apple silicon macs):
-
-```bash
-cd binaries/deno/macos
-curl -L -o deno.zip "https://github.com/denoland/deno/releases/latest/download/deno-aarch64-apple-darwin.zip"
-unzip deno.zip && chmod +x deno && rm deno.zip
-```
-
-**windows x64**:
-
-```bash
-cd binaries/deno/windows
-curl -L -o deno.zip "https://github.com/denoland/deno/releases/latest/download/deno-x86_64-pc-windows-msvc.zip"
-tar -xf deno.zip && rm deno.zip
-```
-
-**linux x64**:
-
-```bash
-cd binaries/deno/linux
-curl -L -o deno.zip "https://github.com/denoland/deno/releases/latest/download/deno-x86_64-unknown-linux-gnu.zip"
-tar -xf deno.zip && chmod +x deno && rm deno.zip
-```
-
-### make deno executable
-
-linux and macos need execute permissions:
-
-```bash
-chmod +x binaries/deno/linux/deno
-chmod +x binaries/deno/macos/deno
-```
-
-## building the app
-
-the build scripts handle binaries automatically:
-
-- `npm run prepare:full` - sets everything up
-- `npm run dist` - creates the final app package
-
-## if something breaks
-
-- make sure you got the right architecture (usually x64)
-- the app will tell you if ffmpeg or deno is missing when downloads fail
-- any recent ffmpeg/deno version should work fine
+Keep new Linux assets beside the existing Mac and Windows assets in the shared `binaries` release; do not rename or replace another platform's files. Record the actual upstream version and source in [the FFmpeg build information](../third-party/ffmpeg/build-info.md). Test merging, trimming, audio conversion, HTTPS downloads and YouTube recovery before replacing a helper. Version output alone does not prove those operations work.
