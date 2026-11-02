@@ -2,10 +2,12 @@
 const fs = require("node:fs"), os = require("node:os"), path = require("node:path"), assert = require("node:assert/strict")
 const { spawnSync } = require("node:child_process"), { parseArgs } = require("node:util")
 const { build, sourcePin } = require("./build-ffprobe-prototype")
-const { packageSource } = require("./package-ffprobe-source")
+const { packageSource, stageInstalledNotices } = require("./package-ffprobe-source")
 const { validate } = require("./validate-ffprobe-candidate")
-async function validateSource({ source, evidence }) {
+const { retainCandidate } = require("./retain-ffprobe-candidate")
+async function validateSource({ source, evidence, retain }) {
   assert(evidence && path.isAbsolute(evidence), "pass a new absolute --evidence directory")
+  assert(!retain || (path.isAbsolute(retain) && !fs.existsSync(retain)), "retention needs a new absolute directory")
   fs.mkdirSync(evidence)
   const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "cliply-source-check-")), output = path.join(scratch, "build")
   const acquisition = []
@@ -19,13 +21,20 @@ async function validateSource({ source, evidence }) {
       }
     }
     build({ source, output })
+    let noticeRecord
     if (process.platform === "darwin") {
       const first = await packageSource({ buildDirectory: output, output: path.join(scratch, "packet-a") })
       const second = await packageSource({ buildDirectory: output, output: path.join(scratch, "packet-b") })
       assert.equal(first.sha256, second.sha256, "same-input source packet must be deterministic")
       fs.writeFileSync(path.join(evidence, "source-packet.json"), JSON.stringify({ ...first, identicalRepeat: true }, null, 2) + "\n")
+      noticeRecord = stageInstalledNotices({ buildDirectory: output, packetDirectory: path.join(scratch, "packet-a"), output: path.join(scratch, "installed-notices") })
     }
-    await validate({ sourceBuild: output, evidence: path.join(evidence, "native-validation") })
+    await validate({ sourceBuild: output, noticeRecord, evidence: path.join(evidence, "native-validation") })
+    if (retain) {
+      const record = retainCandidate({ buildDirectory: output, evidence: path.join(evidence, "native-validation"),
+        packetDirectory: process.platform === "darwin" ? path.join(scratch, "packet-a") : undefined, output: retain })
+      fs.writeFileSync(path.join(evidence, "retained-candidate.json"), JSON.stringify(record, null, 2) + "\n")
+    }
     console.log("Source-built FFprobe native/package validation passed; source selection/publication remain separate review gates")
   } finally {
     try {
@@ -45,7 +54,7 @@ async function validateSource({ source, evidence }) {
   }
 }
 if (require.main === module) {
-  const { values } = parseArgs({ options: { source: { type: "string" }, evidence: { type: "string" } } })
+  const { values } = parseArgs({ options: { source: { type: "string" }, evidence: { type: "string" }, retain: { type: "string" } } })
   validateSource(values).catch(error => { console.error(error); process.exitCode = 1 })
 }
 module.exports = { validateSource }

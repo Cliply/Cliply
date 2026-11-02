@@ -22,6 +22,7 @@ const os = require("os")
 const path = require("path")
 const { spawn } = require("child_process")
 const { ffprobeRelease } = require("./fetch-helpers")
+const { prepareNotices, finishNotices } = require("./ffprobe-notices")
 
 // the same resolver the app uses at runtime, so the check here and the lookup
 // there can never disagree about what counts as a usable engine
@@ -84,6 +85,14 @@ async function afterPack(context) {
   console.log(`running after-pack for platform: ${electronPlatformName}`)
   console.log(`app output directory: ${appOutDir}`)
 
+  const resources = electronPlatformName === "darwin"
+    ? path.join(appOutDir, `${packager.appInfo.productFilename}.app`, "Contents", "Resources")
+    : path.join(appOutDir, "resources")
+  const platform = `${electronPlatformName}-${context.arch === 3 ? "arm64" : "x64"}`
+  const notices = prepareNotices({ resources, platform,
+    projectDir: packager.projectDir || path.resolve(__dirname, ".."),
+    evaluationRecord: process.env.CLIPLY_FFPROBE_NOTICE_RECORD })
+
   switch (electronPlatformName) {
     case "darwin":
       await prepareMacOS(appOutDir, packager, context.arch)
@@ -97,6 +106,8 @@ async function afterPack(context) {
     default:
       console.log(`no after-pack work for ${electronPlatformName}`)
   }
+
+  finishNotices(notices)
 
   console.log("after-pack completed")
 }

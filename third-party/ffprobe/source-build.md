@@ -44,10 +44,16 @@ Mac behavior and avoids the observed Apple clang default-optimization variance.
 | Windows x64 | MSYS2 UCRT64 GCC/NASM, `--arch=x86_64 --target-os=mingw32`, native Win32 threads | Prepared for native CI; no Windows execution claimed from the Mac host |
 
 Windows uses an explicitly supplied MSYS2 root and its UCRT64 compiler rather
-than the MSYS compiler. It links libgcc statically, disables PE linker timestamps
+than the MSYS compiler. It requests static compiler/runtime archives, disables PE linker timestamps
 and refuses non-system DLL imports (including MSYS, libgcc and winpthread DLLs).
-This does not establish the licensing/source requirements of statically included
-compiler-runtime objects: inspect the first native link/toolchain evidence and
+The second native run exposed an actual `libwinpthread-1.dll` import despite
+FFmpeg pthreads being disabled and `-static-libgcc`. The corrected link adds
+`-static`; the DLL allow-list remains unchanged. [GCC's link documentation](https://gcc.gnu.org/onlinedocs/gcc/Link-Options.html)
+distinguishes static library selection from the libgcc-only option, and the
+[UCRT64 winpthreads package](https://packages.msys2.org/packages/mingw-w64-ucrt-x86_64-winpthreads)
+contains both static and DLL import archives. Native rerun must prove the resulting
+imports. Static runtime selection does not establish the licensing/source
+requirements of those objects: inspect the first native link/toolchain evidence and
 retain the matching runtime notices before distributing a Windows asset.
 Linux permits only the recorded standard libc/libm/pthread/dl/rt/libgcc/loader
 dependencies; ELF version requirements and native ldd resolution are retained.
@@ -107,8 +113,9 @@ node scripts/validate-ffprobe-source.js --source <absolute-pinned-checkout> --ev
 
 Omit `--source` to fetch only the pinned commit into owned scratch. The script
 builds, prepares the Mac draft source packet twice, checks packet determinism,
-runs native validation and removes large scratch artifacts. It retains only
-small build/log/configuration/package evidence. Source acquisition and native
+runs native validation and removes large scratch artifacts. By default it retains
+only small build/log/configuration/package evidence. On Mac, it also stages and
+verifies the packet-derived installed notices in the actual private package. Source acquisition and native
 build failures remain failures; no supplier or platform fallback exists.
 
 After separate push/CI authorization, use existing **CI** on the reviewed ref,
@@ -155,10 +162,13 @@ portable metadata, mtime zero, fixed file modes and gzip level 9. Tool versions
 are in the manifest. Repeating with the same inputs/tool versions must yield the
 same hash. Rebuilding the executable from the packet needs only Node and the
 recorded native toolchain, not Cliply/npm dependencies, Python or network access.
-Source packets are not embedded in installers. Future packaging must include
+Source packets are not embedded in installers. The source-check path stages
 NOTICE.source-build.txt as `resources/third-party/ffprobe/NOTICE.txt` and
 COPYING.LGPLv2.1 as `resources/third-party/ffprobe/COPYING.LGPLv2.1`, together with
-a small SOURCE.json linking the final binary/source hashes and source asset URL.
+a small SOURCE.json. The checked-in LGPL text is byte-identical to the pinned
+upstream text. The installed record binds the original helper and exact source
+packet hashes to the helper after package signing. Evaluation source URLs remain
+null; no nonexistent release URL is presented as published.
 Provide the verified source asset beside the new helper
 release asset. Final source URLs, signed binary hashes and source asset hashes
 belong in the reviewed publication record after actual upload verification.
@@ -178,3 +188,60 @@ corrected recipes need a fresh native run before final runtime notices, source
 packets and installed notice wiring can be accepted. Changing the recipe changes
 the source-packet manifest/hash even when a platform's executable bytes are
 unchanged; regenerate the packet from the reviewed recipe before distribution.
+
+
+## Installed source/license records
+
+`ffprobe-notices.js` checks the platform, exact upstream/source-archive identity,
+input binary hash, packet name/hash and every installed notice checksum before
+packaging. `after-pack.js` then records the final packaged helper hash after the
+existing signing/audit steps. `verify-packaged-helpers.js --require-ffprobe-notices`
+requires that mapping and the actual files. Wrong binaries, missing/altered licenses,
+unsafe notice filenames and altered source mappings fail the check.
+
+The evaluated Mac packet supplies these files through an explicit private-build
+`CLIPLY_FFPROBE_NOTICE_RECORD` path. This is independent of supplier validation.
+Windows/Linux installed notices are not staged yet: their compiler/runtime
+material needs native review first. No production selection is implied.
+
+For a future verified production platform, the published record must name
+`distributions/<platform>/SOURCE.json` relative to this directory and pin its
+`sourceRecordSha256`. That canonical JSON record identifies `evaluationOnly: false`,
+the original published helper SHA256, source commit/archive SHA256, the verified
+source packet's name/SHA256/asset ID/URL, and a `files` map of adjacent notice
+filenames to SHA256. Its directory is checked into the reviewed source change;
+after-pack copies only those verified files into resources. A real published
+record must use the exact shared-release source URL. An evaluation record cannot
+satisfy it. Installed SOURCE.json wraps the original record and its hash plus
+the post-signing helper hash, preserving both identities. Production pins remain
+empty until review and actual upload verification.
+
+## Optional short-lived reviewer artifact
+
+An authorized native CI run may set `ffprobe_retain_artifacts=true` together with
+`ffprobe_source_check=true`; other mode inputs stay false. The default is false.
+Locally the equivalent is `validate-ffprobe-source.js --evidence <new-absolute-dir>
+--retain <new-absolute-review-dir>`. No script uploads a shared release.
+
+Only after every required native/package/UI/recovery command passes, retention
+checks the exact validated input hash and writes a new artifact atomically. It
+contains the validated original helper, source/build records and checksum inventory,
+plus the corresponding Mac source packet and installed notices when available.
+For platforms whose packet/runtime review is incomplete, it retains the exact
+source tar, standalone recipe/pins, upstream notices and native compiler/runtime
+notice inputs instead. Those inputs are explicitly **not a finished distribution
+packet**. Compiler/CRT notices are copied from the native toolchain installation;
+their inventory records original paths/hashes and actual package metadata.
+Windows collection includes GCC/libgcc, CRT/headers and winpthreads/libwinpthread;
+static thread-runtime notices must not be omitted just because its DLL disappears.
+No application installers, app bundles or user profiles are retained.
+
+The `source-candidate-<platform>` CI artifact expires after two days and is
+uploaded only on success with the explicit retention input. REVIEW.json always
+says `publicationReady: false`, lists remaining gates and binds every retained
+file by hash. A failed or incomplete validation creates no final review artifact.
+Reviewers must download into owned scratch, verify all files and native evidence,
+finish runtime/source/installed/minimum-OS review, and only then consider NEW
+shared assets under the existing publication authority. Remove temporary remote
+artifacts after verification and remove local downloads. Retention is not an app
+release, automatic production activation or publication approval.

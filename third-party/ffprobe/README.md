@@ -143,8 +143,10 @@ no production manifest changes. See [release checks](../../docs/releasing.md).
 
 [`build-ffprobe-prototype.js`](../../scripts/build-ffprobe-prototype.js) evaluates
 an alternative executed locally on macOS ARM64. The first native Windows x64
-and Ubuntu 24.04 x64 attempts stopped at source-export/configuration guards;
-corrected recipes await another native run. It exports clean source from FFmpeg n8.1,
+and Ubuntu 24.04 x64 attempts exposed source-export/configuration issues. A second
+run compiled Windows but refused its winpthread DLL dependency; Linux passed
+backend checks and stopped at the copied test app sandbox setup. Further corrected
+recipes/harnesses await native rerun. It exports clean source from FFmpeg n8.1,
 commit `9047fa1b084f76b1b4d065af2d743df1b40dfb56`, and builds FFprobe with internal
 demuxers/parsers/decoders and file/pipe/fd protocols. Autodetection, network,
 external codec libraries, other programs, filters and resamplers are checked off
@@ -179,3 +181,12 @@ IJG attribution and offline rebuild instructions. See the
 official toolchain evidence and deterministic source-asset preparation.
 Windows/Linux native execution and runtime notices, minimum OS, final per-platform
 source/notice integration and reviewer selection remain required before production.
+
+
+Source validation now stages the verified Mac packet's installed NOTICE,
+[LGPL text](COPYING.LGPLv2.1) and exact source/binary mapping, with post-signing
+hash verification. Production notice records remain absent until final review.
+An explicit source-CI retention option preserves only a successfully validated
+helper and exact source/build/notice inputs as a two-day reviewer artifact;
+incomplete Windows/Linux runtime packets stay unapproved. See the
+[source guide](source-build.md#optional-short-lived-reviewer-artifact).

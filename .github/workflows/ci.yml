@@ -6,6 +6,10 @@ on:
   pull_request:
   workflow_dispatch:
     inputs:
+      ffprobe_retain_artifacts:
+        description: 'Source-check mode only: retain validated helper/source inputs for 2-day review; no publication'
+        type: boolean
+        default: false
       ffprobe_source_check:
         description: 'Only build pinned FFprobe source and validate exact artifacts; no publication'
         type: boolean
@@ -38,6 +42,8 @@ jobs:
   validate-ffprobe-source:
     if: github.event_name == 'workflow_dispatch' && inputs.ffprobe_source_check && !inputs.ffprobe_candidate_check
     uses: ./.github/workflows/validate-ffprobe-source.yml
+    with:
+      retain_artifacts: ${{ inputs.ffprobe_retain_artifacts }}
 
   validate-ffprobe-candidate:
     if: github.event_name == 'workflow_dispatch' && inputs.ffprobe_candidate_check

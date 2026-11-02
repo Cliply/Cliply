@@ -11,7 +11,9 @@ function configurationFor(platform) {
   // Pinned configure still probes libc iconv with autodetection disabled.
   // Keep the no-external-library contract explicit on glibc hosts.
   if (platform === "linux-x64") return [...common, "--disable-iconv", "--arch=x86_64", "--target-os=linux", "--cc=/usr/bin/gcc-13", "--x86asmexe=/usr/bin/nasm", "--extra-cflags=-march=x86-64"]
-  if (platform === "win32-x64") return [...common, "--arch=x86_64", "--target-os=mingw32", "--cc=/ucrt64/bin/gcc", "--x86asmexe=/ucrt64/bin/nasm", "--disable-pthreads", "--enable-w32threads", "--extra-cflags=-march=x86-64", "--extra-ldflags=-static-libgcc -Wl,--no-insert-timestamp"]
+  // UCRT64 GCC's runtime can pull winpthreads even with FFmpeg pthreads off.
+  // Select static runtime archives; the system-only DLL audit still applies.
+  if (platform === "win32-x64") return [...common, "--arch=x86_64", "--target-os=mingw32", "--cc=/ucrt64/bin/gcc", "--x86asmexe=/ucrt64/bin/nasm", "--disable-pthreads", "--enable-w32threads", "--extra-cflags=-march=x86-64", "--extra-ldflags=-static -static-libgcc -Wl,--no-insert-timestamp"]
   throw new Error("Unsupported native source-build host: " + platform)
 }
 function inspectConfiguration(configure, makefile) {

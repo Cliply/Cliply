@@ -47,6 +47,11 @@ test("Linux explicitly disables libc iconv without relaxing the final dependency
   expect(() => inspectConfiguration(libcConfigure, config + "CONFIG_ICONV=yes\n")).toThrow(/external/)
   expect(inspectConfiguration(libcConfigure, config + "!CONFIG_ICONV=yes\n").externalEnabled).toEqual([])
 })
+test("Windows requests static compiler runtimes while the DLL gate still rejects winpthread", () => {
+  const flags = configurationFor("win32-x64").find(option => option.startsWith("--extra-ldflags=")).slice("--extra-ldflags=".length).split(" ")
+  expect(flags).toContain("-static")
+  expect(() => inspectLibraries("win32-x64", "DLL Name: KERNEL32.dll\nDLL Name: libwinpthread-1.dll")).toThrow(/unexpected Windows DLL/)
+})
 test("source export overrides Windows CRLF and tar mode defaults without changing local Git settings", async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "cliply-source-archive-"))
   const git = args => execFileSync("git", ["-C", root, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim()
@@ -83,7 +88,11 @@ test("native workflow modes remain read-only and exclusive, with supplier priori
   const ci = yaml.load(fs.readFileSync(path.join(__dirname, "../.github/workflows/ci.yml"), "utf8"))
   const source = yaml.load(fs.readFileSync(path.join(__dirname, "../.github/workflows/validate-ffprobe-source.yml"), "utf8"))
   expect(source.permissions).toEqual({ contents: "read" })
-  expect(source.on.workflow_call).toBeNull()
+  expect(source.on.workflow_call.inputs.retain_artifacts).toEqual({ type: "boolean", default: false })
+  expect(ci.on.workflow_dispatch.inputs.ffprobe_retain_artifacts.default).toBe(false)
+  const retainedUpload = source.jobs.source.steps.find(step => step.name === "Retain validated helper and source inputs for review only")
+  expect(retainedUpload.if).toBe("success() && inputs.retain_artifacts")
+  expect(retainedUpload.with["retention-days"]).toBe(2)
   const jobs = ci.jobs, names = ["validate-ffprobe-candidate", "validate-ffprobe-source", "stage-linux-helpers", "check"]
   for (const candidate of [false, true]) for (const built of [false, true]) for (const staging of [false, true]) {
     const inputs = { ffprobe_candidate_check: candidate, ffprobe_source_check: built, stage_linux_helpers: staging }

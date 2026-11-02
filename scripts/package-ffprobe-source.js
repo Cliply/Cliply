@@ -71,8 +71,33 @@ async function packageSource({ buildDirectory, output }) {
   fs.writeFileSync(path.join(output, "source-packet.json"), JSON.stringify(result, null, 2) + "\n")
   return result
 }
+function stageInstalledNotices({ buildDirectory, packetDirectory, output }) {
+  const { facts } = readBuild(buildDirectory)
+  assert.equal(facts.platform, "darwin-arm64", "native runtime notice review is required before extending installed notices")
+  const packet = JSON.parse(fs.readFileSync(path.join(packetDirectory, "source-packet.json"), "utf8"))
+  assert.equal(packet.manifest.executableSha256, facts.executableSha256)
+  assert.equal(packet.manifest.sourceCommit, facts.commit)
+  assert.equal(packet.manifest.platform, facts.platform)
+  assert.equal(path.basename(packet.assetName), packet.assetName)
+  assert.equal(hash(path.join(packetDirectory, packet.assetName)), packet.sha256, "source packet changed")
+  const inputs = { "NOTICE.txt": "third-party/ffprobe/NOTICE.source-build.txt", "COPYING.LGPLv2.1": "notices/COPYING.LGPLv2.1" }
+  assert(path.isAbsolute(output)); fs.mkdirSync(output)
+  const files = {}
+  for (const [name, relative] of Object.entries(inputs)) {
+    const input = path.join(packetDirectory, "packet", relative)
+    assert.equal(hash(input), packet.manifest.files[relative], "packet notice changed")
+    fs.copyFileSync(input, path.join(output, name), fs.constants.COPYFILE_EXCL)
+    files[name] = hash(input)
+  }
+  const record = { schema: 1, evaluationOnly: true, platform: facts.platform, binarySha256: facts.executableSha256,
+    sourceCommit: facts.commit, sourceArchiveSha256: facts.archiveSha256,
+    sourceAsset: { name: packet.assetName, sha256: packet.sha256, url: null, assetId: null }, files }
+  const recordFile = path.join(output, "SOURCE.json")
+  fs.writeFileSync(recordFile, JSON.stringify(record, null, 2) + "\n", { flag: "wx" })
+  return recordFile
+}
 if (require.main === module) {
   const { values } = parseArgs({ options: { build: { type: "string" }, output: { type: "string" } } })
   packageSource({ buildDirectory: values.build, output: values.output }).then(result => console.log(JSON.stringify(result, null, 2))).catch(error => { console.error(error); process.exitCode = 1 })
 }
-module.exports = { readBuild, packageSource }
+module.exports = { readBuild, packageSource, stageInstalledNotices }

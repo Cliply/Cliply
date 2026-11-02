@@ -12,6 +12,7 @@ async function run(resources, { idleOnly = false, normalStartup = false, longMed
   assert(fs.existsSync(path.join(resources, "app.asar")), "pass an actual native packaged resources directory")
   await verifyPackagedHelpers(resources, { requireFfprobe: !idleOnly && !normalStartup })
   const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "cliply-local-package-"))
+  let restoreSandbox
   try {
     const mac = process.platform === "darwin"
     const sourceApp = mac ? path.resolve(resources, "../..") : path.dirname(resources)
@@ -32,12 +33,17 @@ async function run(resources, { idleOnly = false, normalStartup = false, longMed
     env.CLIPLY_SMOKE_IDLE = idleOnly ? "1" : "0"
     const executable = mac ? path.join(appDir, "Contents", "MacOS", "Cliply") : path.join(appDir, process.platform === "win32" ? "Cliply.exe" : "cliply-desktop")
     assert(fs.existsSync(executable), `missing packaged launcher: ${executable}`)
+    if (process.platform === "linux" && process.env.GITHUB_ACTIONS === "true") {
+      restoreSandbox = require("./prepare-linux-smoke-sandbox").prepareLinuxSmokeSandbox(scratch, appDir)
+    }
     const result = spawnSync(executable, [], { env, encoding: "utf8", timeout: 90000, maxBuffer: 8 * 1024 * 1024 })
     process.stdout.write(result.stdout || ""); process.stderr.write(result.stderr || "")
     assert.equal(result.status, 0, result.error?.message || "packaged local-media smoke failed")
     assert.match(result.stdout, normalStartup ? /Normal service startup passed:/ : idleOnly ? /Packaged idle measurement:/ : /Local integration passed:/)
     console.log(idleOnly ? "Packaged idle check passed" : "Packaged local media passed without development helper overrides")
-  } finally { fs.rmSync(scratch, { recursive: true, force: true }) }
+  } finally {
+    try { restoreSandbox?.() } finally { fs.rmSync(scratch, { recursive: true, force: true }) }
+  }
 }
 if (require.main === module) {
   const { values } = parseArgs({ options: { resources: { type: "string" }, "idle-only": { type: "boolean", default: false }, "normal-startup": { type: "boolean", default: false }, "long-media": { type: "boolean", default: false } } })

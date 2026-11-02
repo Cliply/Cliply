@@ -3,6 +3,10 @@ name: Validate source-built FFprobe
 # Native evidence only. Separate from pinned supplier validation/publication.
 on:
   workflow_call:
+    inputs:
+      retain_artifacts:
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -50,12 +54,20 @@ jobs:
           install: make diffutils tar mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-nasm
       - name: Native source build and exact-artifact checks
         if: runner.os != 'Linux'
-        run: node scripts/validate-ffprobe-source.js --evidence "${{ runner.temp }}/source-evidence"
+        run: node scripts/validate-ffprobe-source.js --evidence "${{ runner.temp }}/source-evidence" ${{ inputs.retain_artifacts && format('--retain "{0}/source-candidate"', runner.temp) || '' }}
         env:
           CLIPLY_FFPROBE_MSYS2: ${{ steps.msys2.outputs.msys2-location }}
       - name: Linux source build and exact-artifact checks
         if: runner.os == 'Linux'
-        run: dbus-run-session -- xvfb-run --auto-servernum node scripts/validate-ffprobe-source.js --evidence "${{ runner.temp }}/source-evidence"
+        run: dbus-run-session -- xvfb-run --auto-servernum node scripts/validate-ffprobe-source.js --evidence "${{ runner.temp }}/source-evidence" ${{ inputs.retain_artifacts && format('--retain "{0}/source-candidate"', runner.temp) || '' }}
+      - name: Retain validated helper and source inputs for review only
+        uses: actions/upload-artifact@v4
+        if: success() && inputs.retain_artifacts
+        with:
+          name: source-candidate-${{ matrix.platform }}
+          path: ${{ runner.temp }}/source-candidate
+          retention-days: 2
+          if-no-files-found: error
       - uses: actions/upload-artifact@v4
         if: always()
         with:

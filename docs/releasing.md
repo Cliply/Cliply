@@ -86,7 +86,7 @@ authorized and pushed. It calls
 at the same commit, builds the exact pinned FFmpeg-only design and validates
 that executable in a disposable native app. Supplier mode retains priority if
 both flags are set; ordinary app/helper-publication jobs are excluded in either
-mode. Only small evidence is uploaded. The Mac draft source packet is assembled
+mode. By default only small evidence is uploaded. The Mac draft source packet is assembled
 and checked twice in scratch, then removed. Windows/Linux recipes and dependency
 checks are prepared but unrun locally; their first native run must pass all
 architecture/configuration/library/media gates before any support claim.
@@ -97,6 +97,19 @@ Locally, `node scripts/validate-ffprobe-source.js --source <pinned-checkout>
 `validate-ffprobe-candidate.js --source-build <absolute-build> --evidence
 <new-absolute-directory>` validates an already built, hash-bound artifact.
 Neither command changes the production manifest or replaces project helpers.
+
+Source CI may explicitly set `ffprobe_retain_artifacts=true` to retain a
+successfully validated helper and its exact source/build/notice inputs for two-day
+review. It never uploads installers or a shared release. Incomplete runtime/source
+packets remain marked unapproved; failed validation creates no final candidate
+artifact. See the source guide for checksum verification and cleanup. Retention
+is off by default and ignored outside source-check mode.
+
+The Mac source check now exercises installed NOTICE/LGPL/source mapping in its
+private package. Production after-pack requires the reviewed platform source
+record/checksum whenever a production FFprobe pin exists, and binds the mapping
+to the actual signed helper. Windows/Linux runtime notices and final source
+packets still require native review; the production manifest stays empty.
 
 With existing dependencies, built renderer and ordinary project helpers, the
 same candidate checks can run locally:
@@ -142,7 +155,14 @@ real disk-full check. Never supply a normal user volume. Remove generated media
 after retaining the JSON evidence; CPU samples are process-lifetime averages and
 can miss short helper peaks.
 On Linux, run the UI check under an available desktop session (CI uses Xvfb/DBus).
-No sandbox bypass is added for packaged acceptance.
+No sandbox bypass is added for packaged acceptance. On an ephemeral GitHub Linux
+runner, the local-media smoke configures only its private app copy's genuine
+Electron `chrome-sandbox` as root-owned mode 4755, matching an installed DEB.
+It first checks private scratch ownership, regular files and byte identity with
+the installed Electron dependency. Electron still launches as the runner user;
+SUID is removed before cleanup. No AppArmor/sysctl or global sandbox setting is
+changed, and neither `--no-sandbox` nor disabled user-namespace protections are
+used. Local desktop runs do not perform this privileged CI setup.
 
 The owner authorized new verified shared FFprobe assets and source records once
 the recorded readiness conditions pass. That does not authorize unverified

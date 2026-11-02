@@ -11,10 +11,11 @@ const { createHttpClient } = require("../src/main/services/ytdlp-updater")
 const candidates = require("../third-party/ffprobe/candidates.json")
 const repo = path.resolve(__dirname, "..")
 
-async function validate({ archive, evidence, sourceBuild }) {
+async function validate({ archive, evidence, sourceBuild, noticeRecord }) {
   const platform = `${process.platform}-${process.arch}`, candidate = candidates[platform]
   assert(candidate, `Unsupported native host: ${platform}`)
   assert(!(archive && sourceBuild), "choose a pinned supplier archive or an explicit source build")
+  assert(!noticeRecord || sourceBuild, "source notices require the matching source-built artifact")
   assert(evidence && path.isAbsolute(evidence), "Pass a new absolute --evidence directory")
   fs.mkdirSync(evidence) // Never overwrite an existing evidence packet.
   const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "cliply-candidate-"))
@@ -50,7 +51,7 @@ async function validate({ archive, evidence, sourceBuild }) {
     // trees. Never copy unrelated untracked user files (such as python/).
     const tracked = spawnSync("git", ["ls-files", "-z"], { cwd: repo, encoding: "utf8" })
     assert.equal(tracked.status, 0)
-    for (const relative of new Set([...tracked.stdout.split("\0").filter(Boolean), "third-party/ffprobe/published.json"])) {
+    for (const relative of new Set([...tracked.stdout.split("\0").filter(Boolean), "third-party/ffprobe/published.json", "scripts/ffprobe-notices.js"])) {
       const destination = path.join(project, relative)
       fs.mkdirSync(path.dirname(destination), { recursive: true }); fs.copyFileSync(path.join(repo, relative), destination)
     }
@@ -65,7 +66,8 @@ async function validate({ archive, evidence, sourceBuild }) {
       electronDist: path.join(repo, "node_modules/electron/dist"), directories: { ...require("../package.json").build.directories, output: path.join(scratch, "package") } }
     const configFile = path.join(scratch, "build.json"); fs.writeFileSync(configFile, JSON.stringify(config))
     run("package", process.execPath, [path.join(repo, "node_modules/electron-builder/cli.js"), "--projectDir", project, "--config", configFile, "--dir", { darwin: "--mac", linux: "--linux", win32: "--win" }[process.platform], "--publish", "never"], {
-      CSC_IDENTITY_AUTO_DISCOVERY: "false", CLIPLY_REQUIRE_FFPROBE: "1", ELECTRON_BUILDER_CACHE: path.join(scratch, "builder-cache")
+      CSC_IDENTITY_AUTO_DISCOVERY: "false", CLIPLY_REQUIRE_FFPROBE: "1", ELECTRON_BUILDER_CACHE: path.join(scratch, "builder-cache"),
+      CLIPLY_FFPROBE_NOTICE_RECORD: noticeRecord || ""
     })
     const resources = path.join(scratch, "package", ...({ darwin: ["mac-arm64", "Cliply.app", "Contents", "Resources"], linux: ["linux-unpacked", "resources"], win32: ["win-unpacked", "resources"] }[process.platform]))
     const ffmpeg = path.join(resources, "binaries", "ffmpeg" + suffix), ffprobe = path.join(resources, "binaries", "ffprobe" + suffix)
@@ -73,7 +75,8 @@ async function validate({ archive, evidence, sourceBuild }) {
       inputSha256: await hash(path.join(staged, facts.asset)), packagedSha256: await hash(ffprobe),
       packagedBytes: fs.statSync(ffprobe).size, packageTransforms: process.platform === "darwin" ? "existing after-pack ad-hoc signing" : "none expected" }, null, 2) + "\n")
     if (process.platform !== "darwin") assert.equal(await hash(ffprobe), await hash(path.join(staged, facts.asset)), "packaging changed the source artifact")
-    run("helpers", process.execPath, ["scripts/verify-packaged-helpers.js", "--resources", resources, "--require-ffprobe"])
+    run("helpers", process.execPath, ["scripts/verify-packaged-helpers.js", "--resources", resources, "--require-ffprobe", ...(noticeRecord ? ["--require-ffprobe-notices"] : [])])
+    if (noticeRecord) fs.cpSync(path.join(resources, "third-party/ffprobe"), path.join(evidence, "installed-notices"), { recursive: true })
     if (process.platform === "darwin") run("libraries", "otool", ["-L", ffprobe])
     if (process.platform === "linux") run("libraries", "ldd", [ffprobe])
     if (process.platform === "win32") {
