@@ -142,13 +142,10 @@ no production manifest changes. See [release checks](../../docs/releasing.md).
 ## FFprobe-only build evaluation
 
 [`build-ffprobe-prototype.js`](../../scripts/build-ffprobe-prototype.js) evaluates
-an alternative executed locally on macOS ARM64. The first native Windows x64
-and Ubuntu 24.04 x64 attempts exposed source-export/configuration issues. A second
-run compiled Windows but refused its winpthread DLL dependency; Linux passed
-backend checks and stopped at the copied test app sandbox setup. Run 41503566940
-then passed all 12 Linux and Mac native commands. Current Windows build/import/
-backend and packaged UI checks passed; normal startup failed at the verified
-seed rename. Bounded lock handling and installed notices await native rerun.
+an alternative executed locally on macOS ARM64 and in native CI.
+[Run 41513771327](https://github.com/Cliply/Cliply/actions/runs/41513771327) passed
+all 12 native checks and installed notices on Mac, Windows and Linux at `07b3e9e`.
+Minimum-OS and production distribution acceptance remain pending.
 It exports clean source from FFmpeg n8.1,
 commit `9047fa1b084f76b1b4d065af2d743df1b40dfb56`, and builds FFprobe with internal
 demuxers/parsers/decoders and file/pipe/fd protocols. Autodetection, network,
@@ -182,8 +179,8 @@ include full source, hashed recipes/toolchain/configuration, all source notices,
 IJG attribution and offline rebuild instructions. See the
 [source-build and distribution specification](source-build.md) for exact commands,
 official toolchain evidence and deterministic source-asset preparation.
-Complete Windows native execution/runtime notices, minimum OS, final per-platform
-source/notice integration and reviewer selection remain required before production.
+Minimum OS, final source/distribution selection and production installer checks
+remain required before production.
 
 
 Source validation stages verified target packet-derived installed NOTICE,
@@ -193,6 +190,6 @@ the installed Linux notice path passed in run 41507047367. Production notice
 records remain absent until final review.
 An explicit source-CI retention option preserves only a successfully validated
 helper and exact source/build/notice inputs as a two-day reviewer artifact;
-Windows runtime pins now preserve the exact captured GCC/MinGW/winpthreads notices;
-the new Windows installed-notice path still needs native validation. See the
+Windows runtime pins preserve the exact captured GCC/MinGW/winpthreads notices;
+their installed mapping passed native validation in run 41513771327. See the
 [source guide](source-build.md#optional-short-lived-reviewer-artifact).

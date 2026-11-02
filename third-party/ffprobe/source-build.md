@@ -39,9 +39,9 @@ Mac behavior and avoids the observed Apple clang default-optimization variance.
 
 | Target | Explicit toolchain/target | Evidence boundary |
 | --- | --- | --- |
-| macOS ARM64 | Apple clang; all commands through `/usr/bin/arch -arm64`; target macOS 13 | Locally executed; compiler, SDK and actual tool hashes recorded |
-| Ubuntu 24.04 x64 | `/usr/bin/gcc-13`, NASM, `--arch=x86_64 --target-os=linux`, baseline x86-64 | All 12 native commands and installed notices passed on Ubuntu 24.04 in run 41507047367 |
-| Windows x64 | MSYS2 UCRT64 GCC/NASM, `--arch=x86_64 --target-os=mingw32`, native Win32 threads | Build/import/backend and packaged UI passed; normal startup seed rename failed; bounded lock handling and installed notices await native rerun |
+| macOS ARM64 | Apple clang; all commands through `/usr/bin/arch -arm64`; target macOS 13 | All 12 native commands and installed notices passed on macOS 26 in run 41513771327; macOS 13 remains untested |
+| Ubuntu 24.04 x64 | `/usr/bin/gcc-13`, NASM, `--arch=x86_64 --target-os=linux`, baseline x86-64 | All 12 native commands and installed notices passed on Ubuntu 24.04 in run 41513771327 |
+| Windows x64 | MSYS2 UCRT64 GCC/NASM, `--arch=x86_64 --target-os=mingw32`, native Win32 threads | All 12 native commands and installed notices passed on Windows Server 2025 in run 41513771327; Windows 10 remains untested |
 
 Windows uses an explicitly supplied MSYS2 root and its UCRT64 compiler rather
 than the MSYS compiler. It requests static compiler/runtime archives, disables PE linker timestamps
@@ -175,10 +175,9 @@ Provide the verified source asset beside the new helper
 release asset. Final source URLs, signed binary hashes and source asset hashes
 belong in the reviewed publication record after actual upload verification.
 
-Mac and Linux packet assembly is audited against retained native inputs from
-run 41503566940. Windows now has a narrow runtime pin from run 41507047367;
-its new packet/installed-notice path still requires native validation. Complete Windows native evidence,
-toolchain reproducibility, minimum OS, clean installed/offline behavior, storage
+All three target packets and installed mappings passed native checks and
+independent artifact audits in run 41513771327 at `07b3e9e`.
+Toolchain reproducibility, minimum OS, clean installed/offline behavior, storage
 coverage, final per-platform notice integration and verified publication remain
 gates before production selection. Archive size is source-distribution overhead,
 not installer growth; measure the small installed notice delta separately.
@@ -299,13 +298,14 @@ its runtime material does not turn that failed run into a successful candidate.
 Foreign-host source assembly and retained-candidate creation still require every
 native validation command to pass against the exact helper.
 
-Windows source packets and installed notices require a successful native rerun.
-The current packaged UI check passed, but normal startup failed at the verified
-yt-dlp seed rename. Bounded lock handling preserves the replacement gate and
-rollback; see [engine swap behavior](../../docs/architecture.md#binary-and-update-boundaries).
+Windows source packets, installed notices and all 12 required native commands
+passed in [run 41513771327](https://github.com/Cliply/Cliply/actions/runs/41513771327).
+Bounded lock handling preserves the replacement gate and rollback; see
+[engine swap behavior](../../docs/architecture.md#binary-and-update-boundaries).
 Smoke checks reject shutdown diagnostics even at exit zero and report copied-app
-cleanup failures without masking the primary failure. No successful Windows
-source packet or installed-notice size is claimed from the failed validation.
+cleanup failures without masking the primary failure. The audited Windows source
+packet is 17,218,854 bytes; installed notices including their source record total
+111,734 bytes. These are source/notice measurements, not installer growth.
 
 The Windows entry in runtime-notices.json freezes the observed complete package
 list, GCC/NASM/linker hashes, system-only imports and 13 complete package notice
@@ -332,8 +332,8 @@ packet records that limit explicitly and does not claim to contain them. The
 packet does contain the complete exact FFmpeg source used for this executable.
 No MSYS2/compiler executable, runtime archive or system DLL is redistributed.
 
-Windows installed-notice validation must run natively before acceptance of this
-path. Minimum Windows 10, clean installed/offline behavior, source/distribution
+Windows installed-notice validation has passed on the recorded native host.
+Minimum Windows 10, clean installed/offline behavior, source/distribution
 selection and production publication remain separate gates. No deterministic
 Windows executable rebuild is inferred merely from fixed tool versions; native
 artifact hashes identify the particular build validated by each run.
