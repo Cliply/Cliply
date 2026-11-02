@@ -115,8 +115,8 @@ if (!process.versions.electron) {
           projectRoot: userData // absent by default: proves graceful missing support
         })
       })
-      registerLocalMedia({ ipcMain, service: localMedia, getWindow: () => cliplyApp.mainWindow })
-      cliplyApp.ipcHandlers = { localMedia, setMainWindow: (window) => localMedia.preview.attach(window) }
+      const unregisterLocalMedia = registerLocalMedia({ ipcMain, service: localMedia, getWindow: () => cliplyApp.mainWindow })
+      cliplyApp.ipcHandlers = { localMedia, cleanup: unregisterLocalMedia, setMainWindow: (window) => localMedia.preview.attach(window) }
       ipcMain.handle("settings:get-download-count", () => ({ success: true, data: { count: 123 } }))
       ipcMain.handle("settings:get-download-path", () => ({
         success: true, data: { path: userData, exists: true, writable: true }

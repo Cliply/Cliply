@@ -1,5 +1,5 @@
 // Deterministic source/notice evaluation packets for explicitly reviewed inputs.
-// Never publishes or modifies project binaries. Windows runtime review is pending.
+// Never publishes or modifies project binaries; production selection is separate.
 const fs = require("node:fs"), path = require("node:path"), assert = require("node:assert/strict")
 const { parseArgs } = require("node:util")
 const { sourcePin, hash, configurationFor, inspectArchitecture, inspectConfiguration, inspectLibraries } = require("./build-ffprobe-prototype")
@@ -53,6 +53,13 @@ function verifyRuntimeNotices(facts, directory) {
     assert(fs.lstatSync(path.join(directory, name)).isFile(), "runtime notice must be a regular file")
     assert.equal(hash(path.join(directory, name)), digest, "runtime notice changed: " + name)
   }
+  if (pin.threadRuntimeArchive) {
+    const inventory = JSON.parse(fs.readFileSync(path.join(directory, "inventory.json"), "utf8"))
+    assert.equal(inventory.platform, facts.platform, "runtime inventory platform changed")
+    for (const [key, value] of Object.entries(pin.threadRuntimeArchive)) {
+      assert.equal(inventory.threadRuntimeArchive?.[key], value, "static thread runtime changed: " + key)
+    }
+  }
   return pin
 }
 async function packageSource({ buildDirectory, output, runtimeDirectory, validationDirectory }) {
@@ -70,6 +77,7 @@ async function packageSource({ buildDirectory, output, runtimeDirectory, validat
   for (const file of ["scripts/build-ffprobe-prototype.js", "scripts/package-ffprobe-source.js", "third-party/ffprobe/source-build.json", "third-party/ffprobe/runtime-notices.json", "third-party/ffprobe/NOTICE.source-build.txt", "third-party/ffprobe/source-build.md"]) copy(path.join(repo, file), file)
   for (const file of Object.keys(sourcePin.licenseFiles)) copy(path.join(buildDirectory, "source", file), "notices/" + file)
   if (runtime) for (const name of Object.keys(runtime.files)) copy(path.join(runtimeDirectory, name), "runtime-notices/" + name)
+  if (runtime?.threadRuntimeArchive) copy(path.join(runtimeDirectory, "inventory.json"), "runtime-notices/inventory.json")
   // Fixed inputs => fixed packet. Remove task-specific path spelling, not toolchain
   // versions, hashes, configuration, licenses or library identities.
   const normalize = text => text.split(buildDirectory).join("$BUILD")
@@ -113,6 +121,7 @@ function stageInstalledNotices({ buildDirectory, packetDirectory, output, valida
   const runtime = verifyRuntimeNotices(facts, path.join(packetDirectory, "packet/runtime-notices"))
   if (runtime) {
     inputs["COPYING.GPLv3"] = "notices/COPYING.GPLv3"
+    if (facts.platform === "win32-x64") inputs["COPYING.GPLv2"] = "notices/COPYING.GPLv2"
     for (const [name, input] of Object.entries(runtime.installedFiles)) inputs[name] = "runtime-notices/" + input
   }
   assert(path.isAbsolute(output)); fs.mkdirSync(output)

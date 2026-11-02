@@ -26,7 +26,7 @@ async function validateSource({ source, evidence, retain }) {
     // validation still cannot retain a helper or a successful candidate record.
     const runtimeDirectory = path.join(evidence, "runtime-notices")
     collectRuntimeNotices(runtimeDirectory, process.platform + "-" + process.arch)
-    if (process.platform === "darwin" || process.platform === "linux") {
+    if (["darwin", "linux", "win32"].includes(process.platform)) {
       packetDirectory = path.join(scratch, "packet-a")
       const first = await packageSource({ buildDirectory: output, runtimeDirectory, output: packetDirectory })
       const second = await packageSource({ buildDirectory: output, runtimeDirectory, output: path.join(scratch, "packet-b") })

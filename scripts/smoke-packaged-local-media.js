@@ -13,6 +13,7 @@ async function run(resources, { idleOnly = false, normalStartup = false, longMed
   await verifyPackagedHelpers(resources, { requireFfprobe: !idleOnly && !normalStartup })
   const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "cliply-local-package-"))
   let restoreSandbox
+  let failure
   try {
     const mac = process.platform === "darwin"
     const sourceApp = mac ? path.resolve(resources, "../..") : path.dirname(resources)
@@ -39,10 +40,27 @@ async function run(resources, { idleOnly = false, normalStartup = false, longMed
     const result = spawnSync(executable, [], { env, encoding: "utf8", timeout: 90000, maxBuffer: 8 * 1024 * 1024 })
     process.stdout.write(result.stdout || ""); process.stderr.write(result.stderr || "")
     assert.equal(result.status, 0, result.error?.message || "packaged local-media smoke failed")
+    assert.doesNotMatch((result.stdout || "") + (result.stderr || ""), /Error during shutdown:/, "packaged app reported a shutdown failure")
     assert.match(result.stdout, normalStartup ? /Normal service startup passed:/ : idleOnly ? /Packaged idle measurement:/ : /Local integration passed:/)
     console.log(idleOnly ? "Packaged idle check passed" : "Packaged local media passed without development helper overrides")
+  } catch (error) {
+    failure = error
+    throw error
   } finally {
-    try { restoreSandbox?.() } finally { fs.rmSync(scratch, { recursive: true, force: true }) }
+    const cleanupErrors = []
+    try { restoreSandbox?.() } catch (error) { cleanupErrors.push(error) }
+    try {
+      // Only our disposable copy, after spawnSync has returned. Windows image
+      // handles may outlive process exit briefly; never hide a persistent lock.
+      fs.rmSync(scratch, { recursive: true, force: true, maxRetries: process.platform === "win32" ? 5 : 0, retryDelay: 100 })
+    } catch (error) { cleanupErrors.push(error) }
+    if (cleanupErrors.length) {
+      if (failure) {
+        for (const error of cleanupErrors) console.error("Packaged smoke cleanup failed:", error)
+      } else {
+        throw new AggregateError(cleanupErrors, "Packaged smoke cleanup failed")
+      }
+    }
   }
 }
 if (require.main === module) {

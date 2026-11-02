@@ -534,6 +534,12 @@ comes from official upstream archives. The runtime updater seeds from the packag
 then verifies, stages, probes and swaps newer upstream engines into writable user
 data under the gate. Calling `yt-dlp -U` is not the app's update mechanism.
 
+On Windows, atomic directory swaps retry only EPERM/EBUSY rename failures up to
+five times with 100–500 ms delays (1.5 seconds total per rename). The caller's
+replacement gate stays held through retire, install and any rollback; persistent
+failures still fail and retain existing recovery metadata. Other errors and
+platforms fail immediately. Probes still wait for child closure before swapping.
+
 Optional token recovery builds the provider's native dependencies per platform,
 checks a pinned payload hash and downloads only on demand. It is not a dependency
 that every installer carries. Cookie imports and token escalation are different

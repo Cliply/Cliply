@@ -86,11 +86,12 @@ authorized and pushed. It calls
 at the same commit, builds the exact pinned FFmpeg-only design and validates
 that executable in a disposable native app. Supplier mode retains priority if
 both flags are set; ordinary app/helper-publication jobs are excluded in either
-mode. By default only small evidence is uploaded. Mac and reviewed Linux draft source packets are assembled
-and checked twice in scratch, then removed. Run 41503566940 passed all 12 native
-commands on Mac/Linux. Windows passed backend checks but failed packaged UI
-initial inspection. The new Linux installed runtime-notice path needs a native
-rerun; no final platform acceptance is implied.
+mode. By default only small evidence is uploaded. Target draft source packets with reviewed runtime inputs are assembled
+and checked twice in scratch, then removed. Mac/Linux native checks and Linux
+installed notices have passed. Windows packaged UI/playback/all four actions
+passed; normal startup failed at the verified seed rename. Bounded Windows lock
+handling and installed notices await native rerun. Failed validation cannot
+qualify a successful retained candidate; final platform acceptance remains open.
 See [source-build commands, notices and packet specification](../third-party/ffprobe/source-build.md).
 
 Locally, `node scripts/validate-ffprobe-source.js --source <pinned-checkout>
@@ -106,12 +107,13 @@ packets remain marked unapproved; failed validation creates no final candidate
 artifact. See the source guide for checksum verification and cleanup. Retention
 is off by default and ignored outside source-check mode.
 
-The Mac/Linux source check stages installed NOTICE/LGPL/source mapping in its
+The source check stages installed NOTICE/LGPL/source mapping in its
 private package. Production after-pack requires the reviewed platform source
 record/checksum whenever a production FFprobe pin exists, and binds the mapping
 to the actual signed helper. Linux also requires pinned GCC/glibc runtime notices
-and full GPLv3 text. Windows runtime/source review and a native rerun of Linux
-installed notices remain pending; the production manifest stays empty.
+and full GPLv3 text. Windows adds exact GCC/MinGW/winpthreads notices and the
+additional GPL texts, with an archive-owner/hash check. The new Windows installed
+notice path still needs native validation; the production manifest stays empty.
 
 With existing dependencies, built renderer and ordinary project helpers, the
 same candidate checks can run locally:
@@ -169,7 +171,7 @@ used. Local desktop runs do not perform this privileged CI setup.
 The owner authorized new verified shared FFprobe assets and source records once
 the recorded readiness conditions pass. That does not authorize unverified
 candidates, replacement of existing assets, an app release or a workflow dispatch.
-Complete Windows native validation, Linux installed-notice rerun, minimum-OS
+Complete Windows native/installed-notice validation, minimum-OS
 and final source/installed-package gates remain outstanding.
 
 The Linux package smoke script runs only on an ephemeral GitHub runner. It copies

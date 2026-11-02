@@ -19,8 +19,6 @@ preserved in those files; complete copies accompany the source packet.
 No external codec libraries are enabled. This does not mean there are no
 operating-system or compiler-runtime dependencies. The platform build record
 identifies the toolchain, final configuration and actual library imports.
-Windows compiler-runtime licensing/notices must be reviewed after native
-execution before preparing a Windows distribution packet.
 
 The evaluated Linux distribution includes GCC-RUNTIME-NOTICES.txt (including
 the GCC Runtime Library Exception 3.1), COPYING.GPLv3 and GLIBC-NOTICES.txt.
@@ -28,6 +26,16 @@ These preserve the exact Ubuntu package notices for the recorded compiler and
 runtime inputs. The source packet records their hashes and exact source-package
 versions/locations in third-party/ffprobe/runtime-notices.json. Shared operating-
 system libraries are supplied by the OS, not copied into this distribution.
+
+The evaluated Windows distribution includes GCC-RUNTIME-EXCEPTION.txt,
+COPYING.GPLv3, COPYING.GPLv2, MINGW-ZPL.txt, MINGW-RUNTIME-NOTICES.txt,
+MINGW-NOTICES.txt, MINGW-DDK-NOTICES.txt and WINPTHREADS-NOTICES.txt.
+These preserve the captured GCC, MinGW-w64 and winpthreads package notices,
+including notices for optional toolchain components. Their inclusion does not
+enable optional GPL components in FFprobe. The exact package versions, notice
+hashes, static thread-runtime archive identity and versioned source-package
+locations are recorded in the source packet. Shared Windows/UCRT system DLLs
+are supplied by the OS and are not redistributed with this helper.
 
 There is no warranty; the applicable license texts and source notices govern.
 The corresponding-source packet includes the complete unmodified source,

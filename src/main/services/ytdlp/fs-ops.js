@@ -6,8 +6,24 @@
 
 const fsp = require("fs").promises
 const path = require("path")
+const { setTimeout: delay } = require("node:timers/promises")
 
 const { resolveExecutableIn } = require("./paths")
+
+// Windows can keep an executable directory locked briefly after its verified
+// probe has closed. Retry only lock-compatible rename failures, while the
+// caller still holds its replacement gate. Permanent failures reach rollback.
+async function renameDirectory(from, to) {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      await fsp.rename(from, to)
+      return
+    } catch (error) {
+      if (process.platform !== "win32" || !["EPERM", "EBUSY"].includes(error.code) || attempt >= 5) throw error
+      await delay(100 * (attempt + 1))
+    }
+  }
+}
 
 /**
  * put a prepared directory in place of the live one
@@ -31,17 +47,17 @@ async function swapDirectories(preparedDir, installedDir) {
     // whatever is there goes, directory or not - an older build's onefile
     // could be sitting on this exact path
     if (await pathExists(installedDir)) {
-      await fsp.rename(installedDir, retiredDir)
+      await renameDirectory(installedDir, retiredDir)
       retired = true
     }
 
-    await fsp.rename(preparedDir, installedDir)
+    await renameDirectory(preparedDir, installedDir)
   } catch (error) {
     if (retired) {
       await removeQuietly(installedDir)
 
       try {
-        await fsp.rename(retiredDir, installedDir)
+        await renameDirectory(retiredDir, installedDir)
       } catch (restoreError) {
         // the previous engine is still on disk, just not where the engine
         // looks for it. losing that fact here is how a user ends up with no

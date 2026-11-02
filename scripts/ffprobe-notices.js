@@ -22,6 +22,7 @@ function validateRecord(record, platform, published) {
   const runtime = runtimePins[platform]
   if (runtime) {
     assert.equal(record.files["COPYING.GPLv3"], sourcePin.licenseFiles["COPYING.GPLv3"], "missing runtime GPL text")
+    if (platform === "win32-x64") assert.equal(record.files["COPYING.GPLv2"], sourcePin.licenseFiles["COPYING.GPLv2"], "missing runtime GPLv2 text")
     for (const [name, input] of Object.entries(runtime.installedFiles)) {
       assert.equal(record.files[name], runtime.files[input], "missing or altered runtime notice: " + name)
     }

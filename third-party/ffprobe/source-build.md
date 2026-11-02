@@ -40,8 +40,8 @@ Mac behavior and avoids the observed Apple clang default-optimization variance.
 | Target | Explicit toolchain/target | Evidence boundary |
 | --- | --- | --- |
 | macOS ARM64 | Apple clang; all commands through `/usr/bin/arch -arm64`; target macOS 13 | Locally executed; compiler, SDK and actual tool hashes recorded |
-| Ubuntu 24.04 x64 | `/usr/bin/gcc-13`, NASM, `--arch=x86_64 --target-os=linux`, baseline x86-64 | All 12 native commands passed on Ubuntu 24.04 in run 41503566940; new installed runtime notices await rerun |
-| Windows x64 | MSYS2 UCRT64 GCC/NASM, `--arch=x86_64 --target-os=mingw32`, native Win32 threads | Run 41503566940 passed build/import/backend checks; packaged UI failed its first inspection |
+| Ubuntu 24.04 x64 | `/usr/bin/gcc-13`, NASM, `--arch=x86_64 --target-os=linux`, baseline x86-64 | All 12 native commands and installed notices passed on Ubuntu 24.04 in run 41507047367 |
+| Windows x64 | MSYS2 UCRT64 GCC/NASM, `--arch=x86_64 --target-os=mingw32`, native Win32 threads | Build/import/backend and packaged UI passed; normal startup seed rename failed; bounded lock handling and installed notices await native rerun |
 
 Windows uses an explicitly supplied MSYS2 root and its UCRT64 compiler rather
 than the MSYS compiler. It requests static compiler/runtime archives, disables PE linker timestamps
@@ -51,9 +51,9 @@ FFmpeg pthreads being disabled and `-static-libgcc`. The corrected link adds
 `-static`; the DLL allow-list remains unchanged. [GCC's link documentation](https://gcc.gnu.org/onlinedocs/gcc/Link-Options.html)
 distinguishes static library selection from the libgcc-only option, and the
 [UCRT64 winpthreads package](https://packages.msys2.org/packages/mingw-w64-ucrt-x86_64-winpthreads)
-contains both static and DLL import archives. Run 41503566940 passed the strict
-DLL gate and backend media checks; its packaged UI failed initial inspection.
-That failure did not retain a candidate, and is not Windows acceptance. Static runtime selection does not establish the licensing/source
+contains both static and DLL import archives. The strict DLL gate, backend media
+and packaged UI checks passed; normal startup and the new installed-notice path
+still need a successful rerun. Static runtime selection does not establish the licensing/source
 requirements of those objects: inspect the first native link/toolchain evidence and
 retain the matching runtime notices before distributing a Windows asset.
 Linux permits only the recorded standard libc/libm/pthread/dl/rt/libgcc/loader
@@ -113,9 +113,9 @@ node scripts/validate-ffprobe-source.js --source <absolute-pinned-checkout> --ev
 ```
 
 Omit `--source` to fetch only the pinned commit into owned scratch. The script
-builds, prepares the Mac or reviewed Linux draft source packet twice, checks packet determinism,
+builds, prepares the target draft source packet twice, checks packet determinism,
 runs native validation and removes large scratch artifacts. By default it retains
-only small build/log/configuration/package evidence. On Mac and Linux, it also stages and
+only small build/log/configuration/package evidence. On reviewed targets, it also stages and
 verifies the packet-derived installed notices in the actual private package. Source acquisition and native
 build failures remain failures; no supplier or platform fallback exists.
 
@@ -127,13 +127,13 @@ and helper-publication jobs. No workflow is dispatched by this change.
 
 ## Corresponding-source packet specification
 
-Mac and reviewed Linux draft assets use existing developer tooling:
+Mac, reviewed Linux and Windows draft assets use existing developer tooling:
 
 ```sh
 node scripts/package-ffprobe-source.js --build <absolute-verified-build> --output <new-owned-packet-directory>
 ```
 
-For Linux, also pass `--runtime-notices <absolute-native-notice-directory>`.
+For Linux and Windows, also pass `--runtime-notices <absolute-native-notice-directory>`.
 Name: `ffprobe-source-<commit12>-<platform>-<unsigned-executable-sha12>-<packet-sha12>.tar.gz`.
 The content digest keeps source/notice revisions from colliding even if the
 executable bytes stay unchanged.
@@ -176,8 +176,8 @@ release asset. Final source URLs, signed binary hashes and source asset hashes
 belong in the reviewed publication record after actual upload verification.
 
 Mac and Linux packet assembly is audited against retained native inputs from
-run 41503566940. Windows packet generation remains refused pending runtime review.
-No codec source gap is hidden by that refusal. Complete Windows native evidence,
+run 41503566940. Windows now has a narrow runtime pin from run 41507047367;
+its new packet/installed-notice path still requires native validation. Complete Windows native evidence,
 toolchain reproducibility, minimum OS, clean installed/offline behavior, storage
 coverage, final per-platform notice integration and verified publication remain
 gates before production selection. Archive size is source-distribution overhead,
@@ -201,12 +201,13 @@ existing signing/audit steps. `verify-packaged-helpers.js --require-ffprobe-noti
 requires that mapping and the actual files. Wrong binaries, missing/altered licenses,
 unsafe notice filenames and altered source mappings fail the check.
 
-The evaluated Mac and Linux packets supply these files through an explicit
+The evaluated target packets supply these files through an explicit
 private-build `CLIPLY_FFPROBE_NOTICE_RECORD` path, independent of supplier validation.
 Linux additionally requires the exact GCC runtime and glibc notices plus the
 full GPLv3 text; dropping or altering them fails installed-record verification.
-Windows runtime material still requires native review. No production selection
-is implied.
+Windows additionally requires the captured GCC exception, MinGW and winpthreads
+notices and the full GPLv2 text referenced by the broader toolchain notices.
+No production selection is implied.
 
 For a future verified production platform, the published record must name
 `distributions/<platform>/SOURCE.json` relative to this directory and pin its
@@ -230,7 +231,7 @@ Locally the equivalent is `validate-ffprobe-source.js --evidence <new-absolute-d
 Only after every required native/package/UI/recovery command passes, retention
 checks the exact validated input hash and writes a new artifact atomically. It
 contains the validated original helper, source/build records and checksum inventory,
-plus the corresponding Mac source packet and installed notices when available.
+plus the corresponding target source packet and installed notices when available.
 For platforms whose packet/runtime review is incomplete, it retains the exact
 source tar, standalone recipe/pins, upstream notices and native compiler/runtime
 notice inputs instead. Those inputs are explicitly **not a finished distribution
@@ -256,8 +257,9 @@ Run [41503566940](https://github.com/Cliply/Cliply/actions/runs/41503566940)
 passed all 12 native commands on Ubuntu 24.04, including the sandboxed UI. Its
 12,892,520-byte FFprobe SHA256 is
 `65e92c06ffb12a455a229a2cff419721f2ff2897b52a9122cd638452777875c7`; imports are
-only `libc.so.6` and `libm.so.6`. This run predates the installed Linux notice
-extension; the next native run must exercise those installed files.
+only `libc.so.6` and `libm.so.6`. That run predates the installed Linux notice
+extension; run 41507047367 subsequently passed all 12 native commands with the
+installed runtime notices and source mapping verified.
 
 [runtime-notices.json](runtime-notices.json) freezes the observed package versions,
 GCC/NASM/linker hashes, imports and three complete Ubuntu copyright files. Changed
@@ -286,3 +288,52 @@ helper or report a successful source packet. The Windows inspection assertion
 now records the safe IPC error code/message, trusted-main-frame result and
 synthetic fixture existence to distinguish the observed failure on its rerun.
 No production security or lifecycle check is bypassed.
+
+## Windows runtime inputs
+
+The first captured runtime set is from native run
+[41507047367](https://github.com/Cliply/Cliply/actions/runs/41507047367). Its source
+build and backend checks passed, but packaged UI failed because the legacy
+renderer loader and strict authorization used different URL encodings. Reviewing
+its runtime material does not turn that failed run into a successful candidate.
+Foreign-host source assembly and retained-candidate creation still require every
+native validation command to pass against the exact helper.
+
+Windows source packets and installed notices require a successful native rerun.
+The current packaged UI check passed, but normal startup failed at the verified
+yt-dlp seed rename. Bounded lock handling preserves the replacement gate and
+rollback; see [engine swap behavior](../../docs/architecture.md#binary-and-update-boundaries).
+Smoke checks reject shutdown diagnostics even at exit zero and report copied-app
+cleanup failures without masking the primary failure. No successful Windows
+source packet or installed-notice size is claimed from the failed validation.
+
+The Windows entry in runtime-notices.json freezes the observed complete package
+list, GCC/NASM/linker hashes, system-only imports and 13 complete package notice
+files. Seven unique notice contents are retained without edits. Installed notices
+deduplicate identical copies; the GCC COPYING3 bytes match the already pinned
+upstream GPLv3 text. The MinGW runtime text preserves its historical Cephes FIXME
+and all third-party notices verbatim; no new claim about individual object
+licensing is inferred from the top-level package label. GPLv2 accompanies the
+optional profiling-code reference in the broader MinGW toolchain notice; this
+does not enable profiling or GPL components in FFprobe. The source packet also
+includes the actual runtime inventory and checks the static libwinpthread.a
+hash and exact pacman owner/version. An unexpected library, package, compiler,
+notice or thread archive fails the existing gates rather than being accepted.
+
+Official [GCC](https://packages.msys2.org/packages/mingw-w64-ucrt-x86_64-gcc),
+[CRT](https://packages.msys2.org/packages/mingw-w64-ucrt-x86_64-crt),
+[headers](https://packages.msys2.org/packages/mingw-w64-ucrt-x86_64-headers) and
+[winpthreads](https://packages.msys2.org/packages/mingw-w64-ucrt-x86_64-winpthreads)
+records checked 3 November 2026 match the captured GCC 16.2.0-6 and MinGW
+14.0.0.r569.g34eeafb7d-1 versions and packager runs. Their exact versioned
+source-only tarball URLs are recorded in runtime-notices.json. Those compiler/
+runtime source archives have not been downloaded or content-hashed here; the
+packet records that limit explicitly and does not claim to contain them. The
+packet does contain the complete exact FFmpeg source used for this executable.
+No MSYS2/compiler executable, runtime archive or system DLL is redistributed.
+
+Windows installed-notice validation must run natively before acceptance of this
+path. Minimum Windows 10, clean installed/offline behavior, source/distribution
+selection and production publication remain separate gates. No deterministic
+Windows executable rebuild is inferred merely from fixed tool versions; native
+artifact hashes identify the particular build validated by each run.

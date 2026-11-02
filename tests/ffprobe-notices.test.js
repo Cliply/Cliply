@@ -61,17 +61,18 @@ test("installed notice or record tampering is rejected", () => {
   installed.record.sourceAsset.sha256 = "b".repeat(64); fs.writeFileSync(file, serialize(installed))
   expect(() => verifyInstalledNotices(resources, "darwin-arm64", { required: true, published: null })).toThrow(/record checksum/)
 })
-test("Linux records require the reviewed runtime notices and full GPL text", () => {
-  record.platform = "linux-x64"
-  record.sourceAsset.name = record.sourceAsset.name.replace("darwin-arm64", "linux-x64")
-  const runtime = require("../third-party/ffprobe/runtime-notices.json")["linux-x64"]
+test.each(["linux-x64", "win32-x64"])("%s records require the reviewed runtime notices and full GPL texts", platform => {
+  record.platform = platform
+  record.sourceAsset.name = record.sourceAsset.name.replace("darwin-arm64", platform)
+  const runtime = require("../third-party/ffprobe/runtime-notices.json")[platform]
   record.files["COPYING.GPLv3"] = pin.licenseFiles["COPYING.GPLv3"]
+  if (platform === "win32-x64") record.files["COPYING.GPLv2"] = pin.licenseFiles["COPYING.GPLv2"]
   for (const [name, input] of Object.entries(runtime.installedFiles)) record.files[name] = runtime.files[input]
-  expect(() => validateRecord(record, "linux-x64", null)).not.toThrow()
-  for (const name of ["COPYING.GPLv3", ...Object.keys(runtime.installedFiles)]) {
+  expect(() => validateRecord(record, platform, null)).not.toThrow()
+  for (const name of ["COPYING.GPLv3", ...(platform === "win32-x64" ? ["COPYING.GPLv2"] : []), ...Object.keys(runtime.installedFiles)]) {
     const missing = structuredClone(record); delete missing.files[name]
-    expect(() => validateRecord(missing, "linux-x64", null)).toThrow(/runtime/)
+    expect(() => validateRecord(missing, platform, null)).toThrow(/runtime/)
     missing.files[name] = "b".repeat(64)
-    expect(() => validateRecord(missing, "linux-x64", null)).toThrow(/runtime/)
+    expect(() => validateRecord(missing, platform, null)).toThrow(/runtime/)
   }
 })
