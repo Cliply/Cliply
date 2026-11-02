@@ -44,7 +44,7 @@ jobs:
           - os: windows-latest
             asset: win32-x64
             deno: deno.exe
-          - os: macos-14
+          - os: macos-26
             asset: darwin-arm64
             deno: deno
     runs-on: ${{ matrix.os }}
