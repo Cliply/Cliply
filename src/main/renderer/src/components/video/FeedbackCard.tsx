@@ -1,3 +1,4 @@
+import { systemApi } from "@/lib/api"
 import { Button } from "@/components/ui/button"
 import { useT } from "@/lib/i18n"
 import { cn } from "@/lib/utils"
@@ -13,7 +14,7 @@ export function FeedbackCard({ className }: FeedbackCardProps) {
 
   const handleFeedback = () => {
     // Open cliply.space/hey page
-    window.open("https://cliply.space/hey", "_blank")
+    void systemApi.openExternal("https://cliply.space/hey")
   }
 
   return (

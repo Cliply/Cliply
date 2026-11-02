@@ -3,6 +3,7 @@ const path = require("node:path")
 const { randomUUID } = require("node:crypto")
 const { resolveFfprobe } = require("./local-media/paths")
 const { startProbe } = require("./local-media/probe")
+const { MediaPreview } = require("./local-media/preview")
 const { MediaError } = require("./local-media/errors")
 
 async function identify(sourcePath) {
@@ -48,8 +49,13 @@ class LocalMediaService {
     this.resolveProbe = resolveProbe
     this.runProbe = runProbe
     this.source = null
+    this.sourceError = null
     this.pending = null
     this.frozen = false
+    this.preview = new MediaPreview({
+      getSource: () => this.source, validate: assertUnchanged,
+      invalidate: () => { this.source = null; this.sourceError = new MediaError("SOURCE_CHANGED") }
+    })
   }
 
   // Only main supplies selectFile. There is no renderer path/argv input.
@@ -88,16 +94,19 @@ class LocalMediaService {
       schemaVersion: 1, sourceId: randomUUID(), filename: path.basename(selectedPath).slice(0, 512),
       bytes: identity.bytes, ...metadata, capabilities: capabilities()
     }
+    this.preview.revoke()
     this.source = source
+    this.sourceError = null
     return { cancelled: false, source: source.dto }
   }
 
   async getState() {
     const source = this.source
+    if (!source && this.sourceError) throw this.sourceError
     if (!source) return { source: null, busy: Boolean(this.pending) }
     try { await assertUnchanged(source) }
     catch (error) {
-      if (this.source === source) this.source = null
+      if (this.source === source) { this.source = null; this.preview.revoke() }
       throw error
     }
     // A close/replacement during the stat must never resurrect an old DTO.
@@ -106,7 +115,9 @@ class LocalMediaService {
   }
 
   async close() {
+    this.preview.revoke()
     this.source = null
+    this.sourceError = null
     const job = this.pending
     if (job) {
       job.cancelled = true
@@ -119,6 +130,7 @@ class LocalMediaService {
   }
 
   freeze() {
+    this.preview.revoke()
     this.frozen = true
   }
 

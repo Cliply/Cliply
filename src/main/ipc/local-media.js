@@ -1,29 +1,27 @@
-const path = require("node:path")
-const { pathToFileURL } = require("node:url")
+const { trustedFrame } = require("../services/local-media/preview")
 const { MediaError } = require("../services/local-media/errors")
 
-const CHANNELS = ["media:open", "media:get-state", "media:close"]
+const CHANNELS = ["media:open", "media:get-state", "media:close", "media:preview", "media:release-preview"]
 
 function registerLocalMedia({ ipcMain, service, getWindow, isDevelopment = false }) {
-  const trustedUrl = isDevelopment
-    ? "http://localhost:5173/"
-    : pathToFileURL(path.join(__dirname, "../renderer/dist/index.html")).href
   function authorized(event) {
     const window = getWindow()
-    if (!window || window.isDestroyed() || event.sender !== window.webContents ||
-        !event.senderFrame || event.senderFrame !== window.webContents.mainFrame) return false
-    try {
-      const url = new URL(event.senderFrame.url)
-      url.hash = ""
-      return url.href === trustedUrl
-    } catch { return false }
+    return window && event.sender === window.webContents && trustedFrame(window, event.senderFrame, isDevelopment)
   }
-  for (const [channel, method] of [[CHANNELS[0], "open"], [CHANNELS[1], "getState"], [CHANNELS[2], "close"]]) {
+  for (const [channel, method] of [[CHANNELS[0], "open"], [CHANNELS[1], "getState"], [CHANNELS[2], "close"], [CHANNELS[3], "preview"], [CHANNELS[4], "releasePreview"]]) {
     ipcMain.handle(channel, async (event, ...args) => {
       try {
         if (!authorized(event)) throw new MediaError("FORBIDDEN")
-        if (args.some((arg) => arg !== undefined)) throw new MediaError("REQUEST_INVALID")
-        const data = await service[method]()
+        let data
+        if (method === "preview" || method === "releasePreview") {
+          if (args.length !== 1 || typeof args[0] !== "string" ||
+              !(method === "preview" ? /^[a-f0-9-]{36}$/ : /^[a-f0-9]{64}$/).test(args[0])) throw new MediaError("REQUEST_INVALID")
+          if (method === "preview") data = await service.preview.create(args[0])
+          else { service.preview.revoke(args[0]); data = { released: true } }
+        } else {
+          if (args.some((arg) => arg !== undefined)) throw new MediaError("REQUEST_INVALID")
+          data = await service[method]()
+        }
         if (!authorized(event)) {
           await service.close()
           throw new MediaError("FORBIDDEN")

@@ -1,5 +1,6 @@
 "use client"
 
+import { systemApi } from "@/lib/api"
 import { motion } from "framer-motion"
 import { ArrowRight } from "lucide-react"
 import { Link } from "react-router-dom"
@@ -47,6 +48,7 @@ export const MenuVertical = ({
             <motion.a
               href={item.href}
               target="_blank"
+              onClick={(event) => { event.preventDefault(); void systemApi.openExternal(event.currentTarget.href) }}
               rel="noopener noreferrer"
               variants={{
                 initial: { x: -20, color: "inherit" },

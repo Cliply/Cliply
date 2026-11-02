@@ -16,6 +16,9 @@ if (!process.versions.electron) {
     if (process.env.CLIPLY_SMOKE_FFPROBE) {
       fs.writeFileSync(path.join(userData, "inspection.wav"), require("./smoke-local-media").wavFixture())
     }
+    if (process.env.CLIPLY_SMOKE_PREVIEW === "1") {
+      require("./smoke-local-preview").fixtures(userData)
+    }
     const args = [__filename, userData]
     // Source-tree Electron has no installed AppArmor profile on CI. Packaged
     // Linux checks exercise the real launchers without this test-only flag.
@@ -34,6 +37,7 @@ if (!process.versions.electron) {
   const appRoot = process.env.CLIPLY_SMOKE_APP_ROOT === "bundled"
     ? path.join(process.resourcesPath, "cliply-under-test.asar")
     : path.resolve(__dirname, "..")
+  require(path.join(appRoot, "src/main/services/local-media/preview")).registerMediaScheme(require("electron").protocol)
   app.setPath("userData", userData)
   app.setPath("sessionData", userData)
   const watchdog = setTimeout(() => {
@@ -82,6 +86,7 @@ if (!process.versions.electron) {
         })
       })
       registerLocalMedia({ ipcMain, service: localMedia, getWindow: () => cliplyApp.mainWindow })
+      cliplyApp.ipcHandlers = { localMedia, setMainWindow: (window) => localMedia.preview.attach(window) }
       ipcMain.handle("settings:get-download-count", () => ({ success: true, data: { count: 123 } }))
       ipcMain.handle("settings:get-download-path", () => ({
         success: true, data: { path: userData, exists: true, writable: true }
@@ -133,6 +138,9 @@ if (!process.versions.electron) {
     }
     assert.equal(state.mediaClosed, true)
     assert.equal(state.mediaSourceAfterClose, null)
+    if (process.env.CLIPLY_SMOKE_PREVIEW === "1") {
+      await require("./smoke-local-preview").run({ window: cliplyApp.mainWindow, service: localMedia, userData, cliplyApp })
+    }
     await localMedia.shutdown()
     assert.equal(state.count, 123, "preload IPC round trip")
     assert.equal(state.rendered, true, "React mounted from the built file")

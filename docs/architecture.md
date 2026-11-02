@@ -85,34 +85,69 @@ When adding a channel or changing a response, inspect main handlers, preload,
 renderer declarations, API wrappers and their tests together. Keep Node/file
 access in main and expose only the required bridge operations.
 
-## Local-file inspection (Stage 1)
+## Local-file inspection and preview (Stages 1–2)
 
 [`local-media.js`](../src/main/services/local-media.js) owns one in-memory source
 and at most one inspection, separately from download history, slots and the
-yt-dlp update gate. There is no local workspace/player/export UI yet. No startup
-scan, saved project, file-byte endpoint or new analytics is introduced.
+yt-dlp update gate. The home entry opens the `/media` workspace after a successful
+native selection. The separate session-only store retains source/position across
+routes; global download subscriptions and the panel remain mounted. No startup
+scan, saved project, media-writing operation or new analytics is introduced.
 
 The narrow [`media` IPC handlers](../src/main/ipc/local-media.js), preload and
-renderer `mediaApi` expose three argument-free calls:
+renderer `mediaApi` expose these calls (only the two preview calls take an ID):
 
 | Call | Successful data |
 | --- | --- |
 | `media:open` | `{ cancelled, source }`; main selects one file through a native dialog. Cancel leaves the existing source open. |
 | `media:get-state` | `{ source, busy }`; rechecks source identity before returning metadata. |
 | `media:close` | `{ closed: true }`; revokes the source and cancels/drains a running probe. A pending dialog's eventual result is discarded. |
+| `media:preview(sourceId)` | `{ sourceId, previewId, url, mime, expiresAt }`; one temporary access grant for the currently registered source. |
+| `media:release-preview(previewId)` | `{ released: true }`; revokes that grant without closing the inspected source. |
 
 Only the application window's main frame at its expected local URL is accepted;
-renderer-supplied paths/options are refused. The current host is still unsuitable
-for local preview: Stage 2 must establish its secure context and session before
-any protocol or file bytes are exposed. These inspection checks do not claim to
-solve the existing `webSecurity:false` window's remote-content risks.
+renderer-supplied paths/options are refused. The shared host now requires
+`webSecurity:true`, `sandbox:true`, `contextIsolation:true`, `nodeIntegration:false`
+and `allowRunningInsecureContent:false`. Top-level external navigation and new
+Electron windows are denied; app website links use the existing external-browser
+bridge. The scoped YouTube embed referer is preserved in the same session hook.
+
+[`preview.js`](../src/main/services/local-media/preview.js) registers the
+`cliply-media` scheme before app readiness and its handler only in the owner's
+session. Its exact URL contains a random 256-bit token, never a path. Tokens last
+30 minutes and are revoked on replacement, close, expiry, full navigation,
+renderer loss or shutdown. Route cleanup releases the token and stops/unloads
+the native element; returning requests new access and restores position.
+Unloading the element during expiry/retry must not overwrite that position with
+the browser's reset-to-zero time event.
+
+Before sending headers, main checks the owner WebContents, exact trusted top
+frame URL, GET/HEAD method and media/fetch request type, then injects a private
+proof header. The protocol fails closed without that proof; caller headers are
+overwritten. A leaked URL alone cannot authorize foreign frames/windows/sessions.
+The one header hook also preserves the YouTube referer; do not replace it with
+another listener. CSP permits the custom scheme for media/fetch without a CSP
+bypass privilege. Responses are uncached and stream only the main-owned file;
+single prefix/open/suffix byte ranges and HEAD are supported, malformed or multiple
+ranges return 416, and at most four streams remain live. Identity is rechecked
+before opening and on the opened descriptor to catch replacement during open.
+Revocation destroys active streams. A local process can still modify bytes during
+an already-open read: this is a bounded stat detector, not an immutable snapshot.
+
+The workspace rechecks identity every two seconds while mounted. Native controls
+report loading/play/seek/end/error, support audio-only media and distinguish
+decoder failure from successful inspection. The player chooses default tracks;
+all probed tracks remain visible, including cover artwork. There is no software
+decode/transcode fallback. All four editing/export actions remain disabled.
 
 The version-1 [DTO](../src/main/renderer/src/lib/local-media-types.ts) contains an
 opaque source ID, filename/size, nullable duration/start, format-family labels,
 all actual stream indexes (including unknown/unsupported types), bounded stream
 details and chapter count. It carries separate probe, native-preview, trim,
 extraction, removal and remux capabilities. Probe success enables inspection
-only; preview is unchecked and writing operations remain unavailable.
+only; the DTO's preview capability remains unchecked until the renderer tries
+the native element. Its local playback status is not an export-capability verdict;
+writing operations remain unavailable.
 
 Canonical path plus device/inode/size/nanosecond mtime/ctime stay in main. They
 are checked before/after probing and on state access, and changes revoke the
@@ -142,6 +177,9 @@ operational; local inspection stays frozen until the app closes. After a
 successful drain, queue admission and the engine freeze together before the
 first asynchronous history write. Downloads are cancelled before an updater
 abort can release its gate.
+The window close button prevents immediate destruction and delegates to this
+same drain; it does not set the quit flag early. A refused quit leaves the
+window available for the error and a later retry.
 
 See [FFprobe staging](../third-party/ffprobe/README.md) for the development-only
 verified candidates. Missing FFprobe returns `PROBE_MISSING` on open, with no

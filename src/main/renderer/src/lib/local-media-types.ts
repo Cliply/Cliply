@@ -46,3 +46,11 @@ export interface MediaState {
   source: MediaSource | null
   busy: boolean
 }
+
+export interface MediaPreview {
+  sourceId: string
+  previewId: string
+  url: string
+  mime: string
+  expiresAt: number
+}

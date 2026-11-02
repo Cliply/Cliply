@@ -12,6 +12,7 @@ function setup() {
   const window = { isDestroyed: () => false, webContents: { mainFrame: frame } }
   const event = { sender: window.webContents, senderFrame: frame }
   const service = {
+    preview: { create: jest.fn(async () => ({ url: "opaque" })), revoke: jest.fn() },
     open: jest.fn(async () => ({ cancelled: true, source: null })),
     getState: jest.fn(async () => ({ source: null, busy: false })), close: jest.fn(async () => ({ closed: true }))
   }
@@ -26,6 +27,25 @@ test("main-frame open, state and close expose only the narrow contract; cleanup 
   expect(await calls.get("media:close")(event)).toEqual({ success: true, data: { closed: true } })
   cleanup()
   expect(calls.size).toBe(0)
+})
+
+test("preview bridge validates opaque IDs and owning sender; arbitrary paths never reach the service", async () => {
+  const { calls, event, service } = setup()
+  const id = "11111111-1111-4111-8111-111111111111"
+  expect((await calls.get("media:preview")(event, id)).success).toBe(true)
+  expect(service.preview.create).toHaveBeenCalledWith(id)
+  expect((await calls.get("media:release-preview")(event, "a".repeat(64))).success).toBe(true)
+  expect(service.preview.revoke).toHaveBeenCalledWith("a".repeat(64))
+  for (const payload of ["/private/file", {}, null, "cliply-media://source/token", "../a", "a".repeat(9999)]) {
+    for (const channel of ["media:preview", "media:release-preview"]) {
+      expect((await calls.get(channel)(event, payload)).error.code).toBe("REQUEST_INVALID")
+    }
+  }
+  expect((await calls.get("media:preview")(event, id, "extra")).error.code).toBe("REQUEST_INVALID")
+  event.senderFrame = { url: event.senderFrame.url }
+  expect((await calls.get("media:preview")(event, id)).error.code).toBe("FORBIDDEN")
+  expect((await calls.get("media:release-preview")(event, "a".repeat(64))).error.code).toBe("FORBIDDEN")
+  expect(service.preview.create).toHaveBeenCalledTimes(1)
 })
 
 test.each(["foreign window", "iframe", "missing frame", "foreign URL"])("rejects %s before opening a dialog", async (kind) => {
@@ -74,5 +94,5 @@ test("real preload forwards no path/argv input through its media methods", async
   await api.media.getState()
   await api.media.close()
   expect(invoke.mock.calls).toEqual([["media:open", undefined], ["media:get-state", undefined], ["media:close", undefined]])
-  expect(Object.keys(api.media)).toEqual(["open", "getState", "close"])
+  expect(Object.keys(api.media)).toEqual(["open", "getState", "preview", "releasePreview", "close"])
 })

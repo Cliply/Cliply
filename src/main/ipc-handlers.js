@@ -874,6 +874,7 @@ class IPCHandlers {
   // set main window reference
   setMainWindow(mainWindow) {
     this.mainWindow = mainWindow
+    this.localMedia.preview.attach(mainWindow)
   }
 
   // register all ipc handlers

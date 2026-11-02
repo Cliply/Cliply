@@ -1,5 +1,7 @@
 // Stable, path-free errors. Helper stderr and source names never become telemetry.
 const MESSAGES = {
+  PREVIEW_HOST: "Local preview requires a secure application window.",
+  PREVIEW_UNAVAILABLE: "Native preview is unavailable for this file.",
   PROBE_MISSING: "Local inspection needs FFprobe. This build does not include it; downloads are still available.",
   PROBE_FAILED: "This file could not be inspected. Choose a self-contained MP4, MOV, MKV, WAV, MP3 or AAC file.",
   PROBE_JSON: "FFprobe returned invalid media information.",

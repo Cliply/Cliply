@@ -6,6 +6,7 @@
 
 const { app, BrowserWindow, dialog } = require("electron")
 const path = require("path")
+const { trustedUrl } = require("./services/local-media/preview")
 const isDev = process.env.NODE_ENV === "development"
 
 // the site the embed player is told it is embedded on. it has to name a real
@@ -28,8 +29,12 @@ const EMBED_REFERER = "https://cliply.space/"
  */
 function giveYouTubeEmbedsAReferer(cliplyApp) {
   cliplyApp.mainWindow.webContents.session.webRequest.onBeforeSendHeaders(
-    { urls: ["https://www.youtube.com/embed/*"] },
+    { urls: ["https://www.youtube.com/embed/*", "cliply-media://*/*"] },
     (details, callback) => {
+      if (details.url?.startsWith("cliply-media:")) {
+        callback(cliplyApp.ipcHandlers?.localMedia?.preview.authorize(details) || { cancel: true })
+        return
+      }
       callback({
         requestHeaders: {
           ...details.requestHeaders,
@@ -53,10 +58,10 @@ function createWindow(cliplyApp) {
       nodeIntegration: false,
       contextIsolation: true,
       enableRemoteModule: false,
-      webSecurity: false, // for youtube iframe compatibility
-      allowRunningInsecureContent: true,
+      webSecurity: true,
+      allowRunningInsecureContent: false,
       preload: path.join(__dirname, "..", "preload", "preload.js"),
-      sandbox: false,
+      sandbox: true,
       experimentalFeatures: false,
       enableBlinkFeatures: "",
       disableBlinkFeatures: "Auxclick"
@@ -66,21 +71,32 @@ function createWindow(cliplyApp) {
   })
 
   cliplyApp.giveYouTubeEmbedsAReferer()
+  // Remote embeds never navigate the application host or open privileged windows.
+  cliplyApp.mainWindow.webContents.setWindowOpenHandler(() => ({ action: "deny" }))
+  cliplyApp.mainWindow.webContents.on("will-navigate", (event, url) => {
+    try {
+      const target = new URL(url)
+      target.hash = ""
+      if (target.href === trustedUrl(isDev)) return
+    } catch { /* refuse malformed navigation too */ }
+    event.preventDefault()
+  })
 
   // window event handlers
   cliplyApp.mainWindow.on("closed", cliplyApp.onWindowClosed)
 
-  cliplyApp.mainWindow.on("close", (_event) => {
+  cliplyApp.mainWindow.on("close", (event) => {
     // allow close during update
     if (global.isUpdating) {
       return
     }
 
-    // quit the app when close button is clicked (consistent behavior)
-    if (!cliplyApp.isQuitting) {
-      cliplyApp.isQuitting = true
-      app.quit()
-    }
+    // Keep the window alive while before-quit drains helpers. That drain may
+    // refuse the quit, so it alone owns the isQuitting transition. Once it
+    // finishes, the reissued quit must be allowed to close the window.
+    if (cliplyApp.hasShutDown) return
+    event.preventDefault()
+    app.quit()
   })
 
   // show window when ready

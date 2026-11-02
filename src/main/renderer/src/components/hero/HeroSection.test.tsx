@@ -43,6 +43,7 @@ vi.mock("@/components/ui/menu-vertical", () => ({
 }))
 vi.mock("@/components/ui/mode-toggle", () => ({ ModeToggle: () => <div /> }))
 vi.mock("react-router-dom", () => ({
+  useNavigate: () => vi.fn(),
   Link: ({ children }: { children: React.ReactNode }) => <a>{children}</a>
 }))
 

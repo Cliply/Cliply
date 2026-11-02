@@ -16,6 +16,8 @@ const mockWindow = {
   loadURL: jest.fn(),
   loadFile: jest.fn(() => Promise.resolve()),
   webContents: {
+    on: jest.fn(),
+    setWindowOpenHandler: jest.fn(),
     send: jest.fn(),
     openDevTools: jest.fn(),
     // the window's session is where the youtube embed referer is installed
@@ -371,6 +373,22 @@ describe("initialize", () => {
 })
 
 describe("the youtube embed referer", () => {
+  it("hardens the shared window, blocks navigation/popups and fails closed without the preview gate", () => {
+    app.createWindow()
+    expect(mockElectron.BrowserWindow.mock.calls[0][0].webPreferences).toMatchObject({
+      webSecurity: true, sandbox: true, contextIsolation: true,
+      nodeIntegration: false, allowRunningInsecureContent: false
+    })
+    expect(mockWindow.webContents.setWindowOpenHandler.mock.calls[0][0]({ url: "https://example.invalid" })).toEqual({ action: "deny" })
+    const navigate = mockWindow.webContents.on.mock.calls.find(([name]) => name === "will-navigate")[1]
+    const event = { preventDefault: jest.fn() }
+    navigate(event, "https://example.invalid")
+    expect(event.preventDefault).toHaveBeenCalledTimes(1)
+    const handler = mockWindow.webContents.session.webRequest.onBeforeSendHeaders.mock.calls[0][1]
+    const callback = jest.fn()
+    handler({ url: "cliply-media://source/" + "a".repeat(64) }, callback)
+    expect(callback).toHaveBeenCalledWith({ cancel: true })
+  })
   // the regression this guards: the packaged app is served with loadFile(),
   // so the renderer runs under file:// and chromium sends no Referer at all.
   // youtube's embed player reads that header server-side to decide
@@ -384,10 +402,10 @@ describe("the youtube embed referer", () => {
         .calls[0]
 
     // a broader filter would hand a referer to every request the app makes
-    expect(filter.urls).toEqual(["https://www.youtube.com/embed/*"])
+    expect(filter.urls).toEqual(["https://www.youtube.com/embed/*", "cliply-media://*/*"])
 
     const callback = jest.fn()
-    handler({ requestHeaders: { "User-Agent": "Cliply" } }, callback)
+    handler({ url: "https://www.youtube.com/embed/fixture", requestHeaders: { "User-Agent": "Cliply" } }, callback)
 
     // the existing headers survive; the referer names a real site that is not
     // youtube itself, which youtube refuses as a self-referential embed
@@ -1430,6 +1448,28 @@ describe("the engine version in the Tools menu", () => {
 
 describe("quitting", () => {
   const quitEvent = () => ({ preventDefault: jest.fn() })
+
+  it("keeps the window and quit scheduling available when a close-button drain fails", async () => {
+    app.createWindow()
+    const close = mockWindow.on.mock.calls.find(([name]) => name === "close")[1]
+    app.ipcHandlers.localMedia = { freeze: jest.fn(), shutdown: jest.fn().mockRejectedValue(new Error("stuck")) }
+    const event = quitEvent()
+    close(event)
+    expect(event.preventDefault).toHaveBeenCalledTimes(1)
+    expect(app.isQuitting).toBe(false)
+    expect(mockElectron.app.quit).toHaveBeenCalledTimes(1)
+    await app.onBeforeQuit(quitEvent())
+    expect(app.isQuitting).toBe(false)
+    expect(mockEngine.freeze).not.toHaveBeenCalled()
+    close(quitEvent())
+    expect(mockElectron.app.quit).toHaveBeenCalledTimes(2)
+
+    app.hasShutDown = true
+    const finalClose = quitEvent()
+    close(finalClose)
+    expect(finalClose.preventDefault).not.toHaveBeenCalled()
+    expect(mockElectron.app.quit).toHaveBeenCalledTimes(2)
+  })
 
   it("freezes local inspection immediately and waits for its child before quitting", async () => {
     let drained

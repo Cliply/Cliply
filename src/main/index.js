@@ -762,6 +762,7 @@ class CliplyApp {
 
 // Importing the class for checks must not start a second app or quit Electron.
 if (require.main === module) {
+  require("./services/local-media/preview").registerMediaScheme(require("electron").protocol)
   const gotTheLock = app.requestSingleInstanceLock()
 
   if (!gotTheLock) {

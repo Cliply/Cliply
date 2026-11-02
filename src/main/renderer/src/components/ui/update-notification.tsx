@@ -1,4 +1,4 @@
-import { updaterApi, type UpdateInfo, type UpdateProgress } from "@/lib/api"
+import { systemApi, updaterApi, type UpdateInfo, type UpdateProgress } from "@/lib/api"
 import { useT } from "@/lib/i18n"
 import { cn } from "@/lib/utils"
 import { motion } from "framer-motion"
@@ -62,9 +62,8 @@ export const UpdateNotification: React.FC<UpdateNotificationProps> = ({
           action: {
             label: t("update.download"),
             onClick: () =>
-              window.open(
-                `https://github.com/Cliply/Cliply/releases/latest`,
-                "_blank"
+              systemApi.openExternal(
+                `https://github.com/Cliply/Cliply/releases/latest`
               )
           },
           duration: 10000
@@ -500,9 +499,8 @@ export const UpdateNotification: React.FC<UpdateNotificationProps> = ({
                 </Button>
                 <Button
                   onClick={() =>
-                    window.open(
-                      "https://www.cliply.space/download/macos/autoupdates",
-                      "_blank"
+                    systemApi.openExternal(
+                      "https://www.cliply.space/download/macos/autoupdates"
                     )
                   }
                   variant="outline"
@@ -512,9 +510,8 @@ export const UpdateNotification: React.FC<UpdateNotificationProps> = ({
                 </Button>
                 <Button
                   onClick={() =>
-                    window.open(
-                      `https://github.com/Cliply/Cliply/releases/latest`,
-                      "_blank"
+                    systemApi.openExternal(
+                      `https://github.com/Cliply/Cliply/releases/latest`
                     )
                   }
                   className="w-full sm:w-auto bg-cyan-600 hover:bg-cyan-700 text-white border-2 border-cyan-600 hover:border-cyan-700 transition-all duration-200"

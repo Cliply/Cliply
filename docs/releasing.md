@@ -137,3 +137,23 @@ Keep required helper assets and matching PO hashes available before releasing
 code that selects them. Do not replace another platform's files during a scoped
 update. Remove only your temporary validation uploads after verification; retain
 intended public helper assets and useful CI logs.
+## Local workspace development smoke
+
+Build the renderer, then use the [verified FFprobe staging recipe](../third-party/ffprobe/README.md#reproduce-staging-without-publication).
+On a native host with the existing project FFmpeg and the staged FFprobe, run:
+
+```sh
+CLIPLY_SMOKE_PREVIEW=1 \
+CLIPLY_SMOKE_FFPROBE=<absolute-staged-ffprobe> \
+CLIPLY_SMOKE_FFMPEG=<absolute-project-ffmpeg> \
+npm run smoke:electron
+```
+
+This opt-in extension creates synthetic H.264/AAC MP4, PCM WAV and unsupported
+FFV1 Matroska in an isolated temporary profile, exercises native playback/seek,
+file switching, route return, background download list delivery and source
+invalidation, and checks protocol ranges/HEAD/foreign contexts. It removes the
+profile and media on exit. `CLIPLY_SMOKE_EVIDENCE=<directory>` additionally keeps
+small UI captures and a JSON result. Plain `npm run smoke:electron` continues to
+test the missing-helper path. These development checks do not establish native
+package/helper support on other platforms or authorize any publication.

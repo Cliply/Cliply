@@ -1,3 +1,4 @@
+import { systemApi } from "@/lib/api"
 import { motion } from "framer-motion"
 import { Link } from "react-router-dom"
 import { ModeToggle } from "../components/ui/mode-toggle"
@@ -109,6 +110,7 @@ export function DisclaimerPage() {
                   <a
                     href="https://www.gnu.org/licenses/gpl-3.0.html"
                     target="_blank"
+                    onClick={(event) => { event.preventDefault(); void systemApi.openExternal(event.currentTarget.href) }}
                     rel="noopener noreferrer"
                     className="text-cyan-600 dark:text-cyan-400 hover:underline"
                   >
@@ -130,6 +132,7 @@ export function DisclaimerPage() {
                         <a
                           href="https://github.com/yt-dlp/yt-dlp#license"
                           target="_blank"
+                    onClick={(event) => { event.preventDefault(); void systemApi.openExternal(event.currentTarget.href) }}
                           rel="noopener noreferrer"
                           className="text-cyan-600 dark:text-cyan-400 hover:underline"
                         >
@@ -141,6 +144,7 @@ export function DisclaimerPage() {
                         <a
                           href="https://github.com/yt-dlp/yt-dlp"
                           target="_blank"
+                    onClick={(event) => { event.preventDefault(); void systemApi.openExternal(event.currentTarget.href) }}
                           rel="noopener noreferrer"
                           className="text-cyan-600 dark:text-cyan-400 hover:underline"
                         >
@@ -160,6 +164,7 @@ export function DisclaimerPage() {
                         <a
                           href="https://www.gnu.org/licenses/gpl-3.0.html"
                           target="_blank"
+                    onClick={(event) => { event.preventDefault(); void systemApi.openExternal(event.currentTarget.href) }}
                           rel="noopener noreferrer"
                           className="text-cyan-600 dark:text-cyan-400 hover:underline"
                         >
@@ -171,6 +176,7 @@ export function DisclaimerPage() {
                         <a
                           href="https://ffmpeg.org/"
                           target="_blank"
+                    onClick={(event) => { event.preventDefault(); void systemApi.openExternal(event.currentTarget.href) }}
                           rel="noopener noreferrer"
                           className="text-cyan-600 dark:text-cyan-400 hover:underline"
                         >
@@ -182,6 +188,7 @@ export function DisclaimerPage() {
                         <a
                           href="https://ffmpeg.org/download.html"
                           target="_blank"
+                    onClick={(event) => { event.preventDefault(); void systemApi.openExternal(event.currentTarget.href) }}
                           rel="noopener noreferrer"
                           className="text-cyan-600 dark:text-cyan-400 hover:underline"
                         >
@@ -229,6 +236,7 @@ export function DisclaimerPage() {
                   <a
                     href="https://github.com/cliply/cliply/blob/HEAD/PRIVACY.md"
                     target="_blank"
+                    onClick={(event) => { event.preventDefault(); void systemApi.openExternal(event.currentTarget.href) }}
                     rel="noopener noreferrer"
                     className="text-cyan-600 dark:text-cyan-400 hover:underline"
                   >
@@ -241,6 +249,7 @@ export function DisclaimerPage() {
                   <a
                     href="https://cliply.space/hey"
                     target="_blank"
+                    onClick={(event) => { event.preventDefault(); void systemApi.openExternal(event.currentTarget.href) }}
                     rel="noopener noreferrer"
                     className="text-cyan-600 dark:text-cyan-400 hover:underline"
                   >

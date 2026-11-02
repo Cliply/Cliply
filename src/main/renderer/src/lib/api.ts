@@ -26,6 +26,7 @@ import {
   type VideoDownloadRequest,
   type VideoInfoResponse
 } from "./api-types"
+import { localizeCode } from "./i18n"
 import type { IPCResponse } from "./electron-api"
 
 // the types and the pure helpers used to live here, so they are re-exported
@@ -125,16 +126,25 @@ const listSnapshot = (
   rows: data?.rows ?? []
 })
 
+const mediaError: ErrorFactory = (message, error) =>
+  Object.assign(new Error(localizeCode(error?.code ? `LOCAL_${error.code}` : undefined, message)), { code: error?.code })
+
 // Local inspection is separate from download state, history and telemetry.
 export const mediaApi = {
+  async preview(sourceId: string) {
+    return unwrap(await getElectronAPI().media.preview(sourceId), "Native preview is unavailable", { makeError: mediaError })
+  },
+  async releasePreview(previewId: string) {
+    return unwrap(await getElectronAPI().media.releasePreview(previewId), "Could not release preview", { makeError: mediaError })
+  },
   async open() {
-    return unwrap(await getElectronAPI().media.open(), "Could not inspect the local file")
+    return unwrap(await getElectronAPI().media.open(), "Could not inspect the local file", { makeError: mediaError })
   },
   async getState() {
-    return unwrap(await getElectronAPI().media.getState(), "Could not read local media state")
+    return unwrap(await getElectronAPI().media.getState(), "Could not read local media state", { makeError: mediaError })
   },
   async close() {
-    return unwrap(await getElectronAPI().media.close(), "Could not close the local file")
+    return unwrap(await getElectronAPI().media.close(), "Could not close the local file", { makeError: mediaError })
   }
 }
 

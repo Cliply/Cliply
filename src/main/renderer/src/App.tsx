@@ -1,3 +1,5 @@
+import { lazy, Suspense } from "react"
+import { useT } from "./lib/i18n"
 import { HashRouter, Route, Routes } from "react-router-dom"
 import { DownloadsPanel } from "./components/downloads"
 import { ThemeProvider } from "./components/theme/theme-provider"
@@ -6,7 +8,10 @@ import { Providers } from "./lib/providers"
 import { DisclaimerPage } from "./pages/DisclaimerPage"
 import { HomePage } from "./pages/HomePage"
 
+const MediaPage = lazy(() => import("./pages/MediaPage"))
+
 function App() {
+  const t = useT()
   return (
     <HashRouter>
       {/*
@@ -34,6 +39,7 @@ function App() {
           <div className="min-h-screen overflow-x-hidden bg-background text-foreground">
             <Routes>
               <Route path="/" element={<HomePage />} />
+              <Route path="/media" element={<Suspense fallback={<p role="status" className="p-8">{t("media.loading")}</p>}><MediaPage /></Suspense>} />
               <Route path="/disclaimer" element={<DisclaimerPage />} />
             </Routes>
 

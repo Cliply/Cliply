@@ -69,10 +69,12 @@ const invoke = async (channel, data) => {
 
 // expose ipc api to renderer process
 contextBridge.exposeInMainWorld("electronAPI", {
-  // Inspection only: no paths, file bytes, preview tokens or export arguments.
+  // Local media: opaque IDs only; no renderer paths, file bytes or export arguments.
   media: {
     open: () => invoke("media:open"),
     getState: () => invoke("media:get-state"),
+    preview: (sourceId) => invoke("media:preview", sourceId),
+    releasePreview: (previewId) => invoke("media:release-preview", previewId),
     close: () => invoke("media:close")
   },
   // video operations

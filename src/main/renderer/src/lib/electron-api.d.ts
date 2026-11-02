@@ -26,7 +26,7 @@ import type {
   VideoInfoResponse
 } from "./api-types"
 
-import type { MediaOpenResult, MediaState } from "./local-media-types"
+import type { MediaOpenResult, MediaState, MediaPreview } from "./local-media-types"
 
 // IPC Response wrapper
 export interface IPCResponse<T> {
@@ -41,6 +41,8 @@ declare global {
     electronAPI?: {
       media: {
         open: () => Promise<IPCResponse<MediaOpenResult>>
+        preview: (sourceId: string) => Promise<IPCResponse<MediaPreview>>
+        releasePreview: (previewId: string) => Promise<IPCResponse<{ released: boolean }>>
         getState: () => Promise<IPCResponse<MediaState>>
         close: () => Promise<IPCResponse<{ closed: boolean }>>
       }

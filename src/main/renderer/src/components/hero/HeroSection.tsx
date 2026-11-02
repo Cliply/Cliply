@@ -1,8 +1,9 @@
+import { LocalFileEntry } from "@/components/media/LocalFileEntry"
 import { DownloadsToggle } from "@/components/downloads/DownloadsToggle"
 import { LocaleToggle } from "@/components/ui/locale-toggle"
 import { MenuVertical } from "@/components/ui/menu-vertical"
 import { ModeToggle } from "@/components/ui/mode-toggle"
-import { updaterApi } from "@/lib/api"
+import { systemApi, updaterApi } from "@/lib/api"
 import { cookieActions } from "@/lib/stores/cookieStore"
 import { useT } from "@/lib/i18n"
 import { motion } from "framer-motion"
@@ -168,6 +169,7 @@ export function HeroSection() {
             transition={{ duration: 0.8, delay: 0.5, ease: "easeOut" }}
           >
             <SearchCard platform={selectedPlatform} />
+            <LocalFileEntry />
           </motion.div>
         </div>
       </div>
@@ -203,6 +205,7 @@ export function HeroSection() {
             {t("hero.footerUseful")}{" "}
             <a
               href="https://buymeacoffee.com/itssdevk"
+              onClick={(event) => { event.preventDefault(); void systemApi.openExternal("https://buymeacoffee.com/itssdevk") }}
               target="_blank"
               rel="noopener noreferrer"
               className="text-slate-500 underline underline-offset-4 transition-colors duration-200 hover:text-cyan-500 dark:text-slate-400 dark:hover:text-cyan-400"
