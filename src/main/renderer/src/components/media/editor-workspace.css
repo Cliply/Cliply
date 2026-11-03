@@ -83,8 +83,10 @@
 .editor-file-tool:empty { display: none; }
 .editor-export-status { padding: 12px; border-bottom: 1px solid hsl(var(--border)); background: hsl(var(--muted) / 0.5); }
 .editor-timeline-pane { height: 100%; overflow: auto; overscroll-behavior: contain; container-type: inline-size; }
+.editor-preview-short-label { display: none; }
 @container (max-width: 560px) {
-  .editor-mark-label { display: none; }
+  .editor-mark-label, .editor-preview-label { display: none; }
+  .editor-preview-short-label { display: inline; }
 }
 .editor-source-tracks { min-width: 0; }
 .editor-notice { display: flex; flex-shrink: 0; align-items: center; gap: 8px; padding: 8px 16px; border-bottom: 1px solid hsl(var(--border)); font-size: 12px; }

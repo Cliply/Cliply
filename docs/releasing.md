@@ -276,3 +276,6 @@ panel resizing without seeking. They assert preview visibility, inspector width,
 absence of page overflow and separation of timeline/transport controls. The
 packaged combined UI runner includes the same checks. With
 `CLIPLY_SMOKE_EVIDENCE`, it retains layout captures and `workspace-layout.json`.
+A fixed 784×535 client-area case reproduces the smaller content area inside a
+minimum-size Windows window on every host. The preview and transport footer must
+remain visible; panel minimums share the measured space after the resize handle.

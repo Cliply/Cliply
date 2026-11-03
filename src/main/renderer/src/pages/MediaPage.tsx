@@ -119,6 +119,6 @@ export default function MediaPage() {
         </div>
       </div>}
     </div>
-    <footer className="editor-footer"><span className="editor-session-dot" aria-hidden="true" />{t("media.sessionOnly")}</footer>
+    <footer className="editor-footer"><span className="editor-session-dot" aria-hidden="true" /><span className="truncate" title={t("media.sessionOnly")}>{t("media.sessionOnly")}</span></footer>
   </main>
 }

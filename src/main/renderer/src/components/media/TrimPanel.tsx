@@ -153,7 +153,7 @@ export function TrimPanel({ source, busy, player, inspectorTarget }: { source: M
   return <section id="trim-panel" aria-label={t("media.trim")} className="flex h-full min-h-0 flex-col bg-background">
     {/* Compact, grouped toolbar follows OpenCut Classic timeline-toolbar.tsx;
         actions continue to use the existing Cliply/LosslessCut edit document. */}
-    <div className="flex shrink-0 flex-wrap items-center gap-1 border-b border-border px-2 py-1.5">
+    <div className="flex shrink-0 flex-wrap items-center gap-0.5 border-b border-border px-2 py-1.5">
       <Button size="sm" variant="ghost" className="h-7 w-7 p-0" title={t("media.playPause")} aria-label={t("media.playPause")} disabled={locked} onClick={togglePlay}>{playing ? <Pause className="size-3.5" /> : <Play className="size-3.5" />}</Button>
       <span aria-hidden="true" className="mx-1 h-4 border-l border-border" />
       <Button size="sm" variant="ghost" className="h-7 gap-1.5 px-2 text-[11px]" title={`I · ${t("media.setStart")}`} aria-label={t("media.setStart")} disabled={locked || !range} onClick={() => mark("start")}><span className="font-mono text-primary">[ I</span><span className="editor-mark-label">{t("media.setStart")}</span></Button>
@@ -167,14 +167,14 @@ export function TrimPanel({ source, busy, player, inspectorTarget }: { source: M
     </div>
     {duration > 0 && <CutTimeline key={source.sourceId} edit={edit} duration={duration} position={position} locked={locked} onEdit={commit} onSelect={editorActions.select} onSeek={seek} />}
     <div className="flex shrink-0 flex-wrap items-center justify-between gap-x-3 gap-y-1 border-t border-border px-2 py-1">
-      <Button variant="ghost" size="sm" className="h-7 px-2 text-[11px]" disabled={locked || !valid} onClick={() => {
+      <Button variant="ghost" size="sm" className="h-7 px-2 text-[11px]" aria-label={t(previewing ? "media.stopPreview" : "media.previewEdit")} title={t(previewing ? "media.stopPreview" : "media.previewEdit")} disabled={locked || !valid} onClick={() => {
         const media = player.current
         if (previewing) { setPreviewing(false); media?.pause(); return }
         if (media && Number.isFinite(media.duration)) {
           previewIndex.current = 0; media.currentTime = retained[0].start; setPreviewing(true)
           void media.play().catch(() => setPreviewing(false))
         }
-      }}>{previewing ? <Pause className="size-3" /> : <Play className="size-3" />}{t(previewing ? "media.stopPreview" : "media.previewEdit")}</Button>
+      }}>{previewing ? <Pause className="size-3" /> : <Play className="size-3" />}<span className="editor-preview-label">{t(previewing ? "media.stopPreview" : "media.previewEdit")}</span><span className="editor-preview-short-label">{t(previewing ? "media.stopPreviewShort" : "media.previewShort")}</span></Button>
       <span className="px-1 text-[10px] tabular-nums text-muted-foreground">{t("media.outputSummary", { count: retained.length, time: timecode(retained.reduce((sum, part) => sum + part.end - part.start, 0)) })}</span>
     </div>
     {inspectorTarget ? createPortal(inspector, inspectorTarget) : <div className="border-t border-border p-3">{inspector}</div>}

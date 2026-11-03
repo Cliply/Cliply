@@ -19,6 +19,8 @@ export const ru: Record<Key, string> = {
   "media.resizeInspector": "Изменить размер панели параметров",
   "media.source": "Исходный файл",
   "media.inspector": "Параметры",
+  "media.previewShort": "Просмотр",
+  "media.stopPreviewShort": "Стоп",
   "media.section": "Фрагмент {number}",
   "media.undo": "Отменить",
   "media.redo": "Повторить",

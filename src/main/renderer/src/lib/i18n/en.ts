@@ -21,6 +21,8 @@ export const en = {
   "media.resizeInspector": "Resize inspector",
   "media.source": "Source",
   "media.inspector": "Inspector",
+  "media.previewShort": "Preview edit",
+  "media.stopPreviewShort": "Stop preview",
   "media.section": "Section {number}",
   "media.undo": "Undo",
   "media.redo": "Redo",
