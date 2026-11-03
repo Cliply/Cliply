@@ -42,6 +42,8 @@ got an idea or found something broken? [open an issue](https://github.com/Cliply
 
 this branch also has a local-file workspace: preview a file, mark sections on a visual timeline, keep or remove them and save
 one joined result. You can also extract audio, remove tracks or change a compatible container.
+the compact workspace uses resizable preview/timeline panels and a separate
+section/export inspector, adapted from [OpenCut Classic](third-party/opencut-classic/README.md).
 exports copy existing media without re-encoding. cutting and joining follow
 LosslessCut’s procedure; keyframe cuts can start early and normal cuts can have
 a brief picture gap. native playback has an FFmpeg-assisted compatibility mode; unsupported layouts show a reason instead of converting

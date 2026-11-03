@@ -24,7 +24,7 @@ async function run(resources, { idleOnly = false, normalStartup = false, longMed
     fs.renameSync(path.join(copiedResources, "app.asar"), path.join(copiedResources, "cliply-under-test.asar"))
     if (fs.existsSync(path.join(copiedResources, "app.asar.unpacked"))) fs.renameSync(path.join(copiedResources, "app.asar.unpacked"), path.join(copiedResources, "cliply-under-test.asar.unpacked"))
     const entry = path.join(copiedResources, "app"); fs.mkdirSync(entry)
-    for (const name of ["smoke-electron.js", "smoke-local-integration.js", "smoke-normal-startup.js", "smoke-losslesscut-preview.js"]) fs.copyFileSync(path.join(__dirname, name), path.join(entry, name))
+    for (const name of ["smoke-electron.js", "smoke-local-integration.js", "smoke-editor-workspace.js", "smoke-normal-startup.js", "smoke-losslesscut-preview.js"]) fs.copyFileSync(path.join(__dirname, name), path.join(entry, name))
     fs.writeFileSync(path.join(entry, "package.json"), JSON.stringify({ name: "cliply-package-test", version: "1.0.0", main: normalStartup ? "smoke-normal-startup.js" : "smoke-electron.js" }))
     const userData = path.join(scratch, "profile")
     fs.mkdirSync(userData)

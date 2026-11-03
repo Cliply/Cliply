@@ -107,7 +107,7 @@ async function runUI({ window, service, userData }) {
     for (let i = 0; i < 100; i++) { if (await js(expression)) return; await delay(100) }
     throw new Error(`Remux UI condition timed out: ${expression}`)
   }
-  const click = label => js(`Array.from(document.querySelectorAll('button,a')).find(e=>e.textContent.trim()===${JSON.stringify(label)})?.click()`)
+  const click = label => js(`Array.from(document.querySelectorAll('button,a')).find(e=>(e.getAttribute('aria-label') || e.textContent.trim())===${JSON.stringify(label)})?.click()`)
   const select = value => js(`(() => { const el=document.getElementById('target-container'); Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype,'value').set.call(el,${JSON.stringify(value)}); el.dispatchEvent(new Event('change',{bubbles:true})); })()`)
   const original = path.join(userData, "tracks.mp4"), originalHash = hash(fs.readFileSync(original))
   service.selectFile = async () => original

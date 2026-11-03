@@ -173,3 +173,72 @@ test("arrow seeking and shift-arrow boundaries use LosslessCut defaults", () => 
   fireEvent.keyDown(window, { key: "ArrowRight", shiftKey: true })
   expect(player.current.currentTime).toBe(12)
 })
+
+test("inspector can move beside the player without duplicating controls or resetting the edit", async () => {
+  const inspector = document.createElement("aside")
+  document.body.append(inspector)
+  try {
+    const view = render(<TrimPanel source={source} busy={false} player={player} inspectorTarget={inspector} />)
+    setRange()
+    expect(inspector.contains(screen.getByTestId("cut-inspector"))).toBe(true)
+    expect(document.querySelector("#trim-panel")?.contains(input("media.trimStart"))).toBe(false)
+    fireEvent.click(button("media.reviewCut"))
+    await waitFor(() => expect(mediaApi.inspectTrim).toHaveBeenCalledWith({ sourceId: "source", ranges: [{ start: 4.2, end: 6 }], intent: "keep", mode: "before" }))
+    view.rerender(<TrimPanel source={source} busy={false} player={player} />)
+    expect(screen.getAllByTestId("cut-inspector")).toHaveLength(1)
+    expect(input("media.trimStart").value).toBe("4.2")
+    expect(inspector.childElementCount).toBe(0)
+  } finally { inspector.remove() }
+})
+
+test("transport icon follows native play and pause events", () => {
+  render(<TrimPanel source={source} busy={false} player={player} />)
+  const transport = screen.getByRole("button", { name: en["media.playPause"] })
+  expect(transport.querySelector(".lucide-play")).toBeTruthy()
+  Object.defineProperty(player.current, "paused", { configurable: true, value: false })
+  fireEvent.play(player.current)
+  expect(transport.querySelector(".lucide-pause")).toBeTruthy()
+  Object.defineProperty(player.current, "paused", { configurable: true, value: true })
+  fireEvent.pause(player.current)
+  expect(transport.querySelector(".lucide-play")).toBeTruthy()
+})
+
+
+test("panel resize keyboard events do not trigger editor seeking or shortcuts", () => {
+  Object.defineProperty(player.current, "duration", { value: 12 })
+  render(<TrimPanel source={source} busy={false} player={player} />)
+  const separator = document.createElement("div")
+  separator.setAttribute("role", "separator")
+  separator.tabIndex = 0
+  document.body.append(separator)
+  try {
+    player.current.currentTime = 5
+    fireEvent.keyDown(separator, { key: "ArrowRight" })
+    fireEvent.keyDown(separator, { key: "ArrowLeft", shiftKey: true })
+    fireEvent.keyDown(separator, { key: "b" })
+    const consumedArrow = new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true, cancelable: true })
+    consumedArrow.preventDefault()
+    window.dispatchEvent(consumedArrow)
+    expect(player.current.currentTime).toBe(5)
+    expect(useEditor.getState().document.ranges).toEqual([{ start: 0, end: 12 }])
+    expect(useEditor.getState().past).toHaveLength(0)
+  } finally { separator.remove() }
+})
+
+
+test("transport subscription moves to a replacement source media element", () => {
+  const oldMedia = player.current
+  const view = render(<TrimPanel source={source} busy={false} player={player} />)
+  Object.defineProperty(oldMedia, "paused", { configurable: true, value: false })
+  fireEvent.play(oldMedia)
+  expect(screen.getByRole("button", { name: en["media.playPause"] }).querySelector(".lucide-pause")).toBeTruthy()
+  player.current = document.createElement("video")
+  view.rerender(<TrimPanel source={{ ...source, sourceId: "replacement" }} busy={false} player={player} />)
+  const transport = screen.getByRole("button", { name: en["media.playPause"] })
+  expect(transport.querySelector(".lucide-play")).toBeTruthy()
+  fireEvent.play(oldMedia)
+  expect(transport.querySelector(".lucide-play")).toBeTruthy()
+  Object.defineProperty(player.current, "paused", { configurable: true, value: false })
+  fireEvent.play(player.current)
+  expect(transport.querySelector(".lucide-pause")).toBeTruthy()
+})

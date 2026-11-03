@@ -1,8 +1,7 @@
-import { useEffect, useRef } from "react"
+import { useEffect, useRef, useState } from "react"
 import { Link } from "react-router-dom"
-import { ArrowLeft, FolderOpen, X, Scissors, Music2, ListVideo, FileVideo, Loader2 } from "lucide-react"
+import { ArrowLeft, FolderOpen, X, Scissors, Music2, ListVideo, FileVideo, Loader2, Film } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { DownloadsToggle } from "@/components/downloads/DownloadsToggle"
 import { LocaleToggle } from "@/components/ui/locale-toggle"
 import { ModeToggle } from "@/components/ui/mode-toggle"
@@ -11,19 +10,48 @@ import { TrimPanel } from "@/components/media/TrimPanel"
 import { TrackRemovalPanel } from "@/components/media/TrackRemovalPanel"
 import { AudioExtractionPanel } from "@/components/media/AudioExtractionPanel"
 import { ExportStatus } from "@/components/media/LocalExportStatus"
+import { EditorWorkspace } from "@/components/media/EditorWorkspace"
 import { exportActive, useLocalExport } from "@/lib/stores/localExportStore"
 import { useT } from "@/lib/i18n"
 import { localMediaActions, useLocalMedia } from "@/lib/stores/localMediaStore"
+import type { MediaSource } from "@/lib/local-media-types"
+import "@/components/media/editor-workspace.css"
+
+const tools = [
+  { action: "trim", label: "media.trim", Icon: Scissors },
+  { action: "extractAudio", label: "media.extract", Icon: Music2 },
+  { action: "removeTracks", label: "media.remove", Icon: ListVideo },
+  { action: "remux", label: "media.remux", Icon: FileVideo }
+] as const
+
+function SourceTracks({ source }: { source: MediaSource }) {
+  const t = useT()
+  return <section className="editor-source-tracks" aria-label={t("media.tracks")}>
+    <div className="editor-pane-heading"><h2>{t("media.tracks")}</h2><span>{t("media.chapters", { count: source.chapterCount })}</span></div>
+    <div className="overflow-x-auto"><table className="w-full text-left text-xs">
+      <caption className="sr-only">{t("media.tracks")}</caption>
+      <thead><tr className="border-b text-muted-foreground">
+        {(["media.trackId", "media.type", "media.codec", "media.language", "media.trackTitle"] as const).map(key => <th key={key} scope="col" className="px-3 py-2.5 font-medium">{t(key)}</th>)}
+      </tr></thead>
+      <tbody>{source.streams.map(stream => <tr key={stream.index} className="border-b last:border-0">
+        <td className="px-3 py-3 tabular-nums">{stream.index}</td><td className="px-3 py-3">{stream.type}{stream.disposition.attached_pic ? ` (${t("media.coverArt")})` : ""}</td>
+        <td className="px-3 py-3 font-mono">{stream.codec || t("media.unknown")}</td><td className="px-3 py-3">{stream.language || "—"}</td><td className="max-w-48 break-words px-3 py-3">{stream.title || "—"}</td>
+      </tr>)}</tbody>
+    </table></div>
+  </section>
+}
 
 export default function MediaPage() {
   const t = useT()
-  const source = useLocalMedia((s) => s.source)
-  const busy = useLocalMedia((s) => s.busy)
+  const source = useLocalMedia(s => s.source)
+  const busy = useLocalMedia(s => s.busy)
   const action = useLocalExport(s => s.action)
   const exporting = useLocalExport(s => exportActive(s.snapshot) || s.pending || s.timingPending)
-  const error = useLocalMedia((s) => s.error)
+  const hasExportStatus = useLocalExport(s => Boolean(s.snapshot.job || s.snapshot.recoveryError || s.error))
+  const error = useLocalMedia(s => s.error)
   const player = useRef<HTMLMediaElement>(null)
   const heading = useRef<HTMLHeadingElement>(null)
+  const [inspectorTarget, setInspectorTarget] = useState<HTMLDivElement | null>(null)
   useEffect(() => {
     heading.current?.focus()
     let alive = true
@@ -36,61 +64,61 @@ export default function MediaPage() {
     return () => { alive = false; clearTimeout(timer) }
   }, [])
 
-  return <main className="min-h-screen bg-gradient-to-br from-slate-50 via-slate-100 to-slate-200 px-6 py-4 dark:from-slate-900 dark:via-slate-800 dark:to-slate-900">
-    <div className="mx-auto max-w-6xl space-y-3">
-      <header className="flex flex-wrap items-center justify-between gap-3">
-        <Button variant="ghost" asChild><Link to="/"><ArrowLeft />{t("media.back")}</Link></Button>
-        <div className="flex items-center gap-2"><DownloadsToggle /><LocaleToggle /><ModeToggle /></div>
-      </header>
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0 flex-1"><h1 ref={heading} tabIndex={-1} className="break-words text-xl font-medium tracking-tight outline-none">{t("media.title")}</h1>
-          <p className="mt-1 break-all text-sm text-slate-600 dark:text-slate-300">{source?.filename || t("media.empty")}</p></div>
-        <div className="flex gap-2">
-          <Button variant="outline" disabled={busy || exporting} onClick={() => void localMediaActions.open()}>{busy ? <Loader2 className="animate-spin" /> : <FolderOpen />}{t(source ? "media.change" : "media.open")}</Button>
-          {(source || busy) && <Button variant="ghost" disabled={exporting} onClick={() => void localMediaActions.close()}><X />{t(busy ? "media.cancel" : "media.close")}</Button>}
-        </div>
+  const toolLabel = tools.find(tool => tool.action === action)!.label
+  const isMacOS = (window.electronAPI as typeof window.electronAPI & { platform?: { isMacOS?: boolean } })?.platform?.isMacOS
+  // The compact header and nested resizable workspace adapt OpenCut Classic's
+  // editor header/layout. Playback, edit state and exports stay owned by Cliply.
+  return <main className="media-workspace" data-platform={isMacOS ? "darwin" : undefined}>
+    <header className="editor-header">
+      <Button variant="ghost" size="icon" asChild className="editor-back"><Link to="/" aria-label={t("media.back")} title={t("media.back")}><ArrowLeft /></Link></Button>
+      <div className="editor-file-heading">
+        <h1 ref={heading} tabIndex={-1} className="outline-none">{t("media.title")}</h1>
+        {source && <p title={source.filename}>{source.filename}</p>}
       </div>
-      {busy && <p role="status" className="text-sm">{t("media.opening")}</p>}
-      <ExportStatus />
-      {error && <p role="alert" className="rounded-lg border border-red-300 bg-red-50 p-4 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300">{error}</p>}
-      {!source && <Card><CardContent className="pt-6 text-sm text-slate-600 dark:text-slate-300">{t("media.emptyBody")}</CardContent></Card>}
-      {source && <>
-        <Card className="border-slate-300/50 bg-white/80 py-3 shadow-xl shadow-black/5 dark:border-slate-700/50 dark:bg-slate-800/60">
-          <CardContent className="space-y-2 px-3">
-            <div className="flex flex-wrap gap-x-5 gap-y-2 text-sm text-slate-600 dark:text-slate-300">
-              <span>{t("media.duration")}: {source.duration === null ? t("media.unknown") : t("media.seconds", { value: source.duration.toFixed(2) })}</span>
-              <span>{t("media.size")}: {source.bytes === null ? t("media.unknown") : `${(source.bytes / 1048576).toFixed(2)} MB`}</span>
-              <span>{t("media.container")}: {source.formatNames.join(", ") || t("media.unknown")}</span>
-            </div>
-            <NativeMediaPlayer key={source.sourceId} source={source} busy={busy} mediaRef={player} />
-          </CardContent>
-        </Card>
-        {action === "trim" && <TrimPanel source={source} busy={busy} player={player} />}
-        {action === "extractAudio" && <Card className="border-slate-300/50 bg-white/80 dark:border-slate-700/50 dark:bg-slate-800/60">
-          <CardHeader><CardTitle>{t("media.tracks")}</CardTitle></CardHeader>
-          <CardContent className="space-y-4">
-            <div className="overflow-x-auto"><table className="w-full text-left text-sm">
-              <caption className="sr-only">{t("media.tracks")}</caption>
-              <thead><tr className="border-b border-slate-200 text-slate-500 dark:border-slate-700 dark:text-slate-400">
-                {(["media.trackId", "media.type", "media.codec", "media.language", "media.trackTitle"] as const).map((key) => <th key={key} scope="col" className="px-2 py-3 font-medium">{t(key)}</th>)}
-              </tr></thead>
-              <tbody>{source.streams.map((stream) => <tr key={stream.index} className="border-b border-slate-200/70 last:border-0 dark:border-slate-700/70">
-                <td className="px-2 py-3">{stream.index}</td><td className="px-2 py-3">{stream.type}{stream.disposition.attached_pic ? ` (${t("media.coverArt")})` : ""}</td>
-                <td className="px-2 py-3 font-mono">{stream.codec || t("media.unknown")}</td><td className="px-2 py-3">{stream.language || "—"}</td><td className="max-w-xs break-words px-2 py-3">{stream.title || "—"}</td>
-              </tr>)}</tbody>
-            </table></div>
-            <p className="text-xs text-slate-500 dark:text-slate-400">{t("media.chapters", { count: source.chapterCount })}</p>
-          </CardContent>
-        </Card>}
-        <section aria-label={t("media.tools")} className="space-y-3">
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            <Button variant={action === "trim" ? "secondary" : "outline"} disabled={exporting} onClick={() => useLocalExport.setState({ action: "trim" })}><Scissors />{t("media.trim")}</Button><Button variant={action === "extractAudio" ? "secondary" : "outline"} disabled={exporting} onClick={() => useLocalExport.setState({ action: "extractAudio" })}><Music2 />{t("media.extract")}</Button>
-            <Button variant={action === "removeTracks" ? "secondary" : "outline"} disabled={exporting} onClick={() => useLocalExport.setState({ action: "removeTracks" })}><ListVideo />{t("media.remove")}</Button><Button variant={action === "remux" ? "secondary" : "outline"} disabled={exporting} onClick={() => useLocalExport.setState({ action: "remux" })}><FileVideo />{t("media.remux")}</Button>
+      <div className="editor-header-actions">
+        {source && <Button variant="outline" size="sm" disabled={busy || exporting} aria-label={t("media.change")} title={t("media.change")} onClick={() => void localMediaActions.open()}>{busy ? <Loader2 className="animate-spin" /> : <FolderOpen />}<span className="editor-open-label">{t("media.change")}</span></Button>}
+        {(source || busy) && <Button variant="ghost" size="icon" disabled={exporting} aria-label={t(busy ? "media.cancel" : "media.close")} title={t(busy ? "media.cancel" : "media.close")} onClick={() => void localMediaActions.close()}><X /></Button>}
+        <div className="editor-header-divider" />
+        <div className="editor-global-controls"><DownloadsToggle /><LocaleToggle /><ModeToggle /></div>
+      </div>
+    </header>
+    {busy && <p role="status" className="editor-notice"><Loader2 className="size-3.5 animate-spin" />{t("media.opening")}</p>}
+    {error && <p role="alert" className="editor-notice text-red-600 dark:text-red-400">{error}</p>}
+    <div className="editor-body">
+      <nav className="editor-tools" aria-label={t("media.tools")}>
+        {tools.map(({ action: tool, label, Icon }) => <button key={tool} type="button" disabled={!source || exporting} aria-pressed={action === tool} aria-label={t(label)} title={t(label)} onClick={() => useLocalExport.setState({ action: tool })}>
+          <Icon aria-hidden="true" /><span>{t(label)}</span>
+        </button>)}
+      </nav>
+      {source ? <EditorWorkspace
+        preview={<div className="editor-preview-content">
+          <div className="editor-pane-heading"><h2>{t("media.source")}</h2><span className="truncate">{source.formatNames.join(" / ").toUpperCase() || t("media.unknown")}</span></div>
+          <div className="min-h-0 flex-1"><NativeMediaPlayer key={source.sourceId} source={source} busy={busy} mediaRef={player} /></div>
+        </div>}
+        inspector={<>
+          <div className="editor-pane-heading"><h2>{t(toolLabel)}</h2></div>
+          <dl className="editor-source-info">
+            <div><dt>{t("media.duration")}</dt><dd>{source.duration === null ? t("media.unknown") : t("media.seconds", { value: source.duration.toFixed(2) })}</dd></div>
+            <div><dt>{t("media.size")}</dt><dd>{source.bytes === null ? t("media.unknown") : `${(source.bytes / 1048576).toFixed(2)} MB`}</dd></div>
+            <div><dt>{t("media.container")}</dt><dd>{source.formatNames.join(", ") || t("media.unknown")}</dd></div>
+          </dl>
+          {hasExportStatus && <div className="editor-export-status"><ExportStatus /></div>}
+          <div ref={setInspectorTarget} className="editor-cut-inspector" hidden={action !== "trim"} />
+          <div className="editor-file-tool">
+            {action === "extractAudio" ? <AudioExtractionPanel source={source} busy={busy} /> : action === "trim" ? null : <TrackRemovalPanel source={source} busy={busy} operation={action} />}
           </div>
-        </section>
-        {action === "trim" ? null : action === "extractAudio" ? <AudioExtractionPanel source={source} busy={busy} /> : <TrackRemovalPanel source={source} busy={busy} operation={action} />}
-      </>}
-      <p className="pb-6 text-xs text-slate-500 dark:text-slate-400">{t("media.sessionOnly")}</p>
+        </>}
+        timeline={action === "trim" ? <TrimPanel source={source} busy={busy} player={player} inspectorTarget={inspectorTarget} /> : <SourceTracks source={source} />}
+      /> : <div className="editor-empty">
+        {hasExportStatus && <div className="editor-empty-export"><ExportStatus /></div>}
+        <div className="editor-empty-content">
+          <div className="editor-empty-icon"><Film className="size-7" strokeWidth={1.5} /></div>
+          <h2>{t("media.empty")}</h2>
+          <p>{t("media.emptyBody")}</p>
+          <Button disabled={busy || exporting} onClick={() => void localMediaActions.open()}>{busy ? <Loader2 className="animate-spin" /> : <FolderOpen />}{t("media.open")}</Button>
+        </div>
+      </div>}
     </div>
+    <footer className="editor-footer"><span className="editor-session-dot" aria-hidden="true" />{t("media.sessionOnly")}</footer>
   </main>
 }

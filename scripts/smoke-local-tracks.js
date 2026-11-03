@@ -122,7 +122,7 @@ async function runUI({ window, service, userData }) {
     for (let i = 0; i < 100; i++) { if (await js(condition)) return; await delay(100) }
     throw new Error(`Track UI condition timed out: ${condition}`)
   }
-  const click = label => js(`Array.from(document.querySelectorAll('button,a')).find(e=>e.textContent.trim()===${JSON.stringify(label)})?.click()`)
+  const click = label => js(`Array.from(document.querySelectorAll('button,a')).find(e=>(e.getAttribute('aria-label') || e.textContent.trim())===${JSON.stringify(label)})?.click()`)
   const original = path.join(userData, "tracks.mkv"), originalHash = hash(original)
   service.selectFile = async () => original
   service.exports.selectDestination = async () => path.join(userData, "muted.mkv")

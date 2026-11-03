@@ -382,6 +382,17 @@ Delete deletes a marking, and Ctrl/Cmd+Z / Shift+Ctrl/Cmd+Z undo/redo. Fields fo
 precise times are secondary. Edits survive route changes and repeated exports;
 a new source resets the bounded session history. Nothing persists as a project.
 
+The editor workspace adapts OpenCut Classic's resizable React panels, compact
+toolbar and timeline ruler/zoom presentation. Its neutral light/dark palette is
+scoped to the local editor. A left tool rail switches operations; the center
+holds the original/compatibility preview and timeline, while a separately
+scrolling inspector holds marked sections, precise fields and export review.
+Panel resizing uses `react-resizable-panels` 2.1.7. The same edit document drives
+the timeline and inspector, including when the latter is rendered through a
+React portal. OpenCut's composition engine and export pipeline are not imported;
+the media procedures below are unchanged. See the pinned
+[UI source and notices](../third-party/opencut-classic/README.md).
+
 “Keep marked sections” exports the marked ranges; “Remove marked sections”
 exports their complement. A middle removal retains both sides and joins them in
 source order into one output. The separate retained-content preview skips the

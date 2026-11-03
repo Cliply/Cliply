@@ -69,6 +69,7 @@
       "src/main/**/*",
       "src/preload/**/*",
       "third-party/losslesscut/**/*",
+      "third-party/opencut-classic/**/*",
       "src/main/renderer/dist/**/*",
       "package.json",
       "!**/.DS_Store",

@@ -138,7 +138,7 @@ async function runUI({ window, service, userData }) {
     for (let i = 0; i < 100; i++) { if (await js(condition)) return; await delay(100) }
     throw new Error(`Export UI condition timed out: ${condition}`)
   }
-  const click = label => js(`Array.from(document.querySelectorAll('button,a')).find(e=>e.textContent.trim()===${JSON.stringify(label)})?.click()`)
+  const click = label => js(`Array.from(document.querySelectorAll('button,a')).find(e=>(e.getAttribute('aria-label') || e.textContent.trim())===${JSON.stringify(label)})?.click()`)
   service.selectFile = async () => path.join(userData, "alternate.mkv")
   // Force preview unavailability independently of Chromium codec/platform support.
   service.preview.create = async () => { throw new (require("../src/main/services/local-media/errors").MediaError)("PREVIEW_UNAVAILABLE") }

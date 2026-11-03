@@ -26,7 +26,7 @@ function fixtures(directory, ffmpeg, { longMedia = false } = {}) {
 async function runUI({ window, service, userData, app }) {
   const wc = window.webContents, js = code => wc.executeJavaScript(code, true)
   const wait = async expression => { for (let i = 0; i < 150; i++) { if (await js(expression)) return; await delay(100) } throw new Error(`Integration condition timed out: ${expression}`) }
-  const click = label => js(`(()=>{const e=Array.from(document.querySelectorAll('button,a')).find(e=>e.textContent.trim()===${JSON.stringify(label)});if(!e)throw Error('Missing control: '+${JSON.stringify(label)});e.click()})()`)
+  const click = label => js(`(()=>{const e=Array.from(document.querySelectorAll('button,a')).find(e=>(e.getAttribute('aria-label') || e.textContent.trim())===${JSON.stringify(label)});if(!e)throw Error('Missing control: '+${JSON.stringify(label)});e.click()})()`)
   const set = (id, value) => js(`(()=>{const e=document.getElementById(${JSON.stringify(id)});Object.getOwnPropertyDescriptor(e.tagName==='SELECT'?HTMLSelectElement.prototype:HTMLInputElement.prototype,'value').set.call(e,${JSON.stringify(String(value))});e.dispatchEvent(new Event(e.tagName==='SELECT'?'change':'input',{bubbles:true}));})()`)
   const sourcePath = path.join(userData, "session.mp4"), sourceHash = createHash("sha256").update(fs.readFileSync(sourcePath)).digest("hex")
   const facts = { operations: [], commands: [], metrics: [], outputBytes: {}, helpers: {}, packaged: app.isPackaged }
@@ -71,6 +71,7 @@ async function runUI({ window, service, userData, app }) {
   await js("(async()=>{const v=document.querySelector('video');v.muted=true;await v.play();await new Promise(r=>setTimeout(r,300));v.pause()})()")
   await wait("!Array.from(document.querySelectorAll('button')).find(e=>e.textContent.trim()==='Review export').disabled")
   facts.playMs = performance.now() - start; measure("played")
+  await require("./smoke-editor-workspace").run({ window })
   await set("trim-start", "4.2"); await set("trim-end", "6")
   start = performance.now(); await click("Review export"); await wait("document.body.textContent.includes('Requested section: 4.200')")
   facts.planMs = performance.now() - start

@@ -15,7 +15,7 @@ async function runUI({ window, service, userData }) {
     for (let i = 0; i < 150; i++) { if (await js(expression)) return; await new Promise(resolve => setTimeout(resolve, 100)) }
     throw new Error(`Compatibility playback condition timed out: ${expression}; ${await js("document.body.textContent.slice(-2500)")}`)
   }
-  const click = label => js(`Array.from(document.querySelectorAll('button,a')).find(e => e.textContent.trim() === ${JSON.stringify(label)})?.click()`)
+  const click = label => js(`Array.from(document.querySelectorAll('button,a')).find(e => (e.getAttribute('aria-label') || e.textContent.trim()) === ${JSON.stringify(label)})?.click()`)
   service.selectFile = async () => path.join(userData, "compatibility.mov")
   await click("Open local file")
   await wait("!!document.querySelector('video')")

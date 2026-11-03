@@ -28,7 +28,7 @@ async function run({ window, service, userData, cliplyApp }) {
     }
     throw new Error(`Preview smoke condition timed out: ${expression}`)
   }
-  const click = (label) => js(`Array.from(document.querySelectorAll('button,a')).find(e => e.textContent.trim() === ${JSON.stringify(label)})?.click()`)
+  const click = (label) => js(`Array.from(document.querySelectorAll('button,a')).find(e => (e.getAttribute('aria-label') || e.textContent.trim()) === ${JSON.stringify(label)})?.click()`)
   const facts = { platform: process.platform, arch: process.arch, electron: process.versions.electron, playback: [] }
   assert.equal(wc.getLastWebPreferences().webSecurity, true)
   assert.equal(wc.getLastWebPreferences().sandbox, true)

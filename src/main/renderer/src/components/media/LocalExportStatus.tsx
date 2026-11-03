@@ -29,16 +29,16 @@ export function ExportStatus() {
     cancelled: "media.clipCancelled", failed: "media.clipFailed"
   }
   const code = snapshot.recoveryError || job?.error
-  return <div className="space-y-3" aria-label={t("media.exportStatus")}>
+  return <div className="min-w-0 space-y-2 empty:hidden" aria-label={t("media.exportStatus")}>
     {job && <>
-      <p role="status" className="break-words text-sm">{t(job.operation === "trim" ? clipLabels[job.state] || labels[job.state] : (job.operation === "removeTracks" || job.operation === "remux") ? copyLabels[job.state] || labels[job.state] : labels[job.state])}{job.outputName ? ` · ${job.outputName}` : ""}</p>
-      <Progress value={job.progress} aria-label={t("media.exportProgress")} />
+      <p role="status" className="break-words text-xs leading-relaxed [overflow-wrap:anywhere]">{t(job.operation === "trim" ? clipLabels[job.state] || labels[job.state] : (job.operation === "removeTracks" || job.operation === "remux") ? copyLabels[job.state] || labels[job.state] : labels[job.state])}{job.outputName ? ` · ${job.outputName}` : ""}</p>
+      <Progress className="h-1.5" value={job.progress} aria-label={t("media.exportProgress")} />
       <div className="flex flex-wrap gap-2">
-        {["reserved", "running", "validating", "stopping"].includes(job.state) && <Button variant="outline" disabled={pending || job.state === "stopping"} onClick={() => void localExportActions.cancel(job.jobId)}>{t(job.operation === "trim" ? "media.cancelClip" : (job.operation === "removeTracks" || job.operation === "remux") ? "media.cancelCopy" : "media.cancelExport")}</Button>}
-        {job.state === "completed" && <Button variant="outline" onClick={() => void localExportActions.reveal(job.jobId)}>{t("media.revealOutput")}</Button>}
+        {["reserved", "running", "validating", "stopping"].includes(job.state) && <Button size="sm" variant="outline" className="h-auto min-h-8 whitespace-normal py-1.5 text-xs" disabled={pending || job.state === "stopping"} onClick={() => void localExportActions.cancel(job.jobId)}>{t(job.operation === "trim" ? "media.cancelClip" : (job.operation === "removeTracks" || job.operation === "remux") ? "media.cancelCopy" : "media.cancelExport")}</Button>}
+        {job.state === "completed" && <Button size="sm" variant="outline" className="h-auto min-h-8 whitespace-normal py-1.5 text-xs" onClick={() => void localExportActions.reveal(job.jobId)}>{t("media.revealOutput")}</Button>}
       </div>
     </>}
-    {(error || code) && <p role="alert" className="text-sm text-red-600 dark:text-red-400">{error || t(Object.hasOwn(en, `media.error.${code}`) ? `media.error.${code}` as Key : "media.exportFailureHelp")}</p>}
+    {(error || code) && <p role="alert" className="break-words text-xs leading-relaxed text-red-600 [overflow-wrap:anywhere] dark:text-red-400">{error || t(Object.hasOwn(en, `media.error.${code}`) ? `media.error.${code}` as Key : "media.exportFailureHelp")}</p>}
   </div>
 }
 
@@ -55,7 +55,7 @@ export function LocalExportEvents() {
     return () => { alive = false; unsubscribe() }
   }, [])
   if (!hasStatus || location.pathname === "/media") return null
-  return <aside className="fixed bottom-4 left-4 z-30 w-80 max-w-[calc(100vw-2rem)] space-y-3 rounded-xl border border-slate-300 bg-white p-4 shadow-xl dark:border-slate-700 dark:bg-slate-900">
-    <ExportStatus /><Button variant="ghost" asChild><Link to="/media">{t("media.return")}</Link></Button>
+  return <aside className="fixed bottom-4 left-4 z-30 w-80 max-w-[calc(100vw-2rem)] space-y-2 rounded-lg border border-border bg-background p-3 shadow-lg">
+    <ExportStatus /><Button size="sm" variant="ghost" className="h-auto min-h-8 whitespace-normal py-1.5 text-xs" asChild><Link to="/media">{t("media.return")}</Link></Button>
   </aside>
 }
