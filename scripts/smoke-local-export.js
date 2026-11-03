@@ -136,6 +136,7 @@ async function runUI({ window, service, userData }) {
   // Force preview unavailability independently of Chromium codec/platform support.
   service.preview.create = async () => { throw new (require("../src/main/services/local-media/errors").MediaError)("PREVIEW_UNAVAILABLE") }
   await click("Open local file")
+  await wait("!!document.getElementById('trim-panel')"); await click("Extract audio")
   await wait("!!document.getElementById('local-audio-track')")
   await wait("Array.from(document.querySelectorAll('[role=alert]')).some(e=>e.textContent.includes('Preview unavailable'))")
   await js("const select=document.getElementById('local-audio-track'); select.value='2'; select.dispatchEvent(new Event('change',{bubbles:true}))")

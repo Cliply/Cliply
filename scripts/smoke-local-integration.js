@@ -41,7 +41,7 @@ async function runUI({ window, service, userData, app }) {
   facts.helpers.ffprobe = await service.resolveProbe()
   await delay(1000); measure("idle-before-open")
   service.selectFile = async () => sourcePath
-  let start = performance.now(); await click("Open local file"); await wait("!!document.getElementById('local-audio-track')")
+  let start = performance.now(); await click("Open local file"); await wait("!!document.getElementById('trim-panel')"); await click("Extract audio"); await wait("!!document.getElementById('local-audio-track')")
   facts.openMs = performance.now() - start; const sourceId = service.source.dto.sourceId
   facts.fixture = { bytes: service.source.dto.bytes, duration: service.source.dto.duration, width: service.source.dto.streams[0].width, height: service.source.dto.streams[0].height }
   await wait("document.activeElement?.tagName==='H1'")
@@ -53,7 +53,7 @@ async function runUI({ window, service, userData, app }) {
     await click("Choose destination"); await wait(`document.body.textContent.includes('Save as: ${filename}')`)
     const began = performance.now()
     if (action === "extractAudio") await js("Array.from(document.querySelectorAll('#audio-extraction button')).find(e=>e.textContent.trim()==='Extract audio').click()")
-    else await click(action === "trim" ? "Save clip" : "Save copy")
+    else await click(action === "trim" ? "Export edited video" : "Save copy")
     await wait(`document.body.textContent.includes(${JSON.stringify(label)}) && document.body.textContent.includes(${JSON.stringify(filename)})`)
     assert.equal(service.exports.job.state, "completed"); assert.equal(service.source.dto.sourceId, sourceId)
     facts.operations.push({ action, milliseconds: performance.now() - began, sourceStillOpen: true })
@@ -84,7 +84,7 @@ async function runUI({ window, service, userData, app }) {
   await wait("!Array.from(document.querySelectorAll('button')).find(e=>e.textContent.trim()==='Review cut boundaries').disabled")
   await click("Review cut boundaries"); await wait("document.body.textContent.includes('Planned content: approximately 4.000')")
   await click("Choose destination"); await wait("document.body.textContent.includes('Save as: cancelled.mp4')")
-  await click("Save clip")
+  await click("Export edited video")
   for (let i = 0; i < 100 && service.exports.job.state !== "running"; i++) await delay(20)
   assert.equal(service.exports.job.state, "running"); await delay(250)
   await click("Back to downloads"); await wait("document.querySelector('aside')?.textContent.includes('Cancel clip')")
@@ -100,7 +100,7 @@ async function runUI({ window, service, userData, app }) {
   await click("Change file"); await wait("document.querySelector('main')?.textContent.includes('could not be inspected') && !Array.from(document.querySelectorAll('button')).find(e=>e.textContent.trim()==='Change file').disabled")
   assert.equal(service.source.dto.sourceId, sourceId)
   service.selectFile = async () => path.join(userData, "large.wav")
-  start = performance.now(); await click("Change file"); await wait("document.querySelector('main')?.textContent.includes('large.wav') && !!document.getElementById('local-audio-track')")
+  start = performance.now(); await click("Change file"); await wait("document.querySelector('main')?.textContent.includes('large.wav') && !!document.getElementById('trim-panel')")
   facts.largeOpenMs = performance.now() - start; facts.largeBytes = service.source.dto.bytes
   assert(facts.largeBytes > 512 * 1024 * 1024)
   await click("ru"); assert(await js("document.documentElement.lang==='ru' || document.body.textContent.includes('Локальный')"))

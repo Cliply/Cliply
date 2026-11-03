@@ -114,7 +114,7 @@ async function runUI({ window, service, userData }) {
   service.exports.selectDestination = async () => path.join(userData, "ui-copy.mkv")
   const previewCreate = service.preview.create
   service.preview.create = async () => { throw new (require("../src/main/services/local-media/errors").MediaError)("PREVIEW_UNAVAILABLE") }
-  await click("Open local file"); await wait("!!document.getElementById('local-audio-track')")
+  await click("Open local file"); await wait("!!document.getElementById('trim-panel')")
   await click("Change format"); await wait("!!document.getElementById('target-container')")
   assert(await js("Array.from(document.querySelectorAll('#container-change input[type=checkbox]')).every(e=>e.checked)"))
   await select("mkv")
@@ -150,7 +150,7 @@ async function runUI({ window, service, userData }) {
   // These explicit test opens emulate the user opening a completed output.
   // Production export never replaces the source automatically.
   service.selectFile = async () => path.join(userData, "default.mkv")
-  await click("Change file"); await wait("document.querySelector('main')?.textContent.includes('default.mkv') && !!document.getElementById('local-audio-track')")
+  await click("Change file"); await wait("document.querySelector('main')?.textContent.includes('default.mkv') && !!document.getElementById('trim-panel')")
   const source = service.source.dto
   for (const targetContainer of ["mp4", "mov"]) {
     service.exports.selectDestination = async () => path.join(userData, `ui-copy.${targetContainer}`)

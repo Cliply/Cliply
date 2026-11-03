@@ -128,7 +128,7 @@ async function runUI({ window, service, userData }) {
   service.exports.selectDestination = async () => path.join(userData, "muted.mkv")
   service.preview.create = async () => { throw new (require("../src/main/services/local-media/errors").MediaError)("PREVIEW_UNAVAILABLE") }
   await click("Open local file")
-  await wait("!!document.getElementById('local-audio-track')")
+  await wait("!!document.getElementById('trim-panel')")
   await wait("Array.from(document.querySelectorAll('[role=alert]')).some(e=>e.textContent.includes('Preview unavailable'))")
   await click("Remove tracks")
   await wait("!!document.getElementById('keep-track-0')")

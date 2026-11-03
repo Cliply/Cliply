@@ -37,7 +37,7 @@ export default function MediaPage() {
   }, [])
 
   return <main className="min-h-screen bg-gradient-to-br from-slate-50 via-slate-100 to-slate-200 px-6 py-6 dark:from-slate-900 dark:via-slate-800 dark:to-slate-900">
-    <div className="mx-auto max-w-5xl space-y-6">
+    <div className="mx-auto max-w-6xl space-y-4">
       <header className="flex flex-wrap items-center justify-between gap-3">
         <Button variant="ghost" asChild><Link to="/"><ArrowLeft />{t("media.back")}</Link></Button>
         <div className="flex items-center gap-2"><DownloadsToggle /><LocaleToggle /><ModeToggle /></div>
@@ -65,6 +65,7 @@ export default function MediaPage() {
             <NativeMediaPlayer key={source.sourceId} source={source} busy={busy} mediaRef={player} />
           </CardContent>
         </Card>
+        {action === "trim" && <TrimPanel source={source} busy={busy} player={player} />}
         {action === "extractAudio" && <Card className="border-slate-300/50 bg-white/80 dark:border-slate-700/50 dark:bg-slate-800/60">
           <CardHeader><CardTitle>{t("media.tracks")}</CardTitle></CardHeader>
           <CardContent className="space-y-4">
@@ -87,7 +88,7 @@ export default function MediaPage() {
             <Button variant={action === "removeTracks" ? "secondary" : "outline"} disabled={exporting} onClick={() => useLocalExport.setState({ action: "removeTracks" })}><ListVideo />{t("media.remove")}</Button><Button variant={action === "remux" ? "secondary" : "outline"} disabled={exporting} onClick={() => useLocalExport.setState({ action: "remux" })}><FileVideo />{t("media.remux")}</Button>
           </div>
         </section>
-        {action === "trim" ? <TrimPanel source={source} busy={busy} player={player} /> : action === "extractAudio" ? <AudioExtractionPanel source={source} busy={busy} /> : <TrackRemovalPanel source={source} busy={busy} operation={action} />}
+        {action === "trim" ? null : action === "extractAudio" ? <AudioExtractionPanel source={source} busy={busy} /> : <TrackRemovalPanel source={source} busy={busy} operation={action} />}
       </>}
       <p className="pb-6 text-xs text-slate-500 dark:text-slate-400">{t("media.sessionOnly")}</p>
     </div>

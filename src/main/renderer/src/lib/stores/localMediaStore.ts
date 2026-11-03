@@ -20,7 +20,7 @@ export const localMediaActions = {
       if (current !== revision || result.cancelled || !result.source) return false
       useLocalMedia.setState({ source: result.source, position: 0, auditionPreviewId: null })
       localTrimActions.reset()
-      useLocalExport.setState({ selection: null, trackSelection: null, remuxSelection: null, trimSelection: null, trimTiming: null, action: "extractAudio" })
+      useLocalExport.setState({ selection: null, trackSelection: null, remuxSelection: null, trimSelection: null, trimTiming: null, action: "trim" })
       return true
     } catch (error) {
       if (current === revision) useLocalMedia.setState({ error: message(error) })
@@ -37,7 +37,7 @@ export const localMediaActions = {
       if (state.source?.sourceId !== useLocalMedia.getState().source?.sourceId) {
         useLocalMedia.setState({ source: state.source, position: 0, auditionPreviewId: null })
         localTrimActions.reset()
-        useLocalExport.setState({ selection: null, trackSelection: null, remuxSelection: null, trimSelection: null, trimTiming: null, action: "extractAudio" })
+        useLocalExport.setState({ selection: null, trackSelection: null, remuxSelection: null, trimSelection: null, trimTiming: null, action: "trim" })
       }
     } catch (error) {
       if (current !== revision) return
@@ -50,7 +50,7 @@ export const localMediaActions = {
     const current = ++revision
     localTrimActions.reset()
     useLocalMedia.setState({ source: null, position: 0, auditionPreviewId: null, error: null, busy: true })
-    useLocalExport.setState({ selection: null, trackSelection: null, remuxSelection: null, trimSelection: null, trimTiming: null, action: "extractAudio" })
+    useLocalExport.setState({ selection: null, trackSelection: null, remuxSelection: null, trimSelection: null, trimTiming: null, action: "trim" })
     try {
       await mediaApi.close()
       if (current === revision) useLocalMedia.setState({ busy: false })

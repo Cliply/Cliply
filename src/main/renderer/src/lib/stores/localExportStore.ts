@@ -10,7 +10,7 @@ export const useLocalExport = create<{
   trimSelection: { sourceId: string; start: string; end: string; mode: "before" | "after" } | null
   trimTiming: TrimTiming | null; timingPending: boolean
   action: LocalExportRequest["operation"]
-}>(() => ({ snapshot: { revision: -1, preparing: false, plan: null, job: null, recoveryError: null }, pending: false, error: null, selection: null, trackSelection: null, remuxSelection: null, trimSelection: null, trimTiming: null, timingPending: false, action: "extractAudio" }))
+}>(() => ({ snapshot: { revision: -1, preparing: false, plan: null, job: null, recoveryError: null }, pending: false, error: null, selection: null, trackSelection: null, remuxSelection: null, trimSelection: null, trimTiming: null, timingPending: false, action: "trim" }))
 export const exportActive = (state: LocalExportState) => state.preparing || Boolean(state.job && ["reserved", "running", "validating", "publishing", "stopping"].includes(state.job.state))
 export function acceptExport(state: LocalExportState) {
   if (state.revision > useLocalExport.getState().snapshot.revision) useLocalExport.setState({ snapshot: state })
