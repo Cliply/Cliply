@@ -26,11 +26,19 @@ async function runUI({ window, service, userData }) {
   const sourceId = service.source.dto.sourceId
   await js("document.querySelector('video').play()")
   await wait("document.querySelectorAll('video')[1].currentTime > 0.2 && !document.querySelectorAll('video')[1].paused")
+  assert.equal(await js("document.querySelectorAll('video')[1].muted"), false)
+  await js("document.querySelector('video').muted = true; document.querySelector('video').volume = 0.35")
+  await wait("document.querySelectorAll('video')[1].muted && document.querySelectorAll('video')[1].volume === 0.35")
+  await js("document.querySelector('video').muted = false")
+  await wait("!document.querySelectorAll('video')[1].muted")
   await js("document.querySelector('video').currentTime = 9")
   await wait("document.querySelectorAll('video')[1].currentTime >= 8.8")
   await js("document.querySelector('video').pause(); document.querySelector('video').currentTime = 1")
   await wait("Math.abs(document.querySelectorAll('video')[1].currentTime - 1) < 0.15 && document.querySelectorAll('video')[1].readyState >= 2")
   if (process.env.CLIPLY_SMOKE_EVIDENCE) {
+    window.show(); window.focus()
+    await js("new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))")
+    await new Promise(resolve => setTimeout(resolve, 250))
     fs.mkdirSync(process.env.CLIPLY_SMOKE_EVIDENCE, { recursive: true })
     fs.writeFileSync(path.join(process.env.CLIPLY_SMOKE_EVIDENCE, "compatibility-player.png"), (await window.webContents.capturePage()).toPNG())
   }
@@ -44,6 +52,6 @@ async function runUI({ window, service, userData }) {
   for (let i = 0; i < 40 && service.compatibility.jobs.size; i++) await new Promise(resolve => setTimeout(resolve, 100))
   assert.equal(service.compatibility.jobs.size, 0)
   assert.equal(service.source, null)
-  console.log("LosslessCut compatibility playback: ProRes native failure, automatic fallback, play, forward/back seek, route restoration and cleanup passed")
+  console.log("LosslessCut compatibility playback: ProRes native failure, automatic fallback, play, mute/volume, forward/back seek, route restoration and cleanup passed")
 }
 module.exports = { fixtures, runUI }

@@ -309,6 +309,9 @@ async function startPlayback({ path, slaveVideo, masterVideo, videoStreamIndex, 
         // eslint-disable-next-line no-param-reassign
         slaveVideo.volume = masterVideo.volume;
       }
+      // Cliply exposes native controls; their mute flag is separate from volume.
+      // The master contains silence, so it can retain the user's actual mute state.
+      if (slaveVideo.muted !== masterVideo.muted) slaveVideo.muted = masterVideo.muted;
 
       const masterStopped = masterVideo.paused || masterVideo.ended;
       const slaveStopped = slaveVideo.paused || slaveVideo.ended;

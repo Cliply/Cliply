@@ -244,9 +244,10 @@ has not actually closed keeps admission held and prevents quit/install success.
 [ExportOutput](../src/main/services/local-media/export-output.js) places an
 exclusive partial in a private random directory in the chosen destination.
 Before publication, main rechecks source identity and validates nonempty output,
-one audio stream, codec/sample rate/channels, output family, absent chapters and
+one audio stream, codec/sample rate/channels, output family and
 duration within the larger of 250 ms or 2%. Native acceptance additionally decodes
-and compares the selected encoded audio; this is not sample-accurate editing.
+and compares the selected encoded audio, including MP3 chapter preservation under
+the muxer's default behavior; this is not sample-accurate editing.
 
 The final file is created with an atomic, no-clobber hard link. Existing files,
 symlinks, hardlink aliases and collision races are refused. Unsupported

@@ -97,7 +97,7 @@ export function NativeMediaPlayer({ source, busy, mediaRef }: { source: MediaSou
   return <section aria-label={t("media.preview")} className="space-y-3">
     <div className="relative rounded-xl border border-slate-300/50 bg-slate-950 p-2 dark:border-slate-700/50">
       {!video && <div className="flex h-32 items-center justify-center gap-3 text-slate-300"><Film />{t("media.audioPreview")}</div>}
-      <Player ref={node => { element.current = node; if (mediaRef) mediaRef.current = node }} src={preview?.url} muted={compatibility} controls controlsList="nodownload noremoteplayback" disablePictureInPicture preload="metadata" aria-label={t("media.player")}
+      <Player ref={node => { element.current = node; if (mediaRef) mediaRef.current = node }} src={preview?.url} controls controlsList="nodownload noremoteplayback" disablePictureInPicture preload="metadata" aria-label={t("media.player")}
         className={video ? "aspect-video max-h-[32vh] w-full rounded-lg object-contain" : "w-full"}
         onLoadedMetadata={(event) => {
           const media = event.currentTarget
