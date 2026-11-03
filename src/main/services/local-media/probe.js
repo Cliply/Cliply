@@ -138,6 +138,7 @@ function normalizeProbe(raw) {
       duration: finite(stream.duration, 0), startTime: finite(stream.start_time), timeBase: rational(stream.time_base),
       width: finite(stream.width, 0), height: finite(stream.height, 0), pixelFormat: text(stream.pix_fmt, 80),
       sampleRate: finite(stream.sample_rate, 0), channels: finite(stream.channels, 0),
+      bFrames: Number.isSafeInteger(stream.has_b_frames) && stream.has_b_frames >= 0 && stream.has_b_frames <= 16 ? stream.has_b_frames : null,
       averageFrameRate: rational(stream.avg_frame_rate),
       language: text(stream.tags?.language, 80), title: text(stream.tags?.title ?? stream.tags?.name), disposition,
       titleCopySafe: (stream.tags?.title ?? stream.tags?.name) == null || text(stream.tags?.title ?? stream.tags?.name) === (stream.tags?.title ?? stream.tags?.name),

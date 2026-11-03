@@ -20,7 +20,7 @@ function trackSupported(container, stream) {
     !stream.hasHdrMetadata && [null, undefined, "unknown", "bt709", "smpte170m", "bt470bg"].includes(stream.colorTransfer) &&
     [null, undefined, "unknown", "bt709", "smpte170m", "bt470bg"].includes(stream.colorPrimaries) &&
     [0, 90, -90, 180, -180, 270].includes(stream.rotation ?? 0) && (container.extension !== "mkv" || !stream.rotation)
-  if (stream.type === "audio") return stream.codec === "aac" && stream.profile === "LC" &&
+  if (stream.type === "audio") return stream.codec === "aac" && ["LC", "HE-AAC"].includes(stream.profile) &&
     Number.isSafeInteger(stream.sampleRate) && stream.sampleRate > 0 && [1, 2].includes(stream.channels)
   return stream.type === "subtitle" && stream.codec === (container.extension === "mkv" ? "subrip" : "mov_text")
 }
@@ -114,8 +114,10 @@ function planAudio(source, request) {
 function exportArgs(plan) {
   const streams = ["removeTracks", "remux", "trim"].includes(plan.operation) ? plan.expectedStreams : null
   const trim = plan.operation === "trim"
+  const mkvCut = trim && plan.matroskaInput
+  const compensation = mkvCut && plan.bFrames > 0 ? 3 / 23 + 0.001 : 0
   const inputSeek = trim && plan.seekStart > 0 && (plan.hasVideo || plan.pcm)
-    ? ["-ss", (plan.seekStart + (plan.hasVideo ? 0.000002 : 0)).toFixed(6)] : []
+    ? ["-ss", (plan.seekStart + (mkvCut ? plan.origin - plan.inputStart + compensation : 0) + (plan.hasVideo ? 0.000002 : 0)).toFixed(6)] : []
   const outputSeek = trim && plan.seekStart > 0 && !plan.hasVideo && !plan.pcm ? ["-ss", plan.seekStart.toFixed(6), "-copyinkf"] : []
   const durationArgs = trim && !plan.eof ? ["-t", plan.duration.toFixed(6)] : []
   const maps = streams ? streams.flatMap(stream => ["-map", `0:${stream.index}`]) : ["-map", `0:${plan.streamIndex}`]
@@ -130,7 +132,9 @@ function exportArgs(plan) {
     "-probesize", "5000000", "-analyzeduration", "5000000", "-max_streams", "128",
     // Inherited regular-file descriptors are seekable; FFmpeg never opens a
     // renderer path, the selected source path or a final output path.
+    ...(mkvCut ? ["-copyts", "-itsoffset", (-(plan.seekStart + plan.origin)).toFixed(6)] : []),
     ...inputSeek, "-fd", "0", "-i", "fd:", ...outputSeek, ...durationArgs, ...maps, "-c", "copy", ...metadata, "-map_chapters", plan.expectedChapters?.length ? "0" : "-1",
+    ...(mkvCut ? ["-avoid_negative_ts", "disabled"] : []),
     "-progress", "pipe:2", "-nostats", "-f", plan.muxer, "-fd", "1", "fd:"]
 }
 

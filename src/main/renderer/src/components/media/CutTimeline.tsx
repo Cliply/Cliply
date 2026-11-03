@@ -45,7 +45,11 @@ export function CutTimeline({ edit, duration, position, locked, onEdit, onSelect
           event.currentTarget.setPointerCapture(event.pointerId)
           const edge = (event.target as HTMLElement).dataset.edge as "start" | "end" | undefined
           if (edge) drag.current = { edge, base: edit, draft: edit }
-          else onSeek(pointerTime(event.clientX))
+          else {
+            const section = (event.target as HTMLElement).closest<HTMLElement>("[data-section]")
+            if (section) onSelect(Number(section.dataset.section))
+            onSeek(pointerTime(event.clientX))
+          }
         }}
         onPointerMove={event => {
           if (locked || !event.currentTarget.hasPointerCapture(event.pointerId)) return
@@ -68,7 +72,7 @@ export function CutTimeline({ edit, duration, position, locked, onEdit, onSelect
             <span className="ml-1">{timecode(time)}</span>
           </div>
         })}
-        {shown.ranges.map((range, index) => <button key={index} type="button" disabled={locked} aria-pressed={index === shown.active}
+        {shown.ranges.map((range, index) => <button key={index} data-section={index} type="button" disabled={locked} aria-pressed={index === shown.active}
           aria-label={t("media.section", { number: index + 1 })} onClick={() => onSelect(index)}
           className={`absolute top-9 h-12 overflow-hidden rounded border-2 text-left text-xs font-medium ${shown.intent === "keep" ? "border-teal-600 bg-teal-500/35 dark:border-teal-400" : "border-rose-600 bg-rose-500/30 dark:border-rose-400"} ${index === shown.active ? "ring-2 ring-slate-900 ring-offset-2 dark:ring-white dark:ring-offset-slate-900" : "opacity-65"}`}
           style={{ left: fraction(range.start), width: fraction(range.end - range.start), minWidth: 4 }}><span className="px-4">{index + 1}</span></button>)}

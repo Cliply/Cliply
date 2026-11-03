@@ -30,7 +30,13 @@ function retainedRanges(source, request) {
   }
   // Never silently discard a tiny retained sliver.
   if (!result.length || result.length > MAX_SEGMENTS || result.some(range => range.end - range.start < 0.1 - 1e-9)) fail("TRIM_RANGE")
-  return result
+  const joined = []
+  for (const range of result) {
+    const previous = joined.at(-1)
+    if (previous && previous.end === range.start) previous.end = range.end
+    else joined.push({ ...range })
+  }
+  return joined
 }
 
 function combineTiming(request, cuts) {

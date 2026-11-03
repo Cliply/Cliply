@@ -18,7 +18,7 @@ beforeEach(() => {
   vi.clearAllMocks(); useEditor.setState({ sourceId: null, past: [], future: [] }); useLocale.setState({ locale: "en" })
   useLocalMedia.setState({ source, position: 1, auditionPreviewId: "preview", busy: false })
   useLocalExport.setState({ snapshot: empty, pending: false, error: null, trimSelection: null, trimTiming: null, timingPending: false })
-  player = { current: document.createElement("video") }; player.current.currentTime = 4.234567
+  player = { current: document.createElement("video") }; Object.defineProperty(player.current, "readyState", { value: 2 }); player.current.currentTime = 4.234567
   vi.mocked(mediaApi.inspectTrim).mockResolvedValue(timing)
   vi.mocked(mediaApi.cancelTrim).mockResolvedValue({ cancelled: true })
   vi.mocked(mediaApi.close).mockResolvedValue({ closed: true })
@@ -34,7 +34,7 @@ test("marks and inversion produce the actual segment request without playback ga
   setRange()
   fireEvent.change(screen.getByLabelText(en["media.editMode"]), { target: { value: "remove" } })
   fireEvent.click(button("media.reviewCut"))
-  await waitFor(() => expect(mediaApi.inspectTrim).toHaveBeenCalledWith({ sourceId: "source", ranges: [{ start: 4.2, end: 6 }], intent: "remove", mode: "before" }))
+  await waitFor(() => expect(mediaApi.inspectTrim).toHaveBeenCalledWith({ sourceId: "source", ranges: [{ start: 4.2, end: 6 }], intent: "remove", mode: "after" }))
   expect(screen.getByText(/2 parts/)).toBeTruthy()
 })
 test("split, delete, undo and redo affect the output rather than just the drawing", () => {
@@ -110,4 +110,12 @@ test("closing or cancelling discards an already-returning timing reply", async (
   resolve(timing); await checking
   expect(useLocalExport.getState().trimTiming).toBeNull()
   expect(useLocalExport.getState().timingPending).toBe(false)
+})
+
+
+test("splitting alone keeps a continuous output and one timeline is mounted", () => {
+  render(<TrimPanel source={source} busy={false} player={player} />)
+  fireEvent.keyDown(window, { key: "b" })
+  expect(screen.getByText(/1 parts/)).toBeTruthy()
+  expect(screen.getAllByTestId("cut-timeline")).toHaveLength(1)
 })

@@ -20,8 +20,9 @@ function fixtures(directory, ffmpeg) {
   const video = ["-f", "lavfi", "-i", "testsrc2=s=160x90:r=24:d=12", ...noise]
   const codecs = ["-c:v", "libx264", "-g", "96", "-keyint_min", "96", "-sc_threshold", "0", "-bf", "3", "-pix_fmt", "yuv420p", "-c:a", "aac", "-aac_pns", "0", "-metadata:s:a:0", "language=eng", "-metadata", "title=Boundary fixture"]
   make("gop.mp4", [...video, ...codecs])
+  if (process.platform === "darwin") make("he-aac.mp4", ["-i", path.join(directory, "gop.mp4"), "-map", "0", "-c:v", "copy", "-c:a", "aac_at", "-profile:a", "4", "-ar", "44100", "-ac", "2", "-b:a", "48k"])
   make("vfr.mp4", [...video, "-vf", "select='lt(t,6)+gte(t,6)*not(mod(n,2))'", "-fps_mode", "vfr", ...codecs])
-  for (const name of ["same.mov", "unsupported.mkv"]) make(name, ["-i", path.join(directory, "gop.mp4"), "-map", "0", "-c", "copy"])
+  for (const name of ["same.mov", "compatible.mkv"]) make(name, ["-i", path.join(directory, "gop.mp4"), "-map", "0", "-c", "copy"])
   make("rotated.mov", ["-i", path.join(directory, "same.mov"), "-map", "0", "-c", "copy", "-metadata:s:v:0", "rotate=90"])
   make("brand.mp4", ["-i", path.join(directory, "gop.mp4"), "-map", "0", "-c", "copy", "-brand", "mp42"])
   make("silent.mp4", ["-i", path.join(directory, "gop.mp4"), "-map", "0:v", "-c", "copy"])
@@ -133,7 +134,7 @@ async function runNative({ directory, ffmpeg, ffprobe }) {
   for (const rate of [44100, 48000]) for (const extension of ["wav", "m4a"]) {
     await open(`stereo-${rate}.${extension}`); await save(`cut-stereo-${rate}.${extension}`, 1.123, 3.456)
   }
-  for (const [input, code] of [["audio.mp3", "TRIM_PROFILE"], ["offset.mp4", "TRIM_TIMING"], ["chapters.mp4", "TRIM_STREAMS"], ["unsupported.mkv", "TRIM_PROFILE"], ["raw.aac", "TRIM_PROFILE"]]) {
+  for (const [input, code] of [["audio.mp3", "TRIM_CONTAINER"], ["offset.mp4", "TRIM_TIMING"], ["chapters.mp4", "TRIM_CHAPTERS"], ["raw.aac", "TRIM_CONTAINER"]]) {
     const source = await open(input); assert.equal(source.trimProfile, null); assert.equal(source.capabilities.trim.reason, code); refusals.push({ input, code })
   }
   // Candidate rejected on actual decoded-onset evidence: MP3 reservoir/skip
@@ -231,6 +232,21 @@ async function runUI({ window, service, userData }) {
   await wait("document.querySelector('video').currentTime>0.1")
   await js("document.querySelector('video').pause()")
   assert.equal(await js("document.querySelector('button[aria-label=Undo]').disabled"), true)
+  const compatibility = []
+  for (const filename of ["compatible.mkv", ...(process.platform === "darwin" ? ["he-aac.mp4"] : [])]) {
+    service.selectFile = async () => path.join(userData, filename)
+    await click("Change file"); await wait(`document.querySelector('main')?.textContent.includes(${JSON.stringify(filename)})`)
+    await wait("document.querySelector('video').readyState>=2 || !!document.querySelector('video').error")
+    const ready = await js("document.querySelector('video').readyState>=2")
+    if (ready) {
+      await js("document.querySelector('video').muted=true; document.querySelector('video').play()")
+      await wait("document.querySelector('video').currentTime>0.1")
+      await js("document.querySelector('video').pause()")
+    }
+    compatibility.push({ filename, nativePlayback: ready })
+    assert(ready, `native playback for ${filename}`)
+  }
+  if (process.env.CLIPLY_SMOKE_EVIDENCE) fs.writeFileSync(path.join(process.env.CLIPLY_SMOKE_EVIDENCE, "editor-playback.json"), JSON.stringify(compatibility, null, 2))
   console.log("Native visual editor: middle removal, retained preview, joined export, route return, cancellation and output playback passed")
 }
 

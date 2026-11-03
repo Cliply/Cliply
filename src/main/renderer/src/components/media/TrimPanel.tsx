@@ -28,7 +28,7 @@ export function TrimPanel({ source, busy, player }: { source: MediaSource; busy:
     JSON.stringify(storedTiming.ranges) === JSON.stringify(edit.ranges) && storedTiming.expiresAt > Date.now() ? storedTiming : null
   const plan = snapshot.plan?.operation === "trim" && snapshot.plan.trimPlanId === timing?.trimPlanId ? snapshot.plan : null
   const range = edit.ranges[edit.active]
-  const currentTime = () => player.current?.currentTime ?? position
+  const currentTime = () => player.current && player.current.readyState > 0 ? player.current.currentTime : position
   const seek = (time: number) => {
     if (locked) return
     setPreviewing(false)
@@ -70,8 +70,9 @@ export function TrimPanel({ source, busy, player }: { source: MediaSource; busy:
   useEffect(() => {
     const keydown = (event: KeyboardEvent) => {
       const target = event.target instanceof HTMLElement ? event.target : null
-      if (locked || event.altKey || event.repeat || target?.isContentEditable || target?.closest("input,textarea,select,button,video,audio,[role=slider],[contenteditable]")) return
+      if (locked || event.altKey || event.repeat || target?.isContentEditable || target?.closest("input,textarea,select,video,audio,[role=slider],[contenteditable]")) return
       const key = event.key.toLowerCase()
+      if (key === " " && target?.closest("button")) return
       if ((event.metaKey || event.ctrlKey) && key === "z") {
         event.preventDefault(); setPreviewing(false); localTrimActions.reset()
         if (event.shiftKey) editorActions.redo(); else editorActions.undo()
@@ -103,7 +104,7 @@ export function TrimPanel({ source, busy, player }: { source: MediaSource; busy:
       <Button size="sm" variant="outline" disabled={locked || !range} onClick={() => mark("end")}>O · {t("media.setEnd")}</Button>
       <Button size="sm" variant="outline" disabled={locked || splitSection(edit, currentTime()) === edit} onClick={() => commit(splitSection(edit, currentTime()))}><Scissors />{t("media.split")}</Button>
       <Button size="sm" variant="outline" disabled={locked || addSection(edit, currentTime(), duration) === edit} onClick={() => commit(addSection(edit, currentTime(), duration))}><Plus />{t("media.addSection")}</Button>
-      <select aria-label={t("media.editMode")} value={edit.intent} disabled={locked} onChange={event => commit({ ...edit, intent: event.target.value as "keep" | "remove" })} className="ml-auto rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-600 dark:bg-slate-900">
+      <select aria-label={t("media.editMode")} value={edit.intent} disabled={locked} onChange={event => commit({ ...edit, intent: event.target.value as "keep" | "remove", mode: event.target.value === "remove" ? "after" : "before" })} className="ml-auto rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-600 dark:bg-slate-900">
         <option value="keep">{t("media.keepMarked")}</option><option value="remove">{t("media.removeMarked")}</option>
       </select>
     </div>
@@ -142,6 +143,7 @@ export function TrimPanel({ source, busy, player }: { source: MediaSource; busy:
     {timingPending ? <Button variant="outline" onClick={() => void localTrimActions.cancel()}>{t("media.cancelTiming")}</Button> :
       <Button disabled={locked || !valid || !source.trimProfile} onClick={() => { setPreviewing(false); void localTrimActions.inspect({ sourceId: source.sourceId, ranges: edit.ranges, intent: edit.intent, mode: edit.mode }) }}>{t("media.reviewCut")}</Button>}
     {timing && <div className="space-y-3 rounded-xl border border-teal-500/40 bg-teal-50/50 p-4 dark:bg-teal-950/20">
+      <p className="text-sm font-medium">{t("media.editFormat", { format: timing.extension.toUpperCase() })}</p>
       <p className="text-sm">{t("media.fastCutNote")}</p>
       <ol className="space-y-1 text-sm tabular-nums">{(timing.cuts ?? [timing]).map((cut, index) => <li key={index}>{index + 1}. {t("media.plannedCut", { start: cut.plannedStart.toFixed(3), end: cut.plannedEnd.toFixed(3) })}</li>)}</ol>
       <Button variant="outline" disabled={locked} onClick={() => void localExportActions.prepare({ operation: "trim", sourceId: source.sourceId, trimPlanId: timing.trimPlanId })}>{t("media.chooseDestination")}</Button>

@@ -86,7 +86,7 @@ async function validate({ archive, evidence, sourceBuild, noticeRecord }) {
       run("libraries", dumpbin, ["/dependents", ffprobe])
     }
     run("inspection", process.execPath, ["scripts/smoke-local-media.js", "--ffprobe", ffprobe, "--ffmpeg", ffmpeg])
-    for (const [name, json] of [["export", "extraction"], ["tracks", "tracks"], ["remux", "remux"], ["trim", "trim"]]) {
+    for (const [name, json] of [["export", "extraction"], ["tracks", "tracks"], ["remux", "remux"], ["trim", "trim"], ["segments", "segments"]]) {
       const media = path.join(scratch, name)
       run(name, process.execPath, [`scripts/smoke-local-${name}.js`, media, ffmpeg, ffprobe])
       fs.copyFileSync(path.join(media, `${json}-evidence.json`), path.join(evidence, `${name}.json`))

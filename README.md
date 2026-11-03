@@ -40,14 +40,15 @@ got an idea or found something broken? [open an issue](https://github.com/Cliply
 
 ### local files — under validation
 
-this branch also has a local-file workspace: play a file, save one fast-trimmed
-section, extract one audio track, remove tracks or change a compatible container.
+this branch also has a local-file workspace: preview a file, mark sections on a visual timeline, keep or remove them and save
+one joined result. You can also extract audio, remove tracks or change a compatible container.
 these tools copy existing media without re-encoding. fast cuts can move to a
 nearby video keyframe; unsupported layouts show a reason instead of converting
 or silently dropping tracks. the original stays open and exports use a new file.
 
 production availability is pending: shared ffprobe assets and their complete
-source records are not ready, and windows/linux native acceptance is outstanding.
+source records are not ready. Prior source-built package checks passed on macos,
+windows and linux; the new editor changes need fresh native validation.
 normal builds without ffprobe show a readable inspection error; downloads still
 work. see the [verified profiles and limits](docs/architecture.md#local-media-validation-status)
 and [development staging instructions](third-party/ffprobe/README.md).

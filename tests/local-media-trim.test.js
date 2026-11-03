@@ -38,17 +38,17 @@ test.each([{ start: -1 }, { start: 6 }, { end: 13 }, { end: 4.21 }, { start: NaN
 test("unusable keys, delayed source and unhandled streams cannot become an approximate-looking plan", () => {
   expect(() => planTrimTiming(source, request(), packets.map(packet => ({ ...packet, key: false })), packets)).toThrow(expect.objectContaining({ code: "TRIM_KEYFRAME" }))
   source.startTime = 2; expect(() => trimProfile(source)).toThrow(expect.objectContaining({ code: "TRIM_TIMING" }))
-  source.startTime = 0; source.chapterCount = 1; expect(() => trimProfile(source)).toThrow(expect.objectContaining({ code: "TRIM_STREAMS" }))
+  source.startTime = 0; source.chapterCount = 1; expect(() => trimProfile(source)).toThrow(expect.objectContaining({ code: "TRIM_CHAPTERS" }))
   source.chapterCount = 0; source.streams.push({ index: 9, type: "subtitle" }); expect(() => trimProfile(source)).toThrow(expect.objectContaining({ code: "TRIM_STREAMS" }))
 })
 test.each([{ codec: "hevc" }, { pixelFormat: "yuv420p10le" }, { hasHdrMetadata: true }, { disposition: { default: 0 } }])("video profile refuses %p", patch => { Object.assign(source.streams[0], patch); expect(() => trimProfile(source)).toThrow() })
-test("PCM and AAC audio use separate measured seek rules; MP3/ADTS/MKV are refused", () => {
+test("PCM and AAC audio use separate measured seek rules; MP3/ADTS and audio-only MKV are refused", () => {
   source.streams = [{ ...audio, index: 0, codec: "pcm_s16le", disposition: {}, startTime: null }]; source.formatNames = ["wav"]; source.contentContainer = null; source.startTime = null
   let plan = timing({ start: 1.123, end: 3.456 })
   expect(plan.extension).toBe("wav"); let args = exportArgs(plan)
   expect(args.indexOf("-ss")).toBeLessThan(args.indexOf("-i")); expect(args).not.toContain("-copyinkf")
   source.streams[0].codec = "mp3"; source.formatNames = ["mp3"]; source.startTime = 0.023
-  expect(() => trimProfile(source)).toThrow(expect.objectContaining({ code: "TRIM_PROFILE" }))
+  expect(() => trimProfile(source)).toThrow(expect.objectContaining({ code: "TRIM_CONTAINER" }))
   source.streams = [{ ...audio, index: 0 }]; source.formatNames = ["mov", "mp4"]; source.majorBrand = "M4A"; source.startTime = 0
   expect(trimProfile(source)).toMatchObject({ extension: "m4a", muxer: "ipod", hasVideo: false })
   plan = timing({ start: 1.123, end: 3.456 }); args = exportArgs(plan)
@@ -236,4 +236,33 @@ test("segment planning is independent of native preview but still owns probes/so
     await fs.appendFile(file, "changed")
     await expect(service.inspectTrim(edit())).rejects.toMatchObject({ code: "SOURCE_CHANGED" })
   } finally { await service.shutdown(); await fs.rm(directory, { recursive: true, force: true }) }
+})
+
+test("HE-AAC and several audio tracks retain explicit stream maps and defaults", () => {
+  source.streams[1].profile = "HE-AAC"
+  source.streams.push({ ...source.streams[1], index: 12, disposition: { default: 0 } })
+  const plan = timing()
+  expect(plan.streamIndexes).toEqual([3, 7, 12])
+  expect(exportArgs(plan)).toEqual(expect.arrayContaining(["-map", "0:12", "-disposition:2", "0"]))
+  expect(() => validateOutput(plan, output(plan), 100)).not.toThrow()
+})
+test("Matroska H264 uses a reviewed MP4 copy profile and compensates reordered seeking", () => {
+  source.contentContainer = "mkv"; source.formatNames = ["matroska", "webm"]; source.majorBrand = null
+  source.streams[0].bFrames = 2
+  const plan = timing()
+  expect(plan).toMatchObject({ matroskaInput: true, extension: "mp4", muxer: "mp4", family: "mov" })
+  const args = exportArgs(plan)
+  expect(args).toContain("-copyts")
+  expect(Number(args[args.indexOf("-ss") + 1])).toBeGreaterThan(4.13)
+  expect(args[args.indexOf("-itsoffset") + 1]).toBe("-4.000000")
+})
+test("bounded missing leading DTS is reconstructed, internal holes remain refused", () => {
+  const raw = { packets: [{ pts_time: "0", duration_time: "0.04", flags: "K" }, { pts_time: "0.08", duration_time: "0.04" }, { pts_time: "0.04", dts_time: "0", duration_time: "0.04" }] }
+  expect(normalizePackets(raw).map(packet => packet.dts)).toEqual([-0.08, -0.04, 0])
+  raw.packets.push({ pts_time: "0.12", duration_time: "0.04" })
+  expect(() => normalizePackets(raw)).toThrow(expect.objectContaining({ code: "TRIM_TIMING" }))
+})
+
+test("adjacent retained markings are one cut, avoiding duplicate B-frame tails", () => {
+  expect(retainedRanges(source, edit({ intent: "keep", ranges: [{ start: 0, end: 4 }, { start: 4, end: 8 }] }))).toEqual([{ start: 0, end: 8 }])
 })

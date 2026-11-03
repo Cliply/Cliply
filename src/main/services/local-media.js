@@ -128,7 +128,7 @@ class LocalMediaService {
     try {
       const profile = trimProfile(source.dto)
       source.dto.trimProfile = { extension: profile.extension, hasVideo: profile.hasVideo }
-      source.dto.capabilities.trim = { status: "unchecked", reason: "TRIM_PREVIEW", message: "Play this source before planning a fast cut." }
+      source.dto.capabilities.trim = { status: "available", reason: null, message: null }
     } catch (error) {
       source.dto.trimProfile = null
       source.dto.capabilities.trim = { status: "unavailable", reason: error.code || "TRIM_PROFILE", message: error.message }
@@ -180,9 +180,9 @@ class LocalMediaService {
         await assertUnchanged(source); check()
         const timing = planTrimTiming(source.dto, cutRequest, ...packets)
         if (profile.hasVideo) {
-          job.process = this.runFrames(executable, source.identity.realPath, profile.streamIndex, timing.plannedStart)
+          job.process = this.runFrames(executable, source.identity.realPath, profile.streamIndex, timing.plannedStart + profile.origin)
           const frame = await job.process.result; check()
-          if (Math.abs(frame.firstTime - timing.plannedStart) > 0.001) throw new MediaError("TRIM_TIMING")
+          if (Math.abs(frame.firstTime - profile.origin - timing.plannedStart) > 0.001) throw new MediaError("TRIM_TIMING")
           await assertUnchanged(source); check()
         }
         cuts.push(timing)

@@ -10,6 +10,7 @@
  * english `one|other`, russian `one|few|many`.
  */
 export const en = {
+  "media.editFormat": "Output: {format} · original-quality stream copy",
   "media.editVideo": "Cut video",
   "media.timeline": "Editing timeline",
   "media.timelineHint": "Drag the handles to mark a section. Green below shows what will be kept.",
@@ -35,6 +36,10 @@ export const en = {
   "media.emptyEdit": "Nothing to export, or a remaining section is shorter than 0.1 seconds. Adjust the markings.",
   "media.fastCutNote": "Fast cuts use nearby keyframes. Review the actual sections below; brief picture or audio gaps can occur at joins. The original stays unchanged.",
   "media.exportEdit": "Export edited video",
+  "media.error.TRIM_CONTAINER": "Cutting supports MP4, MOV and compatible MKV video, plus M4A and WAV audio. Try Change format for this container.",
+  "media.error.TRIM_VIDEO": "Cutting this video codec or HDR format is not implemented yet. H.264 SDR video is supported.",
+  "media.error.TRIM_AUDIO": "This audio format is not supported for cutting yet. AAC-LC and HE-AAC mono/stereo at 44.1 or 48 kHz are supported.",
+  "media.error.TRIM_CHAPTERS": "Chapter timing cannot be rewritten for cuts yet. Use Remove tracks to explicitly save a copy without chapters first.",
   "media.error.TRIM_OVERLAP": "Keyframe adjustments overlap two sections. Move their boundaries farther apart and review again.",
   "media.trackCopyNotice": "Keep the tracks you want in a new copy. The original stays open and unchanged. Verified titles, language, default/forced flags, rotation and ordinary file tags are preserved; other format-specific metadata may vary. This does not remove private metadata.",
   "media.removeAllAudio": "Remove all audio",
@@ -163,8 +168,8 @@ export const en = {
   "media.clipCancelled": "Clip cancelled",
   "media.clipFailed": "Clip could not be saved",
   "media.cancelClip": "Cancel clip",
-  "media.error.TRIM_PROFILE": "Fast trim is not verified for this codec/container layout. Full-file tools may still be available.",
-  "media.error.TRIM_STREAMS": "Keep the source layout: one video and at most one audio track, or one audio track. Chapters and other streams block trimming.",
+  "media.error.TRIM_PROFILE": "This track metadata or layout cannot be preserved by cutting yet. Inspect the tracks or use a full-file tool.",
+  "media.error.TRIM_STREAMS": "Cutting supports one video and up to 16 audio tracks. Use Remove tracks to explicitly save a copy without subtitles or other extra tracks first.",
   "media.error.TRIM_TIMING": "Missing, delayed or ambiguous timing is outside the verified fast-cut profile.",
   "media.error.TRIM_RANGE": "Choose a range of at least 0.1 seconds within the file. The planned start must be before the end.",
   "media.error.TRIM_KEYFRAME": "No usable keyframe was found in the bounded search. Adjust the start or choose the other direction.",

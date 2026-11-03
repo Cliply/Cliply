@@ -1,9 +1,13 @@
 // Stable, path-free errors. Helper stderr and source names never become telemetry.
 const MESSAGES = {
+  TRIM_CHAPTERS: "Chapter timing cannot be rewritten for cuts yet. Use Remove tracks to explicitly save a copy without chapters first.",
+  TRIM_AUDIO: "This audio format is not supported for cutting yet. AAC-LC and HE-AAC mono/stereo at 44.1 or 48 kHz are supported.",
+  TRIM_VIDEO: "Cutting this video codec or HDR format is not implemented yet. H.264 SDR video is supported.",
+  TRIM_CONTAINER: "Cutting supports MP4, MOV and compatible MKV video, plus M4A and WAV audio. Try Change format for this container.",
   AUDIO_UNSUPPORTED: "No verified audio extraction profile is available for this track. Choose AAC-LC, MP3 or 16-bit little-endian PCM, mono/stereo, with a known duration.",
   TRIM_OVERLAP: "Keyframe adjustments overlap two sections. Move their boundaries farther apart and review again.",
-  TRIM_PROFILE: "Fast trim is not verified for this codec/container layout. Full-file tools may still be available.",
-  TRIM_STREAMS: "Fast trim requires one video with at most one audio track, or one audio track, without chapters or other streams.",
+  TRIM_PROFILE: "This track metadata or layout cannot be preserved by cutting yet. Inspect the tracks or use a full-file tool.",
+  TRIM_STREAMS: "Cutting supports one video and up to 16 audio tracks. Use Remove tracks to explicitly save a copy without subtitles or other extra tracks first.",
   TRIM_TIMING: "This file has missing, delayed or ambiguous timing outside the verified fast-cut profile.",
   TRIM_RANGE: "Choose an ordered range of at least 0.1 seconds within the file. The planned keyframe must be before the end.",
   TRIM_KEYFRAME: "No usable keyframe was found within the bounded search. Adjust the start or choose the other keyframe direction.",

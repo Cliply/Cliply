@@ -78,7 +78,7 @@ export function NativeMediaPlayer({ source, busy, mediaRef }: { source: MediaSou
     <div className="rounded-xl border border-slate-300/50 bg-slate-950 p-2 dark:border-slate-700/50">
       {!video && <div className="flex h-32 items-center justify-center gap-3 text-slate-300"><Film />{t("media.audioPreview")}</div>}
       <Player ref={node => { element.current = node; if (mediaRef) mediaRef.current = node }} src={preview?.url} controls controlsList="nodownload noremoteplayback" disablePictureInPicture preload="metadata" aria-label={t("media.player")}
-        className={video ? "aspect-video max-h-[50vh] w-full rounded-lg object-contain" : "w-full"}
+        className={video ? "aspect-video max-h-[32vh] w-full rounded-lg object-contain" : "w-full"}
         onLoadedMetadata={(event) => {
           const media = event.currentTarget
           const position = useLocalMedia.getState().position
@@ -99,11 +99,11 @@ export function NativeMediaPlayer({ source, busy, mediaRef }: { source: MediaSou
       />
     </div>
     <div className="flex flex-wrap items-center justify-between gap-3">
-      <p role={failed ? "alert" : "status"} className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-300">
+      <p role={failed ? "alert" : "status"} className={failed || status === "loading" ? "flex items-center gap-2 text-sm text-slate-600 dark:text-slate-300" : "sr-only"}>
         {status === "loading" && <Loader2 className="size-4 animate-spin" aria-hidden="true" />}{t(statusKeys[status])}
       </p>
       {failed && <Button variant="outline" onClick={() => setAttempt((value) => value + 1)}><RotateCcw />{t("media.retryPreview")}</Button>}
     </div>
-    <p className="text-xs text-slate-500 dark:text-slate-400">{t("media.previewNote")}</p>
+
   </section>
 }

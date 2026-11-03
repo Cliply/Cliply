@@ -18,6 +18,7 @@ export interface MediaStream {
   pixelFormat: string | null
   sampleRate: number | null
   channels: number | null
+  bFrames?: number | null
   averageFrameRate: string | null
   language: string | null
   title: string | null

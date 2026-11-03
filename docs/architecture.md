@@ -170,7 +170,7 @@ report loading/play/seek/end/error, support audio-only media and distinguish
 decoder failure from successful inspection. The player chooses default tracks;
 all probed tracks remain visible, including cover artwork. There is no software
 decode/transcode fallback. Audio extraction and full-file track removal are enabled for verified profiles;
-compatible full-file container changes and validated single-section fast trims
+compatible full-file container changes and reviewed multi-section cuts
 are also enabled. Trimming alone requires native playback confirmation.
 
 The version-1 [DTO](../src/main/renderer/src/lib/local-media-types.ts) contains an
@@ -266,8 +266,8 @@ small setup window before ownership is durable can leave an empty staging
 artifact requiring inspection. File descriptors and identity checks reduce path
 races; they are not protection against a hostile local process modifying bytes
 or directories. Network-mounted local paths are not positively identified.
-Windows/Linux descriptor inheritance and hard-link behavior still require native
-acceptance. Private macOS packaged embedded-Node execution is now verified; see
+Prior Windows/Linux descriptor inheritance and hard-link native checks passed at
+07b3e9e; the new multi-cut lifecycle requires fresh native checks. See
 [validation status](#local-media-validation-status).
 
 ### Full-file track removal
@@ -371,89 +371,69 @@ After building the renderer, set `CLIPLY_SMOKE_REMUX=1`,
 `CLIPLY_SMOKE_EVIDENCE` for `npm run smoke:electron`. Helpers must follow the
 existing verified staging process; the scripts do not download or replace them.
 
-### Single-section fast trim
+### Visual cutting and stream-copy export
 
-Trim keeps one range, the validated source container and every source stream.
-Controlled decimal-second fields accept up to six fractional digits; Set start /
-Set end read the native element's actual time. I/O set the edges and arrow keys
-seek five seconds, except while typing or using native controls. The range
-survives exports/routes, resets with the source, and is locked during planning
-or export. The user reviews requested and approximate planned content bounds,
-then chooses a destination and saves. Returning to the route retains the range
-but requires playback under the newly issued preview grant.
+Cutting is the default local-file tool. The preview sits above a zoomable,
+scrollable timeline with draggable boundaries, marked sections and a retained
+output lane. I/O sets the active section's boundaries, B splits at the cursor,
+Delete deletes a marking, and Ctrl/Cmd+Z / Shift+Ctrl/Cmd+Z undo/redo. Fields for
+precise times are secondary. Edits survive route changes and repeated exports;
+a new source resets the bounded session history. Nothing persists as a project.
 
-`onPlaying` acknowledges playback through the existing trusted-main-frame IPC
-boundary. Main requires that acknowledgment and a live matching preview grant
-for timing inspection, destination planning and export admission. This is an
-attestation by the trusted renderer, not independent proof of decoded content.
-Preview error/release/expiry clears it. Full-file extraction/removal/remux do
-not require playback. A successful probe alone never enables trim.
+“Keep marked sections” exports the marked ranges; “Remove marked sections”
+exports their complement. A middle removal retains both sides and joins them in
+source order into one output. The separate retained-content preview skips the
+omitted sections using requested times; it is not proof of keyframe-exact output.
+Review shows each planned cut and output format before destination selection.
+Arbitrary segment reordering, separate-clip batch export and smart re-encoding
+are outside this iteration.
 
-The narrow matrix is H.264 yuv420p SDR in MP4/MOV, with zero or one AAC-LC
-track, or one AAC-LC track in MP4/MOV/M4A, or PCM16 WAV. Audio is mono/stereo
-44.1/48 kHz. All MOV-family tracks must retain their default disposition with
-no other active flags. Known MOV-family starts must be within 1 ms of zero.
-Chapters, subtitle/data/artwork/attachment streams, additional audio/video,
-HDR and unsupported codecs/timing block the whole trim. Existing validated
-language/title/tags/rotation checks apply; no implicit stream removal occurs.
-MP3 and raw ADTS trimming remain refused: the native MP3 candidate exposed
-about 99 ms of decoded-start error from reservoir/skip metadata. This does not
-change full-file MP3/AAC extraction. Matroska trim is also outside this matrix.
+The measured video profile is SDR H.264 yuv420p with AAC-LC or HE-AAC,
+mono/stereo 44.1/48 kHz, in MP4/MOV or compatible MKV. Up to 16 audio tracks can
+be retained; every supported track is mapped explicitly. MP4/MOV must have a
+default track of each type, with no other active disposition flags. Rotation is
+preserved where verified. MP4/MOV exports retain their container. MKV video
+exports to MP4 without re-encoding; the UI shows this in the reviewed plan.
+Audio-only AAC MP4/MOV/M4A and PCM16 WAV retain their existing measured profiles.
+Chapters, subtitles, attachments/data, additional video, HDR and other codecs
+receive specific capability reasons; nothing is silently dropped or converted.
+MP3/raw ADTS cutting remains refused. Use the explicit full-file tools when
+appropriate, which have their own compatibility rules.
 
-[trim-plan.js](../src/main/services/local-media/trim-plan.js) reuses the existing
-supervised FFprobe runner and single interactive-probe slot. Only explicit
-Review cut requests scan packets. The start window is at most 60 seconds for
-video or four for audio; the end window is at most four. Each process has a
-15-second timeout, 2 MiB JSON cap, 8192-packet cap and existing stderr/drain
-limits. Missing/nonfinite timing, nonincreasing DTS, packets longer than 100 ms,
-PTS/DTS separation over 500 ms and unexpectedly long scans are refused. FFprobe
-seeks approximately, so the result is validated instead of trusting the interval
-request. There is no whole-file packet cache or renderer-supplied command.
-The five-minute synthetic H.264/AAC check demonstrated this limit at requested
-starts 60.3 and 180.2 seconds: approximate seeks exceeded the accepted scan span
-and returned `TRIM_TIMING`. Nearby reviewed starts 62.2 and 182.2 passed. Longer
-files do not guarantee every range is supported; these safety limits remain.
+Preview and stream-copy support are independent. The new segment request does
+not require playback; source identity and trusted IPC remain mandatory. Native
+H.264/AAC MKV and H.264/HE-AAC MP4 playback have passed on the macOS development
+host. No proxy/transcode fallback is introduced for unmeasured codecs; failure
+to play does not disable a valid export plan. The legacy single-range IPC request
+still validates its existing preview acknowledgment for backward compatibility.
 
-Video chooses an actual preceding/following key packet within ten seconds of
-the requested start. A collapsed range is refused; requested and planned cuts
-must each be at least 100 ms. A bounded leading decode additionally checks that
-the key packet is a usable picture at the chosen time (within 1 ms). The output
-gets the same check at zero before publication. Those probes allow ten seconds,
-64 KiB JSON, 128 frames and no decoder stderr. Stuck probes retain admission
-until the process actually exits; cancellation, close and shutdown use existing
-drain rules.
+Timing uses bounded packet scans and decoded leading-frame checks. Video start
+requests scan a 40-second window, leaving room within the existing 61-second
+observed span limit for FFprobe's earlier keyframe seek. No whole-file packet
+cache is created. Limits remain 8192 packets, 2 MiB JSON and 15 seconds per packet
+probe, with the existing supervised cancellation/drain. Missing leading DTS on
+at most 16 packets can be reconstructed from the first known DTS and packet
+durations; missing internal timing still fails. VFR/B-frame ends use PTS/DTS,
+never average-frame-rate multiplication.
 
-Video seeks before input, with a two-microsecond rounding guard for nonzero
-keyframe times; PCM seeks before input at the requested time. Audio-only AAC
-seeks after input and uses `-copyinkf`; video never gets that option. Output
-`-t` uses requested end minus seek start; EOF omits `-t`. The command keeps
-`-c copy`, actual stream maps and original-container muxing. No encoding,
-universal timestamp offset, MKV B-frame workaround or `avoid_negative_ts`
-policy is introduced.
+MP4/MOV source starts remain within 1 ms; compatible MKV starts may be within
+100 ms. Matroska planning uses the video origin and export preserves timestamps
+with an explicit rebase. Its B-frame seek compensates FFmpeg's earlier seek;
+this is specific to Matroska, not a universal offset. Each cut is validated for
+streams, tags, dispositions, duration and a decoded starting picture before
+concat. Concat explicitly places the next part after the planned presentation
+end, including B-frame tails, and retains its zero-based timeline. Fast cuts can
+include extra pictures or short picture/audio gaps at boundaries; they are not
+frame/sample accurate. Existing duration/start acceptance thresholds remain.
 
-Planned video end estimates the presentation extent of packets whose DTS is
-before the requested end, accounting for B-frame reorder and VFR without FPS
-multiplication. PCM's end can round to a copy block; AAC cuts follow packet
-boundaries with priming/padding. Admission/output-duration tolerances are 500 ms
-for video, 100 ms for PCM and 50 ms for audio-only AAC; output starts must remain
-within 50 ms of zero. These are bounded acceptance limits, not frame/sample
-accuracy promises. The native fixture matrix also checks actual decoded first/
-last frames and aligned audio onset/end, fully decodes every output and verifies
-source hashes. A bounded runtime leading check does not fully decode every
-production output or prove every media timeline is correct.
-
-Main owns a five-minute timing plan and invalidates earlier destination plans
-when timing is recomputed. Source identity, current grant and plan expiry are
-rechecked. Saving reuses `LocalExport` reservation, descriptors, owned partial,
-progress/cancel, metadata validation, no-clobber publication and recovery ledger.
-No second export runner or persistent project state is introduced. Uncertain
-cleanup still blocks exports while allowing shutdown once helpers have exited.
-
-Reproduce with `node scripts/smoke-local-trim.js <new-task-dir> <project-ffmpeg>
-<verified-ffprobe>`. After renderer build, `CLIPLY_SMOKE_TRIM=1` plus the existing
-helper/evidence environment overrides runs real Electron playback, trim, repeat,
-route and cancel checks via `npm run smoke:electron`. Native Windows/Linux
-acceptance is pending; macOS development and private packaged checks are below.
+See the segment contract/lifecycle below. Run the old single-cut matrix with
+`node scripts/smoke-local-trim.js <task-dir> <ffmpeg> <ffprobe>`, and the joined
+matrix with `node scripts/smoke-local-segments.js <task-dir> <ffmpeg> <ffprobe>`.
+Both require a new disposable fixture directory. After building the renderer,
+`CLIPLY_SMOKE_TRIM=1` plus the existing helper/evidence overrides for
+`npm run smoke:electron` exercises native editor playback, retained preview,
+export, route return, cancellation and replacement. HE-AAC fixture encoding uses
+AudioToolbox on macOS; other native hosts do not inherit that validation.
 
 ### Local-media validation status
 
@@ -465,20 +445,19 @@ extension. Main rejects unknown, incompatible or ambiguous layouts before saving
 | Extract audio | One actual selected AAC-LC/MP3/PCM16 track, full duration, to ADTS AAC/MP3/WAV | No conversion or batch; verified mono/stereo PCM only; preview not required |
 | Remove tracks | Full-file compatible MP4/MOV/MKV, explicit retained tracks or Remove all audio | No implicit loss; tested H.264/AAC/text-subtitle profiles only; MP4/MOV default-flag promotion refused |
 | Change container | Full-file compatible MP4/MOV/MKV, all streams selected initially | Incompatible tracks need deliberate removal; bounded chapters preserved only in compatible MKV; unsupported subtitle flags refused |
-| Fast trim | One reviewed range, original container/layout, H.264/AAC MP4/MOV, AAC MP4/MOV/M4A or PCM16 WAV | Current native playback required; keyframe/packet/block boundaries; no MP3/raw-ADTS/MKV trim, extra streams, chapters or ambiguous timestamps |
+| Cut video | Visual keep/remove sections, joined original-quality output; H.264/AAC-LC or HE-AAC MP4/MOV, compatible MKV to MP4; existing AAC/PCM audio profiles | Keyframe/packet/block boundaries; chapters/subtitles/HDR and unmeasured codecs refused; preview independent |
 
 All four use the same one-job lifecycle, source checks, owned partial, validated
 output and atomic no-clobber publication. Main handles destination paths and
 commands; the renderer never supplies shell text. The original remains open.
 Exports can run beside URL downloads without occupying yt-dlp's replacement gate.
-No background proxies, thumbnails, waveforms, compression, projects or multi-cut
-editing were added.
+No background proxies, thumbnails, waveforms, compression or saved projects were added.
 
 | Target | Evidence established | Still required |
 | --- | --- | --- |
-| macOS ARM64 | Development checks and private candidate package: actual ASAR/preload/renderer, resource-path helpers, native playback and four exports | Complete FFprobe source/build/notices, published pin, clean-machine/normal installed acceptance, macOS 13 and broader performance evidence |
-| Windows x64 | Unit-tested platform branches; candidate archive/header hashes from staging | Native helper/license/libraries/media, complete sources, package and minimum-OS execution |
-| Ubuntu 24.04 x64 | Unit-tested platform branches; candidate archive/header hashes from staging | Native helper/license/libraries/media, complete sources and packaged desktop execution |
+| macOS ARM64 | New editor: development Electron playback/export and decoded multi-cut fixtures. Prior native package/helper checks passed at 07b3e9e | New native package run, production FFprobe pins/installer acceptance, macOS 13 (owner deferred), broader performance/storage evidence |
+| Windows x64 | Prior source-built package/helper checks passed on Server 2025 at 07b3e9e | New editor native validation, production distribution, Windows 10 (owner deferred) |
+| Ubuntu 24.04 x64 | Prior source-built package/helper checks passed at 07b3e9e | New editor native validation and production distribution |
 
 The macOS private package check runs offline with development helper overrides
 absent. Its test entry isolates external services and dialogs; it does not claim
