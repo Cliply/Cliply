@@ -461,8 +461,10 @@ No background proxies, thumbnails, waveforms, compression or saved projects were
 [Native CI run 41575378080](https://github.com/Cliply/Cliply/actions/runs/41575378080)
 passed all 13 checks per platform: package, helpers, libraries, inspection,
 extraction, tracks, remux, trim, segments, packaged UI, normal startup, download
-recovery and URL media. The later pointer-test/documentation commits do not
-change the runtime tested there. Component pointer/keyboard checks passed.
+recovery and URL media. Later changes add pointer tests, documentation and page
+spacing; they do not alter the tested media/helper pipeline. The compact spacing
+was reviewed in native Electron at 1200×800 with the complete picture and
+timeline visible together. Component pointer/keyboard checks passed.
 Native file opening, scrubbing, keyboard handle adjustment, split, zoom, delete
 and Cmd-Z undo also passed on macOS. OS-level dragging remains unverified:
 automation emitted its drag movement with `buttons=0`, without pointer capture,

@@ -36,15 +36,15 @@ export default function MediaPage() {
     return () => { alive = false; clearTimeout(timer) }
   }, [])
 
-  return <main className="min-h-screen bg-gradient-to-br from-slate-50 via-slate-100 to-slate-200 px-6 py-6 dark:from-slate-900 dark:via-slate-800 dark:to-slate-900">
-    <div className="mx-auto max-w-6xl space-y-4">
+  return <main className="min-h-screen bg-gradient-to-br from-slate-50 via-slate-100 to-slate-200 px-6 py-4 dark:from-slate-900 dark:via-slate-800 dark:to-slate-900">
+    <div className="mx-auto max-w-6xl space-y-3">
       <header className="flex flex-wrap items-center justify-between gap-3">
         <Button variant="ghost" asChild><Link to="/"><ArrowLeft />{t("media.back")}</Link></Button>
         <div className="flex items-center gap-2"><DownloadsToggle /><LocaleToggle /><ModeToggle /></div>
       </header>
       <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0 flex-1"><h1 ref={heading} tabIndex={-1} className="break-words text-2xl font-medium tracking-tight outline-none">{t("media.title")}</h1>
-          <p className="mt-2 break-all text-slate-600 dark:text-slate-300">{source?.filename || t("media.empty")}</p></div>
+        <div className="min-w-0 flex-1"><h1 ref={heading} tabIndex={-1} className="break-words text-xl font-medium tracking-tight outline-none">{t("media.title")}</h1>
+          <p className="mt-1 break-all text-sm text-slate-600 dark:text-slate-300">{source?.filename || t("media.empty")}</p></div>
         <div className="flex gap-2">
           <Button variant="outline" disabled={busy || exporting} onClick={() => void localMediaActions.open()}>{busy ? <Loader2 className="animate-spin" /> : <FolderOpen />}{t(source ? "media.change" : "media.open")}</Button>
           {(source || busy) && <Button variant="ghost" disabled={exporting} onClick={() => void localMediaActions.close()}><X />{t(busy ? "media.cancel" : "media.close")}</Button>}
@@ -55,8 +55,8 @@ export default function MediaPage() {
       {error && <p role="alert" className="rounded-lg border border-red-300 bg-red-50 p-4 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300">{error}</p>}
       {!source && <Card><CardContent className="pt-6 text-sm text-slate-600 dark:text-slate-300">{t("media.emptyBody")}</CardContent></Card>}
       {source && <>
-        <Card className="border-slate-300/50 bg-white/80 shadow-xl shadow-black/5 dark:border-slate-700/50 dark:bg-slate-800/60">
-          <CardContent className="space-y-4 pt-6">
+        <Card className="border-slate-300/50 bg-white/80 py-3 shadow-xl shadow-black/5 dark:border-slate-700/50 dark:bg-slate-800/60">
+          <CardContent className="space-y-2 px-3">
             <div className="flex flex-wrap gap-x-5 gap-y-2 text-sm text-slate-600 dark:text-slate-300">
               <span>{t("media.duration")}: {source.duration === null ? t("media.unknown") : t("media.seconds", { value: source.duration.toFixed(2) })}</span>
               <span>{t("media.size")}: {source.bytes === null ? t("media.unknown") : `${(source.bytes / 1048576).toFixed(2)} MB`}</span>
