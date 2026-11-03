@@ -454,9 +454,17 @@ No background proxies, thumbnails, waveforms, compression or saved projects were
 
 | Target | Evidence established | Still required |
 | --- | --- | --- |
-| macOS ARM64 | New editor: development Electron playback/export and decoded multi-cut fixtures. Prior native package/helper checks passed at 07b3e9e | New native package run, production FFprobe pins/installer acceptance, macOS 13 (owner deferred), broader performance/storage evidence |
-| Windows x64 | Prior source-built package/helper checks passed on Server 2025 at 07b3e9e | New editor native validation, production distribution, Windows 10 (owner deferred) |
-| Ubuntu 24.04 x64 | Prior source-built package/helper checks passed at 07b3e9e | New editor native validation and production distribution |
+| macOS 26 ARM64 | Source-built package/helper checks, editor playback/export and nine decoded multi-cut cases including HE-AAC passed at 7596f09 | Production FFprobe pins/installer acceptance, macOS 13 (owner deferred), broader performance/storage evidence |
+| Windows Server 2025 x64 | Source-built package/helper checks, packaged editor and eight decoded multi-cut cases passed at 7596f09 | HE-AAC native fixture/playback coverage, production distribution, Windows 10 (owner deferred) |
+| Ubuntu 24.04 x64 | Source-built package/helper checks, packaged editor and eight decoded multi-cut cases passed at 7596f09 | HE-AAC native fixture/playback coverage and production distribution |
+
+[Native CI run 41575378080](https://github.com/Cliply/Cliply/actions/runs/41575378080)
+passed all 13 checks per platform: package, helpers, libraries, inspection,
+extraction, tracks, remux, trim, segments, packaged UI, normal startup, download
+recovery and URL media. The later pointer-test/documentation commits do not
+change the runtime tested there. Component pointer/keyboard checks passed;
+an additional OS-level mouse review was incomplete because desktop automation
+returned timeouts and no-window errors. This is not full LosslessCut parity.
 
 The macOS private package check runs offline with development helper overrides
 absent. Its test entry isolates external services and dialogs; it does not claim
@@ -472,11 +480,11 @@ overrides. Its fixtures include a 12-second H.264/AAC source and a sparse 512 Mi
 WAV; sparse-file opening is not large-disk throughput evidence. The package
 checker has `--idle-only` for like-for-like isolated startup/idle measurements.
 Native compatibility/cancel/crash matrices remain in the individual smoke scripts.
-[Release checks](releasing.md) define the pending three-platform CI gate.
+[Release checks](releasing.md) define the nonpublishing native CI workflow.
 
-Follow-up acceptance: finish exact corresponding-source/notices and native host
-verification, publish only ready pinned helpers, run native package/minimum-OS
-checks, and complete cold/warm normal-service startup, representative long media,
+Follow-up acceptance: finalize production source/distribution records and pinned
+helper acquisition, perform installer/clean-install/offline checks, retain the
+owner's minimum-OS deferral, and complete cold/warm normal-service startup, representative long media,
 helper CPU/RSS peaks, slower/removable storage and disk-exhaustion measurements.
 Do not infer zero overhead or cross-platform support from small local fixtures.
 
