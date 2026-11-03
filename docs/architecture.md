@@ -171,7 +171,8 @@ decoder failure from successful inspection. The player chooses default tracks;
 all probed tracks remain visible, including cover artwork. There is no software
 decode/transcode fallback. Audio extraction and full-file track removal are enabled for verified profiles;
 compatible full-file container changes and reviewed multi-section cuts
-are also enabled. Trimming alone requires native playback confirmation.
+are also enabled. The section editor can plan exports independently of playback;
+the legacy single-range request still requires its playback acknowledgement.
 
 The version-1 [DTO](../src/main/renderer/src/lib/local-media-types.ts) contains an
 opaque source ID, filename/size, nullable duration/start, format-family labels,
@@ -179,7 +180,7 @@ all actual stream indexes (including unknown/unsupported types), bounded stream
 details, chapter count and bounded chapter start/end/title. It carries separate probe, native-preview, trim,
 extraction, removal and remux capabilities. Probe success enables inspection
 only; the DTO's preview capability remains unchecked until the renderer tries
-the native element. Full-file export capability remains independent of local playback status.
+the native element. Export capability remains independent of local playback status.
 Main computes separate `extractionProfiles`, `trackRemovalProfile`, `remuxProfiles` and `trimProfile` from the
 verified codecs/container, stream properties and duration. Unsupported streams
 stay in the inventory and are not silently removed from a planned copy.
@@ -266,9 +267,8 @@ small setup window before ownership is durable can leave an empty staging
 artifact requiring inspection. File descriptors and identity checks reduce path
 races; they are not protection against a hostile local process modifying bytes
 or directories. Network-mounted local paths are not positively identified.
-Prior Windows/Linux descriptor inheritance and hard-link native checks passed at
-07b3e9e; the new multi-cut lifecycle requires fresh native checks. See
-[validation status](#local-media-validation-status).
+Descriptor inheritance, joined exports and hard-link publication are covered by
+the native checks recorded in [validation status](#local-media-validation-status).
 
 ### Full-file track removal
 
@@ -317,10 +317,9 @@ The synthetic harness is `scripts/smoke-local-tracks.js <new-task-dir>
 <absolute-project-ffmpeg> <absolute-verified-ffprobe>`. Set `CLIPLY_SMOKE_TRACKS=1`
 with the existing `CLIPLY_SMOKE_FFMPEG`/`CLIPLY_SMOKE_FFPROBE` overrides to include
 the real Electron UI checks in `npm run smoke:electron` after renderer build.
-Use a task-owned directory and remove helpers/media after verification. Native
-Stage 4 evidence was macOS ARM64 development-host only. The later private
-macOS package check is recorded in [validation status](#local-media-validation-status);
-other native platforms remain pending.
+Use a task-owned directory and remove helpers/media after verification. Later
+source-built native package checks supersede the initial macOS-only Stage 4
+evidence; see [validation status](#local-media-validation-status).
 
 ### Compatible full-file container changes
 
