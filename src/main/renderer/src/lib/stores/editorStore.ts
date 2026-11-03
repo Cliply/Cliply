@@ -4,15 +4,7 @@ import type { EditRange } from "../local-media-types"
 export interface EditDocument { ranges: EditRange[]; intent: "keep" | "remove"; active: number; mode: "before" | "after" }
 export const initialEdit = (duration: number): EditDocument => ({ ranges: [{ start: 0, end: duration }], intent: "keep", active: 0, mode: "before" })
 export function retainedSections(edit: EditDocument, duration: number): EditRange[] {
-  if (edit.intent === "keep") {
-    const retained: EditRange[] = []
-    for (const range of edit.ranges) {
-      const previous = retained.at(-1)
-      if (previous && previous.end === range.start) previous.end = range.end
-      else retained.push({ ...range })
-    }
-    return retained
-  }
+  if (edit.intent === "keep") return edit.ranges.map(range => ({ ...range }))
   const result: EditRange[] = []
   let start = 0
   for (const range of edit.ranges) {

@@ -71,6 +71,10 @@ const invoke = async (channel, data) => {
 contextBridge.exposeInMainWorld("electronAPI", {
   // Local media: opaque IDs and a selected stream; no paths or FFmpeg arguments.
   media: {
+    compatStart: (request) => invoke("media:compat-start", request),
+    compatRead: (sessionId) => invoke("media:compat-read", sessionId),
+    compatStop: (sessionId) => invoke("media:compat-stop", sessionId),
+    compatClock: (sourceId) => invoke("media:compat-clock", sourceId),
     inspectTrim: (request) => invoke("media:inspect-trim", request),
     cancelTrim: () => invoke("media:cancel-trim"),
     confirmPlayback: (request) => invoke("media:preview-playback", request),

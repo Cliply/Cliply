@@ -1,3 +1,4 @@
+const { cutArgs, fullFileArgs } = require("./losslesscut")
 const { MediaError } = require("./errors")
 const path = require("node:path")
 const { MP4_BRANDS } = require("./container")
@@ -111,31 +112,9 @@ function planAudio(source, request) {
     channels: stream.channels, duration, movInput: source.formatNames.includes("mov"), ...profile }
 }
 
-function exportArgs(plan) {
-  const streams = ["removeTracks", "remux", "trim"].includes(plan.operation) ? plan.expectedStreams : null
-  const trim = plan.operation === "trim"
-  const mkvCut = trim && plan.matroskaInput
-  const compensation = mkvCut && plan.bFrames > 0 ? 3 / 23 + 0.001 : 0
-  const inputSeek = trim && plan.seekStart > 0 && (plan.hasVideo || plan.pcm)
-    ? ["-ss", (plan.seekStart + (mkvCut ? plan.origin - plan.inputStart + compensation : 0) + (plan.hasVideo ? 0.000002 : 0)).toFixed(6)] : []
-  const outputSeek = trim && plan.seekStart > 0 && !plan.hasVideo && !plan.pcm ? ["-ss", plan.seekStart.toFixed(6), "-copyinkf"] : []
-  const durationArgs = trim && !plan.eof ? ["-t", plan.duration.toFixed(6)] : []
-  const maps = streams ? streams.flatMap(stream => ["-map", `0:${stream.index}`]) : ["-map", `0:${plan.streamIndex}`]
-  const metadata = streams ? ["-map_metadata", "0", ...streams.flatMap((stream, outputIndex) => [
-    `-map_metadata:s:${outputIndex}`, `0:s:${stream.index}`,
-    ...(stream.title ? [`-metadata:s:${outputIndex}`, `title=${stream.title}`] : []),
-    `-disposition:${outputIndex}`, ["default", "forced"].filter(flag => stream.disposition?.[flag]).join("+") || "0"
-  ]), ...(plan.muxer === "matroska" ? ["-default_mode", "passthrough"] : [])] : ["-map_metadata", "-1", "-map_metadata:s:a", "-1"]
-  return ["-hide_banner", "-nostdin", "-v", "error", "-max_alloc", "67108864",
-    "-protocol_whitelist", "fd,file,pipe", "-format_whitelist", "mov,matroska,webm,wav,mp3,aac",
-    ...(plan.movInput ? ["-enable_drefs", "0", "-use_absolute_path", "0"] : []),
-    "-probesize", "5000000", "-analyzeduration", "5000000", "-max_streams", "128",
-    // Inherited regular-file descriptors are seekable; FFmpeg never opens a
-    // renderer path, the selected source path or a final output path.
-    ...(mkvCut ? ["-copyts", "-itsoffset", (-(plan.seekStart + plan.origin)).toFixed(6)] : []),
-    ...inputSeek, "-fd", "0", "-i", "fd:", ...outputSeek, ...durationArgs, ...maps, "-c", "copy", ...metadata, "-map_chapters", plan.expectedChapters?.length ? "0" : "-1",
-    ...(mkvCut ? ["-avoid_negative_ts", "disabled"] : []),
-    "-progress", "pipe:2", "-nostats", "-f", plan.muxer, "-fd", "1", "fd:"]
+function exportArgs(plan, outputPath) {
+  if (plan.operation === "trim") return cutArgs(plan, undefined, outputPath ? ["-y", outputPath] : undefined)
+  return fullFileArgs(plan, outputPath)
 }
 
 function validateOutput(plan, metadata, bytes) {
@@ -156,8 +135,7 @@ function validateTracks(plan, metadata, bytes) {
     (plan.family !== "mov" || (plan.extension === "mp4" ? MP4_BRANDS.has(metadata.majorBrand) : metadata.majorBrand === plan.majorBrand))
     : (plan.operation === "remux" ? metadata.contentContainer : trackContainer({ ...metadata, filename: `output.${plan.extension}` })?.extension) === plan.extension
   if (bytes <= 0 || metadata.streams.length !== plan.expectedStreams.length || metadata.chapterCount !== (plan.expectedChapters?.length || 0) ||
-      !Number.isFinite(duration) || duration <= 0 || Math.abs(duration - plan.duration) > (plan.operation === "trim" ? plan.tolerance : Math.max(0.25, plan.duration * 0.02)) || !containerMatches) fail()
-  if (plan.operation === "trim" && (Math.abs(metadata.startTime ?? 0) > 0.05 || metadata.streams.some(stream => Math.abs(stream.startTime ?? 0) > 0.05))) fail()
+      !Number.isFinite(duration) || duration <= 0 || (plan.operation !== "trim" && Math.abs(duration - plan.duration) > Math.max(0.25, plan.duration * 0.02)) || !containerMatches) fail()
   if (plan.operation === "remux") {
     if (!Number.isFinite(metadata.startTime) || Math.abs(metadata.startTime) > 0.1) fail()
     if (plan.expectedChapters.length && (!metadata.chaptersCopySafe || !Array.isArray(metadata.chapters) || metadata.chapters.length !== plan.expectedChapters.length)) fail()
@@ -171,11 +149,17 @@ function validateTracks(plan, metadata, bytes) {
   plan.expectedStreams.forEach((before, index) => {
     const after = metadata.streams[index]
     const same = keys => keys.every(key => (before[key] ?? null) === (after[key] ?? null))
+    // LosslessCut uses Matroska infer_no_subs: if no retained audio/video
+    // track is explicitly default, the muxer marks the first of that type.
+    const disposition = { ...before.disposition }
+    if (plan.muxer === "matroska" && ["audio", "video"].includes(before.type) &&
+        !plan.expectedStreams.some(stream => stream.type === before.type && stream.disposition?.default) &&
+        plan.expectedStreams.findIndex(stream => stream.type === before.type) === index) disposition.default = 1
     const angle = value => ((value ?? 0) % 360 + 360) % 360
     if (after.index !== index || !same(["type", "codec", "title"]) ||
         (before.language || "und") !== (after.language || "und") || !containsTags(before.tags, after.tags) ||
-        Object.entries(after.disposition || {}).some(([flag, value]) => value === 1 && before.disposition?.[flag] !== 1) ||
-        ["default", "forced"].some(flag => (before.disposition?.[flag] || 0) !== (after.disposition?.[flag] || 0))) fail()
+        Object.entries(after.disposition || {}).some(([flag, value]) => value === 1 && disposition[flag] !== 1) ||
+        ["default", "forced"].some(flag => (disposition[flag] || 0) !== (after.disposition?.[flag] || 0))) fail()
     if (plan.operation === "remux" && ["video", "audio"].includes(before.type) &&
         (!Number.isFinite(after.startTime) || Math.abs(before.startTime - after.startTime) > 0.05)) fail()
     if (before.type === "video" && (!same(["width", "height", "pixelFormat", "colorTransfer", "colorPrimaries", "hasHdrMetadata"]) || angle(before.rotation) !== angle(after.rotation))) fail()

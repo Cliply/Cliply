@@ -69,8 +69,8 @@ function mediaMime(dto) {
 }
 
 class MediaPreview {
-  constructor({ getSource, validate, invalidate, now = Date.now, ttlMs = PREVIEW_TTL_MS }) {
-    Object.assign(this, { getSource, validate, invalidate, now, ttlMs })
+  constructor({ getSource, validate, invalidate, onRevoke, now = Date.now, ttlMs = PREVIEW_TTL_MS }) {
+    Object.assign(this, { getSource, validate, invalidate, onRevoke, now, ttlMs })
     this.grant = null
     this.revision = 0
     this.streams = new Set()
@@ -149,6 +149,7 @@ class MediaPreview {
   revoke(previewId) {
     if (previewId && this.grant?.previewId !== previewId) return
     this.revision += 1
+    this.onRevoke?.()
     this.grant = null
     this.playedPreviewId = null
     clearTimeout(this.timer)

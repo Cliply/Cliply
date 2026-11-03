@@ -1,3 +1,4 @@
+const { CompatibilityPlayer } = require("./local-media/compatibility-player")
 const fs = require("node:fs/promises")
 const path = require("node:path")
 const { randomUUID } = require("node:crypto")
@@ -7,7 +8,7 @@ const { MediaPreview } = require("./local-media/preview")
 const { MediaError } = require("./local-media/errors")
 const { LocalExport } = require("./local-media/export")
 const { audioProfile, trackRemovalProfile, remuxProfiles } = require("./local-media/export-plan")
-const { trimProfile, validateTrimRequest, startPacketProbe, startFrameProbe, timingWindows, planTrimTiming } = require("./local-media/trim-plan")
+const { trimProfile, validateTrimRequest, planLosslessCut } = require("./local-media/trim-plan")
 const { retainedRanges, combineTiming } = require("./local-media/segments")
 const { detectContainer } = require("./local-media/container")
 
@@ -49,12 +50,10 @@ function capabilities() {
 }
 
 class LocalMediaService {
-  constructor({ selectFile, resolveProbe = resolveFfprobe, runProbe = startProbe, runPackets = startPacketProbe, runFrames = startFrameProbe, exportOptions = {} } = {}) {
+  constructor({ selectFile, resolveProbe = resolveFfprobe, runProbe = startProbe, exportOptions = {} } = {}) {
     this.selectFile = selectFile
     this.resolveProbe = resolveProbe
     this.runProbe = runProbe
-    this.runPackets = runPackets
-    this.runFrames = runFrames
     this.trimPlan = null
     this.source = null
     this.sourceError = null
@@ -63,7 +62,10 @@ class LocalMediaService {
     this.exports = new LocalExport({ ...exportOptions, getSource: () => this.source,
       getTrimPlan: id => this.getTrimPlan(id), validateTrimPlan: plan => this.getTrimPlan(plan.trimPlanId),
       validateSource: assertUnchanged, isInspecting: () => Boolean(this.pending), resolveProbe })
+    this.compatibility = new CompatibilityPlayer({ getSource: () => this.source, validate: assertUnchanged,
+      resolveFfmpeg: exportOptions.resolveFfmpeg, isFrozen: () => this.frozen })
     this.preview = new MediaPreview({
+      onRevoke: () => { void this.compatibility.drain().catch(() => {}) },
       getSource: () => this.source, validate: assertUnchanged,
       invalidate: () => { this.source = null; this.sourceError = new MediaError("SOURCE_CHANGED") }
     })
@@ -143,7 +145,6 @@ class LocalMediaService {
   getTrimPlan(id) {
     const plan = this.trimPlan
     if (!plan || plan.trimPlanId !== id || plan.sourceId !== this.source?.dto.sourceId || Date.now() >= plan.expiresAt) throw new MediaError("PLAN_EXPIRED")
-    if (!plan.cuts && !this.preview.hasPlayback(plan.previewId)) throw new MediaError("TRIM_PREVIEW")
     return plan
   }
 
@@ -154,8 +155,7 @@ class LocalMediaService {
     const multi = request && Object.hasOwn(request, "ranges")
     const ranges = multi ? retainedRanges(source?.dto, request) : [request]
     const requests = multi ? ranges.map(range => ({ ...range, sourceId: request.sourceId, mode: request.mode, previewId: "0".repeat(64) })) : ranges
-    const profile = validateTrimRequest(source?.dto, requests[0])
-    if (!multi && !this.preview.hasPlayback(request.previewId)) return Promise.reject(new MediaError("TRIM_PREVIEW"))
+    validateTrimRequest(source?.dto, requests[0])
     this.trimPlan = null
     this.exports.invalidatePlan()
     const job = { kind: "trim", cancelled: false, process: null, done: null }
@@ -164,29 +164,10 @@ class LocalMediaService {
       const check = () => {
         if (job.cancelled || this.frozen) throw new MediaError("CANCELLED")
         if (source !== this.source) throw new MediaError("SOURCE_CHANGED")
-        if (!multi && !this.preview.hasPlayback(request.previewId)) throw new MediaError("TRIM_PREVIEW")
       }
       await assertUnchanged(source); check()
-      const executable = await this.resolveProbe(); check()
-      const cuts = []
-      for (const cutRequest of requests) {
-        const packets = []
-        for (const { from, to } of timingWindows(source.dto, cutRequest, profile)) {
-          check()
-          job.process = this.runPackets(executable, source.identity.realPath, profile.streamIndex, from, to)
-          packets.push(await job.process.result)
-          check()
-        }
-        await assertUnchanged(source); check()
-        const timing = planTrimTiming(source.dto, cutRequest, ...packets)
-        if (profile.hasVideo) {
-          job.process = this.runFrames(executable, source.identity.realPath, profile.streamIndex, timing.plannedStart + profile.origin)
-          const frame = await job.process.result; check()
-          if (Math.abs(frame.firstTime - profile.origin - timing.plannedStart) > 0.001) throw new MediaError("TRIM_TIMING")
-          await assertUnchanged(source); check()
-        }
-        cuts.push(timing)
-      }
+      const cuts = requests.map(cutRequest => planLosslessCut(source.dto, cutRequest))
+      await assertUnchanged(source); check()
       const timing = multi ? combineTiming(request, cuts) : cuts[0]
       this.trimPlan = { ...timing, trimPlanId: randomUUID(), expiresAt: Date.now() + 5 * 60 * 1000 }
       return this.trimPlan
@@ -222,6 +203,7 @@ class LocalMediaService {
 
   async close() {
     await this.exports.drain()
+    await this.compatibility.drain()
     this.preview.revoke()
     this.source = null
     this.sourceError = null

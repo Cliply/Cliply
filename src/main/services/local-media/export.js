@@ -6,7 +6,6 @@ const { planExport, exportArgs, validateOutput } = require("./export-plan")
 const { ExportOutput, destination } = require("./export-output")
 const { startExportProcess } = require("./export-process")
 const { startProbe } = require("./probe")
-const { startFrameProbe } = require("./trim-plan")
 const { concatManifest, concatArgs } = require("./join")
 const { detectContainer } = require("./container")
 
@@ -16,8 +15,8 @@ const safeError = error => error instanceof MediaError ? error : new MediaError(
 
 class LocalExport {
   constructor({ getSource, validateSource, isInspecting, selectDestination, resolveFfmpeg, resolveProbe,
-    storagePath, revealOutput, getTrimPlan, validateTrimPlan, onUpdate = () => {}, runProcess = startExportProcess, runProbe = startProbe, runFrames = startFrameProbe } = {}) {
-    Object.assign(this, { getSource, validateSource, isInspecting, selectDestination, resolveFfmpeg, resolveProbe, revealOutput, getTrimPlan, validateTrimPlan, onUpdate, runProcess, runProbe, runFrames })
+    storagePath, revealOutput, getTrimPlan, validateTrimPlan, onUpdate = () => {}, runProcess = startExportProcess, runProbe = startProbe } = {}) {
+    Object.assign(this, { getSource, validateSource, isInspecting, selectDestination, resolveFfmpeg, resolveProbe, revealOutput, getTrimPlan, validateTrimPlan, onUpdate, runProcess, runProbe })
     this.output = new ExportOutput(storagePath)
     this.revision = 0; this.plan = null; this.job = null; this.active = null; this.preparing = null; this.frozen = false
     this.ready = this.output.recover().then(interrupted => {
@@ -121,16 +120,12 @@ class LocalExport {
           }
           intermediate = await this.output.artifact(owned, `part-${index}.partial`)
           check()
-          await supervise(this.runProcess(executable, exportArgs(cut), { inputFd: input.fd, outputFd: intermediate.fd,
+          await supervise(this.runProcess(executable, exportArgs(cut, path.join(owned.directory, `part-${index}.partial`)), { inputFd: input.fd, outputFd: intermediate.fd,
             onProgress: seconds => progress(seconds, completed / plan.profile.duration * 70, 70) }))
           check(); await intermediate.sync()
           const file = path.join(owned.directory, `part-${index}.partial`)
           const metadata = await supervise(this.runProbe(probe, file)); check()
           validateOutput(cut, metadata, Number((await intermediate.stat()).size))
-          if (cut.hasVideo) {
-            const frame = await supervise(this.runFrames(probe, file, metadata.streams.find(stream => stream.type === "video").index, 0)); check()
-            if (Math.abs(frame.firstTime) > 0.001) throw new MediaError("OUTPUT_INVALID")
-          }
           completed += cut.duration
           await intermediate.close(); intermediate = null
         }
@@ -140,11 +135,11 @@ class LocalExport {
         const manifestStat = await manifest.stat({ bigint: true })
         if (`${manifestStat.dev}:${manifestStat.ino}` !== owned.artifacts["concat.partial"]) throw new MediaError("OUTPUT_INVALID")
         check()
-        await supervise(this.runProcess(executable, concatArgs(plan.profile), { inputFd: manifest.fd, outputFd: output.fd,
+        await supervise(this.runProcess(executable, concatArgs(plan.profile, path.join(owned.directory, "part-0.partial"), owned.partial), { inputFd: manifest.fd, outputFd: output.fd,
           onProgress: seconds => progress(seconds, 70, 28) }))
         await manifest.close(); manifest = null
       } else {
-        await supervise(this.runProcess(executable, exportArgs(cuts?.[0] || plan.profile), { inputFd: input.fd, outputFd: output.fd,
+        await supervise(this.runProcess(executable, exportArgs(cuts?.[0] || plan.profile, owned.partial), { inputFd: input.fd, outputFd: output.fd,
           onProgress: seconds => progress(seconds, 0, 98) }))
       }
       check()
@@ -156,12 +151,6 @@ class LocalExport {
       check()
       await this.validateSource(plan.source)
       validateOutput(plan.profile, metadata, Number((await output.stat()).size))
-      if (plan.profile.operation === "trim" && plan.profile.hasVideo) {
-        const first = await supervise(this.runFrames(probe, owned.partial, metadata.streams.find(stream => stream.type === "video").index, 0))
-        check()
-        if (Math.abs(first.firstTime) > 0.001) throw new MediaError("OUTPUT_INVALID")
-        await this.validateSource(plan.source); check()
-      }
       await output.close(); output = null
       await input.close(); input = null
       check()

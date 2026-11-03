@@ -32,8 +32,8 @@ async function runNative({ directory, ffmpeg, ffprobe }) {
   const service = new LocalMediaService({ selectFile: async () => selected, resolveProbe: async () => ffprobe,
     exportOptions: { storagePath: path.join(directory, "state"), resolveFfmpeg: async () => ffmpeg, selectDestination: async () => destination,
       runProcess: (exe, args, options) => {
-        assert.deepEqual(args.filter((_arg, i) => args[i - 1] === "-c"), ["copy"])
-        assert(!args.some(arg => /^-(c:|codec|vf|af|ss$|t$)/.test(arg)))
+        assert(args.filter((_arg, i) => /^-c(?::\d+)?$/.test(args[i - 1])).every(codec => codec === "copy"))
+        assert(!args.some(arg => /^-(codec|vf|af|ss$|t$)/.test(arg)))
         commands.push({ input: path.basename(selected), output: path.basename(destination), args })
         return startExportProcess(exe, args, options)
       } } })

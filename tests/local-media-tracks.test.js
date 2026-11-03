@@ -20,7 +20,7 @@ test("actual indexes are canonicalized, metadata/dispositions use output indexes
   expect(plan).toMatchObject({ operation: "removeTracks", streamIndexes: [3, 11], removedStreamIndexes: [7], extension: "mp4" })
   const args = exportArgs(plan)
   expect(args.filter((_value, i) => args[i - 1] === "-map")).toEqual(["0:3", "0:11"])
-  expect(args).toEqual(expect.arrayContaining(["-c", "copy", "-map_metadata:s:1", "0:s:11", "-disposition:1", "default+forced", "title=Captions", "-map_chapters", "-1"]))
+  expect(args).toEqual(expect.arrayContaining(["-c:1", "copy", "-map_metadata", "0", "-disposition:1", "default+forced", "-map_chapters", "-1"]))
   for (const forbidden of ["-ss", "-t", "-y", "libx264", "-af", "-vf"]) expect(args).not.toContain(forbidden)
   expect(() => validateOutput(plan, output(plan), 100)).not.toThrow()
 })
@@ -53,12 +53,17 @@ test("same-container identification checks extension and brand, never the first 
   source.majorBrand = "qt"
   expect(planTracks(source, request()).extension).toBe("mov")
 })
-test("MOV family refuses implicit default promotion; MKV preserves zero/forced flags with passthrough", () => {
+test("MOV family refuses implicit default promotion; MKV uses upstream audio/video default inference", () => {
   source.streams[1].disposition = { default: 0 }
   expect(() => planTracks(source, request([3, 7]))).toThrow(expect.objectContaining({ code: "TRACK_DEFAULT" }))
   source.filename = "fixture.mkv"; source.formatNames = ["matroska", "webm"]; source.streams[0].rotation = 0
   const plan = planTracks(source, request([7]))
-  expect(exportArgs(plan)).toEqual(expect.arrayContaining(["-disposition:0", "0", "-default_mode", "passthrough"]))
+  expect(exportArgs(plan)).toEqual(expect.arrayContaining(["-disposition:0", "0", "-default_mode", "infer_no_subs"]))
+  const data = { ...output(plan), formatNames: ["matroska"], majorBrand: null }
+  data.streams[0].disposition.default = 1
+  expect(() => validateOutput(plan, data, 100)).not.toThrow()
+  data.streams[0].disposition.default = 0
+  expect(() => validateOutput(plan, data, 100)).toThrow()
   source.streams[0].rotation = 90
   expect(() => planTracks(source, request([3]))).toThrow(expect.objectContaining({ code: "TRACK_UNSUPPORTED" }))
 })

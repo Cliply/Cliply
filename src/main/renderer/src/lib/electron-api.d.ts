@@ -41,6 +41,10 @@ declare global {
   interface Window {
     electronAPI?: {
       media: {
+        compatStart: (request: { sourceId: string; seekTo: number }) => Promise<IPCResponse<{ sessionId: string; video: boolean; audio: boolean }>>
+        compatRead: (sessionId: string) => Promise<IPCResponse<Uint8Array | null>>
+        compatStop: (sessionId: string) => Promise<IPCResponse<{ stopped: boolean }>>
+        compatClock: (sourceId: string) => Promise<IPCResponse<Uint8Array>>
         inspectTrim: (request: TrimInspectRequest) => Promise<IPCResponse<TrimTiming>>
         cancelTrim: () => Promise<IPCResponse<{ cancelled: boolean }>>
         confirmPlayback: (request: { previewId: string; played: boolean }) => Promise<IPCResponse<{ confirmed: boolean }>>

@@ -33,7 +33,8 @@ async function runUI({ window, service, userData, app }) {
   const measure = label => facts.metrics.push({ label, at: performance.now(), processes: app.getAppMetrics().map(({ type, cpu, memory }) => ({ type, cpu, memory })) })
   const runProcess = service.exports.runProcess
   service.exports.runProcess = (exe, args, options) => {
-    assert.equal(args[args.indexOf("-c") + 1], "copy")
+    const codecs = args.filter((_arg, i) => /^-c(?::\d+)?$/.test(args[i - 1]))
+    assert(codecs.length > 0 && codecs.every(codec => codec === "copy"))
     facts.commands.push(args)
     facts.helpers.ffmpeg = exe
     return runProcess(exe, args, options)
@@ -68,10 +69,10 @@ async function runUI({ window, service, userData, app }) {
   await wait("document.querySelector('video')?.readyState >= 2")
   start = performance.now()
   await js("(async()=>{const v=document.querySelector('video');v.muted=true;await v.play();await new Promise(r=>setTimeout(r,300));v.pause()})()")
-  await wait("!Array.from(document.querySelectorAll('button')).find(e=>e.textContent.trim()==='Review cut boundaries').disabled")
+  await wait("!Array.from(document.querySelectorAll('button')).find(e=>e.textContent.trim()==='Review export').disabled")
   facts.playMs = performance.now() - start; measure("played")
   await set("trim-start", "4.2"); await set("trim-end", "6")
-  start = performance.now(); await click("Review cut boundaries"); await wait("document.body.textContent.includes('Planned content: approximately 4.000')")
+  start = performance.now(); await click("Review export"); await wait("document.body.textContent.includes('Requested section: 4.200')")
   facts.planMs = performance.now() - start
   await save("clip.mp4", "trim", "Clip saved")
   await click("Back to downloads"); await wait("document.querySelector('aside')?.textContent.includes('Clip saved')")
@@ -81,8 +82,8 @@ async function runUI({ window, service, userData, app }) {
   service.exports.selectDestination = async () => path.join(userData, "cancelled.mp4")
   await wait("document.querySelector('video')?.readyState >= 2")
   await js("(async()=>{const v=document.querySelector('video');v.muted=true;await v.play();await new Promise(r=>setTimeout(r,100));v.pause()})()")
-  await wait("!Array.from(document.querySelectorAll('button')).find(e=>e.textContent.trim()==='Review cut boundaries').disabled")
-  await click("Review cut boundaries"); await wait("document.body.textContent.includes('Planned content: approximately 4.000')")
+  await wait("!Array.from(document.querySelectorAll('button')).find(e=>e.textContent.trim()==='Review export').disabled")
+  await click("Review export"); await wait("document.body.textContent.includes('Requested section: 4.200')")
   await click("Choose destination"); await wait("document.body.textContent.includes('Save as: cancelled.mp4')")
   await click("Export edited video")
   for (let i = 0; i < 100 && service.exports.job.state !== "running"; i++) await delay(20)

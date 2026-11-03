@@ -34,7 +34,7 @@ test("marks and inversion produce the actual segment request without playback ga
   setRange()
   fireEvent.change(screen.getByLabelText(en["media.editMode"]), { target: { value: "remove" } })
   fireEvent.click(button("media.reviewCut"))
-  await waitFor(() => expect(mediaApi.inspectTrim).toHaveBeenCalledWith({ sourceId: "source", ranges: [{ start: 4.2, end: 6 }], intent: "remove", mode: "after" }))
+  await waitFor(() => expect(mediaApi.inspectTrim).toHaveBeenCalledWith({ sourceId: "source", ranges: [{ start: 4.2, end: 6 }], intent: "remove", mode: "before" }))
   expect(screen.getByText(/2 parts/)).toBeTruthy()
 })
 test("split, delete, undo and redo affect the output rather than just the drawing", () => {
@@ -113,10 +113,10 @@ test("closing or cancelling discards an already-returning timing reply", async (
 })
 
 
-test("splitting alone keeps a continuous output and one timeline is mounted", () => {
+test("splitting retains separate output sections and one timeline is mounted", () => {
   render(<TrimPanel source={source} busy={false} player={player} />)
   fireEvent.keyDown(window, { key: "b" })
-  expect(screen.getByText(/1 parts/)).toBeTruthy()
+  expect(screen.getByText(/2 parts/)).toBeTruthy()
   expect(screen.getAllByTestId("cut-timeline")).toHaveLength(1)
 })
 
@@ -157,4 +157,19 @@ test("pointer selection seeks, cancelled drags preserve the edit, and zoom does 
   fireEvent.click(screen.getByRole("button", { name: en["media.zoomIn"] }))
   expect(track.style.width).toBe("200%")
   expect(useEditor.getState().document.ranges).toEqual(before)
+})
+
+
+test("arrow seeking and shift-arrow boundaries use LosslessCut defaults", () => {
+  Object.defineProperty(player.current, "duration", { value: 12 })
+  render(<TrimPanel source={source} busy={false} player={player} />)
+  player.current.currentTime = 5
+  fireEvent.keyDown(window, { key: "ArrowRight" })
+  expect(player.current.currentTime).toBe(6)
+  fireEvent.keyDown(window, { key: "ArrowLeft" })
+  expect(player.current.currentTime).toBe(5)
+  fireEvent.keyDown(window, { key: "ArrowLeft", shiftKey: true })
+  expect(player.current.currentTime).toBe(0)
+  fireEvent.keyDown(window, { key: "ArrowRight", shiftKey: true })
+  expect(player.current.currentTime).toBe(12)
 })

@@ -68,6 +68,7 @@
     "files": [
       "src/main/**/*",
       "src/preload/**/*",
+      "third-party/losslesscut/**/*",
       "src/main/renderer/dist/**/*",
       "package.json",
       "!**/.DS_Store",

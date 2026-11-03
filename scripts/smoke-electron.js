@@ -34,6 +34,7 @@ if (!process.versions.electron) {
     if (process.env.CLIPLY_SMOKE_INTEGRATION === "1") {
       require("./smoke-local-integration").fixtures(userData, process.env.CLIPLY_SMOKE_FFMPEG)
     }
+    if (process.env.CLIPLY_SMOKE_COMPAT === "1") require("./smoke-losslesscut-preview").fixtures(userData, process.env.CLIPLY_SMOKE_FFMPEG)
     const args = [__filename, userData]
     // Source-tree Electron has no installed AppArmor profile on CI. Packaged
     // Linux checks exercise the real launchers without this test-only flag.
@@ -215,6 +216,7 @@ if (!process.versions.electron) {
     if (process.env.CLIPLY_SMOKE_INTEGRATION === "1") {
       await require("./smoke-local-integration").runUI({ window: cliplyApp.mainWindow, service: localMedia, userData, app })
     }
+    if (process.env.CLIPLY_SMOKE_COMPAT === "1") await require("./smoke-losslesscut-preview").runUI({ window: cliplyApp.mainWindow, service: localMedia, userData })
     await localMedia.shutdown()
     assert.equal(state.count, 123, "preload IPC round trip")
     assert.equal(state.rendered, true, "React mounted from the built file")

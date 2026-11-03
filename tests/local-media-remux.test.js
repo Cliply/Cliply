@@ -39,7 +39,7 @@ test("targets are explicit, retain real stream indexes, and source content contr
   const plan = planExport(source, request({ streamIndexes: [7, 3] }))
   expect(plan).toMatchObject({ operation: "remux", streamIndexes: [3, 7], targetContainer: "mkv", muxer: "matroska", movInput: true })
   const args = exportArgs(plan)
-  expect(args).toEqual(expect.arrayContaining(["-enable_drefs", "0", "-use_absolute_path", "0", "-c", "copy", "-map", "0:3", "-map", "0:7", "-default_mode", "passthrough", "-map_chapters", "-1"]))
+  expect(args).toEqual(expect.arrayContaining(["-enable_drefs", "0", "-use_absolute_path", "0", "-c:0", "copy", "-map", "0:3", "-map", "0:7", "-default_mode", "infer_no_subs", "-map_chapters", "-1"]))
   source.contentContainer = "mkv"
   expect(exportArgs(planRemux(source, request({ targetContainer: "mp4" })))).not.toContain("-enable_drefs")
   expect(() => validateOutput(plan, output(plan), 100)).not.toThrow()

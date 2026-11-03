@@ -24,13 +24,17 @@ async function run(resources, { idleOnly = false, normalStartup = false, longMed
     fs.renameSync(path.join(copiedResources, "app.asar"), path.join(copiedResources, "cliply-under-test.asar"))
     if (fs.existsSync(path.join(copiedResources, "app.asar.unpacked"))) fs.renameSync(path.join(copiedResources, "app.asar.unpacked"), path.join(copiedResources, "cliply-under-test.asar.unpacked"))
     const entry = path.join(copiedResources, "app"); fs.mkdirSync(entry)
-    for (const name of ["smoke-electron.js", "smoke-local-integration.js", "smoke-normal-startup.js"]) fs.copyFileSync(path.join(__dirname, name), path.join(entry, name))
+    for (const name of ["smoke-electron.js", "smoke-local-integration.js", "smoke-normal-startup.js", "smoke-losslesscut-preview.js"]) fs.copyFileSync(path.join(__dirname, name), path.join(entry, name))
     fs.writeFileSync(path.join(entry, "package.json"), JSON.stringify({ name: "cliply-package-test", version: "1.0.0", main: normalStartup ? "smoke-normal-startup.js" : "smoke-electron.js" }))
     const userData = path.join(scratch, "profile")
     fs.mkdirSync(userData)
     if (!idleOnly && !normalStartup) require("./smoke-local-integration").fixtures(userData, path.join(copiedResources, "binaries", process.platform === "win32" ? "ffmpeg.exe" : "ffmpeg"), { longMedia })
     const env = { ...process.env, NODE_ENV: "production", CLIPLY_SMOKE_APP_ROOT: "bundled", CLIPLY_SMOKE_LOCAL_PACKAGE: "1", CLIPLY_SMOKE_INTEGRATION: "1", CLIPLY_SMOKE_USER_DATA: userData }
     for (const key of ["ELECTRON_RUN_AS_NODE", "NODE_OPTIONS", "CLIPLY_DEV_FFPROBE", "CLIPLY_SMOKE_FFPROBE", "CLIPLY_SMOKE_FFMPEG", "CLIPLY_SMOKE_PREVIEW", "CLIPLY_SMOKE_EXPORT", "CLIPLY_SMOKE_TRACKS", "CLIPLY_SMOKE_REMUX", "CLIPLY_SMOKE_TRIM"]) delete env[key]
+    if (!idleOnly && !normalStartup) {
+      require("./smoke-losslesscut-preview").fixtures(userData, path.join(copiedResources, "binaries", process.platform === "win32" ? "ffmpeg.exe" : "ffmpeg"))
+      env.CLIPLY_SMOKE_COMPAT = "1"
+    } else env.CLIPLY_SMOKE_COMPAT = "0"
     env.CLIPLY_SMOKE_IDLE = idleOnly ? "1" : "0"
     const executable = mac ? path.join(appDir, "Contents", "MacOS", "Cliply") : path.join(appDir, process.platform === "win32" ? "Cliply.exe" : "cliply-desktop")
     assert(fs.existsSync(executable), `missing packaged launcher: ${executable}`)

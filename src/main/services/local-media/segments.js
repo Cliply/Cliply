@@ -30,18 +30,11 @@ function retainedRanges(source, request) {
   }
   // Never silently discard a tiny retained sliver.
   if (!result.length || result.length > MAX_SEGMENTS || result.some(range => range.end - range.start < 0.1 - 1e-9)) fail("TRIM_RANGE")
-  const joined = []
-  for (const range of result) {
-    const previous = joined.at(-1)
-    if (previous && previous.end === range.start) previous.end = range.end
-    else joined.push({ ...range })
-  }
-  return joined
+  return result
 }
 
 function combineTiming(request, cuts) {
-  if (cuts.some((cut, i) => i && cut.plannedStart < cuts[i - 1].plannedEnd - 0.000002)) fail("TRIM_OVERLAP")
   return { ...cuts[0], previewId: null, intent: request.intent, ranges: request.ranges.map(range => ({ ...range })), cuts,
-    duration: cuts.reduce((sum, cut) => sum + (cuts.length > 1 ? cut.plannedEnd - cut.plannedStart : cut.duration), 0) }
+    duration: cuts.reduce((sum, cut) => sum + cut.duration, 0) }
 }
 module.exports = { retainedRanges, combineTiming, MAX_SEGMENTS }

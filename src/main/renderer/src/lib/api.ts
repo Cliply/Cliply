@@ -132,6 +132,10 @@ const mediaError: ErrorFactory = (message, error) =>
 
 // Local inspection is separate from download state, history and telemetry.
 export const mediaApi = {
+  async compatStart(request: { sourceId: string; seekTo: number }) { return unwrap(await getElectronAPI().media.compatStart(request), "Preview unavailable", { makeError: mediaError }) },
+  async compatRead(id: string) { return unwrap(await getElectronAPI().media.compatRead(id), "Preview unavailable", { makeError: mediaError, requireData: false }) ?? null },
+  async compatStop(id: string) { return unwrap(await getElectronAPI().media.compatStop(id), "Preview unavailable", { makeError: mediaError }) },
+  async compatClock(id: string) { return unwrap(await getElectronAPI().media.compatClock(id), "Preview unavailable", { makeError: mediaError }) },
   async inspectTrim(request: TrimInspectRequest) {
     return unwrap(await getElectronAPI().media.inspectTrim(request), "Could not inspect cut boundaries", { makeError: mediaError })
   },

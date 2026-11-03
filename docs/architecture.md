@@ -114,7 +114,7 @@ renderer `mediaApi` expose these calls:
 | `media:cancel-export(jobId)` | Export snapshot; repeat cancellation is harmless. |
 | `media:export-state` | Revision, preparing flag, plan, job and cleanup error. |
 | `media:preview-playback({ previewId, played })` | `{ confirmed }`; trusted native-player event, tied to the current grant. |
-| `media:inspect-trim({ sourceId, previewId, start, end, mode })` | Main-owned five-minute timing plan; `mode` is `before` or `after`. |
+| `media:inspect-trim({ sourceId, previewId, start, end, mode })` | Main-owned five-minute cut plan; legacy `before` means keyframe/input seek, `after` means normal/output seek. |
 | `media:cancel-trim` | `{ cancelled }`; drains timing inspection while retaining the source. |
 | `media:reveal-output(jobId)` | `{ revealed: true }`; main revalidates its completed path before revealing it. |
 
@@ -124,7 +124,7 @@ Requests are exactly `{ operation: "extractAudio", sourceId, streamIndex }` or
 `{ operation: "trim", sourceId, trimPlanId }`.
 Remux targets are exactly `mp4`, `mov`, or `mkv`; main checks the destination
 extension. Export requests never accept arbitrary flags, paths or cut times;
-trim times go through the separate bounded timing inspection first.
+trim times are validated against the source duration before destination selection.
 
 `media:export-updated` sends the same revisioned snapshot only to the trusted
 application main frame. Renderer subscriptions live outside the route. Requests
@@ -168,11 +168,10 @@ an already-open read: this is a bounded stat detector, not an immutable snapshot
 The workspace rechecks identity every two seconds while mounted. Native controls
 report loading/play/seek/end/error, support audio-only media and distinguish
 decoder failure from successful inspection. The player chooses default tracks;
-all probed tracks remain visible, including cover artwork. There is no software
-decode/transcode fallback. Audio extraction and full-file track removal are enabled for verified profiles;
+all probed tracks remain visible, including cover artwork. Unsupported native tracks can use the LosslessCut compatibility player described below. Audio extraction and full-file track removal are enabled for verified profiles;
 compatible full-file container changes and reviewed multi-section cuts
 are also enabled. The section editor can plan exports independently of playback;
-the legacy single-range request still requires its playback acknowledgement.
+the legacy single-range request also remains independent of preview.
 
 The version-1 [DTO](../src/main/renderer/src/lib/local-media-types.ts) contains an
 opaque source ID, filename/size, nullable duration/start, format-family labels,
@@ -227,13 +226,14 @@ download or startup failure.
 The main-owned [planner](../src/main/services/local-media/export-plan.js) accepts
 one full-duration track: AAC-LC to ADTS `.aac`, MP3 to `.mp3`, or signed 16-bit
 little-endian PCM to `.wav`. Only mono/stereo and the tested source families are
-enabled. Other tracks, artwork, chapters and source tags are omitted with an
-explicit UI notice. There is no codec conversion, batch, range or preview
+enabled. Only the selected track is mapped; metadata follows FFmpeg defaults
+for the destination format, matching LosslessCut extraction. There is no codec conversion, batch, range or preview
 requirement. The original source stays open after success or cancellation.
 
 [LocalExport](../src/main/services/local-media/export.js) reserves before replying,
-allows one local job, maps `0:<actual index>` and uses `-c copy`. Input and exclusive
-temporary output are opened in main and inherited as seekable descriptors. The
+allows one local job, maps `0:<actual index>` and uses `-c copy`. Main opens the input as an inherited seekable descriptor and reserves the
+temporary output. FFmpeg writes to its owned staging path so faststart can reopen
+the same output; it never receives the final destination path. The
 [supervisor](../src/main/services/local-media/export-worker.js) uses Electron's
 embedded Node and owns one FFmpeg child. Parent IPC loss stops and drains FFmpeg;
 no separately installed Node or Python is needed. Machine progress is bounded,
@@ -299,7 +299,9 @@ title/handler name, language, default/forced flags and rotation. MOV/MP4's `name
 tag is normalized as a displayed track title and passed back as the muxer's
 `title` option; values altered by display sanitization/truncation are refused.
 Other format-specific metadata may vary; this is not privacy sanitization.
-Matroska uses `-default_mode passthrough` so zero default flags stay zero.
+Matroska follows LosslessCut with `-default_mode infer_no_subs`: when a retained
+audio/video type has no default, its first track becomes default. The output
+validator checks that inferred result; subtitle default flags are not inferred.
 MOV/MP4 automatically promotes a retained track when its type has no default;
 that selection is refused with `TRACK_DEFAULT`, rather than silently changing
 the flag. Keep the existing default track too, or use Extract audio.
@@ -383,7 +385,7 @@ a new source resets the bounded session history. Nothing persists as a project.
 exports their complement. A middle removal retains both sides and joins them in
 source order into one output. The separate retained-content preview skips the
 omitted sections using requested times; it is not proof of keyframe-exact output.
-Review shows each planned cut and output format before destination selection.
+Review shows each requested cut and output format before destination selection.
 Arbitrary segment reordering, separate-clip batch export and smart re-encoding
 are outside this iteration.
 
@@ -399,42 +401,57 @@ receive specific capability reasons; nothing is silently dropped or converted.
 MP3/raw ADTS cutting remains refused. Use the explicit full-file tools when
 appropriate, which have their own compatibility rules.
 
-Preview and stream-copy support are independent. The new segment request does
-not require playback; source identity and trusted IPC remain mandatory. Native
-H.264/AAC MKV and H.264/HE-AAC MP4 playback have passed on the macOS development
-host. No proxy/transcode fallback is introduced for unmeasured codecs; failure
-to play does not disable a valid export plan. The legacy single-range IPC request
-still validates its existing preview acknowledgment for backward compatibility.
+Preview and stream-copy support are independent, including the legacy single-range
+IPC request. The custom packet-window/decoded-first-frame planner has been removed.
+`losslesscut.js` adapts upstream `losslessCutSingle`, `concatFiles` and stream maps:
+requested times go unchanged to FFmpeg, keyframe mode puts `-ss` before input and
+uses `-avoid_negative_ts make_zero` when cutting the start; normal mode puts `-ss`
+after input and uses `-copyinkf` for audio-only cuts. Matroska B-frames use upstream's
+positive `3/23 + 0.001` seek compensation and `-itsoffset`. Zero/EOF omit unnecessary
+seek/duration flags. MOV-family outputs use faststart. Nonzero source starts are
+not rejected by a custom zero-origin policy.
 
-Timing uses bounded packet scans and decoded leading-frame checks. Video start
-requests scan a 40-second window, leaving room within the existing 61-second
-observed span limit for FFprobe's earlier keyframe seek. No whole-file packet
-cache is created. Limits remain 8192 packets, 2 MiB JSON and 15 seconds per packet
-probe, with the existing supervised cancellation/drain. Missing leading DTS on
-at most 16 packets can be reconstructed from the first known DTS and packet
-durations; missing internal timing still fails. VFR/B-frame ends use PTS/DTS,
-never average-frame-rate multiplication.
+Each retained section is cut sequentially, including adjacent split sections.
+Concat lists contain only file entries, without custom duration rows or copyts.
+Global metadata is supplied using the first cut as a separate input (upstream's
+preserve-metadata-on-merge option); titles use its per-stream metadata mechanism.
+Inventory/content checks and owned staging/cancellation/publication remain. There
+is no assertion that requested duration or the first picture matches an exact
+frame: ordinary upstream stream-copy cuts can include leading media, blank starts
+and gaps. Smart Cut is not implemented. Cut mode is independent of keep/remove.
 
-MP4/MOV source starts remain within 1 ms; compatible MKV starts may be within
-100 ms. Matroska planning uses the video origin and export preserves timestamps
-with an explicit rebase. Its B-frame seek compensates FFmpeg's earlier seek;
-this is specific to Matroska, not a universal offset. Each cut is validated for
-streams, tags, dispositions, duration and a decoded starting picture before
-concat. Concat explicitly places the next part after the planned presentation
-end, including B-frame tails, and retains its zero-based timeline. Fast cuts can
-include extra pictures or short picture/audio gaps at boundaries; they are not
-frame/sample accurate. Existing duration/start acceptance thresholds remain.
+Native playback is attempted first. Missing video tracks or decoder errors switch
+to the adapted `MediaSourcePlayer`; it can also be selected manually. Following
+upstream `html5ifyDummy`, FFmpeg creates a temporary silent FLAC clock. The native
+master remains the source of play/pause/time/volume; an MSE slave displays an
+on-demand FFmpeg fragmented MP4 stream (800px/30fps H.264 ultrafast CRF 10,
+AAC 128k stereo). Buffering, 30ms master/slave synchronization and out-of-buffer
+seek resets follow upstream. This encodes preview data only; exports always use
+the original. Clock files are removed after loading; session release, source
+replacement, navigation and shutdown drain the supervised decoder.
 
-See the segment contract/lifecycle below. Run the old single-cut matrix with
-`node scripts/smoke-local-trim.js <task-dir> <ffmpeg> <ffprobe>`, and the joined
-matrix with `node scripts/smoke-local-segments.js <task-dir> <ffmpeg> <ffprobe>`.
-Both require a new disposable fixture directory. After building the renderer,
-`CLIPLY_SMOKE_TRIM=1` plus the existing helper/evidence overrides for
-`npm run smoke:electron` exercises native editor playback, retained preview,
-export, route return, cancellation and replacement. HE-AAC fixture encoding uses
-AudioToolbox on macOS; other native hosts do not inherit that validation.
+The authenticated IPC adds `media:compat-start({sourceId, seekTo})` returning an
+opaque session ID, `media:compat-read(sessionId)` returning a bounded chunk or EOF,
+`media:compat-stop(sessionId)`, and `media:compat-clock(sourceId)` returning the
+bounded silent clock bytes. No renderer filesystem/FFmpeg access is added.
+Provenance and the deferred license reconciliation are recorded in
+[third-party/losslesscut](../third-party/losslesscut/README.md).
+
+`node scripts/smoke-local-trim.js <task-dir> <ffmpeg> <ffprobe>` and
+`node scripts/smoke-local-segments.js <task-dir> <ffmpeg> <ffprobe>` now compare
+single and joined outputs with independently reproduced upstream commands:
+packet hashes, PTS/DTS/durations, full decoding, original hashes and cancellation.
+Use new disposable directories. After building, `CLIPLY_SMOKE_TRIM=1` checks the
+visual editor; `CLIPLY_SMOKE_COMPAT=1` checks ProRes fallback, playback, forward/back
+seeking and route cleanup with `npm run smoke:electron` and explicit helper paths.
+The packaged local-media check includes compatibility playback. HE-AAC fixture
+encoding uses AudioToolbox only on macOS.
 
 ### Local-media validation status
+
+The older cross-platform results below predate the LosslessCut foundation change.
+They are historical evidence, not validation of the replacement engine/player.
+Current alignment checks and native CI are recorded in the PR and research report.
 
 These are narrow verified profiles, not support for every file carrying an
 extension. Main rejects unknown, incompatible or ambiguous layouts before saving.
@@ -550,12 +567,8 @@ of a middle removal. Empty outputs and retained slivers below 0.1 seconds are
 refused. The existing legacy request remains supported. Segment planning does
 not require native playback; preview capability is separate from stream copying.
 
-A main-owned timing plan contains every retained cut. Keyframe-expanded overlaps
-are refused. One export reservation cuts and validates each part, then joins the
-parts into one new file. Concat timestamps use each planned presentation extent,
-including B-frame tails, and preserve the demuxer's zero-based timeline. AAC
-packet boundaries and video reordering can leave short gaps at joins; this is
-fast stream copying, not frame-exact editing or re-encoding. All intermediates
-are individually recorded in the existing ownership ledger, validated before
-publication and cleaned on cancellation/recovery. Original file identity,
-explicit stream maps and atomic no-clobber publication remain mandatory.
+A main-owned cut plan contains every retained section. One export reservation
+cuts and validates each part, then concatenates using LosslessCut's procedure
+above. All intermediates remain recorded in the ownership ledger and are cleaned
+on cancellation/recovery. Original identity, explicit stream maps and atomic
+no-clobber publication remain mandatory.

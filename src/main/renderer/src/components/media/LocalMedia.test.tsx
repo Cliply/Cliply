@@ -13,7 +13,7 @@ import { LocalFileEntry } from "./LocalFileEntry"
 import { NativeMediaPlayer } from "./NativeMediaPlayer"
 import MediaPage from "@/pages/MediaPage"
 
-vi.mock("@/lib/api", () => ({ mediaApi: { open: vi.fn(), close: vi.fn(), getState: vi.fn(), preview: vi.fn(), releasePreview: vi.fn(), confirmPlayback: vi.fn() } }))
+vi.mock("@/lib/api", () => ({ mediaApi: { open: vi.fn(), close: vi.fn(), getState: vi.fn(), preview: vi.fn(), releasePreview: vi.fn(), confirmPlayback: vi.fn(), compatClock: vi.fn() } }))
 vi.mock("@/components/ui/mode-toggle", () => ({ ModeToggle: () => <button>Theme</button> }))
 
 const source = {
@@ -30,6 +30,8 @@ beforeEach(() => {
   vi.clearAllMocks()
   useLocale.setState({ locale: "en" })
   useLocalMedia.setState({ source: null, busy: false, error: null, position: 0 })
+  vi.spyOn(HTMLVideoElement.prototype, "videoWidth", "get").mockReturnValue(160)
+  vi.spyOn(HTMLMediaElement.prototype as HTMLMediaElement & { audioTracks: unknown[] }, "audioTracks", "get").mockReturnValue([{ id: "8" }])
   vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => {})
   vi.spyOn(HTMLMediaElement.prototype, "load").mockImplementation(() => {})
   vi.mocked(mediaApi.preview).mockResolvedValue(grant)
@@ -89,11 +91,14 @@ test("native events report seek/end/error without losing the probed tracks; retr
   expect(screen.getByRole("status").textContent).toBe(en["media.seeking"])
   fireEvent.ended(player)
   expect(screen.getByRole("status").textContent).toBe(en["media.ended"])
+  vi.mocked(mediaApi.compatClock).mockRejectedValue(new Error("decoder unavailable"))
   fireEvent.error(player)
+  await screen.findByRole("alert")
+  expect(mediaApi.compatClock).toHaveBeenCalledWith(source.sourceId)
   expect(screen.getByRole("alert").textContent).toBe(en["media.previewUnavailable"])
   expect(useLocalMedia.getState().source).toBe(source)
   fireEvent.click(screen.getByRole("button", { name: en["media.retryPreview"] }))
-  await waitFor(() => expect(mediaApi.preview).toHaveBeenCalledTimes(2))
+  await waitFor(() => expect(mediaApi.preview).toHaveBeenCalledTimes(3))
   expect(mediaApi.releasePreview).toHaveBeenCalledWith(grant.previewId)
 })
 

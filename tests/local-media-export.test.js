@@ -66,7 +66,7 @@ test("maps an actual non-contiguous ID, preserves selected identity and exposes 
   const plan = await prepare()
   expect(plan).toMatchObject({ streamIndex: 7, codec: "pcm_s16le", extension: "wav", language: "rus", title: "Alternate", outputName: "audio.wav" })
   expect(JSON.stringify(plan)).not.toContain(directory)
-  expect(exportArgs(plan)).toEqual(expect.arrayContaining(["-map", "0:7", "-c", "copy", "-map_chapters", "-1", "-f", "wav"]))
+  expect(exportArgs(plan)).toEqual(expect.arrayContaining(["-map", "0:7", "-c", "copy", "-f", "wav"]))
   expect(exportArgs(plan)).not.toContain("-y")
 })
 test.each([{}, { ...request(), argv: [] }, { ...request(), operation: "trim" }, { ...request(), streamIndex: 0 }, { ...request(), streamIndex: -1 }, { ...request(), sourceId: "wrong" }])("rejects invalid plan %p", request => {

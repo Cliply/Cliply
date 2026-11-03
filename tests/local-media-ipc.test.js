@@ -109,7 +109,7 @@ test("real preload forwards no path/argv input through its media methods", async
   await api.media.getState()
   await api.media.close()
   expect(invoke.mock.calls).toEqual([["media:open", undefined], ["media:get-state", undefined], ["media:close", undefined]])
-  expect(Object.keys(api.media)).toEqual(["inspectTrim", "cancelTrim", "confirmPlayback", "open", "getState", "preview", "releasePreview", "close", "prepareExport", "startExport", "cancelExport", "exportState", "revealOutput", "onExportUpdated"])
+  expect(Object.keys(api.media)).toEqual(["compatStart", "compatRead", "compatStop", "compatClock", "inspectTrim", "cancelTrim", "confirmPlayback", "open", "getState", "preview", "releasePreview", "close", "prepareExport", "startExport", "cancelExport", "exportState", "revealOutput", "onExportUpdated"])
 })
 
 test("trim inspection/playback contract remains behind owning-frame IPC", async () => {
@@ -124,4 +124,18 @@ test("trim inspection/playback contract remains behind owning-frame IPC", async 
   event.senderFrame = { url: event.senderFrame.url }
   for (const channel of ["media:inspect-trim", "media:cancel-trim", "media:preview-playback"]) expect((await calls.get(channel)(event, request)).error.code).toBe("FORBIDDEN")
   expect(service.inspectTrim).toHaveBeenCalledTimes(1)
+})
+
+test("compatibility transport accepts opaque IDs only and stays behind the owning frame", async () => {
+  const { calls, event, window, service } = setup()
+  service.compatibility = { start: jest.fn(async () => ({ sessionId: 'session' })), read: jest.fn(async () => null), stop: jest.fn(), clock: jest.fn() }
+  const id = '11111111-1111-4111-8111-111111111111'
+  expect((await calls.get('media:compat-start')(event, { sourceId: id, seekTo: 0 })).success).toBe(true)
+  expect(await calls.get('media:compat-read')(event, id)).toEqual({ success: true, data: null })
+  for (const action of ['read', 'stop', 'clock']) {
+    expect((await calls.get('media:compat-' + action)(event, '/private/file')).error.code).toBe('REQUEST_INVALID')
+    expect((await calls.get('media:compat-' + action)(event, id, 'extra')).error.code).toBe('REQUEST_INVALID')
+  }
+  window.webContents.mainFrame.url = 'https://example.org/'
+  for (const action of ['start', 'read', 'stop', 'clock']) expect((await calls.get('media:compat-' + action)(event, id)).error.code).toBe('FORBIDDEN')
 })

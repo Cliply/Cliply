@@ -82,7 +82,8 @@ export function TrimPanel({ source, busy, player }: { source: MediaSource; busy:
         else if (key === "b") commit(splitSection(edit, currentTime()))
         else if (["delete", "backspace"].includes(key)) commit(deleteSection(edit))
         else if (key === " ") togglePlay()
-        else seek(currentTime() + (key === "arrowleft" ? -1 : 1) * (event.shiftKey ? 1 : 5))
+        else if (event.shiftKey && range) seek(key === "arrowleft" ? range.start : range.end)
+        else seek(currentTime() + (key === "arrowleft" ? -1 : 1))
       }
     }
     window.addEventListener("keydown", keydown)
@@ -104,7 +105,7 @@ export function TrimPanel({ source, busy, player }: { source: MediaSource; busy:
       <Button size="sm" variant="outline" disabled={locked || !range} onClick={() => mark("end")}>O · {t("media.setEnd")}</Button>
       <Button size="sm" variant="outline" disabled={locked || splitSection(edit, currentTime()) === edit} onClick={() => commit(splitSection(edit, currentTime()))}><Scissors />{t("media.split")}</Button>
       <Button size="sm" variant="outline" disabled={locked || addSection(edit, currentTime(), duration) === edit} onClick={() => commit(addSection(edit, currentTime(), duration))}><Plus />{t("media.addSection")}</Button>
-      <select aria-label={t("media.editMode")} value={edit.intent} disabled={locked} onChange={event => commit({ ...edit, intent: event.target.value as "keep" | "remove", mode: event.target.value === "remove" ? "after" : "before" })} className="ml-auto rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-600 dark:bg-slate-900">
+      <select aria-label={t("media.editMode")} value={edit.intent} disabled={locked} onChange={event => commit({ ...edit, intent: event.target.value as "keep" | "remove" })} className="ml-auto rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-600 dark:bg-slate-900">
         <option value="keep">{t("media.keepMarked")}</option><option value="remove">{t("media.removeMarked")}</option>
       </select>
     </div>

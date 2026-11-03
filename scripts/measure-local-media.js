@@ -6,7 +6,6 @@ const { spawn, spawnSync, execFile } = require("node:child_process")
 const { createHash, randomBytes } = require("node:crypto")
 const { LocalMediaService } = require("../src/main/services/local-media")
 const { startProbe } = require("../src/main/services/local-media/probe")
-const { startPacketProbe, startFrameProbe } = require("../src/main/services/local-media/trim-plan")
 const { startExportProcess } = require("../src/main/services/local-media/export-process")
 const { ownedPartialBytes } = require("./local-smoke-sampling")
 const digest = file => createHash("sha256").update(fs.readFileSync(file)).digest("hex")
@@ -46,10 +45,8 @@ async function measure({ directory, ffmpeg, ffprobe, diskVolume }) {
     })).finally(() => { pendingSample = null })
   }
   const runProbe = (exe, file) => startProbe(exe, file, { spawnProcess: track("probe") })
-  const runFrames = (exe, file, stream, from) => startFrameProbe(exe, file, stream, from, { spawnProcess: track("frame-probe") })
-  const service = new LocalMediaService({ selectFile: async () => sourcePath, resolveProbe: async () => ffprobe, runProbe, runFrames,
-    runPackets: (exe, file, stream, from, to) => startPacketProbe(exe, file, stream, from, to, { spawnProcess: track("packet-probe") }),
-    exportOptions: { storagePath: path.join(directory, "state"), selectDestination: async () => destination, resolveFfmpeg: async () => ffmpeg, runProbe, runFrames,
+  const service = new LocalMediaService({ selectFile: async () => sourcePath, resolveProbe: async () => ffprobe, runProbe,
+    exportOptions: { storagePath: path.join(directory, "state"), selectDestination: async () => destination, resolveFfmpeg: async () => ffmpeg, runProbe,
       onUpdate: sampleDisk, runProcess: (exe, args, options) => { commands.push(args); return startExportProcess(exe, args, { ...options, spawnProcess: track("supervisor") }) } } })
   const timer = setInterval(sample, 50)
   try {

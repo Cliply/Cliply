@@ -18,6 +18,7 @@ export interface MediaStream {
   pixelFormat: string | null
   sampleRate: number | null
   channels: number | null
+  channelLayout?: string | null
   bFrames?: number | null
   averageFrameRate: string | null
   language: string | null
@@ -90,7 +91,7 @@ export interface TrimTiming {
   ranges?: EditRange[]; intent?: "keep" | "remove"; cuts?: TrimTiming[]
   operation: "trim"; sourceId: string; trimPlanId: string; expiresAt: number; previewId: string | null
   requestedStart: number; requestedEnd: number; mode: "before" | "after"
-  plannedStart: number; plannedEnd: number; tolerance: number; duration: number; extension: string; streamIndexes: number[]
+  plannedStart: number; plannedEnd: number; tolerance?: number; duration: number; extension: string; streamIndexes: number[]
 }
 export interface TrimExportRequest { operation: "trim"; sourceId: string; trimPlanId: string }
 export interface TrimExportPlan extends TrimTiming { planId: string; outputName: string }
