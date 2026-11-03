@@ -462,9 +462,11 @@ No background proxies, thumbnails, waveforms, compression or saved projects were
 passed all 13 checks per platform: package, helpers, libraries, inspection,
 extraction, tracks, remux, trim, segments, packaged UI, normal startup, download
 recovery and URL media. The later pointer-test/documentation commits do not
-change the runtime tested there. Component pointer/keyboard checks passed;
-an additional OS-level mouse review was incomplete because desktop automation
-returned timeouts and no-window errors. This is not full LosslessCut parity.
+change the runtime tested there. Component pointer/keyboard checks passed.
+Native file opening, scrubbing, keyboard handle adjustment, split, zoom, delete
+and Cmd-Z undo also passed on macOS. OS-level dragging remains unverified:
+automation emitted its drag movement with `buttons=0`, without pointer capture,
+after earlier timeout/no-window errors. This is not full LosslessCut parity.
 
 The macOS private package check runs offline with development helper overrides
 absent. Its test entry isolates external services and dialogs; it does not claim
