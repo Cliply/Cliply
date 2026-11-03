@@ -1,6 +1,7 @@
 // Stable, path-free errors. Helper stderr and source names never become telemetry.
 const MESSAGES = {
   AUDIO_UNSUPPORTED: "No verified audio extraction profile is available for this track. Choose AAC-LC, MP3 or 16-bit little-endian PCM, mono/stereo, with a known duration.",
+  TRIM_OVERLAP: "Keyframe adjustments overlap two sections. Move their boundaries farther apart and review again.",
   TRIM_PROFILE: "Fast trim is not verified for this codec/container layout. Full-file tools may still be available.",
   TRIM_STREAMS: "Fast trim requires one video with at most one audio track, or one audio track, without chapters or other streams.",
   TRIM_TIMING: "This file has missing, delayed or ambiguous timing outside the verified fast-cut profile.",

@@ -205,3 +205,35 @@ test("100 ms ranges tolerate floating-point subtraction; MP4 brand variants rema
   expect(() => validateOutput(plan, data, 100)).not.toThrow()
   data.majorBrand = "qt"; expect(() => validateOutput(plan, data, 100)).toThrow()
 })
+
+const { retainedRanges, combineTiming } = require("../src/main/services/local-media/segments")
+const edit = (patch = {}) => ({ sourceId: "source", intent: "remove", mode: "after", ranges: [{ start: 4, end: 8 }], ...patch })
+test("middle deletion retains both sides, ordered; keep exports only markings", () => {
+  expect(retainedRanges(source, edit())).toEqual([{ start: 0, end: 4 }, { start: 8, end: 12 }])
+  expect(retainedRanges(source, edit({ intent: "keep" }))).toEqual([{ start: 4, end: 8 }])
+  expect(retainedRanges(source, edit({ ranges: [] }))).toEqual([{ start: 0, end: 12 }])
+})
+test.each([
+  { ranges: [{ start: 0, end: 12 }] }, { intent: "keep", ranges: [] },
+  { ranges: [{ start: 0.01, end: 8 }] }, { ranges: [{ start: 8, end: 10 }, { start: 4, end: 6 }] },
+  { ranges: [{ start: 4, end: 8 }, { start: 7, end: 9 }] }, { ranges: [{ start: 4, end: Infinity }] },
+  { ranges: [{ start: 4, end: 8, path: "/private" }] }, { sourceId: "old" }, { command: [] },
+  { ranges: Array(33).fill({ start: 4, end: 8 }) }
+])("rejects empty outputs, tiny remainders and malformed edit requests %p", patch => {
+  expect(() => retainedRanges(source, edit(patch))).toThrow()
+})
+test("expanded cuts cannot duplicate overlapping source pictures", () => {
+  expect(() => combineTiming(edit(), [{ plannedStart: 0, plannedEnd: 5 }, { plannedStart: 4, plannedEnd: 12 }])).toThrow(expect.objectContaining({ code: "TRIM_OVERLAP" }))
+})
+test("segment planning is independent of native preview but still owns probes/source identity", async () => {
+  const { service, directory, file } = await setup()
+  try {
+    service.preview.revoke()
+    service.runFrames = (_exe, _file, _stream, start) => ({ result: Promise.resolve({ firstTime: start }), ended: true })
+    const plan = await service.inspectTrim(edit())
+    expect(plan.cuts.map(cut => [cut.plannedStart, cut.requestedEnd])).toEqual([[0, 4], [8, 12]])
+    expect(service.getTrimPlan(plan.trimPlanId)).toBe(plan)
+    await fs.appendFile(file, "changed")
+    await expect(service.inspectTrim(edit())).rejects.toMatchObject({ code: "SOURCE_CHANGED" })
+  } finally { await service.shutdown(); await fs.rm(directory, { recursive: true, force: true }) }
+})

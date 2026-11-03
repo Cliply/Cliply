@@ -549,3 +549,23 @@ Use the [binary guide](../binaries/README.md) for asset mappings and provenance,
 and the [release guide](releasing.md) for app packaging and publication. A helper
 fetcher's broader list of upstream architectures does not establish app support
 on those architectures.
+
+### Visual editor continuation
+
+The corrected editor direction supersedes the one-section product restriction.
+`media:inspect-trim` also accepts `{ sourceId, ranges: [{ start, end }], intent:
+"keep" | "remove", mode: "before" | "after" }`. Main validates up to 32 ordered,
+disjoint marked ranges and computes the retained intervals, including both sides
+of a middle removal. Empty outputs and retained slivers below 0.1 seconds are
+refused. The existing legacy request remains supported. Segment planning does
+not require native playback; preview capability is separate from stream copying.
+
+A main-owned timing plan contains every retained cut. Keyframe-expanded overlaps
+are refused. One export reservation cuts and validates each part, then joins the
+parts into one new file. Concat timestamps use each planned presentation extent,
+including B-frame tails, and preserve the demuxer's zero-based timeline. AAC
+packet boundaries and video reordering can leave short gaps at joins; this is
+fast stream copying, not frame-exact editing or re-encoding. All intermediates
+are individually recorded in the existing ownership ledger, validated before
+publication and cleaned on cancellation/recovery. Original file identity,
+explicit stream maps and atomic no-clobber publication remain mandatory.

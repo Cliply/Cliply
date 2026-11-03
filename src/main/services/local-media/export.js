@@ -7,6 +7,7 @@ const { ExportOutput, destination } = require("./export-output")
 const { startExportProcess } = require("./export-process")
 const { startProbe } = require("./probe")
 const { startFrameProbe } = require("./trim-plan")
+const { concatManifest, concatArgs } = require("./join")
 const { detectContainer } = require("./container")
 
 const TERMINAL = new Set(["completed", "cancelled", "failed", "interrupted"])
@@ -47,7 +48,7 @@ class LocalExport {
       }
       await this.validateSource(source); check()
       const selected = await this.selectDestination({
-        defaultName: `${path.parse(source.dto.filename).name.slice(0, 120)}-${profile.operation === "extractAudio" ? `audio-${profile.streamIndex}` : profile.operation === "remux" ? "remux" : profile.operation === "trim" ? "clip" : "tracks"}.${profile.extension}`,
+        defaultName: `${path.parse(source.dto.filename).name.slice(0, 120)}-${profile.operation === "extractAudio" ? `audio-${profile.streamIndex}` : profile.operation === "remux" ? "remux" : profile.operation === "trim" ? (profile.cuts ? "edited" : "clip") : "tracks"}.${profile.extension}`,
         extension: profile.extension
       })
       check()
@@ -75,7 +76,7 @@ class LocalExport {
     return this.snapshot() // the unique job is reserved before acknowledgment
   }
   async execute(active, plan) {
-    let input, output, owned, terminal = "failed", errorCode = null
+    let input, output, intermediate, manifest, owned, terminal = "failed", errorCode = null
     const check = () => { if (active.cancelled || this.frozen) throw new MediaError("EXPORT_CANCELLED") }
     const supervise = async process => {
       active.process = process
@@ -99,13 +100,53 @@ class LocalExport {
       const created = await this.output.create(plan.target); owned = created.record; output = created.handle
       check()
       this.update({ state: "running" })
-      await supervise(this.runProcess(executable, exportArgs(plan.profile), { inputFd: input.fd, outputFd: output.fd,
-        onProgress: seconds => {
-          if (this.active === active && this.job.state === "running") {
-            const progress = Math.min(99, Math.max(this.job.progress, Math.floor(seconds / plan.profile.duration * 100)))
-            if (progress !== this.job.progress) this.update({ progress })
+      const progress = (seconds, offset = 0, scale = 1) => {
+        if (this.active === active && this.job.state === "running") {
+          const value = Math.min(98, Math.max(this.job.progress, Math.floor(offset + seconds / plan.profile.duration * scale)))
+          if (value !== this.job.progress) this.update({ progress: value })
+        }
+      }
+      const cuts = plan.profile.cuts
+      if (cuts?.length > 1) {
+        let completed = 0
+        for (const [index, cut] of cuts.entries()) {
+          check()
+          await this.validateSource(plan.source); check()
+          // Each child inherits a fresh open-file description at offset zero.
+          // Reusing fd 0 shares the previous child's seek position on POSIX.
+          if (index > 0) {
+            await input.close(); input = await fs.open(plan.source.identity.realPath, "r")
+            const stat = await input.stat({ bigint: true })
+            if ([stat.dev, stat.ino, stat.size, stat.mtimeNs, stat.ctimeNs].join(":") !== plan.source.identity.stamp) throw new MediaError("SOURCE_CHANGED")
           }
-        } }))
+          intermediate = await this.output.artifact(owned, `part-${index}.partial`)
+          check()
+          await supervise(this.runProcess(executable, exportArgs(cut), { inputFd: input.fd, outputFd: intermediate.fd,
+            onProgress: seconds => progress(seconds, completed / plan.profile.duration * 70, 70) }))
+          check(); await intermediate.sync()
+          const file = path.join(owned.directory, `part-${index}.partial`)
+          const metadata = await supervise(this.runProbe(probe, file)); check()
+          validateOutput(cut, metadata, Number((await intermediate.stat()).size))
+          if (cut.hasVideo) {
+            const frame = await supervise(this.runFrames(probe, file, metadata.streams.find(stream => stream.type === "video").index, 0)); check()
+            if (Math.abs(frame.firstTime) > 0.001) throw new MediaError("OUTPUT_INVALID")
+          }
+          completed += cut.duration
+          await intermediate.close(); intermediate = null
+        }
+        manifest = await this.output.artifact(owned, "concat.partial")
+        await manifest.writeFile(concatManifest(owned.directory, cuts)); await manifest.sync()
+        await manifest.close(); manifest = await fs.open(path.join(owned.directory, "concat.partial"), "r")
+        const manifestStat = await manifest.stat({ bigint: true })
+        if (`${manifestStat.dev}:${manifestStat.ino}` !== owned.artifacts["concat.partial"]) throw new MediaError("OUTPUT_INVALID")
+        check()
+        await supervise(this.runProcess(executable, concatArgs(plan.profile), { inputFd: manifest.fd, outputFd: output.fd,
+          onProgress: seconds => progress(seconds, 70, 28) }))
+        await manifest.close(); manifest = null
+      } else {
+        await supervise(this.runProcess(executable, exportArgs(cuts?.[0] || plan.profile), { inputFd: input.fd, outputFd: output.fd,
+          onProgress: seconds => progress(seconds, 0, 98) }))
+      }
       check()
       await output.sync()
       this.update({ state: "validating", progress: 99 })
@@ -136,6 +177,8 @@ class LocalExport {
       terminal = active.cancelled || safe.code === "EXPORT_CANCELLED" || safe.code === "CANCELLED" ? "cancelled" : "failed"
       errorCode = terminal === "cancelled" ? null : safe.code
     } finally {
+      await intermediate?.close().catch(() => {})
+      await manifest?.close().catch(() => {})
       await input?.close().catch(() => {})
       await output?.close().catch(() => {})
       let cleanupWarning = false

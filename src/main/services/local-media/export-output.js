@@ -72,6 +72,20 @@ class ExportOutput {
       throw error
     }
   }
+  async artifact(record, name) {
+    if (!/^(?:part-\d{1,2}|concat)\.partial$/.test(name) || Object.keys(record.artifacts || {}).length >= 33) throw new MediaError("OUTPUT_PATH")
+    await this.verify(record)
+    record.artifacts ||= {}
+    if (Object.hasOwn(record.artifacts, name)) throw new MediaError("OUTPUT_PATH")
+    record.artifacts[name] = null
+    await this.write(record)
+    const handle = await fs.open(path.join(record.directory, name), "wx", 0o600)
+    try {
+      record.artifacts[name] = key(await handle.stat({ bigint: true }))
+      await this.write(record)
+      return handle
+    } catch (error) { await handle.close(); throw error }
+  }
   async verify(record) {
     if (await fs.realpath(record.parent) !== record.parent || key(await fs.stat(record.parent, { bigint: true })) !== record.parentKey) throw new MediaError("EXPORT_CLEANUP")
     const dir = await fs.lstat(record.directory, { bigint: true })
@@ -99,7 +113,18 @@ class ExportOutput {
       return
     }
     await this.verify(record)
-    if ((await fs.readdir(record.directory)).some(name => ![".owner", "audio.partial"].includes(name))) throw new MediaError("EXPORT_CLEANUP")
+    const artifacts = record.artifacts || {}
+    if (typeof artifacts !== "object" || Array.isArray(artifacts) || Object.keys(artifacts).length > 33 ||
+        Object.keys(artifacts).some(name => !/^(?:part-\d{1,2}|concat)\.partial$/.test(name))) throw new MediaError("EXPORT_CLEANUP")
+    if ((await fs.readdir(record.directory)).some(name => ![".owner", "audio.partial", ...Object.keys(artifacts)].includes(name))) throw new MediaError("EXPORT_CLEANUP")
+    for (const [name, identity] of Object.entries(artifacts)) {
+      const file = path.join(record.directory, name)
+      try {
+        const stat = await fs.lstat(file, { bigint: true })
+        if (!stat.isFile() || stat.isSymbolicLink() || key(stat) !== identity) throw new MediaError("EXPORT_CLEANUP")
+        await fs.unlink(file)
+      } catch (error) { if (error.code !== "ENOENT") throw error }
+    }
     try {
       const stat = await fs.lstat(record.partial, { bigint: true })
       if (!stat.isFile() || stat.isSymbolicLink() || key(stat) !== record.fileKey) throw new MediaError("EXPORT_CLEANUP")

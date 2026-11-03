@@ -81,9 +81,13 @@ export interface TrackExportPlan extends TrackExportRequest {
 }
 export interface RemuxRequest extends Omit<TrackExportRequest, "operation"> { operation: "remux"; targetContainer: MediaContainer }
 export interface RemuxPlan extends Omit<TrackExportPlan, "operation"> { operation: "remux"; targetContainer: MediaContainer }
-export interface TrimInspectRequest { sourceId: string; previewId: string; start: number; end: number; mode: "before" | "after" }
+export interface EditRange { start: number; end: number }
+export interface SegmentInspectRequest { sourceId: string; ranges: EditRange[]; intent: "keep" | "remove"; mode: "before" | "after" }
+export type TrimInspectRequest = LegacyTrimInspectRequest | SegmentInspectRequest
+export interface LegacyTrimInspectRequest { sourceId: string; previewId: string; start: number; end: number; mode: "before" | "after" }
 export interface TrimTiming {
-  operation: "trim"; sourceId: string; trimPlanId: string; expiresAt: number; previewId: string
+  ranges?: EditRange[]; intent?: "keep" | "remove"; cuts?: TrimTiming[]
+  operation: "trim"; sourceId: string; trimPlanId: string; expiresAt: number; previewId: string | null
   requestedStart: number; requestedEnd: number; mode: "before" | "after"
   plannedStart: number; plannedEnd: number; tolerance: number; duration: number; extension: string; streamIndexes: number[]
 }
