@@ -124,7 +124,7 @@ function validateOutput(plan, metadata, bytes) {
   const duration = stream?.duration ?? metadata.duration
   if (bytes <= 0 || metadata.streams.length !== 1 || stream?.type !== "audio" ||
       stream.codec !== plan.codec || stream.sampleRate !== plan.sampleRate || stream.channels !== plan.channels ||
-      !metadata.formatNames.includes(family) || metadata.chapterCount !== 0 ||
+      !metadata.formatNames.includes(family) ||
       !Number.isFinite(duration) || duration <= 0 || Math.abs(duration - plan.duration) > Math.max(0.25, plan.duration * 0.02)) throw new MediaError("OUTPUT_INVALID")
 }
 

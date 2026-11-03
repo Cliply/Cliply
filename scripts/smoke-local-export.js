@@ -21,6 +21,8 @@ function fixtures(directory, ffmpeg) {
   for (const [name, codec] of [["aac.m4a", "aac"], ["aac.aac", "aac"], ["mp3.mp3", "libmp3lame"], ["mp3.mkv", "libmp3lame"], ["pcm.wav", "pcm_s16le"], ["pcm.mov", "pcm_s16le"], ["pcm.mkv", "pcm_s16le"]]) {
     make(name, ["-f", "lavfi", "-i", "sine=frequency=660", "-t", "5", "-c:a", codec, "-ac", ["aac.m4a", "mp3.mp3", "pcm.wav"].includes(name) ? "2" : "1"])
   }
+  fs.writeFileSync(path.join(directory, "chapters.txt"), ";FFMETADATA1\n[CHAPTER]\nTIMEBASE=1/1000\nSTART=0\nEND=3000\ntitle=Opening\n")
+  make("chapters.mp3", ["-i", path.join(directory, "mp3.mp3"), "-f", "ffmetadata", "-i", path.join(directory, "chapters.txt"), "-map", "0:a", "-map_chapters", "1", "-c", "copy"])
 }
 
 async function runNative({ directory, ffmpeg, ffprobe }) {
@@ -37,7 +39,7 @@ async function runNative({ directory, ffmpeg, ffprobe }) {
         } })
       }
     } })
-  for (const name of ["alternate.mkv", "aac.m4a", "aac.aac", "mp3.mp3", "mp3.mkv", "pcm.wav", "pcm.mov", "pcm.mkv"]) {
+  for (const name of ["alternate.mkv", "aac.m4a", "aac.aac", "mp3.mp3", "chapters.mp3", "mp3.mkv", "pcm.wav", "pcm.mov", "pcm.mkv"]) {
     selected = path.join(directory, name); const before = hash(selected)
     const { source } = await service.open()
     const index = name === "alternate.mkv" ? 2 : 0
@@ -53,6 +55,11 @@ async function runNative({ directory, ffmpeg, ffprobe }) {
     command(ffmpeg, ["-v", "error", "-xerror", "-i", output, "-f", "null", "-"])
     const metadata = JSON.parse(command(ffprobe, ["-v", "error", "-show_streams", "-show_format", "-of", "json", output]))
     assert.equal(metadata.streams.length, 1)
+    if (name === "chapters.mp3") {
+      const chapters = JSON.parse(command(ffprobe, ["-v", "error", "-show_chapters", "-of", "json", output])).chapters
+      assert.equal(chapters.length, 1)
+      assert.equal(chapters[0].tags.title, "Opening")
+    }
     const packetHash = file => command(ffmpeg, ["-v", "error", "-i", file, "-map", file === selected ? `0:${index}` : "0:0", "-c", "copy", ...(profile.extension === "aac" ? ["-bsf:a", "aac_adtstoasc"] : []), "-f", "hash", "-hash", "sha256", "-"])
     assert.equal(packetHash(selected), packetHash(output), "only the selected encoded audio packets are copied")
     inventory.push({ source: name, sourceSha256: before, selectedIndex: index, codec: metadata.streams[0].codec_name,

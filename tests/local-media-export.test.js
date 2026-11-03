@@ -163,6 +163,17 @@ test("failed output validation discards even an exit-zero output", async () => {
   await run(); expect(controller.job).toMatchObject({ state: "failed", error: "OUTPUT_INVALID" })
   await expect(fs.stat(selected)).rejects.toHaveProperty("code", "ENOENT")
 })
+test("audio extraction accepts the muxer's default chapter copying, as LosslessCut does", () => {
+  source.dto.formatNames = ["mp3"]
+  source.dto.streams[1].codec = "mp3"
+  source.dto.chapterCount = 1
+  metadata.formatNames = ["mp3"]
+  metadata.streams[0].codec = "mp3"
+  metadata.chapterCount = 1
+  const plan = planAudio(source.dto, request())
+  expect(exportArgs(plan)).not.toContain("-map_chapters")
+  expect(() => validateOutput(plan, metadata, 100)).not.toThrow()
+})
 test.each([0, 0.1, 3, NaN])("invalid output duration %s is rejected", duration => {
   expect(() => validateOutput(planAudio(source.dto, request()), { ...metadata, streams: [{ ...metadata.streams[0], duration }] }, 100)).toThrow()
 })
