@@ -35,6 +35,17 @@ async function runUI({ window, service, userData }) {
   await wait("document.querySelectorAll('video')[1].currentTime >= 8.8")
   await js("document.querySelector('video').pause(); document.querySelector('video').currentTime = 1")
   await wait("Math.abs(document.querySelectorAll('video')[1].currentTime - 1) < 0.15 && document.querySelectorAll('video')[1].readyState >= 2")
+  // Desktop screenshots can contain stale compositor frames on hosted Windows.
+  // Verify the decoded synthetic picture itself, not only playback timestamps.
+  await wait(`(() => {
+    const video = document.querySelectorAll('video')[1]
+    const canvas = document.createElement('canvas'); canvas.width = 16; canvas.height = 16
+    const context = canvas.getContext('2d'); context.drawImage(video, 0, 0, 16, 16)
+    const pixels = context.getImageData(0, 0, 16, 16).data
+    let colored = 0
+    for (let i = 0; i < pixels.length; i += 4) if (Math.max(pixels[i], pixels[i+1], pixels[i+2]) - Math.min(pixels[i], pixels[i+1], pixels[i+2]) > 40) colored++
+    return video.videoWidth > 0 && colored > 32
+  })()`)
   if (process.env.CLIPLY_SMOKE_EVIDENCE) {
     window.show(); window.focus()
     await js("new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))")
@@ -52,6 +63,6 @@ async function runUI({ window, service, userData }) {
   for (let i = 0; i < 40 && service.compatibility.jobs.size; i++) await new Promise(resolve => setTimeout(resolve, 100))
   assert.equal(service.compatibility.jobs.size, 0)
   assert.equal(service.source, null)
-  console.log("LosslessCut compatibility playback: ProRes native failure, automatic fallback, play, mute/volume, forward/back seek, route restoration and cleanup passed")
+  console.log("LosslessCut compatibility playback: ProRes native failure, automatic fallback, decoded picture pixels, play, mute/volume, forward/back seek, route restoration and cleanup passed")
 }
 module.exports = { fixtures, runUI }
