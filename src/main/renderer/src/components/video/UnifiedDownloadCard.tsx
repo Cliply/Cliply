@@ -283,8 +283,9 @@ function SimpleVideoDownloadCard({
             {t("card.uploader")} {videoInfo.uploader}
           </p>
           <p>
-            {t("card.duration")}{" "}
-            {videoInfo.duration_string || t("card.unknownDuration")}
+            {videoInfo.duration_string
+              ? `${t("card.duration")} ${videoInfo.duration_string}`
+              : t("card.unknownDuration")}
           </p>
         </div>
 
