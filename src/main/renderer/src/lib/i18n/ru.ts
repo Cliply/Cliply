@@ -526,9 +526,12 @@ export const ru: Record<Key, string> = {
   "progress.stopTitle": "остановить загрузку",
   "progress.working": "идёт работа",
 
-  "feedback.title": "помогите улучшить",
-  "feedback.subtitle": "предложите функцию",
-  "feedback.cta": "жмите :)",
+  "community.homePrompt": "есть идея для cliply?",
+  "community.homeLink": "давайте обсудим в discord",
+  "feedback.title": "сделаем cliply лучше",
+  "feedback.subtitle": "помощь, идеи и планы на будущее.",
+  "feedback.cta": "в discord",
+  "feedback.alternative": "оставить отзыв",
 
   "layout.downloadsAt": "загрузки сохраняются в",
   "layout.concurrentNote":
