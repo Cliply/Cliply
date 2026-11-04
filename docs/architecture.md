@@ -393,6 +393,12 @@ React portal. OpenCut's composition engine and export pipeline are not imported;
 the media procedures below are unchanged. See the pinned
 [UI source and notices](../third-party/opencut-classic/README.md).
 
+`TrimPanel` composes the timeline and transport controls. `TrimInspector` owns
+section fields and export review, `useTrimPlayback` owns retained-section
+audition and native transport subscriptions, and `useTrimShortcuts` owns the
+keyboard guards/actions. They share the session edit document; no second trim
+selection state or separate playback engine is introduced.
+
 “Keep marked sections” exports the marked ranges; “Remove marked sections”
 exports their complement. A middle removal retains both sides and joins them in
 source order into one output. The separate retained-content preview skips the

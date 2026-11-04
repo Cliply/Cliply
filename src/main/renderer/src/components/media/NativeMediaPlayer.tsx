@@ -125,8 +125,8 @@ export function NativeMediaPlayer({ source, busy, mediaRef }: { source: MediaSou
         onEnded={() => setStatus("ended")}
         onError={() => { if (preview) { reportPlayback(false); if (!compatibility) setCompatibility(true); else setStatus("failed") } }}
       />
-      {compatibility && clockReady && preview && <MediaSourcePlayer filePath={source.sourceId} videoStream={previewVideo ? { index: previewVideo.index } : undefined}
-        audioStreams={previewAudio} masterVideoRef={element} rotate={undefined} mediaSourceQuality={0} ffmpegHwaccel="none" baseVideoStyle={previewStyle} onFailure={compatFailed} />}
+      {compatibility && clockReady && preview && <MediaSourcePlayer sourceId={source.sourceId} videoStream={previewVideo ? { index: previewVideo.index } : undefined}
+        audioStreams={previewAudio} masterVideoRef={element} baseVideoStyle={previewStyle} onFailure={compatFailed} />}
     </div>
     <div className="flex min-h-8 shrink-0 flex-wrap items-center justify-between gap-x-3 gap-y-1 border-t border-border px-3 py-1">
       <p role={failed ? "alert" : "status"} className={failed || status === "loading" ? "flex items-center gap-2 text-xs text-muted-foreground" : "sr-only"}>

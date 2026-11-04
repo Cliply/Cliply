@@ -15,6 +15,10 @@ supersedes the earlier source-informed original implementation decision.
   `src/main/ffmpeg.ts`, including its filter graph and fragmented MP4 encoding.
 - The renderer compatibility player adapts `MediaSourcePlayer.tsx`: native
   master clock, MSE slave, bounded buffering, seek resets and playback sync.
+  Diagnostic-only upstream timers, event listeners and progress logs are
+  omitted; error diagnostics remain. The component accepts an opaque `sourceId`.
+  Main owns the fixed 800px/30fps preview settings; the renderer retains the
+  matching one-frame timestamp correction and upstream 30ms synchronization.
 
 Integration adaptations: CommonJS in main, Cliply's existing authenticated
 preload IPC instead of Electron remote, opaque source/session IDs, supervised

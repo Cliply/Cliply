@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, beforeEach, expect, test, vi } from "vitest"
 import { mediaApi } from "@/lib/api"
 import { useLocale } from "@/lib/i18n"
@@ -17,7 +17,7 @@ let player: { current: HTMLMediaElement }
 beforeEach(() => {
   vi.clearAllMocks(); useEditor.setState({ sourceId: null, past: [], future: [] }); useLocale.setState({ locale: "en" })
   useLocalMedia.setState({ source, position: 1, auditionPreviewId: "preview", busy: false })
-  useLocalExport.setState({ snapshot: empty, pending: false, error: null, trimSelection: null, trimTiming: null, timingPending: false })
+  useLocalExport.setState({ snapshot: empty, pending: false, error: null, trimTiming: null, timingPending: false })
   player = { current: document.createElement("video") }; Object.defineProperty(player.current, "readyState", { value: 2 }); player.current.currentTime = 4.234567
   vi.mocked(mediaApi.inspectTrim).mockResolvedValue(timing)
   vi.mocked(mediaApi.cancelTrim).mockResolvedValue({ cancelled: true })
@@ -241,4 +241,76 @@ test("transport subscription moves to a replacement source media element", () =>
   Object.defineProperty(player.current, "paused", { configurable: true, value: false })
   fireEvent.play(player.current)
   expect(transport.querySelector(".lucide-pause")).toBeTruthy()
+})
+
+// Exercise the extracted playback lifecycle through the public panel controls.
+test("retained preview skips removed ranges, survives position updates and stops at the final boundary", () => {
+  const frames = new Map<number, FrameRequestCallback>()
+  let nextFrame = 0
+  const request = vi.spyOn(window, "requestAnimationFrame").mockImplementation(callback => {
+    frames.set(++nextFrame, callback)
+    return nextFrame
+  })
+  const cancel = vi.spyOn(window, "cancelAnimationFrame").mockImplementation(id => { frames.delete(id) })
+  const play = vi.spyOn(player.current, "play").mockResolvedValue()
+  const pause = vi.spyOn(player.current, "pause").mockImplementation(() => {})
+  const tick = () => act(() => {
+    const current = [...frames.values()]
+    frames.clear()
+    current.forEach(callback => callback(0))
+  })
+  Object.defineProperty(player.current, "duration", { value: 12 })
+  const view = render(<TrimPanel source={source} busy={false} player={player} />)
+  try {
+    setRange()
+    fireEvent.change(screen.getByLabelText(en["media.editMode"]), { target: { value: "remove" } })
+    fireEvent.click(screen.getByRole("button", { name: en["media.previewEdit"] }))
+    expect(player.current.currentTime).toBe(0)
+    expect(play).toHaveBeenCalledOnce()
+    expect(frames.size).toBe(1)
+    act(() => useLocalMedia.setState({ position: 2 }))
+    expect(pause).not.toHaveBeenCalled()
+    player.current.currentTime = 4.2
+    tick()
+    expect(player.current.currentTime).toBe(6)
+    expect(frames.size).toBe(1)
+    player.current.currentTime = 12
+    tick()
+    expect(pause).toHaveBeenCalled()
+    expect(frames.size).toBe(0)
+    expect(screen.getByRole("button", { name: en["media.previewEdit"] })).toBeTruthy()
+  } finally {
+    view.unmount()
+    request.mockRestore(); cancel.mockRestore(); play.mockRestore(); pause.mockRestore()
+  }
+})
+
+test("editing and unmounting stop retained preview and remove its scheduled frame", () => {
+  const frames = new Set<number>()
+  let nextFrame = 0
+  const request = vi.spyOn(window, "requestAnimationFrame").mockImplementation(() => {
+    frames.add(++nextFrame)
+    return nextFrame
+  })
+  const cancel = vi.spyOn(window, "cancelAnimationFrame").mockImplementation(id => { frames.delete(id) })
+  const play = vi.spyOn(player.current, "play").mockResolvedValue()
+  const pause = vi.spyOn(player.current, "pause").mockImplementation(() => {})
+  Object.defineProperty(player.current, "duration", { value: 12 })
+  const view = render(<TrimPanel source={source} busy={false} player={player} />)
+  try {
+    fireEvent.click(screen.getByRole("button", { name: en["media.previewEdit"] }))
+    expect(frames.size).toBe(1)
+    fireEvent.change(input("media.trimEnd"), { target: { value: "10" } })
+    expect(pause).toHaveBeenCalled()
+    expect(frames.size).toBe(0)
+    fireEvent.click(screen.getByRole("button", { name: en["media.previewEdit"] }))
+    expect(frames.size).toBe(1)
+    pause.mockClear()
+    view.unmount()
+    expect(pause).toHaveBeenCalled()
+    expect(frames.size).toBe(0)
+  } finally {
+    view.unmount()
+    request.mockRestore(); cancel.mockRestore(); play.mockRestore(); pause.mockRestore()
+  }
 })
