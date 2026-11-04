@@ -45,7 +45,7 @@ export function FeedbackCard({ className }: FeedbackCardProps) {
           </div>
         </div>
 
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+        <div className="grid grid-cols-2 gap-2">
           <Button
             asChild
             size="sm"
@@ -61,16 +61,21 @@ export function FeedbackCard({ className }: FeedbackCardProps) {
               {t("feedback.cta")}
             </a>
           </Button>
-          <a
-            href={FEEDBACK_URL}
-            onClick={(event) => {
-              event.preventDefault()
-              void systemApi.openExternal(FEEDBACK_URL)
-            }}
-            className="rounded-sm text-xs text-cyan-700 underline-offset-4 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-cyan-500 dark:text-cyan-300"
+          <Button
+            asChild
+            size="sm"
+            className="bg-cyan-600 text-sm font-medium text-white hover:bg-cyan-700"
           >
-            {t("feedback.alternative")}
-          </a>
+            <a
+              href={FEEDBACK_URL}
+              onClick={(event) => {
+                event.preventDefault()
+                void systemApi.openExternal(FEEDBACK_URL)
+              }}
+            >
+              {t("feedback.alternative")}
+            </a>
+          </Button>
         </div>
       </div>
     </motion.div>
