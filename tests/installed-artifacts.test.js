@@ -22,10 +22,11 @@ test("refuses installation outside disposable CI before invoking host tools", ()
   expect(assertDisposableRunner).toThrow(/CI-only/)
   expect(spawnSync).not.toHaveBeenCalled()
 })
-test("selects the current Setup installer and refuses ambiguous/stale artifacts", () => {
+test("selects exactly the current Setup installer and refuses stale artifacts", () => {
   for (const name of [`Cliply.Setup.${metadata.version}.exe`, `Cliply.${metadata.version}.exe`, "Cliply.Setup.0.0.0.exe"]) fs.writeFileSync(path.join(root, name), "")
   expect(installerArtifacts(root, "win32")).toEqual([{ kind: "nsis", file: path.join(root, `Cliply.Setup.${metadata.version}.exe`) }])
-  fs.writeFileSync(path.join(root, `Cliply.Setup.${metadata.version}.duplicate.exe`), "")
+  fs.rmSync(path.join(root, `Cliply.Setup.${metadata.version}.exe`))
+  fs.writeFileSync(path.join(root, `Cliply.Setup.${metadata.version}1.exe`), "")
   expect(() => installerArtifacts(root, "win32")).toThrow(/expected one current nsis/)
   expect(() => installerArtifacts(root, "darwin")).toThrow(/expected one current dmg/)
 })
@@ -93,4 +94,18 @@ test("AppImage check explicitly extracts the final image without repacking or cl
   await withInstalledArtifact({ kind: "appimage", file }, root, verify)
   expect(spawnSync).toHaveBeenCalledWith(file, ["--appimage-extract"], expect.objectContaining({ cwd: path.join(root, "appimage") }))
   expect(verify).toHaveBeenCalledWith(path.join(root, "appimage", "squashfs-root", "resources"), "final-appimage-extracted-payload")
+})
+
+
+test("retains both validation and detach failures rather than hiding the original error", async () => {
+  spawnSync.mockImplementation((executable, args) => {
+    if (executable === "hdiutil" && args[0] === "attach") fs.mkdirSync(path.join(args[4], "Cliply.app"))
+    return { status: args[0] === "detach" ? 1 : 0, stdout: "", stderr: "" }
+  })
+  let failure
+  try { await withInstalledArtifact({ kind: "dmg", file: path.join(root, "final.dmg") }, root, async () => { throw new Error("payload mismatch") }) }
+  catch (error) { failure = error }
+  expect(failure).toBeInstanceOf(AggregateError)
+  expect(failure.errors[0].message).toBe("payload mismatch")
+  expect(failure.errors[1].message).toMatch(/hdiutil exited 1/)
 })

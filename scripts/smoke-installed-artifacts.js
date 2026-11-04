@@ -60,8 +60,9 @@ function installerArtifacts(directory, platform = process.platform) {
   const types = platform === "darwin" ? ["dmg"] : platform === "win32" ? ["nsis"] : ["deb", "appimage"]
   return types.map(kind => {
     const extension = { dmg: ".dmg", nsis: ".exe", deb: ".deb", appimage: ".AppImage" }[kind]
-    const matches = files.filter(name => name.endsWith(extension) && name.includes(metadata.version) &&
-      (kind !== "nsis" || name.startsWith("Cliply.Setup.")))
+    const matches = files.filter(name => name.endsWith(extension) && (kind === "nsis"
+      ? name === `Cliply.Setup.${metadata.version}.exe`
+      : name.startsWith(`Cliply-${metadata.version}-`)))
     assert.equal(matches.length, 1, `expected one current ${kind} installer, got ${matches.length}`)
     return { kind, file: path.resolve(directory, matches[0]) }
   })
@@ -91,11 +92,18 @@ function installedPackage(name) {
   return result.status === 0 && result.stdout.trim() !== "not-installed"
 }
 
+function cleanupInstallation(cleanup, failure) {
+  try { cleanup() } catch (error) {
+    if (failure) throw new AggregateError([failure, error], "Installer validation and cleanup both failed")
+    throw error
+  }
+}
+
 async function withInstalledArtifact({ kind, file }, root, verify) {
   const owned = path.join(root, kind); fs.mkdirSync(owned)
   if (kind === "dmg") {
     const mount = path.join(owned, "mounted"); fs.mkdirSync(mount)
-    let attached = false
+    let attached = false, failure
     try {
       attached = true
       command("hdiutil", ["attach", "-readonly", "-nobrowse", "-mountpoint", mount, file])
@@ -104,18 +112,20 @@ async function withInstalledArtifact({ kind, file }, root, verify) {
       const destination = path.join(owned, "Installed App", apps[0]); fs.mkdirSync(path.dirname(destination))
       command("ditto", [path.join(mount, apps[0]), destination])
       await verify(path.join(destination, "Contents", "Resources"), "readonly-dmg-copy")
-    } finally { if (attached) command("hdiutil", ["detach", mount]) }
+    } catch (error) { failure = error; throw error }
+    finally { cleanupInstallation(() => { if (attached) command("hdiutil", ["detach", mount]) }, failure) }
   } else if (kind === "nsis") {
     noWindowsInstall()
     const destination = path.join(owned, "Installed App")
     assert(!fs.existsSync(destination), "installer target must be new")
-    let attempted = false
+    let attempted = false, failure
     try {
       attempted = true
       command(file, nsisArguments(destination), { windowsVerbatimArguments: true, timeout: 300000 })
       assert(fs.existsSync(path.join(destination, "Cliply.exe")), "NSIS did not install into the requested path with spaces")
       await verify(path.join(destination, "resources"), "nsis-per-user-install")
-    } finally {
+    } catch (error) { failure = error; throw error }
+    finally { cleanupInstallation(() => {
       const uninstaller = path.join(destination, "Uninstall Cliply.exe")
       if (attempted && fs.existsSync(uninstaller)) {
         const copy = path.join(owned, "uninstall.exe"); fs.copyFileSync(uninstaller, copy)
@@ -123,7 +133,7 @@ async function withInstalledArtifact({ kind, file }, root, verify) {
         assert(!fs.existsSync(path.join(destination, "Cliply.exe")), "NSIS uninstall left the installed executable")
         noWindowsInstall()
       } else if (attempted) assert(!fs.existsSync(destination), "partial NSIS installation needs cleanup")
-    }
+    }, failure) }
   } else if (kind === "deb") {
     const name = command("dpkg-deb", ["--field", file, "Package"]).trim()
     assert.match(name, /^[a-z0-9][a-z0-9+.-]+$/, "invalid DEB package name")
@@ -132,19 +142,20 @@ async function withInstalledArtifact({ kind, file }, root, verify) {
     const destination = path.join("/opt", metadata.build.productName)
     assert(!fs.existsSync(destination), "refusing to replace an existing app directory")
     assert(!fs.existsSync("/usr/bin/cliply-desktop"), "refusing to replace an existing launcher")
-    let attempted = false
+    let attempted = false, failure
     try {
       attempted = true
       command("sudo", ["-n", "env", "DEBIAN_FRONTEND=noninteractive", "apt-get", "install", "-y", "--no-install-recommends", file], { timeout: 300000 })
       assert(installedPackage(name), "DEB was not registered as installed")
       await verify(path.join(destination, "resources"), "apt-installed-deb")
-    } finally {
+    } catch (error) { failure = error; throw error }
+    finally { cleanupInstallation(() => {
       if (attempted) {
         command("sudo", ["-n", "env", "DEBIAN_FRONTEND=noninteractive", "apt-get", "purge", "-y", name], { timeout: 180000 })
         assert(!installedPackage(name), "DEB cleanup left an installed package")
         assert(!fs.existsSync(path.join(destination, "resources", "app.asar")), "DEB cleanup left its app archive")
       }
-    }
+    }, failure) }
   } else {
     assert.equal(kind, "appimage")
     command(file, ["--appimage-extract"], { cwd: owned, timeout: 180000 })
