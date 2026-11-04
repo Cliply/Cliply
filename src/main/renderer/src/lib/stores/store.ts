@@ -10,7 +10,7 @@ interface GlobalState {
 }
 
 export const useAppStore = create<GlobalState>((set) => ({
-  selectedPlatform: "youtube",
+  selectedPlatform: "instagram",
   showMediaDetails: false,
   setSelectedPlatform: (platform) => set({ selectedPlatform: platform }),
   setShowMediaDetails: (show) => set({ showMediaDetails: show })
