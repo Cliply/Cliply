@@ -65,7 +65,7 @@ describe("native helper acquisition", () => {
     ["win32-x64", "windows", ["ffmpeg.exe", "deno.exe"], ".exe"]
   ])("installs %s helpers from the expected release assets", async (platform, directory, assets, suffix) => {
     const http = fakeDownloads(platform)
-    await fetchHelpers({ platform, binariesDir: root, baseUrl: "https://helpers.example/binaries", http, ffprobeRecords: {} })
+    await fetchHelpers({ platform, binariesDir: root, baseUrl: "https://helpers.example/binaries", http, ffprobeRecords: {}, requireFfprobe: false })
 
     expect(http.download.mock.calls.map(([url]) => url).sort()).toEqual(
       assets.map((asset) => `https://helpers.example/binaries/${asset}`).sort()
@@ -94,7 +94,7 @@ describe("native helper acquisition", () => {
       })
     }
 
-    await expect(fetchHelpers({ platform: "linux-x64", binariesDir: root, http, ffprobeRecords: {} }))
+    await expect(fetchHelpers({ platform: "linux-x64", binariesDir: root, http, ffprobeRecords: {}, requireFfprobe: false }))
       .rejects.toThrow(failure === "missing" ? "HTTP 404" : "not a linux-x64 executable")
     for (const file of existing) expect(await fs.readFile(file, "utf8")).toBe("existing helper")
     await expectNoStaging()

@@ -1,0 +1,4 @@
+# Source/build and installed notice digests must survive Windows checkouts.
+/scripts/*.js text eol=lf
+/third-party/ffprobe/** text eol=lf
+/LICENSE text eol=lf

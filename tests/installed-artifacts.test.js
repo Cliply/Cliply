@@ -2,7 +2,7 @@ jest.mock("node:child_process", () => ({ spawnSync: jest.fn() }))
 const fs = require("node:fs"), path = require("node:path"), os = require("node:os")
 const { spawnSync } = require("node:child_process")
 const metadata = require("../package.json")
-const { assertDisposableRunner, installerArtifacts, nsisArguments, payloadIdentity, withInstalledArtifact } = require("../scripts/smoke-installed-artifacts")
+const { run, assertDisposableRunner, installerArtifacts, nsisArguments, payloadIdentity, withInstalledArtifact } = require("../scripts/smoke-installed-artifacts")
 let root, savedEnv
 beforeEach(() => {
   root = fs.mkdtempSync(path.join(os.tmpdir(), "cliply-installer-unit-"))
@@ -108,4 +108,68 @@ test("retains both validation and detach failures rather than hiding the origina
   expect(failure).toBeInstanceOf(AggregateError)
   expect(failure.errors[0].message).toBe("payload mismatch")
   expect(failure.errors[1].message).toMatch(/hdiutil exited 1/)
+})
+
+
+describe("final scratch cleanup and evidence", () => {
+  let originalPlatform, originalArch, scratch, remove
+  beforeEach(() => {
+    originalPlatform = Object.getOwnPropertyDescriptor(process, "platform")
+    originalArch = Object.getOwnPropertyDescriptor(process, "arch")
+    Object.defineProperty(process, "platform", { value: "darwin" })
+    Object.defineProperty(process, "arch", { value: "arm64" })
+    process.env.GITHUB_ACTIONS = "true"; process.env.CI = "true"
+    scratch = path.join(root, "owned-installer-check")
+    jest.spyOn(fs, "mkdtempSync").mockImplementation(() => { fs.mkdirSync(scratch); return scratch })
+    remove = fs.rmSync.bind(fs)
+  })
+  afterEach(() => {
+    Object.defineProperty(process, "platform", originalPlatform)
+    Object.defineProperty(process, "arch", originalArch)
+  })
+  test.each([false, true])("retains the validation error and writes evidence when cleanup also fails: %s", async cleanupFails => {
+    const cleanupError = new Error("scratch remains locked")
+    jest.spyOn(fs, "rmSync").mockImplementation((file, options) => {
+      if (file === scratch && cleanupFails) throw cleanupError
+      return remove(file, options)
+    })
+    const evidence = path.join(root, "result.json")
+    let failure
+    try { await run({ resources: path.join(root, "missing-resources"), evidence }) } catch (error) { failure = error }
+    if (cleanupFails) {
+      expect(failure).toBeInstanceOf(AggregateError)
+      expect(failure.errors[0].code).toBe("ENOENT")
+      expect(failure.errors[1]).toBe(cleanupError)
+    } else expect(failure.code).toBe("ENOENT")
+    const report = JSON.parse(fs.readFileSync(evidence, "utf8"))
+    expect(report.passed).toBe(false)
+    expect(report.error).toMatch(/ENOENT/)
+    expect(report.scratchCleanedUp).toBe(!cleanupFails)
+    if (cleanupFails) expect(report.cleanupError).toBe(cleanupError.message)
+  })
+  test("cleanup alone fails an otherwise successful run after evidence is written", async () => {
+    const resources = path.join(root, "resources"), dist = path.join(root, "dist")
+    fs.mkdirSync(path.join(resources, "binaries"), { recursive: true }); fs.mkdirSync(dist)
+    fs.writeFileSync(path.join(resources, "app.asar"), "fixture archive")
+    fs.writeFileSync(path.join(dist, `Cliply-${metadata.version}-arm64.dmg`), "fixture installer")
+    spawnSync.mockImplementation((executable, args) => {
+      if (executable === "hdiutil" && args[0] === "attach") {
+        fs.mkdirSync(path.join(args[4], "Cliply.app", "Contents"), { recursive: true })
+        fs.cpSync(resources, path.join(args[4], "Cliply.app", "Contents", "Resources"), { recursive: true })
+      } else if (executable === "ditto") fs.cpSync(args[0], args[1], { recursive: true })
+      return { status: 0, stdout: "", stderr: "" }
+    })
+    const cleanupError = new Error("scratch remains locked")
+    jest.spyOn(fs, "rmSync").mockImplementation((file, options) => {
+      if (file === scratch) throw cleanupError
+      return remove(file, options)
+    })
+    const evidence = path.join(root, "result.json")
+    await expect(run({ resources, directory: dist, evidence })).rejects.toBe(cleanupError)
+    const report = JSON.parse(fs.readFileSync(evidence, "utf8"))
+    expect(report.artifacts[0].passed).toBe(true)
+    expect(report.passed).toBe(false)
+    expect(report.scratchCleanedUp).toBe(false)
+    expect(report.cleanupError).toBe(cleanupError.message)
+  })
 })

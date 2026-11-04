@@ -205,20 +205,19 @@ async function run({ resources, directory = path.join(repo, "dist"), evidence, l
     }
     report.passed = true
   } catch (error) {
-    failure = error; report.error = error.message; throw error
+    failure = error; report.error = error.message
   } finally {
     try {
       fs.rmSync(root, { recursive: true, force: true, maxRetries: process.platform === "win32" ? 5 : 0, retryDelay: 100 })
       report.scratchCleanedUp = true
     } catch (error) {
       report.passed = false; report.cleanupError = error.message
-      if (failure) console.error("Installed-artifact cleanup failed:", error)
-      else { failure = error }
+      failure = failure ? new AggregateError([failure, error], "Installer validation and scratch cleanup both failed") : error
     }
     fs.mkdirSync(path.dirname(evidence), { recursive: true })
     fs.writeFileSync(evidence, JSON.stringify(report, null, 2) + "\n")
-    if (failure && report.scratchCleanedUp === false) throw failure
   }
+  if (failure) throw failure
   console.log("Final installer artifact checks passed:", evidence)
   return report
 }

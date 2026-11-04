@@ -1,6 +1,6 @@
 const fs = require("node:fs"), os = require("node:os"), path = require("node:path")
 const { createHash } = require("node:crypto")
-const { spawnSync } = require("node:child_process")
+const { spawnSync, execFileSync } = require("node:child_process")
 const tar = require("tar")
 const { validateRun, publishAsset, extract, verifyCandidate } = require("../scripts/publish-ffprobe")
 const digest = value => createHash("sha256").update(value).digest("hex")
@@ -8,6 +8,47 @@ const hash = file => digest(fs.readFileSync(file))
 let root
 beforeEach(() => { root = fs.mkdtempSync(path.join(os.tmpdir(), "cliply-publication-test-")) })
 afterEach(() => { fs.rmSync(root, { recursive: true, force: true }) })
+
+test("Windows-style checkout preserves hash-bound recipes, notices and canonical production records as LF", () => {
+  const repository = path.join(root, "repository"), checkout = path.join(root, "checkout")
+  fs.mkdirSync(repository); fs.mkdirSync(checkout)
+  const git = args => execFileSync("git", ["-C", repository, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] })
+  git(["init"])
+  git(["config", "--local", "core.autocrlf", "true"])
+  git(["config", "--local", "core.eol", "crlf"])
+  const emptyAttributes = path.join(root, "empty-attributes")
+  fs.writeFileSync(emptyAttributes, "")
+  git(["config", "--local", "core.attributesFile", emptyAttributes])
+  const inputs = ["scripts/build-ffprobe-prototype.js", "scripts/package-ffprobe-source.js",
+    "third-party/ffprobe/source-build.json", "third-party/ffprobe/runtime-notices.json",
+    "third-party/ffprobe/NOTICE.source-build.txt", "third-party/ffprobe/COPYING.LGPLv2.1",
+    "third-party/ffprobe/source-build.md", "LICENSE"]
+  const expected = new Map()
+  for (const relative of [".gitattributes", ...inputs]) {
+    const contents = fs.readFileSync(path.join(__dirname, "..", relative))
+    const file = path.join(repository, relative)
+    fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, contents)
+    if (relative !== ".gitattributes") expected.set(relative, contents)
+  }
+  for (const platform of ["darwin-arm64", "win32-x64", "linux-x64"]) {
+    const relative = `third-party/ffprobe/distributions/${platform}/SOURCE.json`
+    const contents = Buffer.from(JSON.stringify({ schema: 1, platform, files: { "NOTICE.txt": "a".repeat(64) } }, null, 2) + "\n")
+    fs.mkdirSync(path.dirname(path.join(repository, relative)), { recursive: true })
+    fs.writeFileSync(path.join(repository, relative), contents); expected.set(relative, contents)
+  }
+  // Prove autocrlf conversion actually occurs for text outside the protected paths.
+  fs.writeFileSync(path.join(repository, "unprotected.txt"), "first\nsecond\n")
+  git(["add", "."])
+  git(["checkout-index", "--all", "--force", "--prefix=" + checkout + path.sep])
+  expect(fs.readFileSync(path.join(checkout, "unprotected.txt"), "utf8")).toBe("first\r\nsecond\r\n")
+  for (const [relative, original] of expected) {
+    const actual = fs.readFileSync(path.join(checkout, relative))
+    expect(actual.toString()).not.toContain("\r\n")
+    expect(actual).toEqual(original)
+    expect(digest(actual)).toBe(digest(original))
+    if (relative.endsWith("/SOURCE.json")) expect(actual.toString()).toBe(JSON.stringify(JSON.parse(actual), null, 2) + "\n")
+  }
+})
 
 const successfulRun = () => ({ head_sha: "a".repeat(40), head_repository: { full_name: "Cliply/Cliply" },
   path: ".github/workflows/ci.yml", event: "workflow_dispatch", status: "completed", conclusion: "success" })

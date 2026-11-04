@@ -130,6 +130,9 @@ manual CI run from `Cliply/Cliply`, downloads all three retained native candidat
 and rechecks their inventories, complete source packets, current recipes/pins,
 native commands, runtime notices and installed source mappings. It rejects a
 different checkout commit or tracked local changes. It never creates an app release.
+The repository's `.gitattributes` fixes LF endings for build scripts and FFprobe
+source/notice records, including production JSON. This is part of the checksum
+contract on Windows; do not normalize changed bytes inside a verifier.
 
 ```sh
 node scripts/publish-ffprobe.js --run <successful-source-CI-run> --output <new-absolute-plan-directory>

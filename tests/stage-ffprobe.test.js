@@ -4,6 +4,9 @@ const os = require("node:os")
 const crypto = require("node:crypto")
 const { makeZip } = require("./helpers/zip-fixture")
 
+// Staging and architecture fixtures have no production source-notice payload.
+// Test the unpublished path without loading real release pins.
+jest.mock("../third-party/ffprobe/published.json", () => ({}))
 jest.mock("../third-party/ffprobe/candidates.json", () => ({
   "darwin-arm64": { url: "https://fixture.invalid/probe.zip", member: "ffprobe", publicationReady: false }
 }))
