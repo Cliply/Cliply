@@ -50,6 +50,8 @@ vi.mock("sonner", () => ({
 import { en } from "@/lib/i18n/en"
 import { useDownloadsStore } from "@/lib/stores/downloadsStore"
 import { useTikTokStore } from "@/lib/stores/tiktokStore"
+import { usePinterestStore } from "@/lib/stores/pinterestStore"
+import { useInstagramStore } from "@/lib/stores/instagramStore"
 
 import { useSimplePlatformDownload } from "./useSimplePlatformDownload"
 
@@ -181,6 +183,70 @@ test("this card starts nothing while its own download is going", async () => {
 
   expect(mocks.download).toHaveBeenCalledTimes(1)
 })
+
+test.each(
+  [
+    {
+      platform: "instagram" as const,
+      mediaStore: useInstagramStore,
+      url: "https://instagram.com/reel/First/",
+      nextUrl: "https://instagram.com/reel/Second/"
+    },
+    {
+      platform: "pinterest" as const,
+      mediaStore: usePinterestStore,
+      url: "https://www.pinterest.com/pin/1/",
+      nextUrl: "https://www.pinterest.com/pin/2/"
+    },
+    {
+      platform: "tiktok" as const,
+      mediaStore: useTikTokStore,
+      url: URL,
+      nextUrl: "https://vm.tiktok.com/ZM456/"
+    }
+  ].flatMap((fixture) =>
+    (["queued", "downloading"] as const).map((status) => ({
+      ...fixture,
+      status
+    }))
+  )
+)(
+  "$platform accepts another link while the first is $status",
+  async ({ platform, mediaStore, url, nextUrl, status }) => {
+    mediaStore.getState().reset()
+    mediaStore.getState().setUrl(url)
+    const { result } = renderHook(() =>
+      useSimplePlatformDownload({
+        platform,
+        store: mediaStore,
+        api: { download: mocks.download },
+        title: "Example"
+      })
+    )
+    await click(result)
+    const firstId = sentDownloadId()
+    act(() => {
+      store().applyEvent({ downloadId: firstId, status, progress: 0 })
+      mediaStore.getState().setUrl(nextUrl)
+    })
+
+    expect(result.current.isDownloading).toBe(false)
+    await click(result)
+    expect(mocks.download).toHaveBeenCalledTimes(2)
+    expect(mocks.download.mock.calls[1][0].url).toBe(nextUrl)
+    expect(store().rows).toHaveLength(2)
+    expect(store().rows.find((row) => row.downloadId === firstId)?.status).toBe(
+      status
+    )
+
+    // Returning to the first link follows its existing job rather than duplicating it.
+    act(() => mediaStore.getState().setUrl(url))
+    await click(result)
+    expect(mocks.download).toHaveBeenCalledTimes(2)
+    expect(store().highlightedId).toBe(firstId)
+    expect(result.current.isDownloading).toBe(true)
+  }
+)
 
 /**
  * the duplicate a card cannot guard against itself: the screen was swapped out

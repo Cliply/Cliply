@@ -71,6 +71,12 @@ completed items to be skipped on a repeated run. An archive skip is not proof
 that the corresponding file still exists. Preserve saved/reused/skipped counts
 and item identity when changing this flow.
 
+YouTube, Instagram, Pinterest and TikTok share the same queue and concurrency
+limit. Users can load another link while earlier downloads run or wait. Replacing
+a link on the same screen leaves those jobs intact; the simple download button's
+busy state applies only to its current URL. Selecting an already active download
+opens its existing row instead of creating a duplicate.
+
 ## Renderer state and IPC contracts
 
 `lib/api.ts` wraps the preload API. Feature hooks live in `lib/hooks/`, Zustand
