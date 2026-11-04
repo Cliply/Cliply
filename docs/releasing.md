@@ -62,10 +62,12 @@ The resource argument must point to the actual native build, not a different
 platform's tree. Media/recovery checks create local fixtures and clean their
 temporary files. Ordinary mocked unit tests do not require these executables.
 
-Local-media production acceptance is pending. No FFprobe asset is published;
-the [source/staging record](../third-party/ffprobe/README.md) lists exact candidates
-and unresolved source/native requirements. `published.json` intentionally has no
-platform records. Ordinary downloader CI can pass without local-media support.
+Source-built FFprobe and matching source archives are published for all three
+supported targets. [Production records](../third-party/ffprobe/published.json)
+activate required acquisition, source notices and package checks. The
+[distribution guide](../third-party/ffprobe/README.md) describes the exact inputs.
+Ordinary source-tree CI does not fetch helpers and is not installer acceptance;
+run the required production package/local-media mode below before shipping.
 
 The prepared CI input `local_media_check=true` requires `package_check=true`.
 It sets `CLIPLY_REQUIRE_FFPROBE=1`, requires the published pin during fetching,
@@ -101,9 +103,9 @@ that executable in a disposable native app. Supplier mode retains priority if
 both flags are set; ordinary app/helper-publication jobs are excluded in either
 mode. By default only small evidence is uploaded. Target draft source packets with
 reviewed runtime inputs are assembled and checked twice in scratch, then removed.
-[Run 41513771327](https://github.com/Cliply/Cliply/actions/runs/41513771327) passed
-all 12 required native checks on macOS 26 ARM64, Windows Server 2025 x64 and
-Ubuntu 24.04 x64 at `07b3e9e`: packaged helpers, inspection, four export matrices,
+[Run 41893450459](https://github.com/Cliply/Cliply/actions/runs/41893450459) passed
+all 13 required native checks on macOS 26 ARM64, Windows Server 2025 x64 and
+Ubuntu 24.04 x64 at `48cf479` using n8.1.3: packaged helpers, inspection, export matrices,
 UI/playback, normal startup, download recovery and URL media. Installed source
 and license mappings passed on all three targets. This does not establish
 minimum-OS or final production-installer acceptance.
@@ -166,8 +168,7 @@ record/checksum whenever a production FFprobe pin exists, and binds the mapping
 to the actual signed helper. Linux also requires pinned GCC/glibc runtime notices
 and full GPLv3 text. Windows adds exact GCC/MinGW/winpthreads notices and the
 additional GPL texts, with an archive-owner/hash check. These installed notice
-paths passed native validation; the production manifest stays empty until final
-distribution prerequisites pass. Windows runtime inventory updates must include the
+paths passed native validation; the production manifest selects only explicitly promoted, verified assets. Windows runtime inventory updates must include the
 [package/source review](../third-party/ffprobe/source-build.md#runtime-update-reviewed-4-november-2026)
 and fresh source CI; supplier-candidate success cannot qualify changed source-built inputs.
 
@@ -224,11 +225,10 @@ SUID is removed before cleanup. No AppArmor/sysctl or global sandbox setting is
 changed, and neither `--no-sandbox` nor disabled user-namespace protections are
 used. Local desktop runs do not perform this privileged CI setup.
 
-The owner authorized new verified shared FFprobe assets and source records once
-the recorded readiness conditions pass. That does not authorize unverified
-candidates, replacement of existing assets, an app release or a workflow dispatch.
-Minimum-OS evidence and final source/distribution, installer footprint and
-installed-package gates remain outstanding.
+Verified FFprobe helpers and source records have been added without replacing
+existing assets. Helper publication does not publish the app. Native installer
+validation, footprint measurements and minimum-OS evidence are separate from
+source qualification; perform and report the checks relevant to the app release.
 
 The Linux package smoke script runs only on an ephemeral GitHub runner. It copies
 the app into disposable test packages, installs/purges its DEB, checks X11/Wayland
@@ -303,8 +303,8 @@ update. Remove only your temporary validation uploads after verification; retain
 intended public helper assets and useful CI logs.
 ## Local workspace development smoke
 
-Build the renderer, then use the [verified FFprobe staging recipe](../third-party/ffprobe/README.md#reproduce-staging-without-publication).
-On a native host with the existing project FFmpeg and the staged FFprobe, run:
+Build the renderer, then [fetch the published pinned FFprobe](../third-party/ffprobe/README.md#build-and-verify).
+On a native host with the project FFmpeg and verified FFprobe, run:
 
 ```sh
 CLIPLY_SMOKE_PREVIEW=1 \

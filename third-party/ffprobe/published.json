@@ -1,1 +1,23 @@
-{}
+{
+  "darwin-arm64": {
+    "assetName": "ffprobe-1041abdc962f-darwin-arm64-12f33a63103e",
+    "assetId": 710640753,
+    "sha256": "12f33a63103e9d7cbd469993e466f8c1891bb3ad253a2ab5ccec62b551a5d328",
+    "sourceRecord": "distributions/darwin-arm64/SOURCE.json",
+    "sourceRecordSha256": "fa11ca91c018a43cc26b971068c17808bb6158bddb0e62a9618a4e914e26dfaa"
+  },
+  "win32-x64": {
+    "assetName": "ffprobe-1041abdc962f-win32-x64-2a58ef3bcf84.exe",
+    "assetId": 710642713,
+    "sha256": "2a58ef3bcf84e78afab58a29d248a382a098fd93640709fb4d88de662fc5bb1d",
+    "sourceRecord": "distributions/win32-x64/SOURCE.json",
+    "sourceRecordSha256": "3e4ccc95f834599e6355e2c76655c81cd9b6a91b23c98e3d3faa15af64f5f971"
+  },
+  "linux-x64": {
+    "assetName": "ffprobe-1041abdc962f-linux-x64-58ff935528eb",
+    "assetId": 710644971,
+    "sha256": "58ff935528eb5b8c8f33bc8d2bc93f4e8b1443ba7f4f7c3cab8f4b5b672434bd",
+    "sourceRecord": "distributions/linux-x64/SOURCE.json",
+    "sourceRecordSha256": "6fef64df9e93fd715ab78168d60d77638a49351b69b7de852a495c8c6f527ea5"
+  }
+}

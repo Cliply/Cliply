@@ -1,8 +1,23 @@
-# Source-built FFprobe evaluation
+# Source-built FFprobe
 
-This is a separate alternative to the supplier pins in `candidates.json`.
-It is not production-selected. `published.json` stays empty. Existing FFmpeg,
-Deno and yt-dlp are unchanged. No runtime helper downloader is introduced.
+The source-built path is selected by [published.json](published.json), with verified
+executables and matching source archives in Cliply’s shared `binaries` release.
+The alternative supplier pins in `candidates.json` remain evaluation-only. Existing
+FFmpeg, Deno and yt-dlp are unchanged. No runtime helper downloader is introduced.
+
+[Native qualification 41893450459](https://github.com/Cliply/Cliply/actions/runs/41893450459)
+passed at `48cf479` for n8.1.3 on macOS 26 ARM64, Windows Server 2025 x64 and
+Ubuntu 24.04 x64. All 13 required package/media/UI/download commands passed; Windows
+also passed its DLL-inspector discovery check. Publication independently rechecked
+all retained source/build/runtime/notice inputs and re-downloaded all six uploaded
+assets before generating the production records. Earlier runs below describe the
+historical n8.1 baseline. Minimum-OS execution remains separate from these hosts.
+
+Build/packet records retain their original evaluation markers: producing a candidate
+is not publication. The separate production SOURCE.json records identify the exact
+source assets and their verified promotion. Source packets include the complete
+unmodified FFmpeg source and build recipe, plus runtime notices and provenance;
+they do not claim to include complete compiler/toolchain source archives.
 
 ## Exact source and build design
 
@@ -15,8 +30,8 @@ The patch update from n8.1 follows FFmpeg's maintained 8.1 release branch,
 including fixes made after the original baseline. Its canonical tar SHA256 is
 `801838344d51651d45ab3ce6502a2627da7746492475711ff2adfb723aeaf7b6`.
 All eight upstream license/IJG file hashes are unchanged. Earlier native results
-below qualify the previous n8.1 baseline, not this patch update; new qualification
-is required before promotion.
+below qualify the previous n8.1 baseline. The patch update is qualified by the
+current run linked above.
 
 Git exports explicitly use LF line endings and tar umask `0002`, independently
 of host Git settings. Git for Windows' CRLF conversion also affects `git archive`;
@@ -46,9 +61,9 @@ Mac behavior and avoids the observed Apple clang default-optimization variance.
 
 | Target | Explicit toolchain/target | Evidence boundary |
 | --- | --- | --- |
-| macOS ARM64 | Apple clang; all commands through `/usr/bin/arch -arm64`; target macOS 13 | All 12 native commands and installed notices passed on macOS 26 in run 41513771327; macOS 13 remains untested |
-| Ubuntu 24.04 x64 | `/usr/bin/gcc-13`, NASM, `--arch=x86_64 --target-os=linux`, baseline x86-64 | All 12 native commands and installed notices passed on Ubuntu 24.04 in run 41513771327 |
-| Windows x64 | MSYS2 UCRT64 GCC/NASM, `--arch=x86_64 --target-os=mingw32`, native Win32 threads | All 12 native commands and installed notices passed on Windows Server 2025 in run 41513771327; Windows 10 remains untested |
+| macOS ARM64 | Apple clang; all commands through `/usr/bin/arch -arm64`; target macOS 13 | All 13 required commands and installed notices passed for n8.1.3 in run 41893450459; macOS 13 remains untested |
+| Ubuntu 24.04 x64 | `/usr/bin/gcc-13`, NASM, `--arch=x86_64 --target-os=linux`, baseline x86-64 | All 13 required commands and installed notices passed for n8.1.3 in run 41893450459 |
+| Windows x64 | MSYS2 UCRT64 GCC/NASM, `--arch=x86_64 --target-os=mingw32`, native Win32 threads | All 13 required commands, DLL discovery and installed notices passed for n8.1.3 in run 41893450459; Windows 10 remains untested |
 
 Windows uses an explicitly supplied MSYS2 root and its UCRT64 compiler rather
 than the MSYS compiler. It requests static compiler/runtime archives, disables PE linker timestamps
@@ -58,9 +73,8 @@ FFmpeg pthreads being disabled and `-static-libgcc`. The corrected link adds
 `-static`; the DLL allow-list remains unchanged. [GCC's link documentation](https://gcc.gnu.org/onlinedocs/gcc/Link-Options.html)
 distinguishes static library selection from the libgcc-only option, and the
 [UCRT64 winpthreads package](https://packages.msys2.org/packages/mingw-w64-ucrt-x86_64-winpthreads)
-contains both static and DLL import archives. The strict DLL gate, backend media
-and packaged UI checks passed; normal startup and the new installed-notice path
-still need a successful rerun. Static runtime selection does not establish the licensing/source
+contains both static and DLL import archives. The strict DLL gate, backend media, packaged UI, normal startup and installed
+notice checks passed in the current qualification. Static runtime selection does not establish the licensing/source
 requirements of those objects: inspect the first native link/toolchain evidence and
 retain the matching runtime notices before distributing a Windows asset.
 Linux permits only the recorded standard libc/libm/pthread/dl/rt/libgcc/loader
@@ -130,7 +144,7 @@ After separate push/CI authorization, use existing **CI** on the reviewed ref,
 `ffprobe_source_check=true`, all other inputs false. It calls the reusable
 `validate-ffprobe-source.yml` at that same commit. Supplier mode retains priority
 if both flags are accidentally set. Both validation modes exclude ordinary app
-and helper-publication jobs. No workflow is dispatched by this change.
+and helper-publication jobs. Validation and publication are separate workflow/command operations.
 
 ## Corresponding-source packet specification
 
@@ -182,18 +196,18 @@ Provide the verified source asset beside the new helper
 release asset. Final source URLs, signed binary hashes and source asset hashes
 belong in the reviewed publication record after actual upload verification.
 
-All three target packets and installed mappings passed native checks and
-independent artifact audits in run 41513771327 at `07b3e9e`.
-Toolchain reproducibility, minimum OS, clean installed/offline behavior, storage
-coverage, final per-platform notice integration and verified publication remain
-gates before production selection. Archive size is source-distribution overhead,
-not installer growth; measure the small installed notice delta separately.
+The historical n8.1 packets and installed mappings passed native checks in
+run 41513771327 at `07b3e9e`. The current n8.1.3 qualification and verified
+publication are recorded above. Minimum-OS execution, installed-app acceptance
+and storage coverage remain separate from source qualification. Archive size is
+source-distribution overhead, not installer growth. Source-packet repeatability
+does not imply deterministic executable rebuilds.
 
 The first native source CI run at `afc8cae` reached Linux configuration and
 Windows source export, but stopped at the guards described above. Those are
 actual failed native attempts, not successful platform qualification. The
-corrected recipes need a fresh native run before final runtime notices, source
-packets and installed notice wiring can be accepted. Changing the recipe changes
+corrected recipes subsequently passed native qualification, including runtime
+notices, source packets and installed notice wiring. Changing the recipe changes
 the source-packet manifest/hash even when a platform's executable bytes are
 unchanged; regenerate the packet from the reviewed recipe before distribution.
 
@@ -215,7 +229,7 @@ Windows additionally requires the captured GCC exception, MinGW and winpthreads
 notices and the full GPLv2 text referenced by the broader toolchain notices.
 No production selection is implied.
 
-For a future verified production platform, the published record must name
+For each selected production platform, the published record must name
 `distributions/<platform>/SOURCE.json` relative to this directory and pin its
 `sourceRecordSha256`. That canonical JSON record identifies `evaluationOnly: false`,
 the original published helper SHA256, source commit/archive SHA256, the verified
@@ -224,15 +238,15 @@ filenames to SHA256. Its directory is checked into the reviewed source change;
 after-pack copies only those verified files into resources. A real published
 record must use the exact shared-release source URL. An evaluation record cannot
 satisfy it. Installed SOURCE.json wraps the original record and its hash plus
-the post-signing helper hash, preserving both identities. Production pins remain
-empty until review and actual upload verification.
+the post-signing helper hash, preserving both identities. Production pins identify only reviewed, uploaded and re-downloaded assets.
 
 ## Optional short-lived reviewer artifact
 
 An authorized native CI run may set `ffprobe_retain_artifacts=true` together with
 `ffprobe_source_check=true`; other mode inputs stay false. The default is false.
 Locally the equivalent is `validate-ffprobe-source.js --evidence <new-absolute-dir>
---retain <new-absolute-review-dir>`. No script uploads a shared release.
+--retain <new-absolute-review-dir>`. Validation and retention do not upload a shared release; explicit promotion uses
+`publish-ffprobe.js`.
 
 Only after every required native/package/UI/recovery command passes, retention
 checks the exact validated input hash and writes a new artifact atomically. It
@@ -340,8 +354,8 @@ packet; it contains the complete exact FFmpeg source used for the executable.
 No MSYS2/compiler executable, runtime archive or system DLL is redistributed.
 
 Windows installed-notice validation has passed on the recorded native host.
-Minimum Windows 10, clean installed/offline behavior, source/distribution
-selection and production publication remain separate gates. No deterministic
+Minimum Windows 10 and clean installed/offline acceptance remain separate
+from the completed source qualification and helper publication. No deterministic
 Windows executable rebuild is inferred merely from fixed tool versions; native
 artifact hashes identify the particular build validated by each run.
 
@@ -377,9 +391,9 @@ notice files are unchanged across those revisions. The separate winpthreads and
 GCC source-only archives were not downloaded; the winpthreads recipe and shared
 source revision were checked. This review makes no new distribution-license claim.
 
-Fresh source CI must build and validate the updated runtime, repeat source-packet
-assembly deterministically, verify installed notices against the packaged helper,
-and pass all media/UI/startup/download checks. Current results are recorded in
+Current qualification completed native builds, repeated source-packet assembly,
+installed-notice verification and all media/UI/startup/download checks. Future
+runtime changes require fresh qualification. Results are recorded in
 [PR #77](https://github.com/Cliply/Cliply/pull/77). Rolling package acquisition
 remains guarded by exact inventory/content checks; further drift requires review.
-Production publication and minimum-OS acceptance remain separate.
+Minimum-OS acceptance remains separate from verified helper publication.
