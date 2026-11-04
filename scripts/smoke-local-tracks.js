@@ -153,9 +153,9 @@ async function runUI({ window, service, userData }) {
     const dir = process.env.CLIPLY_SMOKE_EVIDENCE; fs.mkdirSync(dir, { recursive: true })
     await js("document.getElementById('track-removal').scrollIntoView()")
     await delay(250); fs.writeFileSync(path.join(dir, "tracks-en-light.png"), (await wc.capturePage()).toPNG())
-    await click("ru"); await click("переключить тему"); await delay(250)
+    await require("./smoke-editor-workspace").setPreferences({ window, locale: "ru", dark: true }); await delay(250)
     fs.writeFileSync(path.join(dir, "tracks-ru-dark.png"), (await wc.capturePage()).toPNG())
-    await click("en")
+    await require("./smoke-editor-workspace").setPreferences({ window, locale: "en" })
   }
   await js("document.getElementById('keep-track-2').click()")
   service.exports.selectDestination = async () => path.join(userData, "cancel-copy.mkv")

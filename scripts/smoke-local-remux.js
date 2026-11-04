@@ -132,9 +132,9 @@ async function runUI({ window, service, userData }) {
     const dir = process.env.CLIPLY_SMOKE_EVIDENCE; fs.mkdirSync(dir, { recursive: true })
     await js("document.getElementById('container-change').scrollIntoView()")
     await delay(250); fs.writeFileSync(path.join(dir, "remux-en-light.png"), (await wc.capturePage()).toPNG())
-    await click("ru"); await click("переключить тему"); await delay(250)
+    await require("./smoke-editor-workspace").setPreferences({ window, locale: "ru", dark: true }); await delay(250)
     fs.writeFileSync(path.join(dir, "remux-ru-dark.png"), (await wc.capturePage()).toPNG())
-    await click("en")
+    await require("./smoke-editor-workspace").setPreferences({ window, locale: "en" })
   }
   // Exercise cancel while away using this operation's shared local job.
   service.exports.selectDestination = async () => path.join(userData, "cancel-remux.mkv")

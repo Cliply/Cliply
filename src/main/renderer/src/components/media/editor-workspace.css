@@ -1,47 +1,13 @@
-/* OpenCut Classic's compact panel layout, adapted to Cliply's scoped theme.
-   The downloader keeps its own theme tokens and page layout. */
+/* OpenCut Classic panel geometry with Cliply's shared typography and theme. */
 .media-workspace {
-  --background: 0 0% 98%;
-  --foreground: 220 9% 16%;
-  --card: 0 0% 100%;
-  --card-foreground: 220 9% 16%;
-  --primary: 218 80% 52%;
-  --primary-foreground: 0 0% 100%;
-  --secondary: 220 9% 94%;
-  --secondary-foreground: 220 9% 16%;
-  --muted: 220 9% 94%;
-  --muted-foreground: 220 5% 44%;
-  --accent: 220 10% 92%;
-  --accent-foreground: 220 9% 16%;
-  --border: 220 8% 88%;
-  --input: 220 8% 88%;
-  --ring: 218 80% 52%;
   display: flex;
   height: 100dvh;
   min-height: 0;
   flex-direction: column;
   overflow: hidden;
-  background: hsl(var(--background));
-  color: hsl(var(--foreground));
-  font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  @apply bg-gradient-to-br from-slate-50 via-slate-100 to-slate-200 text-slate-900 dark:from-slate-900 dark:via-slate-800 dark:to-slate-900 dark:text-white;
+  font-family: var(--font-sans);
   font-size: 13px;
-}
-.dark .media-workspace {
-  --background: 240 5% 8%;
-  --foreground: 240 5% 91%;
-  --card: 240 4% 11%;
-  --card-foreground: 240 5% 91%;
-  --primary: 217 91% 65%;
-  --primary-foreground: 240 5% 8%;
-  --secondary: 240 4% 16%;
-  --secondary-foreground: 240 5% 91%;
-  --muted: 240 4% 16%;
-  --muted-foreground: 240 4% 62%;
-  --accent: 240 4% 19%;
-  --accent-foreground: 240 5% 96%;
-  --border: 240 4% 20%;
-  --input: 240 4% 22%;
-  --ring: 217 91% 65%;
 }
 .media-workspace button, .media-workspace input, .media-workspace select { font-size: 12px; }
 .media-workspace button { box-shadow: none; }
@@ -50,24 +16,18 @@
 .editor-file-heading { min-width: 0; flex: 1; line-height: 1.5; }
 .editor-file-heading h1 { font-size: 12px; font-weight: 500; color: hsl(var(--muted-foreground)); }
 .editor-file-heading p { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 500; }
-.editor-header-actions, .editor-global-controls { display: flex; flex-shrink: 0; align-items: center; gap: 6px; }
-.editor-header-divider { height: 20px; width: 1px; margin: 0 3px; background: hsl(var(--border)); }
-.media-workspace .editor-global-controls > div, .media-workspace .editor-global-controls > div > button { height: 32px; border: 0; border-radius: 5px; background: transparent; box-shadow: none; backdrop-filter: none; }
-.editor-global-controls > div > button { width: 32px; }
-.editor-global-controls > div[class*="px-"] { padding: 0 8px; }
-.editor-global-controls button svg { height: 16px; width: 16px; color: hsl(var(--muted-foreground)); }
-.editor-global-controls button:hover { background: hsl(var(--accent)); }
+.editor-header-actions { display: flex; flex-shrink: 0; align-items: center; gap: 6px; }
 .editor-body { display: flex; min-height: 0; flex: 1; gap: 4px; padding: 6px 6px 0 0; }
 .editor-tools { width: 88px; flex-shrink: 0; display: flex; flex-direction: column; gap: 7px; padding: 7px 7px 0; }
 .editor-tools button { display: flex; width: 100%; align-items: center; flex-direction: column; justify-content: center; gap: 7px; padding: 12px 4px; border: 1px solid transparent; border-radius: 6px; color: hsl(var(--muted-foreground)); line-height: 1.35; transition: background-color 120ms; }
 .editor-tools button svg { width: 18px; height: 18px; stroke-width: 1.7; }
 .editor-tools button span { font-size: 10px; }
 .editor-tools button:hover:not(:disabled) { background: hsl(var(--muted)); color: hsl(var(--foreground)); }
-.editor-tools button[aria-pressed="true"] { background: hsl(var(--primary) / 0.1); border-color: hsl(var(--primary) / 0.18); color: hsl(var(--primary)); }
+.editor-tools button[aria-pressed="true"] { @apply border-cyan-600/20 bg-cyan-500/10 text-cyan-700 dark:border-cyan-400/20 dark:text-cyan-300; }
 .editor-tools button:focus-visible { outline: 2px solid hsl(var(--ring)); outline-offset: 2px; }
 .editor-tools button:disabled { opacity: 0.45; cursor: default; }
 .editor-panels { min-width: 0; min-height: 0; flex: 1; }
-.editor-preview-pane, .editor-inspector, .editor-timeline-pane { border: 1px solid hsl(var(--border)); border-radius: 7px; background: hsl(var(--card)); }
+.editor-preview-pane, .editor-inspector, .editor-timeline-pane { border: 1px solid hsl(var(--border)); border-radius: var(--radius); background: hsl(var(--card)); }
 .editor-preview-content { display: flex; height: 100%; min-height: 0; flex-direction: column; }
 .editor-pane-heading { display: flex; min-height: 36px; flex-shrink: 0; align-items: center; justify-content: space-between; gap: 8px; padding: 9px 12px; border-bottom: 1px solid hsl(var(--border)); }
 .editor-pane-heading h2 { flex-shrink: 0; font-size: 12px; font-weight: 500; }
@@ -92,7 +52,7 @@
 .editor-notice { display: flex; flex-shrink: 0; align-items: center; gap: 8px; padding: 8px 16px; border-bottom: 1px solid hsl(var(--border)); font-size: 12px; }
 .editor-footer { display: flex; flex-shrink: 0; align-items: center; gap: 6px; padding: 6px 12px; font-size: 10px; line-height: 1.4; color: hsl(var(--muted-foreground)); }
 .editor-session-dot { width: 4px; height: 4px; flex-shrink: 0; border-radius: 50%; background: hsl(var(--muted-foreground)); }
-.editor-empty { position: relative; display: flex; min-width: 0; flex: 1; align-items: center; justify-content: center; overflow: auto; border: 1px solid hsl(var(--border)); border-radius: 7px; background: hsl(var(--card)); }
+.editor-empty { position: relative; display: flex; min-width: 0; flex: 1; align-items: center; justify-content: center; overflow: auto; border: 1px solid hsl(var(--border)); border-radius: var(--radius); background: hsl(var(--card)); }
 .editor-empty-content { display: flex; max-width: 380px; flex-direction: column; align-items: center; padding: 32px; text-align: center; }
 .editor-empty-icon { display: flex; height: 64px; width: 64px; align-items: center; justify-content: center; margin-bottom: 20px; border: 1px solid hsl(var(--border)); border-radius: 14px; color: hsl(var(--muted-foreground)); background: hsl(var(--background)); }
 .editor-empty h2 { font-size: 18px; font-weight: 500; letter-spacing: -0.02em; }
@@ -104,7 +64,7 @@
   .editor-tools button span { display: none; }
   .editor-open-label { display: none; }
   .editor-header { gap: 8px; padding-left: 8px; padding-right: 8px; }
-  .editor-header-actions, .editor-global-controls { gap: 3px; }
+  .editor-header-actions { gap: 3px; }
   .editor-inspector .editor-pane-heading, .editor-cut-inspector, .editor-source-info, .editor-file-tool { padding-left: 10px; padding-right: 10px; }
 }
 @media (prefers-reduced-motion: reduce) {
@@ -112,3 +72,8 @@
 }
 /* hiddenInset title bars put the traffic lights inside the renderer bounds. */
 .media-workspace[data-platform="darwin"] .editor-header { padding-left: 84px; }
+
+/* Match Downloads' soft card surfaces without adding extra visual chrome. */
+.editor-preview-pane, .editor-inspector, .editor-timeline-pane, .editor-empty {
+  @apply border-slate-300/50 bg-white/80 dark:border-slate-700/50 dark:bg-slate-800/60;
+}

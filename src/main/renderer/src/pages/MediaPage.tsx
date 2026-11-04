@@ -3,8 +3,6 @@ import { Link } from "react-router-dom"
 import { ArrowLeft, FolderOpen, X, Scissors, Music2, ListVideo, FileVideo, Loader2, Film } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { DownloadsToggle } from "@/components/downloads/DownloadsToggle"
-import { LocaleToggle } from "@/components/ui/locale-toggle"
-import { ModeToggle } from "@/components/ui/mode-toggle"
 import { NativeMediaPlayer } from "@/components/media/NativeMediaPlayer"
 import { TrimPanel } from "@/components/media/TrimPanel"
 import { TrackRemovalPanel } from "@/components/media/TrackRemovalPanel"
@@ -78,8 +76,7 @@ export default function MediaPage() {
       <div className="editor-header-actions">
         {source && <Button variant="outline" size="sm" disabled={busy || exporting} aria-label={t("media.change")} title={t("media.change")} onClick={() => void localMediaActions.open()}>{busy ? <Loader2 className="animate-spin" /> : <FolderOpen />}<span className="editor-open-label">{t("media.change")}</span></Button>}
         {(source || busy) && <Button variant="ghost" size="icon" disabled={exporting} aria-label={t(busy ? "media.cancel" : "media.close")} title={t(busy ? "media.cancel" : "media.close")} onClick={() => void localMediaActions.close()}><X /></Button>}
-        <div className="editor-header-divider" />
-        <div className="editor-global-controls"><DownloadsToggle /><LocaleToggle /><ModeToggle /></div>
+        <DownloadsToggle />
       </div>
     </header>
     {busy && <p role="status" className="editor-notice"><Loader2 className="size-3.5 animate-spin" />{t("media.opening")}</p>}

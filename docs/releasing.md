@@ -274,7 +274,9 @@ package/helper support on other platforms or authorize any publication.
 The trim (`CLIPLY_SMOKE_TRIM=1`) and combined
 (`CLIPLY_SMOKE_INTEGRATION=1`) UI checks also exercise the resizable editor at
 1200×800 and 800×600, English/Russian labels, light/dark presentation and keyboard
-panel resizing without seeking. They assert preview visibility, inspector width,
+panel resizing without seeking. Theme and language changes run through the home
+controls, then return to the retained editor session. They assert shared font/theme
+inheritance, absence of duplicate preference controls, preview visibility, inspector width,
 absence of page overflow and separation of timeline/transport controls. The
 packaged combined UI runner includes the same checks. With
 `CLIPLY_SMOKE_EVIDENCE`, it retains layout captures and `workspace-layout.json`.

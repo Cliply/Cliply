@@ -105,11 +105,12 @@ async function runUI({ window, service, userData, app }) {
   start = performance.now(); await click("Change file"); await wait("document.querySelector('main')?.textContent.includes('large.wav') && !!document.getElementById('trim-panel')")
   facts.largeOpenMs = performance.now() - start; facts.largeBytes = service.source.dto.bytes
   assert(facts.largeBytes > 512 * 1024 * 1024)
-  await click("ru"); assert(await js("document.documentElement.lang==='ru' || document.body.textContent.includes('Локальный')"))
   const wasDark = await js("document.documentElement.classList.contains('dark')")
-  await click("переключить тему")
+  await require("./smoke-editor-workspace").setPreferences({ window, locale: "ru", dark: !wasDark })
+  assert(await js("document.documentElement.lang==='ru'"))
   await wait(`document.documentElement.classList.contains('dark')===${!wasDark}`)
-  await click("en"); await wait("document.querySelector('h1')?.textContent==='Local media'")
+  await require("./smoke-editor-workspace").setPreferences({ window, locale: "en" })
+  await wait("document.querySelector('h1')?.textContent==='Local media'")
   facts.languagesAndThemeChanged = true
   await click("Close file"); await wait("!document.querySelector('video,audio')")
   await delay(500); measure("idle-after-close")

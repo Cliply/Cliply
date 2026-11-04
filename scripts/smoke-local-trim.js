@@ -72,8 +72,8 @@ async function runUI({ window, service, userData }) {
     const directory = process.env.CLIPLY_SMOKE_EVIDENCE; fs.mkdirSync(directory, { recursive: true })
     await js("document.getElementById('trim-panel').scrollIntoView()"); await delay(150)
     fs.writeFileSync(path.join(directory, "editor-en-light.png"), (await wc.capturePage()).toPNG())
-    await click("ru"); await click("переключить тему"); await delay(150)
-    fs.writeFileSync(path.join(directory, "editor-ru-dark.png"), (await wc.capturePage()).toPNG()); await click("en")
+    await require("./smoke-editor-workspace").setPreferences({ window, locale: "ru", dark: true }); await delay(150)
+    fs.writeFileSync(path.join(directory, "editor-ru-dark.png"), (await wc.capturePage()).toPNG()); await require("./smoke-editor-workspace").setPreferences({ window, locale: "en" })
   }
   await click("Back to downloads"); await click("Return to local file")
   await wait("document.getElementById('trim-start')?.value==='4'")

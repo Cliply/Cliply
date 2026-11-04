@@ -140,9 +140,8 @@ async function run({ window, service, userData, cliplyApp }) {
     await new Promise(r => setTimeout(r, 300))
     fs.writeFileSync(path.join(dir, "workspace-en-light.png"), (await wc.capturePage()).toPNG())
     // Exercise the actual locale control (EN/RU toggle), then capture dark mode.
-    await click("ru")
+    await require("./smoke-editor-workspace").setPreferences({ window, locale: "ru", dark: true })
     await wait("document.documentElement.lang === 'ru'")
-    await click("переключить тему")
     await wait("document.documentElement.classList.contains('dark')")
     await new Promise(r => setTimeout(r, 300))
     fs.writeFileSync(path.join(dir, "workspace-ru-dark.png"), (await wc.capturePage()).toPNG())

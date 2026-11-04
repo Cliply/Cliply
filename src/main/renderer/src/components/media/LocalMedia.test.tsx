@@ -14,7 +14,6 @@ import { NativeMediaPlayer } from "./NativeMediaPlayer"
 import MediaPage from "@/pages/MediaPage"
 
 vi.mock("@/lib/api", () => ({ mediaApi: { open: vi.fn(), close: vi.fn(), getState: vi.fn(), preview: vi.fn(), releasePreview: vi.fn(), confirmPlayback: vi.fn(), compatClock: vi.fn() } }))
-vi.mock("@/components/ui/mode-toggle", () => ({ ModeToggle: () => <button>Theme</button> }))
 
 const source = {
   schemaVersion: 1, sourceId: "11111111-1111-4111-8111-111111111111", filename: "synthetic.mp4", bytes: 1024,
@@ -60,7 +59,9 @@ test("entry opens the workspace only after successful selection; cancellation ke
     expect((screen.getByRole("button", { name: en[key] }) as HTMLButtonElement).disabled).toBe(false)
   }
   expect((screen.getByRole("button", { name: en["media.remux"] }) as HTMLButtonElement).disabled).toBe(false)
-  fireEvent.click(screen.getByRole("button", { name: "ru" }))
+  expect(screen.queryByRole("button", { name: "ru" })).toBeNull()
+  expect(screen.queryByRole("button", { name: "Toggle theme" })).toBeNull()
+  act(() => useLocale.setState({ locale: "ru" }))
   expect(screen.getByRole("heading", { name: ru["media.title"] })).toBeTruthy()
   expect(screen.getByRole("button", { name: ru["media.close"] })).toBeTruthy()
   fireEvent.click(screen.getByRole("button", { name: ru["media.close"] }))

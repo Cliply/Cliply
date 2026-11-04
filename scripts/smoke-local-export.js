@@ -179,7 +179,7 @@ async function runUI({ window, service, userData }) {
     const dir = process.env.CLIPLY_SMOKE_EVIDENCE; fs.mkdirSync(dir, { recursive: true })
     await js("document.getElementById('audio-extraction').scrollIntoView()")
     await delay(300); fs.writeFileSync(path.join(dir, "extraction-en-light.png"), (await wc.capturePage()).toPNG())
-    await click("ru"); await click("переключить тему"); await delay(300)
+    await require("./smoke-editor-workspace").setPreferences({ window, locale: "ru", dark: true }); await delay(300)
     fs.writeFileSync(path.join(dir, "extraction-ru-dark.png"), (await wc.capturePage()).toPNG())
     fs.writeFileSync(path.join(dir, "extraction-ui.json"), JSON.stringify({ selectedStream: 2, nativePreviewUnavailable: true, previewDeniedForTest: true, extracted: "completed", sourceStillOpen: true, routeStatusAndSelectionRetained: true, cancelledWhileAway: service.exports.job.state, partialRemoved: true }, null, 2) + "\n")
   }
