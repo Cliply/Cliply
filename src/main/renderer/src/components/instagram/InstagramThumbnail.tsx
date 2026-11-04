@@ -26,7 +26,7 @@ export function InstagramThumbnail({
       await systemApi.openExternal(ensureHttpScheme(videoUrl))
     } catch (error) {
       console.error("Failed to open Instagram link:", error)
-      toast.error(t("thumb.openFailed", { name: "Instagram" }))
+      toast.error(t("thumb.instagramOpenFailed"))
     }
   }
 
@@ -70,7 +70,7 @@ export function InstagramThumbnail({
           )}
         >
           <ExternalLink className="h-4 w-4" />
-          {t("thumb.viewOn", { name: "Instagram" })}
+          {t("thumb.instagramViewOn")}
         </button>
       </div>
     </motion.div>

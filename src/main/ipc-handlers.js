@@ -994,7 +994,7 @@ class IPCHandlers {
         // we do not serve is the invalid one
         return this.createError(
           "Unsupported platform",
-          "Please use YouTube, Pinterest, TikTok, or Instagram",
+          "please use youtube, pinterest, tiktok, or instagram",
           "GENERAL_ERROR",
           { category: ERROR_CATEGORIES.INVALID_URL }
         )
@@ -1015,8 +1015,8 @@ class IPCHandlers {
           Array.isArray(info.entries)
         ) {
           return this.createError(
-            "Instagram carousels aren't supported yet. Paste a link to a single video or Reel.",
-            "Choose an Instagram post containing one video.",
+            "instagram carousels aren't supported yet. paste a link to a reel or a post with one video.",
+            "choose an instagram post containing one video.",
             ERROR_CODES.UNSUPPORTED_COLLECTION,
             { category: ERROR_CODES.UNSUPPORTED_COLLECTION }
           )
@@ -1027,8 +1027,8 @@ class IPCHandlers {
           !info.formats.some((format) => format && format.vcodec !== "none")
         ) {
           return this.createError(
-            "This Instagram post doesn't contain a downloadable video.",
-            "Try a public Reel or single-video post.",
+            "this instagram post doesn't contain a downloadable video.",
+            "try a public reel or a post with one video.",
             ERROR_CODES.NOT_A_VIDEO,
             { category: ERROR_CODES.NOT_A_VIDEO }
           )
@@ -1069,9 +1069,9 @@ class IPCHandlers {
   instagramRequestUrl(url) {
     const normalized = normalizeInstagramUrl(url)
     if (normalized) return normalized
-    const error = new Error("Paste an instagram.com link to a Reel or single-video post.")
+    const error = new Error("paste an instagram.com link to a reel or a post with one video.")
     error.code = ERROR_CODES.INVALID_URL
-    error.suggestion = "Stories, profiles, shortened links and carousels aren't supported."
+    error.suggestion = "stories, profiles, shortened links and carousels aren't supported."
     throw error
   }
 
@@ -1132,7 +1132,7 @@ class IPCHandlers {
     if (!SUPPORTED_DOWNLOAD_PLATFORMS.includes(targetPlatform)) {
       return this.createError(
         "Unsupported platform",
-        "Please use YouTube, Pinterest, TikTok, or Instagram"
+        "please use youtube, pinterest, tiktok, or instagram"
       )
     }
 

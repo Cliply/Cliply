@@ -299,7 +299,7 @@ export const instagramApi = {
     const electronAPI = getElectronAPI()
     const response = await electronAPI.instagram.getInfo(url)
 
-    return unwrap(response, "Failed to get Instagram video info", {
+    return unwrap(response, "failed to get instagram video info", {
       log: "Instagram info failed:"
     })
   },
@@ -310,7 +310,7 @@ export const instagramApi = {
     const electronAPI = getElectronAPI()
     const response = await electronAPI.instagram.download(request)
 
-    const data = unwrap(response, "Failed to download Instagram video", {
+    const data = unwrap(response, "failed to download instagram video", {
       log: "Instagram download failed:"
     })
 

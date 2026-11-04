@@ -35,14 +35,16 @@ export const ru: Record<Key, string> = {
   "url.pinterestHelper":
     "поддерживаются ссылки pin.it и pinterest.com/pin, любой домен страны",
   "url.instagramHelper":
-    "Публичные Reels и публикации с одним видео. Фото, карусели, истории и закрытые публикации не поддерживаются.",
-  "error.instagramUrl": "неверная ссылка на Instagram",
-  "validation.instagramRequired": "введите ссылку на Instagram",
+    "публичные reels и публикации с одним видео. фото, карусели, истории и закрытые публикации не поддерживаются.",
+  "error.instagramUrl": "неверная ссылка на instagram",
+  "validation.instagramRequired": "введите ссылку на instagram",
   "validation.instagramInvalid":
-    "введите ссылку на Reel или публикацию Instagram",
+    "введите ссылку на reel или публикацию instagram",
   "card.instagramSubtitle":
     "лучшее доступное качество, выбирается автоматически.",
   "card.unknownDuration": "длительность неизвестна",
+  "thumb.instagramViewOn": "открыть в instagram",
+  "thumb.instagramOpenFailed": "не удалось открыть ссылку instagram",
   "url.tiktokHelper":
     "поддерживаются ссылки tiktok.com/@user/video/ID, vm.tiktok.com и vt.tiktok.com",
 
@@ -477,14 +479,14 @@ export const ruErrors: Partial<
       "возможно, оно приватное, с возрастным ограничением или удалено."
   },
   LOGIN_REQUIRED: {
-    message: "Instagram требует входа для доступа к этому видео.",
+    message: "instagram требует входа для доступа к этому видео.",
     suggestion:
-      "cliply поддерживает только публичные видео Instagram, доступные без входа. попробуйте другую публичную ссылку."
+      "cliply поддерживает только публичные видео instagram, доступные без входа. попробуйте другую публичную ссылку."
   },
   UNSUPPORTED_COLLECTION: {
-    message: "карусели Instagram не поддерживаются.",
+    message: "карусели instagram не поддерживаются.",
     suggestion:
-      "используйте ссылку на публичный Reel или публикацию с одним видео."
+      "используйте ссылку на публичный reel или публикацию с одним видео."
   },
   NOT_A_VIDEO: {
     message: "по этой ссылке нет видео.",
@@ -573,11 +575,11 @@ export const ruErrors: Partial<
 // unless the caller knows it is displaying an Instagram error.
 export const ruInstagramErrors: typeof ruErrors = {
   EXTRACTION_FAILED: {
-    message: "Instagram что-то изменил, и загрузчику нужно это догнать.",
+    message: "instagram изменил способ загрузки видео.",
     suggestion: "обычно помогает обновление загрузчика."
   },
   RATE_LIMITED: {
-    message: "Instagram временно ограничивает это устройство.",
+    message: "instagram временно ограничивает это устройство.",
     suggestion: "подождите несколько минут перед следующей попыткой."
   }
 }

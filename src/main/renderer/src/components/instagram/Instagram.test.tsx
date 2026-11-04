@@ -100,7 +100,7 @@ test.each([undefined, null, 0])(
         <UnifiedDownloadCard platform="instagram" instagramInfo={metadata} />
       </>
     )
-    expect(screen.getAllByText(/Unknown duration/)).toHaveLength(2)
+    expect(screen.getAllByText(/unknown duration/)).toHaveLength(2)
     expect(screen.queryByText(/00:00/)).toBeNull()
     expect(screen.queryByRole("combobox")).toBeNull()
     expect(
@@ -234,7 +234,7 @@ test.each([
       />
     )
     await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: "View on Instagram" }))
+      fireEvent.click(screen.getByRole("button", { name: "view on instagram" }))
     })
     expect(openExternal).toHaveBeenCalledWith(expected)
     expect(mocks.error).not.toHaveBeenCalled()

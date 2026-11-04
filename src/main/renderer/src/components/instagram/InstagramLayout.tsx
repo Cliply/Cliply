@@ -2,6 +2,7 @@ import { DownloadsToggle } from "@/components/downloads/DownloadsToggle"
 import { ModeToggle } from "@/components/ui/mode-toggle"
 import { FeedbackCard, UnifiedDownloadCard } from "@/components/video"
 import { useDownloadPath } from "@/lib/hooks/useDownloadPath"
+import { MONO } from "@/lib/fonts"
 import { useT } from "@/lib/i18n"
 import { useInstagramStore } from "@/lib/stores/instagramStore"
 import { useAppStore } from "@/lib/stores/store"
@@ -67,8 +68,7 @@ export function InstagramLayout() {
               className="hidden lg:block text-lg font-light text-slate-700 dark:text-slate-300 tracking-tight cursor-pointer hover:text-slate-900 dark:hover:text-slate-100 transition-colors duration-300"
               onClick={handleReset}
               style={{
-                fontFamily:
-                  'Geist Mono, ui-monospace, SFMono-Regular, "SF Mono", Consolas, "Liberation Mono", Menlo, monospace'
+                fontFamily: MONO
               }}
             >
               cliply
