@@ -1,6 +1,6 @@
 import { create } from "zustand"
 
-export type Platform = "youtube" | "pinterest" | "tiktok"
+export type Platform = "youtube" | "pinterest" | "tiktok" | "instagram"
 
 interface GlobalState {
   selectedPlatform: Platform

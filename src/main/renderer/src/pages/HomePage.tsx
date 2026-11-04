@@ -1,3 +1,5 @@
+import { InstagramLayout } from "@/components/instagram/InstagramLayout"
+import { useInstagramStore } from "@/lib/stores/instagramStore"
 import { CookieDialog } from "@/components/cookies/CookieDialog"
 import { SupportDialog } from "@/components/support/SupportDialog"
 import { PinterestLayout } from "@/components/pinterest"
@@ -19,6 +21,7 @@ export function HomePage() {
   const { playlistInfo } = usePlaylistStore()
   const { info: pinInfo } = usePinterestStore()
   const { info: tikTokInfo } = useTikTokStore()
+  const instagramInfo = useInstagramStore((s) => s.info)
 
   // the youtube box holds one of two things. loading either clears the other,
   // so a listing in the store means the playlist is what was pasted last
@@ -42,6 +45,10 @@ export function HomePage() {
           <PinterestLayout key="pinterest-layout" />
         ) : shouldShowTikTokLayout ? (
           <TikTokLayout key="tiktok-layout" />
+        ) : selectedPlatform === "instagram" &&
+          showMediaDetails &&
+          instagramInfo ? (
+          <InstagramLayout key="instagram-layout" />
         ) : (
           <HeroSection key="hero-section" />
         )}

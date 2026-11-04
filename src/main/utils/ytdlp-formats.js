@@ -32,12 +32,17 @@ const SIMPLE_PLATFORM_PRESETS = {
   pinterest: {
     formatSelector: "bestvideo+bestaudio/best",
     extraArgs: ["--merge-output-format", "mp4"]
+  },
+  instagram: {
+    // null explicitly delegates selection and merging to yt-dlp's defaults.
+    formatSelector: null,
+    extraArgs: []
   }
 }
 
 /**
  * the download options for a simple platform
- * @param {string} platform - tiktok | pinterest
+ * @param {string} platform - tiktok | pinterest | instagram
  * @returns {Object} {formatSelector, extraArgs}
  */
 function getSimplePlatformOptions(platform) {
@@ -51,7 +56,7 @@ function getSimplePlatformOptions(platform) {
 }
 
 /**
- * is this a platform we download with a fixed preset?
+ * is this a platform we download through the single-button flow?
  *
  * the presets above are the definition, so there is one list rather than two:
  * a platform with an entry here has no format list, no quality menu and no

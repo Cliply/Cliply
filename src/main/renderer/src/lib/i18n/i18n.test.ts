@@ -387,6 +387,32 @@ describe("localizeError", () => {
     }
   )
 
+  test.each(["RATE_LIMITED", "EXTRACTION_FAILED"])(
+    "%s uses Instagram wording only when that platform is supplied",
+    async (category) => {
+      const { localizeError, useLocale } = await freshStore()
+      const { ruErrors, ruInstagramErrors } = await import("./ru")
+      const error = {
+        message: "Instagram failure",
+        suggestion: "Try later",
+        category
+      }
+      expect(localizeError(error, "instagram")).toBe(error)
+      useLocale.getState().setLocale("ru")
+      expect(localizeError(error, "instagram")).toEqual({
+        ...error,
+        ...ruInstagramErrors[category]
+      })
+      expect(localizeError(error, "instagram").message).not.toContain("YouTube")
+      expect(localizeError(error, "youtube")).toEqual({
+        ...error,
+        ...ruErrors[category]
+      })
+      expect(localizeError(error)).toEqual({ ...error, ...ruErrors[category] })
+      expect(localizeError(error, "youtube").message).toContain("YouTube")
+    }
+  )
+
   // ru.ts has an entry per key of ERROR_METADATA and TERMINAL_ERRORS, and a
   // category with only half a translation would show a russian message above an
   // english suggestion

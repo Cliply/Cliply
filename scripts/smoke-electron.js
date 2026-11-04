@@ -74,6 +74,16 @@ if (!process.versions.electron) {
         success: true, data: { seq: 1, rows: [], lifetimeCompleted: 123 }
       }))
       ipcMain.handle("cookies:status", () => ({ success: true, data: { signed_in: false } }))
+      ipcMain.handle("video:get-info", (_event, request) => {
+        assert.equal(request.platform, "instagram")
+        assert.equal(request.url, "https://www.instagram.com/reel/Example123/")
+        return { success: true, data: { title: "Instagram smoke", duration: 0, duration_string: "00:00", thumbnail: null, uploader: "Example" } }
+      })
+      ipcMain.handle("video:download-combined", (_event, request) => {
+        assert.equal(request.platform, "instagram")
+        assert.equal(request.download_id, "instagram_smoke")
+        return { success: true, data: { download_id: request.download_id, status: "started", type: "combined" } }
+      })
     }
     cliplyApp.createMenu = () => {}
     cliplyApp.reportLaunch = () => {}
@@ -94,8 +104,15 @@ if (!process.versions.electron) {
     const state = await cliplyApp.mainWindow.webContents.executeJavaScript(
       `(async () => {
         const response = await window.electronAPI.settings.getDownloadCount()
+        const instagram = await window.electronAPI.instagram.getInfo("https://www.instagram.com/reel/Example123/")
+        const download = await window.electronAPI.instagram.download({
+          url: "https://www.instagram.com/reel/Example123/",
+          download_id: "instagram_smoke", platform: "youtube"
+        })
         return {
           count: response.data.count,
+          instagramTitle: instagram.data.title,
+          instagramDownloadStatus: download.data.status,
           platform: window.electronAPI.platform.platform,
           electron: window.electronAPI.platform.versions.electron,
           rendered: document.getElementById("root")?.childElementCount > 0,
@@ -104,6 +121,8 @@ if (!process.versions.electron) {
       })()`
     )
     assert.equal(state.count, 123, "preload IPC round trip")
+    assert.equal(state.instagramTitle, "Instagram smoke", "Instagram metadata bridge")
+    assert.equal(state.instagramDownloadStatus, "started", "Instagram download bridge fixes the platform")
     assert.equal(state.rendered, true, "React mounted from the built file")
     assert.equal(state.nodeIsolated, true, "renderer has no Node require")
     assert.equal(state.electron, process.versions.electron)

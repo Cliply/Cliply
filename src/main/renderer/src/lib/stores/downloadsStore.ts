@@ -1,5 +1,6 @@
 // every download this session knows about, in one list
 
+import { normalizeInstagramUrl } from "@/lib/validation"
 import { create } from "zustand"
 
 import {
@@ -431,7 +432,15 @@ export const useDownloadsStore = create<DownloadsState>((set, get) => ({
    * to, and refusing to start would be worse than starting twice.
    */
   findLive: (candidate) => {
-    const url = urlOf(candidate.request)
+    const identityUrl = (request?: DownloadRequest) => {
+      const url = urlOf(request)
+      return url &&
+        candidate.kind === "simple" &&
+        candidate.label === "instagram"
+        ? (normalizeInstagramUrl(url) ?? url)
+        : url
+    }
+    const url = identityUrl(candidate.request)
 
     if (!url) return undefined
 
@@ -440,7 +449,7 @@ export const useDownloadsStore = create<DownloadsState>((set, get) => ({
         isLiveRow(row) &&
         row.kind === candidate.kind &&
         row.label === candidate.label &&
-        urlOf(row.request) === url &&
+        identityUrl(row.request) === url &&
         outputOf(row.request) === outputOf(candidate.request) &&
         sameTimeRange(timeRangeOf(row.request), timeRangeOf(candidate.request))
     )
@@ -736,7 +745,9 @@ function rowFromHistory(entry: DownloadHistoryRow): DownloadRow {
 }
 
 const platformOf = (platform?: string): Platform =>
-  platform === "tiktok" || platform === "pinterest" ? platform : "youtube"
+  platform === "tiktok" || platform === "pinterest" || platform === "instagram"
+    ? platform
+    : "youtube"
 
 const urlOf = (request?: DownloadRequest): string | undefined => request?.url
 

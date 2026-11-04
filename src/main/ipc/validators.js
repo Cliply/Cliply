@@ -3,7 +3,7 @@
 const { PLAYLIST_MAX_ITEMS } = require("../services/ytdlp-engine")
 
 // platforms served by the binary engine's single-video flows
-const SUPPORTED_DOWNLOAD_PLATFORMS = ["youtube", "pinterest", "tiktok"]
+const SUPPORTED_DOWNLOAD_PLATFORMS = ["youtube", "pinterest", "tiktok", "instagram"]
 
 /**
  * the audio modes a playlist may ask for

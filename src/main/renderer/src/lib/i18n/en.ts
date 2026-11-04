@@ -45,6 +45,13 @@ export const en = {
   "url.youtubeHelperRest": " from youtube.com and youtu.be",
   "url.pinterestHelper":
     "supports pin.it and pinterest.com/pin links, any country domain",
+  "url.instagramHelper":
+    "Public Reels and single-video posts. Photos, carousels, Stories and private posts are not supported.",
+  "error.instagramUrl": "Invalid Instagram URL",
+  "validation.instagramRequired": "Please enter an Instagram URL",
+  "validation.instagramInvalid": "Please enter an Instagram Reel or post URL",
+  "card.instagramSubtitle": "Best available quality, selected automatically.",
+  "card.unknownDuration": "Unknown duration",
   "url.tiktokHelper":
     "supports tiktok.com/@user/video/ID, vm.tiktok.com, and vt.tiktok.com links",
 

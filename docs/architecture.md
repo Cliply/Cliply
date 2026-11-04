@@ -3,7 +3,7 @@
 ## Product and process boundaries
 
 This repository contains the Electron desktop app. It supports YouTube video/audio,
-trimming and playlists, plus TikTok and Pinterest video downloads. English and
+trimming and playlists, plus TikTok, Pinterest and public Instagram video downloads. English and
 Russian UI strings live under the renderer's `lib/i18n/` directory. Exact tool and
 dependency versions belong to the two package manifests and lockfiles.
 
@@ -84,6 +84,36 @@ the list/history IPC tests.
 When adding a channel or changing a response, inspect main handlers, preload,
 renderer declarations, API wrappers and their tests together. Keep Node/file
 access in main and expose only the required bridge operations.
+
+### Instagram single-video downloads
+
+Instagram uses the existing video-info/combined-download channels and simple
+platform queue, progress, retry and history flow. Main validates direct Reel and
+post URLs using [`instagram-url.js`](../src/main/utils/instagram-url.js), including
+on retries. Stories, profiles, `/share/` and shortened links are outside this scope.
+
+Metadata uses yt-dlp's `--dump-single-json --flat-playlist` so a carousel remains a
+collection rather than several JSON lines. `--ignore-no-formats-error` lets main
+explain photo-only results; unknown codecs are not ranked or rejected. Collections
+are refused even when only one video entry is available. Downloads independently
+use `--break-match-filters !playlist` to reject collection entries before saving,
+including direct requests that never fetched metadata. yt-dlp's filter exit 101
+maps to `UNSUPPORTED_COLLECTION` for Instagram operations only.
+
+Instagram passes no format, sort, container or client overrides. yt-dlp selects
+and merges streams using the managed FFmpeg executable; final filenames retain
+the extension it reports. `--ignore-config` prevents a user's CLI config from
+changing this policy. Cookies and YouTube token recovery are disabled for these
+operations. Authentication failures use `LOGIN_REQUIRED` without a cookie-import
+action, and shared extraction/rate-limit errors use Instagram wording.
+
+The renderer displays available metadata and an automatic best-quality download
+button; absent duration is shown as unknown. Instagram lookups commit the normalized
+URL and metadata together, ignore responses superseded by a new lookup or reset,
+and use the same URL identity as main for duplicate-download detection.
+Existing telemetry records the
+Instagram platform and `best_available` quality, never captions, usernames or URLs.
+The managed stable-channel engine updater remains responsible for extractor fixes.
 
 ## Storage and privacy
 

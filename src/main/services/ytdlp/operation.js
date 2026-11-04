@@ -102,6 +102,7 @@ class YtdlpOperation extends EventEmitter {
   constructor({
     id,
     operation,
+    platform = null,
     binaryPath,
     args,
     cwd,
@@ -136,6 +137,7 @@ class YtdlpOperation extends EventEmitter {
 
     this.id = id
     this.operation = operation
+    this.platform = platform
     this.binaryPath = binaryPath
     this.args = args
     this.cwd = cwd
@@ -289,6 +291,16 @@ class YtdlpOperation extends EventEmitter {
 
       // what was saved is read here, once, before anything is decided
       this.readSavedRecords()
+
+      // An empty extraction can exit successfully without ever reaching the
+      // collection filter. Never turn that into an Instagram download success.
+      if (
+        this.platform === "instagram" && this.operation === "simple" &&
+        exitCode === 0 && !this.filePath && !this.cancelled && !this.stalled
+      ) {
+        this.fail({ code: ERROR_CODES.DOWNLOAD_FAILED })
+        return
+      }
 
       // **a playlist outcome is decided by counting items, not by the exit
       // code, in both directions.**
@@ -798,6 +810,7 @@ class YtdlpOperation extends EventEmitter {
       ? explicitError(code, cause ? redactLogLine(cause.message) : null)
       : mapError({
           exitCode,
+          platform: this.platform,
           stderrLines,
           cancelled: this.cancelled,
           stalled: this.stalled

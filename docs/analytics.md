@@ -14,6 +14,15 @@ would be the one that goes stale.
 
 ## metrics that will mislead you if you take them at face value
 
+### Instagram support is anonymous and single-video only
+
+Instagram uses the existing events with `platform: instagram` and
+`quality: best_available`. It has no cookie dimension. `LOGIN_REQUIRED` records
+authentication/access refusals, while `UNSUPPORTED_COLLECTION` records carousels
+outside the supported scope and `NOT_A_VIDEO` records photo-only results. These
+are product/access boundaries, not evidence that a quality-selection algorithm
+failed. yt-dlp owns quality selection; no raw URL, caption or username is added.
+
 ### `elapsed_bucket` on `download_completed` is not engine throughput
 
 the clock starts in `DownloadRunner.reserve()` (`src/main/services/download-runner.js`),

@@ -168,9 +168,48 @@ export const tiktokUrlSchema = z.object({
 
 export type TikTokUrlFormData = z.infer<typeof tiktokUrlSchema>
 
+// Match main's URL boundary and canonical spelling, including host case and
+// query escaping. The same identity is used before and after list snapshots.
+export const normalizeInstagramUrl = (value: string): string | null => {
+  if (!value.trim()) return null
+  try {
+    const input = value.trim()
+    const url = new URL(
+      /^[a-z][a-z\d+.-]*:/i.test(input) ? input : `https://${input}`
+    )
+    if (
+      (url.protocol !== "https:" && url.protocol !== "http:") ||
+      (url.hostname !== "instagram.com" &&
+        url.hostname !== "www.instagram.com") ||
+      url.username ||
+      url.password ||
+      url.port ||
+      !/^\/(?:(?!share\/|stories\/|explore\/)[A-Za-z0-9._]+\/)?(?:p|tv|reels?)\/[A-Za-z0-9_-]+\/?$/.test(
+        url.pathname
+      )
+    )
+      return null
+    return url.href
+  } catch {
+    return null
+  }
+}
+
+export const isValidInstagramUrl = (value: string): boolean =>
+  normalizeInstagramUrl(value) !== null
+
+export const instagramUrlSchema = z.object({
+  url: z
+    .string()
+    .min(1, "validation.instagramRequired" satisfies Key)
+    .refine(isValidInstagramUrl, "validation.instagramInvalid" satisfies Key)
+})
+
+export type InstagramUrlFormData = z.infer<typeof instagramUrlSchema>
+
 export const detectPlatform = (
   url: string
-): "youtube" | "pinterest" | "tiktok" | null => {
+): "youtube" | "pinterest" | "tiktok" | "instagram" | null => {
   if (YOUTUBE_URL_REGEX.test(url) || PLAYLIST_URL_REGEX.test(url)) {
     return "youtube"
   }
@@ -179,6 +218,9 @@ export const detectPlatform = (
   }
   if (TIKTOK_URL_REGEX.test(url)) {
     return "tiktok"
+  }
+  if (isValidInstagramUrl(url)) {
+    return "instagram"
   }
   return null
 }

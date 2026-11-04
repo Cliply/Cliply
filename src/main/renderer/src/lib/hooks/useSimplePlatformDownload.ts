@@ -14,10 +14,14 @@ import {
   showDownloadErrorToast,
   showServerOverwhelmedToast
 } from "@/lib/toast-utils"
+import { normalizeInstagramUrl } from "@/lib/validation"
 import { useEffect, useState } from "react"
 
 /** the platforms whose whole download is one quality behind one button */
-export type SimplePlatform = Extract<Platform, "pinterest" | "tiktok">
+export type SimplePlatform = Extract<
+  Platform,
+  "pinterest" | "tiktok" | "instagram"
+>
 
 /**
  * the slice of a platform store a download of this kind touches
@@ -86,7 +90,10 @@ export function useSimplePlatformDownload({
     if (!url || isDownloading) return
 
     const label = platform
-    const request = { url, ...(title ? { title } : {}) }
+    const request = {
+      url: platform === "instagram" ? (normalizeInstagramUrl(url) ?? url) : url,
+      ...(title ? { title } : {})
+    }
 
     /**
      * the same pin or clip, asked for twice. two processes writing one `.part`
@@ -173,10 +180,14 @@ export function useSimplePlatformDownload({
       showDownloadErrorToast(
         t(DOWNLOAD_WORDING.simple.failed),
         // the staged report above keeps main's english; the toast is read
-        localizeError({
-          message,
-          category: error instanceof DownloadError ? error.category : undefined
-        }).message,
+        localizeError(
+          {
+            message,
+            category:
+              error instanceof DownloadError ? error.category : undefined
+          },
+          platform
+        ).message,
         error instanceof DownloadError ? error.category : undefined,
         platform
       )

@@ -74,6 +74,8 @@ vi.mock("sonner", () => ({
   toast: { success: mocks.successToast, info: vi.fn(), error: vi.fn() }
 }))
 
+import { useLocale } from "@/lib/i18n"
+import { ruInstagramErrors } from "@/lib/i18n/ru"
 import { en } from "@/lib/i18n/en"
 import {
   useDownloadsStore,
@@ -647,3 +649,23 @@ describe("a cancel main was not ready for", () => {
     expect(mocks.cancelDownload).not.toHaveBeenCalled()
   })
 })
+
+test.each(["RATE_LIMITED", "EXTRACTION_FAILED"])(
+  "Instagram terminal %s uses its platform wording",
+  async (category) => {
+    useLocale.getState().setLocale("ru")
+    mocks.getList.mockResolvedValue(
+      snapshot({ rows: [listed({ kind: "simple", platform: "instagram" })] })
+    )
+    const view = await mount()
+    await emit({ status: "failed", error: "Instagram failure", category })
+    expect(mocks.showDownloadErrorToast).toHaveBeenCalledWith(
+      expect.any(String),
+      ruInstagramErrors[category]!.message,
+      category,
+      "instagram"
+    )
+    view.unmount()
+    useLocale.getState().setLocale("en")
+  }
+)

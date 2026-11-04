@@ -16,6 +16,7 @@ import {
   pinterestApi,
   playlistApi,
   tiktokApi,
+  instagramApi,
   videoApi
 } from "./api"
 import type { DownloadHistoryRow, PlaylistDownloadRequest } from "./api"
@@ -26,7 +27,8 @@ function bridge({ getInfo }: { getInfo: Responder }) {
   ;(window as unknown as { electronAPI: unknown }).electronAPI = {
     video: { getInfo: async () => getInfo() },
     pinterest: { getInfo: async () => getInfo() },
-    tiktok: { getInfo: async () => getInfo() }
+    tiktok: { getInfo: async () => getInfo() },
+    instagram: { getInfo: async () => getInfo() }
   }
 }
 
@@ -50,7 +52,11 @@ describe("an info request that failed", () => {
   test.each([
     ["youtube", () => videoApi.getVideoInfo("https://youtu.be/abc")],
     ["pinterest", () => pinterestApi.getInfo("https://pin.it/abc")],
-    ["tiktok", () => tiktokApi.getInfo("https://vm.tiktok.com/abc")]
+    ["tiktok", () => tiktokApi.getInfo("https://vm.tiktok.com/abc")],
+    [
+      "instagram",
+      () => instagramApi.getInfo("https://www.instagram.com/reel/abc/")
+    ]
   ])("carries %s's classification back to the caller", async (_name, call) => {
     vi.spyOn(console, "error").mockImplementation(() => {})
     bridge({ getInfo: () => FAILURE })

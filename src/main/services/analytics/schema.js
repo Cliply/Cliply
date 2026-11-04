@@ -604,7 +604,7 @@ const PLATFORM_UNSUPPORTED = "unsupported"
  * SUPPORTED_PLATFORMS is imported rather than copied, but it is not the whole
  * set: it lists youtube, instagram and tiktok, while the engine's own
  * download list (SUPPORTED_DOWNLOAD_PLATFORMS in ipc/validators.js) lists
- * youtube, pinterest and tiktok. the two are not mirrors. pinterest is fully
+ * youtube, pinterest, tiktok and instagram. the two are not mirrors. pinterest is fully
  * supported - it has dedicated handling in ipc-handlers and its own
  * extractQuality mapping - so validating against SUPPORTED_PLATFORMS alone
  * would relabel a real platform as unsupported.
