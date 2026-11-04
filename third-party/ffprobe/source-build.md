@@ -6,11 +6,18 @@ Deno and yt-dlp are unchanged. No runtime helper downloader is introduced.
 
 ## Exact source and build design
 
-The [source pin](source-build.json) records FFmpeg n8.1 commit
-`9047fa1b084f76b1b4d065af2d743df1b40dfb56`, the SHA256 of its complete Git tar
+The [source pin](source-build.json) records FFmpeg n8.1.3 commit
+`1041abdc962f4cc4f394aa8de9dc5236c0c3b9e7`, the SHA256 of its complete Git tar
 export, and hashes of the upstream license files and three IJG-derived files.
 The builder accepts either that Git checkout or the exact tar export. It checks
 the archive before extracting and does not patch upstream source.
+The patch update from n8.1 follows FFmpeg's maintained 8.1 release branch,
+including fixes made after the original baseline. Its canonical tar SHA256 is
+`801838344d51651d45ab3ce6502a2627da7746492475711ff2adfb723aeaf7b6`.
+All eight upstream license/IJG file hashes are unchanged. Earlier native results
+below qualify the previous n8.1 baseline, not this patch update; new qualification
+is required before promotion.
+
 Git exports explicitly use LF line endings and tar umask `0002`, independently
 of host Git settings. Git for Windows' CRLF conversion also affects `git archive`;
 the first native run exposed that mismatch. The canonical archive hash stays

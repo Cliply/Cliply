@@ -90,7 +90,7 @@ function retainCandidate({ buildDirectory, evidence, packetDirectory, output }) 
         return entry.isDirectory() ? Object.entries(inventory(file, relative + "/")) : [[relative, hash(file)]]
       }))
     }
-    const record = { schema: 1, evaluationOnly: true, publicationReady: false, platform: facts.platform,
+    const record = { schema: 1, evaluationOnly: true, publicationReady: false, platform: facts.platform, normalizationRoot: buildDirectory,
       nativeValidationPassed: true, executableSha256: facts.executableSha256, packagedSha256: artifact.packagedSha256,
       sourceCommit: facts.commit, sourceArchiveSha256: facts.archiveSha256, recipeSha256: facts.recipeSha256,
       runtimeNoticesReviewed: runtime.reviewed || Boolean(sourcePacket && verifyRuntimeNotices(facts, path.join(staging, "runtime-notices"))), installedNoticesValidated: fs.existsSync(installed), sourcePacketReadyForReview: Boolean(sourcePacket),

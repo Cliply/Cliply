@@ -37,6 +37,19 @@ installers with `--publish never`, runs real packaged helper/media/recovery chec
 and validates aggregated update manifests against installer size/SHA512. Its token
 is read-only. Keep helper staging inputs off for normal package validation.
 
+Final-artifact checks also consume the unchanged DMG, NSIS Setup, DEB and AppImage:
+copy the app from a read-only mounted DMG into a path with spaces; perform a silent
+per-user NSIS installation into a path with spaces; install and purge the DEB on
+the disposable runner; and extract the final AppImage payload. Existing AppImage
+launcher/update checks remain separate. These checks refuse existing Cliply
+installations and run only on native disposable GitHub runners. They compare the
+installed ASAR, bundled helpers and notices with the qualified unpacked payload,
+then check helpers, normal services, offline editor actions and download recovery.
+GUI checks use the existing isolated-entry harness on copies of installed bytes,
+with an empty helper PATH; they are not pristine signed-app, Gatekeeper or minimum-
+OS acceptance. Small per-artifact JSON evidence records identity, checks and
+cleanup. Installer files themselves are never modified or republished by tests.
+
 Run only the probes needed for a helper or packaging change:
 
 ```sh
@@ -108,6 +121,41 @@ review. It never uploads installers or a shared release. Incomplete runtime/sour
 packets remain marked unapproved; failed validation creates no final candidate
 artifact. See the source guide for checksum verification and cleanup. Retention
 is off by default and ignored outside source-check mode.
+
+### Explicit FFprobe promotion
+
+After reviewing the source/runtime inputs, run source CI with retention enabled
+on the exact committed ref. The separate promotion command verifies a successful
+manual CI run from `Cliply/Cliply`, downloads all three retained native candidates,
+and rechecks their inventories, complete source packets, current recipes/pins,
+native commands, runtime notices and installed source mappings. It rejects a
+different checkout commit or tracked local changes. It never creates an app release.
+
+```sh
+node scripts/publish-ffprobe.js --run <successful-source-CI-run> --output <new-absolute-plan-directory>
+node scripts/publish-ffprobe.js --run <same-run> --output <new-absolute-publication-directory> --publish
+```
+
+The first command is read-only. The explicit second command adds content-addressed
+helpers and matching source archives to the existing `binaries` release. It never
+uses `--clobber`, replaces an existing asset, or edits pins in the checkout.
+Existing identically named assets must pass the same size/hash/download checks;
+this permits resuming an interrupted upload. Every uploaded asset is downloaded
+again and checked before its ID/URL enters the generated production record.
+
+Review and commit the resulting `published.json` and `distributions/` directory
+under `third-party/ffprobe/`. Then run CI with `package_check=true` and
+`local_media_check=true`, other modes false. This fetches the real published pins
+and validates final installers without publication. Keep source CI usable after
+activation: it clears pins and replaces FFprobe only inside its private evaluation
+project, and runs validation scripts from that private copy. No production override
+or fallback is added. Original evaluation packets remain immutable evidence;
+the separately verified production record records their promotion.
+
+Remove temporary artifact downloads and generated source/build trees after review.
+Retain small evidence/receipts, and delete temporary installer CI uploads after
+verification. Source CI retention remains two days; shared source assets remain
+available alongside the binary versions they describe.
 
 The source check stages installed NOTICE/LGPL/source mapping in its
 private package. Production after-pack requires the reviewed platform source

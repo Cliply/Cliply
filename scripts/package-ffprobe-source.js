@@ -5,7 +5,7 @@ const { parseArgs } = require("node:util")
 const { sourcePin, hash, configurationFor, inspectArchitecture, inspectConfiguration, inspectLibraries } = require("./build-ffprobe-prototype")
 const repo = path.resolve(__dirname, "..")
 const runtimePins = require("../third-party/ffprobe/runtime-notices.json")
-const checks = ["package", "helpers", "libraries", "inspection", "export", "tracks", "remux", "trim", "packaged-ui", "normal-startup", "download-recovery", "url-media"]
+const checks = ["package", "helpers", "libraries", "inspection", "export", "tracks", "remux", "trim", "segments", "packaged-ui", "normal-startup", "download-recovery", "url-media"]
 function requirePassedValidation(evidence, facts) {
   const commands = JSON.parse(fs.readFileSync(path.join(evidence, "commands.json"), "utf8"))
   assert(commands.length && commands.every(command => command.status === 0 && !command.error), "cannot retain a failed validation")

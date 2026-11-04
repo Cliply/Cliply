@@ -15,7 +15,7 @@ beforeEach(() => {
   facts = { platform: "darwin-arm64", executableSha256: hash(path.join(build, "ffprobe")), commit: sourcePin.commit, archiveSha256: hash(path.join(build, "source.tar")), recipeSha256: "a".repeat(64) }
   put("prototype.json", JSON.stringify(facts))
   readBuild.mockReturnValue({ facts, executable: path.join(build, "ffprobe") })
-  commands = ["package", "helpers", "libraries", "inspection", "export", "tracks", "remux", "trim", "packaged-ui", "normal-startup", "download-recovery", "url-media"].map(name => ({ name, status: 0 }))
+  commands = ["package", "helpers", "libraries", "inspection", "export", "tracks", "remux", "trim", "segments", "packaged-ui", "normal-startup", "download-recovery", "url-media"].map(name => ({ name, status: 0 }))
   save(); fs.writeFileSync(path.join(evidence, "artifact.json"), JSON.stringify({ evidenceKind: "source-built", platform: facts.platform, inputSha256: facts.executableSha256, packagedSha256: "b".repeat(64) }))
 })
 const save = () => fs.writeFileSync(path.join(evidence, "commands.json"), JSON.stringify(commands))

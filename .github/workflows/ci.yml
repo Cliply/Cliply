@@ -61,7 +61,7 @@ jobs:
     if: ${{ !inputs.stage_linux_helpers && !inputs.ffprobe_candidate_check && !inputs.ffprobe_source_check }}
     name: ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: ${{ inputs.package_check && 35 || 20 }}
+    timeout-minutes: ${{ inputs.package_check && 60 || 20 }}
     env:
       CLIPLY_REQUIRE_FFPROBE: ${{ inputs.local_media_check && '1' || '0' }}
     strategy:
@@ -176,6 +176,23 @@ jobs:
       - name: Verify Linux AppImage launcher and installed DEB
         if: github.event_name == 'workflow_dispatch' && inputs.package_check && runner.os == 'Linux'
         run: dbus-run-session -- xvfb-run --auto-servernum node scripts/smoke-packaged-linux.js
+
+      - name: Validate final installed artifact payloads
+        if: github.event_name == 'workflow_dispatch' && inputs.package_check && runner.os != 'Linux'
+        run: node scripts/smoke-installed-artifacts.js --resources "${{ matrix.resources }}" --evidence "${{ runner.temp }}/cliply-installed-artifacts.json" ${{ inputs.local_media_check && '--local-media' || '' }}
+
+      - name: Validate final installed artifact payloads on Linux
+        if: github.event_name == 'workflow_dispatch' && inputs.package_check && runner.os == 'Linux'
+        run: dbus-run-session -- xvfb-run --auto-servernum node scripts/smoke-installed-artifacts.js --resources "${{ matrix.resources }}" --evidence "${{ runner.temp }}/cliply-installed-artifacts.json" ${{ inputs.local_media_check && '--local-media' || '' }}
+
+      - name: Upload final installer verification evidence
+        if: always() && github.event_name == 'workflow_dispatch' && inputs.package_check
+        uses: actions/upload-artifact@v4
+        with:
+          name: installed-artifact-evidence-${{ runner.os }}
+          path: ${{ runner.temp }}/cliply-installed-artifacts.json
+          if-no-files-found: warn
+          retention-days: 7
 
       - name: Upload validation installers
         if: github.event_name == 'workflow_dispatch' && inputs.package_check

@@ -11,6 +11,28 @@ const { createHttpClient } = require("../src/main/services/ytdlp-updater")
 const candidates = require("../third-party/ffprobe/candidates.json")
 const repo = path.resolve(__dirname, "..")
 
+function prepareCandidateProject({ project, stagedProbe, platform, sourceRoot = repo }) {
+  const directory = { "darwin-arm64": "macos", "linux-x64": "linux", "win32-x64": "windows" }[platform]
+  assert(directory, `Unsupported candidate platform: ${platform}`)
+  fs.mkdirSync(project) // Only a newly owned copy may have its production pins cleared.
+  const tracked = spawnSync("git", ["ls-files", "-z"], { cwd: sourceRoot, encoding: "utf8" })
+  assert.equal(tracked.status, 0)
+  for (const relative of new Set([...tracked.stdout.split("\0").filter(Boolean), "third-party/ffprobe/published.json", "third-party/ffprobe/runtime-notices.json", "scripts/ffprobe-notices.js"])) {
+    const destination = path.join(project, relative)
+    fs.mkdirSync(path.dirname(destination), { recursive: true }); fs.copyFileSync(path.join(sourceRoot, relative), destination)
+  }
+  // Evaluation stays independent of production selection, including after a
+  // platform has shipped. All verification scripts execute from this copy.
+  fs.writeFileSync(path.join(project, "third-party/ffprobe/published.json"), "{}\n")
+  for (const relative of ["node_modules", "src/main/renderer/dist", `binaries/${directory}`, `binaries/deno/${directory}`]) {
+    fs.cpSync(path.join(sourceRoot, relative), path.join(project, relative), { recursive: true, verbatimSymlinks: true, mode: fs.constants.COPYFILE_FICLONE })
+  }
+  const probe = path.join(project, "binaries", directory, platform === "win32-x64" ? "ffprobe.exe" : "ffprobe")
+  // Replace only the private copy; the repository's published helper survives.
+  fs.rmSync(probe, { force: true })
+  fs.copyFileSync(stagedProbe, probe, fs.constants.COPYFILE_EXCL)
+}
+
 async function validate({ archive, evidence, sourceBuild, noticeRecord }) {
   const platform = `${process.platform}-${process.arch}`, candidate = candidates[platform]
   assert(candidate, `Unsupported native host: ${platform}`)
@@ -19,10 +41,11 @@ async function validate({ archive, evidence, sourceBuild, noticeRecord }) {
   assert(evidence && path.isAbsolute(evidence), "Pass a new absolute --evidence directory")
   fs.mkdirSync(evidence) // Never overwrite an existing evidence packet.
   const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "cliply-candidate-"))
+  const project = path.join(scratch, "project")
   const manifest = path.join(repo, "third-party/ffprobe/published.json"), initialManifest = await hash(manifest)
   const commands = []
   function run(name, executable, args, env = {}) {
-    const result = spawnSync(executable, args, { cwd: repo, env: { ...process.env, ...env }, encoding: "utf8", timeout: 15 * 60 * 1000, maxBuffer: 16 * 1024 * 1024 })
+    const result = spawnSync(executable, args, { cwd: project, env: { ...process.env, ...env }, encoding: "utf8", timeout: 15 * 60 * 1000, maxBuffer: 16 * 1024 * 1024 })
     fs.writeFileSync(path.join(evidence, name + ".log"), (result.stdout || "") + (result.stderr || ""))
     commands.push({ name, executable, args, status: result.status, error: result.error?.message })
     assert.equal(result.status, 0, `${name}: ${result.error?.message || result.stderr?.slice(-2000)}`)
@@ -46,22 +69,10 @@ async function validate({ archive, evidence, sourceBuild, noticeRecord }) {
     }
     assert(facts.nativeExecution, "native execution is required")
     fs.writeFileSync(path.join(evidence, sourceBuild ? "source-build.json" : "candidate.json"), JSON.stringify(facts, null, 2) + "\n")
-    const project = path.join(scratch, "project"); fs.mkdirSync(project)
     // Copy only tracked project inputs, then explicit built/dependency/helper
     // trees. Never copy unrelated untracked user files (such as python/).
-    const tracked = spawnSync("git", ["ls-files", "-z"], { cwd: repo, encoding: "utf8" })
-    assert.equal(tracked.status, 0)
-    for (const relative of new Set([...tracked.stdout.split("\0").filter(Boolean), "third-party/ffprobe/published.json", "third-party/ffprobe/runtime-notices.json", "scripts/ffprobe-notices.js"])) {
-      const destination = path.join(project, relative)
-      fs.mkdirSync(path.dirname(destination), { recursive: true }); fs.copyFileSync(path.join(repo, relative), destination)
-    }
-    const directory = { darwin: "macos", linux: "linux", win32: "windows" }[process.platform]
-    for (const relative of ["node_modules", "src/main/renderer/dist", `binaries/${directory}`, `binaries/deno/${directory}`]) {
-      fs.cpSync(path.join(repo, relative), path.join(project, relative), { recursive: true, verbatimSymlinks: true, mode: fs.constants.COPYFILE_FICLONE })
-    }
+    prepareCandidateProject({ project, stagedProbe: path.join(staged, facts.asset), platform })
     const suffix = process.platform === "win32" ? ".exe" : ""
-    const probe = path.join(project, "binaries", directory, "ffprobe" + suffix)
-    fs.copyFileSync(path.join(staged, facts.asset), probe, fs.constants.COPYFILE_EXCL)
     const config = { ...require("../package.json").build, extends: null, npmRebuild: false,
       electronDist: path.join(repo, "node_modules/electron/dist"), directories: { ...require("../package.json").build.directories, output: path.join(scratch, "package") } }
     const configFile = path.join(scratch, "build.json"); fs.writeFileSync(configFile, JSON.stringify(config))
@@ -106,4 +117,4 @@ if (require.main === module) {
   const { values } = parseArgs({ options: { archive: { type: "string" }, evidence: { type: "string" }, "source-build": { type: "string" } } })
   validate({ ...values, sourceBuild: values["source-build"] }).catch(error => { console.error(error); process.exitCode = 1 })
 }
-module.exports = { validate }
+module.exports = { validate, prepareCandidateProject }

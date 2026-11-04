@@ -7,7 +7,7 @@ const assert = require("node:assert/strict")
 const { spawnSync } = require("node:child_process")
 const { parseArgs } = require("node:util")
 const { verifyPackagedHelpers } = require("./verify-packaged-helpers")
-async function run(resources, { idleOnly = false, normalStartup = false, longMedia = false } = {}) {
+async function run(resources, { idleOnly = false, normalStartup = false, longMedia = false, isolatedPath = false } = {}) {
   resources = path.resolve(resources)
   assert(fs.existsSync(path.join(resources, "app.asar")), "pass an actual native packaged resources directory")
   await verifyPackagedHelpers(resources, { requireFfprobe: !idleOnly && !normalStartup })
@@ -36,6 +36,12 @@ async function run(resources, { idleOnly = false, normalStartup = false, longMed
       env.CLIPLY_SMOKE_COMPAT = "1"
     } else env.CLIPLY_SMOKE_COMPAT = "0"
     env.CLIPLY_SMOKE_IDLE = idleOnly ? "1" : "0"
+    if (isolatedPath) {
+      // Prove the application uses bundled absolute helper paths. Fixture
+      // generation and ldd verification above still need normal OS tools.
+      for (const key of Object.keys(env)) if (key.toUpperCase() === "PATH") delete env[key]
+      env.PATH = path.join(scratch, "empty-path"); fs.mkdirSync(env.PATH)
+    }
     const executable = mac ? path.join(appDir, "Contents", "MacOS", "Cliply") : path.join(appDir, process.platform === "win32" ? "Cliply.exe" : "cliply-desktop")
     assert(fs.existsSync(executable), `missing packaged launcher: ${executable}`)
     if (process.platform === "linux" && process.env.GITHUB_ACTIONS === "true") {
@@ -68,8 +74,8 @@ async function run(resources, { idleOnly = false, normalStartup = false, longMed
   }
 }
 if (require.main === module) {
-  const { values } = parseArgs({ options: { resources: { type: "string" }, "idle-only": { type: "boolean", default: false }, "normal-startup": { type: "boolean", default: false }, "long-media": { type: "boolean", default: false } } })
+  const { values } = parseArgs({ options: { resources: { type: "string" }, "idle-only": { type: "boolean", default: false }, "normal-startup": { type: "boolean", default: false }, "long-media": { type: "boolean", default: false }, "isolated-path": { type: "boolean", default: false } } })
   if (!values.resources) throw new Error("Pass --resources <actual native packaged resources>")
-  run(values.resources, { idleOnly: values["idle-only"], normalStartup: values["normal-startup"], longMedia: values["long-media"] }).catch(error => { console.error(error); process.exitCode = 1 })
+  run(values.resources, { idleOnly: values["idle-only"], normalStartup: values["normal-startup"], longMedia: values["long-media"], isolatedPath: values["isolated-path"] }).catch(error => { console.error(error); process.exitCode = 1 })
 }
 module.exports = { run }

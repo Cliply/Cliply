@@ -6,19 +6,24 @@ const { parseArgs } = require("node:util")
 const { createHash } = require("node:crypto")
 const { createReadStream } = require("node:fs")
 const publishedFfprobe = require("../third-party/ffprobe/published.json")
+const sourcePin = require("../third-party/ffprobe/source-build.json")
 const { createHttpClient } = require("../src/main/services/ytdlp-updater")
 
 const TARGETS = {
-  "darwin-arm64": { directory: "macos", ffmpeg: "ffmpeg", deno: "deno", ffprobe: "ffprobe" },
-  "win32-x64": { directory: "windows", ffmpeg: "ffmpeg.exe", deno: "deno.exe", ffprobe: "ffprobe.exe" },
-  "linux-x64": { directory: "linux", ffmpeg: "ffmpeg-linux-x64", deno: "deno-linux-x64", ffprobe: "ffprobe-linux-x64" }
+  "darwin-arm64": { directory: "macos", ffmpeg: "ffmpeg", deno: "deno" },
+  "win32-x64": { directory: "windows", ffmpeg: "ffmpeg.exe", deno: "deno.exe" },
+  "linux-x64": { directory: "linux", ffmpeg: "ffmpeg-linux-x64", deno: "deno-linux-x64" }
 }
 
 function ffprobeRelease(platform, records = publishedFfprobe) {
   const record = records[platform]
-  if (!record) return null
-  if (!/^[a-f0-9]{64}$/.test(record.sha256) || !Number.isSafeInteger(record.assetId) || record.assetId <= 0 ||
-      typeof record.sourceRecord !== "string" || !record.sourceRecord.trim()) throw new Error(`Invalid published FFprobe record for ${platform}`)
+  if (!Object.hasOwn(records, platform)) return null
+  const validHash = value => typeof value === "string" && /^[a-f0-9]{64}$/.test(value)
+  if (!TARGETS[platform] || !record || !validHash(record.sha256) || !Number.isSafeInteger(record.assetId) || record.assetId <= 0 ||
+      record.assetName !== `ffprobe-${sourcePin.commit.slice(0, 12)}-${platform}-${record.sha256.slice(0, 12)}${platform === "win32-x64" ? ".exe" : ""}` ||
+      record.sourceRecord !== `distributions/${platform}/SOURCE.json` || !validHash(record.sourceRecordSha256)) {
+    throw new Error(`Invalid published FFprobe record for ${platform}`)
+  }
   return record
 }
 
@@ -69,7 +74,7 @@ async function fetchHelpers({
   const entries = [
     { asset: target.ffmpeg, destination: path.join(binariesDir, target.directory, `ffmpeg${suffix}`) },
     { asset: target.deno, destination: path.join(binariesDir, "deno", target.directory, `deno${suffix}`) },
-    ...(ffprobe ? [{ asset: target.ffprobe, sha256: ffprobe.sha256, destination: path.join(binariesDir, target.directory, `ffprobe${suffix}`) }] : [])
+    ...(ffprobe ? [{ asset: ffprobe.assetName, sha256: ffprobe.sha256, destination: path.join(binariesDir, target.directory, `ffprobe${suffix}`) }] : [])
   ]
   try {
     const results = await Promise.allSettled(entries.map(async (entry) => {

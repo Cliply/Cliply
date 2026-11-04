@@ -83,11 +83,16 @@ FFprobe's prepared paths are `binaries/macos/ffprobe`,
 `<resources>/binaries/ffprobe[.exe]`. The reviewed publication manifest
 [`published.json`](../third-party/ffprobe/published.json) is intentionally empty.
 Until it has a platform record, `fetch:helpers` fetches only FFmpeg and Deno.
-Each future record contains the verified shared-release asset ID, final executable
-SHA256 and source-record reference. Fetching verifies that hash and architecture
+Each production record contains a versioned `assetName`, verified shared-release
+asset ID, executable SHA256 and source-record reference/checksum. FFprobe asset
+names are `ffprobe-<source-commit12>-<platform>-<sha256-first12>[.exe]`; only Windows
+uses `.exe`. The build downloader uses that exact name, then installs it under
+the stable local filename above. Old release assets are retained, so older pinned
+builds remain fetchable. Fetching verifies the hash and architecture
 before installing any staged helper. It never follows an upstream “latest” URL.
 A changed shared asset fails the pinned hash check; it cannot silently update the
-helper used by an app build.
+helper used by an app build. The source archive has its own content-addressed
+asset name and hash; its URL is included in the installed notice record.
 
 `node scripts/fetch-helpers.js --require-ffprobe` fails before downloading anything
 when the platform has no publication record. `CLIPLY_REQUIRE_FFPROBE=1` applies

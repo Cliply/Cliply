@@ -58,3 +58,15 @@ test.each(["stdout", "stderr"])("a shutdown diagnostic in %s fails even with a s
   await expect(run(resources, { normalStartup: true })).rejects.toThrow("packaged app reported a shutdown failure")
   expect(fs.existsSync(scratch)).toBe(false)
 })
+
+test("installed-payload checks launch with an owned empty PATH and no inherited Path alias", async () => {
+  const inherited = process.env.Path
+  process.env.Path = "C:\\developer helpers"
+  try {
+    await run(resources, { normalStartup: true, isolatedPath: true })
+    const environment = spawnSync.mock.calls[0][2].env
+    expect(Object.keys(environment).filter(key => key.toUpperCase() === "PATH")).toEqual(["PATH"])
+    expect(environment.PATH).toBe(path.join(scratch, "empty-path"))
+    expect(environment.CLIPLY_DEV_FFPROBE).toBeUndefined()
+  } finally { inherited === undefined ? delete process.env.Path : process.env.Path = inherited }
+})
