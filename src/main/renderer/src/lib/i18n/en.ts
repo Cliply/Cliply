@@ -380,9 +380,12 @@ export const en = {
   // what a bar with no position tells assistive tech
   "progress.working": "Working",
 
-  "feedback.title": "Help us improve",
-  "feedback.subtitle": "Request a feature",
-  "feedback.cta": "tap me :)",
+  "community.homePrompt": "got an idea for cliply?",
+  "community.homeLink": "come chat on discord",
+  "feedback.title": "help shape cliply",
+  "feedback.subtitle": "get help, share ideas, see what's next.",
+  "feedback.cta": "join discord",
+  "feedback.alternative": "send feedback",
 
   "layout.downloadsAt": "Downloads stored at",
   "layout.concurrentNote":
