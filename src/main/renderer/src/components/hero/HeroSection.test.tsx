@@ -14,6 +14,7 @@ import { useCookieStore } from "@/lib/stores/cookieStore"
 import { en } from "@/lib/i18n/en"
 import { ru } from "@/lib/i18n/ru"
 import { useLocale } from "@/lib/i18n"
+import { systemApi } from "@/lib/api"
 
 vi.mock("@/lib/api", () => ({
   updaterApi: { checkForUpdates: vi.fn() },
@@ -51,6 +52,14 @@ beforeEach(() => {
 })
 
 afterEach(cleanup)
+
+test("the home invite opens Discord through the browser bridge", async () => {
+  const { HeroSection } = await import("./HeroSection")
+  render(<HeroSection />)
+
+  fireEvent.click(screen.getByRole("link", { name: "come chat on discord" }))
+  expect(systemApi.openExternal).toHaveBeenLastCalledWith("https://discord.gg/kjhtgYFFbh")
+})
 
 describe("the line in the top chrome", () => {
   test("names the problem the user actually has", async () => {

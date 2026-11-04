@@ -2,7 +2,8 @@ import { DownloadsToggle } from "@/components/downloads/DownloadsToggle"
 import { LocaleToggle } from "@/components/ui/locale-toggle"
 import { MenuVertical } from "@/components/ui/menu-vertical"
 import { ModeToggle } from "@/components/ui/mode-toggle"
-import { updaterApi } from "@/lib/api"
+import { systemApi, updaterApi } from "@/lib/api"
+import { DISCORD_INVITE_URL } from "@/lib/community"
 import { cookieActions } from "@/lib/stores/cookieStore"
 import { useT } from "@/lib/i18n"
 import { motion } from "framer-motion"
@@ -168,6 +169,19 @@ export function HeroSection() {
             transition={{ duration: 0.8, delay: 0.5, ease: "easeOut" }}
           >
             <SearchCard platform={selectedPlatform} />
+            <p className="mt-5 px-4 text-center font-mono text-xs leading-relaxed text-slate-500 dark:text-slate-400">
+              {t("community.homePrompt")}{" "}
+              <a
+                href={DISCORD_INVITE_URL}
+                onClick={(event) => {
+                  event.preventDefault()
+                  void systemApi.openExternal(DISCORD_INVITE_URL)
+                }}
+                className="rounded-sm text-cyan-600 underline decoration-cyan-600/30 underline-offset-4 transition-colors hover:text-cyan-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-cyan-500 dark:text-cyan-400 dark:hover:text-cyan-300"
+              >
+                {t("community.homeLink")}
+              </a>
+            </p>
           </motion.div>
         </div>
       </div>
