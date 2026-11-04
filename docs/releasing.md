@@ -116,7 +116,9 @@ to the actual signed helper. Linux also requires pinned GCC/glibc runtime notice
 and full GPLv3 text. Windows adds exact GCC/MinGW/winpthreads notices and the
 additional GPL texts, with an archive-owner/hash check. These installed notice
 paths passed native validation; the production manifest stays empty until final
-distribution prerequisites pass.
+distribution prerequisites pass. Windows runtime inventory updates must include the
+[package/source review](../third-party/ffprobe/source-build.md#runtime-update-reviewed-4-november-2026)
+and fresh source CI; supplier-candidate success cannot qualify changed source-built inputs.
 
 With existing dependencies, built renderer and ordinary project helpers, the
 same candidate checks can run locally:

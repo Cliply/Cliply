@@ -324,12 +324,12 @@ Official [GCC](https://packages.msys2.org/packages/mingw-w64-ucrt-x86_64-gcc),
 [CRT](https://packages.msys2.org/packages/mingw-w64-ucrt-x86_64-crt),
 [headers](https://packages.msys2.org/packages/mingw-w64-ucrt-x86_64-headers) and
 [winpthreads](https://packages.msys2.org/packages/mingw-w64-ucrt-x86_64-winpthreads)
-records checked 3 November 2026 match the captured GCC 16.2.0-6 and MinGW
-14.0.0.r569.g34eeafb7d-1 versions and packager runs. Their exact versioned
-source-only tarball URLs are recorded in runtime-notices.json. Those compiler/
-runtime source archives have not been downloaded or content-hashed here; the
-packet records that limit explicitly and does not claim to contain them. The
-packet does contain the complete exact FFmpeg source used for this executable.
+records checked 3 November 2026 matched the initial GCC 16.2.0-6 and MinGW
+14.0.0.r569.g34eeafb7d-1 versions and packager runs. The reviewed update below
+advances only the four MinGW runtime packages. Exact versioned source URLs and
+whether each source archive was downloaded/hash-checked are recorded in
+runtime-notices.json. Compiler/runtime source archives are not embedded in the
+packet; it contains the complete exact FFmpeg source used for the executable.
 No MSYS2/compiler executable, runtime archive or system DLL is redistributed.
 
 Windows installed-notice validation has passed on the recorded native host.
@@ -337,3 +337,42 @@ Minimum Windows 10, clean installed/offline behavior, source/distribution
 selection and production publication remain separate gates. No deterministic
 Windows executable rebuild is inferred merely from fixed tool versions; native
 artifact hashes identify the particular build validated by each run.
+
+### Runtime update reviewed 4 November 2026
+
+[Run 41817035809](https://github.com/Cliply/Cliply/actions/runs/41817035809)
+stopped before Windows package validation because CRT, headers, libwinpthread
+and winpthreads advanced to `14.0.0.r598.ge3d18511f-1`. That failed build supplies
+review inputs, not a successful candidate. The accepted inventory and exact
+archive-owner version now reflect the reviewed packages; verifier code is
+unchanged. All 13 notice hashes, GCC/NASM/linker hashes, system DLL imports and
+the static `libwinpthread.a` hash retain their previous values.
+
+The four downloaded UCRT64 package archives match the SHA256 values on their
+official MSYS2 package records. Their `.BUILDINFO` recipe hashes match
+[MSYS2 recipe commit 07f00a4d](https://github.com/msys2/MINGW-packages/commit/07f00a4d37082cdeaeefc366ff939b9975cf83fd).
+All nine notices from those packages and the static thread archive match the
+captured native files. Archive URLs, hashes and recipe identities are retained
+in `runtime-notices.json` under `reviewedUpdate`.
+
+The [29 upstream commits](https://github.com/mingw-w64/mingw-w64/compare/34eeafb7d0e5b037b4644c17defc4f4131ad85cc...e3d18511f9759d455cae20c34703eea4a0723cf3)
+include allocation-overflow handling, CRT math/symbol selection and winpthreads
+header changes. Build flags and notice-installation recipes are unchanged.
+The optional VCRuntime import library requires explicit selection; the existing
+system-only DLL gate remains mandatory. The captured FFprobe executable hash
+changed despite matching size, configuration and imported DLL/symbol sets, so
+previous native success cannot qualify this build.
+
+CRT and headers source-only archives were downloaded and hashed. Their recipes
+match the pinned MSYS2 commit; the CRT archive's Git tree contains both reviewed
+revisions and exports the exact source checksum in the recipes. The five upstream
+notice files are unchanged across those revisions. The separate winpthreads and
+GCC source-only archives were not downloaded; the winpthreads recipe and shared
+source revision were checked. This review makes no new distribution-license claim.
+
+Fresh source CI must build and validate the updated runtime, repeat source-packet
+assembly deterministically, verify installed notices against the packaged helper,
+and pass all media/UI/startup/download checks. Current results are recorded in
+[PR #77](https://github.com/Cliply/Cliply/pull/77). Rolling package acquisition
+remains guarded by exact inventory/content checks; further drift requires review.
+Production publication and minimum-OS acceptance remain separate.
