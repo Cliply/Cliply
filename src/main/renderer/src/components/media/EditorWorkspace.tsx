@@ -24,6 +24,10 @@ export function EditorWorkspace({ preview, inspector, timeline }: {
   const t = useT()
   const container = useRef<HTMLDivElement>(null)
   const [minimums, setMinimums] = useState(() => panelMinimums(window.innerWidth - (window.innerWidth <= 1000 ? 66 : 98), window.innerHeight - 84))
+  // Route re-entry can render the library's default layout before registration
+  // applies constraints. Keep that initial layout readable on small windows too.
+  const inspectorSize = Math.max(28, minimums.inspector)
+  const timelineSize = Math.max(44, minimums.timeline)
   useEffect(() => {
     const node = container.current
     if (!node || typeof ResizeObserver === "undefined") return
@@ -37,19 +41,19 @@ export function EditorWorkspace({ preview, inspector, timeline }: {
     return () => observer.disconnect()
   }, [])
   return <div ref={container} className="editor-panels"><ResizablePanelGroup direction="horizontal" id="media-workspace-panels">
-    <ResizablePanel id="media-canvas" order={1} defaultSize={72} minSize={48}>
+    <ResizablePanel id="media-canvas" order={1} defaultSize={100 - inspectorSize} minSize={48}>
       <ResizablePanelGroup direction="vertical" id="media-preview-timeline">
-        <ResizablePanel id="media-preview-pane" order={1} defaultSize={56} minSize={minimums.preview} className="editor-preview-pane">
+        <ResizablePanel id="media-preview-pane" order={1} defaultSize={100 - timelineSize} minSize={minimums.preview} className="editor-preview-pane">
           {preview}
         </ResizablePanel>
         <ResizableHandle aria-label={t("media.resizePreview")} />
-        <ResizablePanel id="media-timeline-pane" order={2} defaultSize={44} minSize={minimums.timeline} maxSize={70}>
+        <ResizablePanel id="media-timeline-pane" order={2} defaultSize={timelineSize} minSize={minimums.timeline} maxSize={70}>
           <div className="editor-timeline-pane">{timeline}</div>
         </ResizablePanel>
       </ResizablePanelGroup>
     </ResizablePanel>
     <ResizableHandle aria-label={t("media.resizeInspector")} />
-    <ResizablePanel id="media-inspector-pane" order={2} defaultSize={28} minSize={minimums.inspector} maxSize={48}>
+    <ResizablePanel id="media-inspector-pane" order={2} defaultSize={inspectorSize} minSize={minimums.inspector} maxSize={48}>
       <aside className="editor-inspector" aria-label={t("media.inspector")}>{inspector}</aside>
     </ResizablePanel>
   </ResizablePanelGroup></div>
