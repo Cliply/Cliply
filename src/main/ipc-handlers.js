@@ -1015,8 +1015,8 @@ class IPCHandlers {
           Array.isArray(info.entries)
         ) {
           return this.createError(
-            "instagram carousels aren't supported yet. paste a link to a reel or a post with one video.",
-            "choose an instagram post containing one video.",
+            "carousels aren't supported. use a single video.",
+            "paste a reel or a post with one video.",
             ERROR_CODES.UNSUPPORTED_COLLECTION,
             { category: ERROR_CODES.UNSUPPORTED_COLLECTION }
           )
@@ -1027,7 +1027,7 @@ class IPCHandlers {
           !info.formats.some((format) => format && format.vcodec !== "none")
         ) {
           return this.createError(
-            "this instagram post doesn't contain a downloadable video.",
+            "this post has no downloadable video.",
             "try a public reel or a post with one video.",
             ERROR_CODES.NOT_A_VIDEO,
             { category: ERROR_CODES.NOT_A_VIDEO }
@@ -1069,9 +1069,9 @@ class IPCHandlers {
   instagramRequestUrl(url) {
     const normalized = normalizeInstagramUrl(url)
     if (normalized) return normalized
-    const error = new Error("paste an instagram.com link to a reel or a post with one video.")
+    const error = new Error("paste a direct instagram reel or post link.")
     error.code = ERROR_CODES.INVALID_URL
-    error.suggestion = "stories, profiles, shortened links and carousels aren't supported."
+    error.suggestion = "use an instagram.com link."
     throw error
   }
 

@@ -46,11 +46,11 @@ export const en = {
   "url.pinterestHelper":
     "supports pin.it and pinterest.com/pin links, any country domain",
   "url.instagramHelper":
-    "public reels and posts with one video. photos, carousels, stories and private posts are not supported.",
+    "public reels and video posts",
   "error.instagramUrl": "invalid instagram url",
   "validation.instagramRequired": "please enter an instagram url",
-  "validation.instagramInvalid": "please enter an instagram reel or post url",
-  "card.instagramSubtitle": "best available quality, selected automatically.",
+  "validation.instagramInvalid": "paste an instagram reel or post link",
+  "card.instagramSubtitle": "best quality, automatically",
   "card.unknownDuration": "unknown duration",
   "thumb.instagramViewOn": "view on instagram",
   "thumb.instagramOpenFailed": "could not open instagram link",

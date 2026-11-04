@@ -35,12 +35,12 @@ const ERROR_METADATA = {
     suggestion: "Cliply downloads video, so try a link that has one."
   },
   [ERROR_CODES.UNSUPPORTED_COLLECTION]: {
-    message: "instagram carousels aren't supported yet. paste a link to a reel or a post with one video.",
-    suggestion: "choose an instagram post containing one video."
+    message: "carousels aren't supported. use a single video.",
+    suggestion: "paste a reel or a post with one video."
   },
   [ERROR_CODES.LOGIN_REQUIRED]: {
-    message: "instagram requires you to log in or has restricted this link. cliply downloads public instagram videos without cookies.",
-    suggestion: "try another public reel or video post."
+    message: "this video needs login or is restricted.",
+    suggestion: "try another public video."
   },
   [ERROR_CODES.GEO_BLOCKED]: {
     message: "This video isn't available in your country.",
@@ -138,15 +138,15 @@ function wordingFor(code, platform) {
     if (code === ERROR_CODES.EXTRACTION_FAILED) {
       return {
         ...ERROR_METADATA[code],
-        message: "instagram changed how videos are loaded. try updating the downloader.",
+        message: "instagram changed. try updating the downloader.",
         suggestion: "updating the downloader usually fixes this."
       }
     }
     if (code === ERROR_CODES.RATE_LIMITED) {
       return {
         ...ERROR_METADATA[code],
-        message: "instagram is temporarily limiting this device.",
-        suggestion: "wait a few minutes before trying again."
+        message: "instagram is limiting requests. try again later.",
+        suggestion: "wait a few minutes."
       }
     }
   }

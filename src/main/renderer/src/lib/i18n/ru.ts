@@ -35,13 +35,13 @@ export const ru: Record<Key, string> = {
   "url.pinterestHelper":
     "поддерживаются ссылки pin.it и pinterest.com/pin, любой домен страны",
   "url.instagramHelper":
-    "публичные reels и публикации с одним видео. фото, карусели, истории и закрытые публикации не поддерживаются.",
+    "публичные reels и публикации с видео",
   "error.instagramUrl": "неверная ссылка на instagram",
   "validation.instagramRequired": "введите ссылку на instagram",
   "validation.instagramInvalid":
-    "введите ссылку на reel или публикацию instagram",
+    "вставьте ссылку на reels или видео в instagram",
   "card.instagramSubtitle":
-    "лучшее доступное качество, выбирается автоматически.",
+    "лучшее качество автоматически",
   "card.unknownDuration": "длительность неизвестна",
   "thumb.instagramViewOn": "открыть в instagram",
   "thumb.instagramOpenFailed": "не удалось открыть ссылку instagram",
@@ -479,14 +479,14 @@ export const ruErrors: Partial<
       "возможно, оно приватное, с возрастным ограничением или удалено."
   },
   LOGIN_REQUIRED: {
-    message: "instagram требует входа для доступа к этому видео.",
+    message: "для видео нужен вход или доступ ограничен.",
     suggestion:
-      "cliply поддерживает только публичные видео instagram, доступные без входа. попробуйте другую публичную ссылку."
+      "попробуйте другое публичное видео."
   },
   UNSUPPORTED_COLLECTION: {
     message: "карусели instagram не поддерживаются.",
     suggestion:
-      "используйте ссылку на публичный reel или публикацию с одним видео."
+      "вставьте ссылку на reels или одно видео."
   },
   NOT_A_VIDEO: {
     message: "по этой ссылке нет видео.",
@@ -575,11 +575,11 @@ export const ruErrors: Partial<
 // unless the caller knows it is displaying an Instagram error.
 export const ruInstagramErrors: typeof ruErrors = {
   EXTRACTION_FAILED: {
-    message: "instagram изменил способ загрузки видео.",
+    message: "instagram изменился. обновите загрузчик.",
     suggestion: "обычно помогает обновление загрузчика."
   },
   RATE_LIMITED: {
-    message: "instagram временно ограничивает это устройство.",
+    message: "instagram ограничивает запросы. попробуйте позже.",
     suggestion: "подождите несколько минут перед следующей попыткой."
   }
 }
