@@ -52,18 +52,14 @@ this branch also has a local-file workspace: preview a file, mark sections on a 
 one joined result. You can also extract audio, remove tracks or change a compatible container.
 the compact workspace uses resizable preview/timeline panels and a separate
 section/export inspector, adapted from [OpenCut Classic](third-party/opencut-classic/README.md).
-exports copy existing media without re-encoding. cutting and joining follow
-LosslessCut’s procedure; keyframe cuts can start early and normal cuts can have
-a brief picture gap. native playback has an FFmpeg-assisted compatibility mode; unsupported layouts show a reason instead of converting
+exports copy existing media without re-encoding. keyframe cuts can start early and
+normal cuts can have a brief picture gap. see the [cutting and playback credits](third-party/losslesscut/README.md).
+native playback has an FFmpeg-assisted compatibility mode; unsupported layouts show a reason instead of converting
 or silently dropping tracks. the original stays open and exports use a new file.
 
-production availability is pending: shared ffprobe assets and their complete
-source records are not ready. earlier source-built package checks passed on macos 26, windows server 2025 and
-ubuntu 24.04. the replacement media foundation has separate validation recorded
-in PR #77; older os verification and production distribution remain pending.
-normal builds without ffprobe show a readable inspection error; downloads still
-work. see the [verified profiles and limits](docs/architecture.md#local-media-validation-status)
-and [development staging instructions](third-party/ffprobe/README.md).
+builds from this branch bundle the verified ffprobe executable for the target platform.
+the editor is pending an app release. see the [verified profiles and limits](docs/architecture.md#local-media-validation-status)
+and [ffprobe build and source records](third-party/ffprobe/README.md).
 
 ### get it
 
