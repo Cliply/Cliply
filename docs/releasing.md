@@ -10,7 +10,7 @@ code. Do not run a publishing workflow to test a change.
 
 | Workflow | Trigger and effect |
 | --- | --- |
-| [CI](../.github/workflows/ci.yml) | PRs and pushes to master run checks. Manual `package_check=true` also builds native installers with publishing disabled. |
+| [CI](../.github/workflows/ci.yml) | PRs and pushes to master run checks. Manual `package_check=true` also builds native installers with publishing disabled. `ffprobe_candidate_check=true` instead runs only read-only native candidate checks. |
 | [Build Release](../.github/workflows/build-release.yml) | A pushed `v*` tag or manual dispatch builds and publishes an app release. Both triggers are publishing actions. |
 | [Stage Linux helpers](../.github/workflows/stage-linux-helpers.yml) | Manual/reusable upstream verification. `publish=false` is the default; explicit publication adds Linux FFmpeg/Deno assets to the existing helper release. |
 | [Build PO token payload](../.github/workflows/build-pot-payload.yml) | Manual native payload builds for selected platforms. `publish=false` is the default; publication writes to the helper release. |
@@ -37,6 +37,19 @@ installers with `--publish never`, runs real packaged helper/media/recovery chec
 and validates aggregated update manifests against installer size/SHA512. Its token
 is read-only. Keep helper staging inputs off for normal package validation.
 
+Final-artifact checks also consume the unchanged DMG, NSIS Setup, DEB and AppImage:
+copy the app from a read-only mounted DMG into a path with spaces; perform a silent
+per-user NSIS installation into a path with spaces; install and purge the DEB on
+the disposable runner; and extract the final AppImage payload. Existing AppImage
+launcher/update checks remain separate. These checks refuse existing Cliply
+installations and run only on native disposable GitHub runners. They compare the
+installed ASAR, bundled helpers and notices with the qualified unpacked payload,
+then check helpers, normal services, offline editor actions and download recovery.
+GUI checks use the existing isolated-entry harness on copies of installed bytes,
+with an empty helper PATH; they are not pristine signed-app, Gatekeeper or minimum-
+OS acceptance. Small per-artifact JSON evidence records identity, checks and
+cleanup. Installer files themselves are never modified or republished by tests.
+
 Run only the probes needed for a helper or packaging change:
 
 ```sh
@@ -48,6 +61,174 @@ node scripts/smoke-download-recovery.js --resources <resources-directory>
 The resource argument must point to the actual native build, not a different
 platform's tree. Media/recovery checks create local fixtures and clean their
 temporary files. Ordinary mocked unit tests do not require these executables.
+
+Source-built FFprobe and matching source archives are published for all three
+supported targets. [Production records](../third-party/ffprobe/published.json)
+activate required acquisition, source notices and package checks. The
+[distribution guide](../third-party/ffprobe/README.md) describes the exact inputs.
+Ordinary source-tree CI does not fetch helpers and is not installer acceptance;
+run the required production package/local-media mode below before shipping.
+
+The prepared CI input `local_media_check=true` requires `package_check=true`.
+It sets `CLIPLY_REQUIRE_FFPROBE=1`, requires the published pin during fetching,
+fails packaging on a missing FFprobe, and runs packaged offline local-media UI
+plus concurrent URL/local-export recovery checks. Run it on a reviewed, pushed
+`local-media-tools` ref only when workflow/push authority and helper readiness
+are established. Do not dispatch Build Release for validation.
+
+Prepublication native evidence uses the separate read-only
+[Validate FFprobe candidates](../.github/workflows/validate-ffprobe-candidate.yml)
+workflow. An authorized actor must first review, commit and push the Stage 7
+`local-media-tools` ref, then dispatch the existing **CI** workflow on that ref
+with `ffprobe_candidate_check=true` and all other inputs false. This mode runs
+only the read-only candidate workflow; it takes precedence over other modes.
+The local reusable-workflow call uses the same commit as CI. Direct manual
+dispatch of the new workflow (no inputs) is available only once its definition
+exists on the default branch, as required by
+[GitHub's dispatch rules](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#onworkflow_dispatch).
+Its macOS ARM64, Windows x64
+and Ubuntu 24.04 x64 jobs acquire the exact `candidates.json` pins, stage/hash/check
+them and build disposable native packages. Native version/license/libraries,
+inspection, all four tools, cancel/crash recovery, packaged UI, normal-service
+startup and URL recovery run before publication. Only small evidence is uploaded.
+The workflow never writes `published.json`, publishes helpers or uses a latest
+candidate. These hosts do not establish minimum-OS support.
+
+The alternative **source-built** path is separate: dispatch existing CI with
+`ffprobe_source_check=true` and all other inputs false after the reviewed ref is
+authorized and pushed. It calls
+[Validate source-built FFprobe](../.github/workflows/validate-ffprobe-source.yml)
+at the same commit, builds the exact pinned FFmpeg-only design and validates
+that executable in a disposable native app. Supplier mode retains priority if
+both flags are set; ordinary app/helper-publication jobs are excluded in either
+mode. By default only small evidence is uploaded. Target draft source packets with
+reviewed runtime inputs are assembled and checked twice in scratch, then removed.
+[Run 41893450459](https://github.com/Cliply/Cliply/actions/runs/41893450459) passed
+all 13 required native checks on macOS 26 ARM64, Windows Server 2025 x64 and
+Ubuntu 24.04 x64 at `48cf479` using n8.1.3: packaged helpers, inspection, export matrices,
+UI/playback, normal startup, download recovery and URL media. Installed source
+and license mappings passed on all three targets. This does not establish
+minimum-OS or final production-installer acceptance.
+See [source-build commands, notices and packet specification](../third-party/ffprobe/source-build.md).
+
+Locally, `node scripts/validate-ffprobe-source.js --source <pinned-checkout>
+--evidence <new-absolute-directory>` builds and exercises this whole path.
+`validate-ffprobe-candidate.js --source-build <absolute-build> --evidence
+<new-absolute-directory>` validates an already built, hash-bound artifact.
+Neither command changes the production manifest or replaces project helpers.
+
+Source CI may explicitly set `ffprobe_retain_artifacts=true` to retain a
+successfully validated helper and its exact source/build/notice inputs for two-day
+review. It never uploads installers or a shared release. Incomplete runtime/source
+packets remain marked unapproved; failed validation creates no final candidate
+artifact. See the source guide for checksum verification and cleanup. Retention
+is off by default and ignored outside source-check mode.
+
+### Explicit FFprobe promotion
+
+After reviewing the source/runtime inputs, run source CI with retention enabled
+on the exact committed ref. The separate promotion command verifies a successful
+manual CI run from `Cliply/Cliply`, downloads all three retained native candidates,
+and rechecks their inventories, complete source packets, current recipes/pins,
+native commands, runtime notices and installed source mappings. It rejects a
+different checkout commit or tracked local changes. It never creates an app release.
+The repository's `.gitattributes` fixes LF endings for build scripts and FFprobe
+source/notice records, including production JSON. This is part of the checksum
+contract on Windows; do not normalize changed bytes inside a verifier.
+
+```sh
+node scripts/publish-ffprobe.js --run <successful-source-CI-run> --output <new-absolute-plan-directory>
+node scripts/publish-ffprobe.js --run <same-run> --output <new-absolute-publication-directory> --publish
+```
+
+The first command is read-only. The explicit second command adds content-addressed
+helpers and matching source archives to the existing `binaries` release. It never
+uses `--clobber`, replaces an existing asset, or edits pins in the checkout.
+Existing identically named assets must pass the same size/hash/download checks;
+this permits resuming an interrupted upload. Every uploaded asset is downloaded
+again and checked before its ID/URL enters the generated production record.
+
+Review and commit the resulting `published.json` and `distributions/` directory
+under `third-party/ffprobe/`. Then run CI with `package_check=true` and
+`local_media_check=true`, other modes false. This fetches the real published pins
+and validates final installers without publication. Keep source CI usable after
+activation: it clears pins and replaces FFprobe only inside its private evaluation
+project, and runs validation scripts from that private copy. No production override
+or fallback is added. Original evaluation packets remain immutable evidence;
+the separately verified production record records their promotion.
+
+Remove temporary artifact downloads and generated source/build trees after review.
+Retain small evidence/receipts, and delete temporary installer CI uploads after
+verification. Source CI retention remains two days; shared source assets remain
+available alongside the binary versions they describe.
+
+The source check stages installed NOTICE/LGPL/source mapping in its
+private package. Production after-pack requires the reviewed platform source
+record/checksum whenever a production FFprobe pin exists, and binds the mapping
+to the actual signed helper. Linux also requires pinned GCC/glibc runtime notices
+and full GPLv3 text. Windows adds exact GCC/MinGW/winpthreads notices and the
+additional GPL texts, with an archive-owner/hash check. These installed notice
+paths passed native validation; the production manifest selects only explicitly promoted, verified assets. Windows runtime inventory updates must include the
+[package/source review](../third-party/ffprobe/source-build.md#runtime-update-reviewed-4-november-2026)
+and fresh source CI; supplier-candidate success cannot qualify changed source-built inputs.
+
+With existing dependencies, built renderer and ordinary project helpers, the
+same candidate checks can run locally:
+
+```sh
+node scripts/validate-ffprobe-candidate.js --evidence <new-absolute-evidence-directory>
+```
+
+`--archive <absolute-pinned-archive>` avoids downloading it again. The script
+checks the same hashes either way, uses an owned project/package copy, preserves
+the production manifest and removes its temporary executables/media on exit.
+It requires a native desktop session (Linux: Xvfb/DBus is supported). Passing
+candidate checks does not satisfy the separate corresponding-source gate.
+
+For a private native package already containing verified candidate bytes:
+
+```sh
+node scripts/verify-packaged-helpers.js --resources <actual-resources> --require-ffprobe
+node scripts/smoke-packaged-local-media.js --resources <actual-resources>
+node scripts/smoke-download-recovery.js --resources <actual-resources> --local-media
+node scripts/smoke-media.js --resources <actual-resources>
+```
+
+Use the native resources tree. The package UI check copies the app into an owned
+temporary directory, runs its actual ASAR/preload/renderer and bundled helpers
+without development overrides, then removes that copy and profile. Its test entry
+isolates dialogs, telemetry, updates and unrelated external services. It checks
+inspection, playback, all four exports in one session, route/file changes,
+invalid and large files, EN/RU, theme and cleanup. It is not a substitute for a
+normal installed-app startup/update check. `--idle-only` measures that isolated
+unopened workspace for comparisons; it is not cold-start product benchmarking.
+`--normal-startup` instead initializes real application services, settings,
+cookie storage, engine seeding, IPC and the renderer in a fresh owned profile.
+Analytics is opted out and external update scheduling is disabled. It records
+startup/service time, three-second idle process metrics and normal quit drainage;
+it neither clears OS caches nor proves installed-app/update behavior.
+`--long-media` runs the UI actions on a generated five-minute, 720p H.264/AAC
+file instead of the small fixture. For bounded POSIX helper CPU/RSS, temporary
+disk and sequential range measurements, use
+`node scripts/measure-local-media.js <new-absolute-directory> <ffmpeg> <ffprobe>`.
+An optional fourth argument must be a disposable small mounted volume for the
+real disk-full check. Never supply a normal user volume. Remove generated media
+after retaining the JSON evidence; CPU samples are process-lifetime averages and
+can miss short helper peaks.
+On Linux, run the UI check under an available desktop session (CI uses Xvfb/DBus).
+No sandbox bypass is added for packaged acceptance. On an ephemeral GitHub Linux
+runner, the local-media smoke configures only its private app copy's genuine
+Electron `chrome-sandbox` as root-owned mode 4755, matching an installed DEB.
+It first checks private scratch ownership, regular files and byte identity with
+the installed Electron dependency. Electron still launches as the runner user;
+SUID is removed before cleanup. No AppArmor/sysctl or global sandbox setting is
+changed, and neither `--no-sandbox` nor disabled user-namespace protections are
+used. Local desktop runs do not perform this privileged CI setup.
+
+Verified FFprobe helpers and source records have been added without replacing
+existing assets. Helper publication does not publish the app. Native installer
+validation, footprint measurements and minimum-OS evidence are separate from
+source qualification; perform and report the checks relevant to the app release.
 
 The Linux package smoke script runs only on an ephemeral GitHub runner. It copies
 the app into disposable test packages, installs/purges its DEB, checks X11/Wayland
@@ -120,3 +301,36 @@ Keep required helper assets and matching PO hashes available before releasing
 code that selects them. Do not replace another platform's files during a scoped
 update. Remove only your temporary validation uploads after verification; retain
 intended public helper assets and useful CI logs.
+## Local workspace development smoke
+
+Build the renderer, then [fetch the published pinned FFprobe](../third-party/ffprobe/README.md#build-and-verify).
+On a native host with the project FFmpeg and verified FFprobe, run:
+
+```sh
+CLIPLY_SMOKE_PREVIEW=1 \
+CLIPLY_SMOKE_FFPROBE=<absolute-staged-ffprobe> \
+CLIPLY_SMOKE_FFMPEG=<absolute-project-ffmpeg> \
+npm run smoke:electron
+```
+
+This opt-in extension creates synthetic H.264/AAC MP4, PCM WAV and unsupported
+FFV1 Matroska in an isolated temporary profile, exercises native playback/seek,
+file switching, route return, background download list delivery and source
+invalidation, and checks protocol ranges/HEAD/foreign contexts. It removes the
+profile and media on exit. `CLIPLY_SMOKE_EVIDENCE=<directory>` additionally keeps
+small UI captures and a JSON result. Plain `npm run smoke:electron` continues to
+test the missing-helper path. These development checks do not establish native
+package/helper support on other platforms or authorize any publication.
+
+The trim (`CLIPLY_SMOKE_TRIM=1`) and combined
+(`CLIPLY_SMOKE_INTEGRATION=1`) UI checks also exercise the resizable editor at
+1200×800 and 800×600, English/Russian labels, light/dark presentation and keyboard
+panel resizing without seeking. Theme and language changes run through the home
+controls, then return to the retained editor session. They assert shared font/theme
+inheritance, absence of duplicate preference controls, preview visibility, inspector width,
+absence of page overflow and separation of timeline/transport controls. The
+packaged combined UI runner includes the same checks. With
+`CLIPLY_SMOKE_EVIDENCE`, it retains layout captures and `workspace-layout.json`.
+A fixed 784×535 client-area case reproduces the smaller content area inside a
+minimum-size Windows window on every host. The preview and transport footer must
+remain visible; panel minimums share the measured space after the resize handle.

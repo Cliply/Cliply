@@ -130,7 +130,16 @@ class CookieManager {
   /**
    * initialize cookie manager
    */
-  async initialize() {
+  initialize() {
+    // Construction starts initialization; application startup also awaits it.
+    // Share that work so both calls cannot replace the same temporary jar.
+    if (!this.initializing) {
+      this.initializing = this.initializeOnce().finally(() => { this.initializing = null })
+    }
+    return this.initializing
+  }
+
+  async initializeOnce() {
     try {
       // create cookie directory if it doesn't exist
       await fs.mkdir(this.cookieDir, { recursive: true, mode: JAR_DIR_MODE })

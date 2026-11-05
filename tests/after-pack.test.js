@@ -11,6 +11,18 @@ const fsp = require("fs").promises
 const os = require("os")
 const path = require("path")
 
+// Synthetic downloader fixtures exercise an unpublished platform independently
+// of the checked-in production selection. Required capability tests stay strict.
+jest.mock("../third-party/ffprobe/published.json", () => ({}))
+const publishedFixtures = require("../third-party/ffprobe/published.json")
+const sourcePin = require("../third-party/ffprobe/source-build.json")
+const inheritedRequireFfprobe = process.env.CLIPLY_REQUIRE_FFPROBE
+beforeAll(() => { delete process.env.CLIPLY_REQUIRE_FFPROBE })
+afterAll(() => {
+  if (inheritedRequireFfprobe === undefined) delete process.env.CLIPLY_REQUIRE_FFPROBE
+  else process.env.CLIPLY_REQUIRE_FFPROBE = inheritedRequireFfprobe
+})
+
 const afterPack = require("../scripts/after-pack")
 const {
   prepareMacOS,
@@ -905,4 +917,30 @@ describe("afterPack", () => {
       })
     ).resolves.toBeUndefined()
   })
+})
+
+describe("required local media package capability", () => {
+  test.each(["darwin", "win32", "linux"])("%s refuses absent FFprobe when local media is required", async platform => {
+    const pkg = makePackage(platform, { binaries: FULL_BINARIES[platform] })
+    await expect(collectBinaries(path.join(pkg.resourcesPath, "binaries"), platform, { requireFfprobe: true })).rejects.toThrow("missing required binaries: ffprobe")
+    const probe = path.join(pkg.resourcesPath, "binaries", platform === "win32" ? "ffprobe.exe" : "ffprobe")
+    writeFile(probe)
+    expect(await collectBinaries(path.join(pkg.resourcesPath, "binaries"), platform, { requireFfprobe: true })).toContain(probe)
+  })
+})
+
+// A publication pin must activate the real default gate without an explicit flag.
+test.each(["darwin", "win32", "linux"])("published %s requires FFprobe automatically", async platform => {
+  const target = platform + (platform === "darwin" ? "-arm64" : "-x64")
+  const suffix = platform === "win32" ? ".exe" : ""
+  publishedFixtures[target] = { assetId: 123, sha256: "a".repeat(64),
+    assetName: `ffprobe-${sourcePin.commit.slice(0, 12)}-${target}-${"a".repeat(12)}${suffix}`,
+    sourceRecord: `distributions/${target}/SOURCE.json`, sourceRecordSha256: "b".repeat(64) }
+  try {
+    const pkg = makePackage(platform, { binaries: FULL_BINARIES[platform] })
+    await expect(collectBinaries(path.join(pkg.resourcesPath, "binaries"), platform)).rejects.toThrow("missing required binaries: ffprobe")
+    const probe = path.join(pkg.resourcesPath, "binaries", "ffprobe" + suffix)
+    writeFile(probe)
+    expect(await collectBinaries(path.join(pkg.resourcesPath, "binaries"), platform)).toContain(probe)
+  } finally { delete publishedFixtures[target] }
 })

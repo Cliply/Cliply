@@ -1,0 +1,77 @@
+name: Validate source-built FFprobe
+
+# Native evidence only. Separate from pinned supplier validation/publication.
+on:
+  workflow_call:
+    inputs:
+      retain_artifacts:
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  source:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-26
+            platform: darwin-arm64
+          - os: windows-2025
+            platform: win32-x64
+          - os: ubuntu-24.04
+            platform: linux-x64
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm ci
+      - run: npx --no-install install-electron --no
+      - run: npm run install:renderer
+      - run: npm run build:renderer
+      - run: node scripts/fetch-helpers.js --platform ${{ matrix.platform }}
+      - run: npm run fetch:ytdlp
+        env:
+          BUILD_TARGET_PLATFORM: ${{ matrix.platform }}
+      - name: Native Linux build and GUI tools (disposable runner only)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends gcc-13 libc6-dev make binutils nasm xvfb xauth dbus-x11 libgtk-3-0t64 libasound2t64 libgbm1 libnss3
+      - name: Native Windows UCRT64 toolchain (disposable runner only)
+        if: runner.os == 'Windows'
+        id: msys2
+        uses: msys2/setup-msys2@ec48f7c5447b3140e2b088413ae3a55687bccb6e # v2, reviewed source-build setup
+        with:
+          msystem: UCRT64
+          location: ${{ runner.temp }}/ffprobe-msys2
+          path-type: minimal
+          update: true
+          cache: false
+          install: make diffutils tar mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-nasm
+      - name: Native source build and exact-artifact checks
+        if: runner.os != 'Linux'
+        run: node scripts/validate-ffprobe-source.js --evidence "${{ runner.temp }}/source-evidence" ${{ inputs.retain_artifacts && format('--retain "{0}/source-candidate"', runner.temp) || '' }}
+        env:
+          CLIPLY_FFPROBE_MSYS2: ${{ steps.msys2.outputs.msys2-location }}
+      - name: Linux source build and exact-artifact checks
+        if: runner.os == 'Linux'
+        run: dbus-run-session -- xvfb-run --auto-servernum node scripts/validate-ffprobe-source.js --evidence "${{ runner.temp }}/source-evidence" ${{ inputs.retain_artifacts && format('--retain "{0}/source-candidate"', runner.temp) || '' }}
+      - name: Retain validated helper and source inputs for review only
+        uses: actions/upload-artifact@v4
+        if: success() && inputs.retain_artifacts
+        with:
+          name: source-candidate-${{ matrix.platform }}
+          path: ${{ runner.temp }}/source-candidate
+          retention-days: 2
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: source-evidence-${{ matrix.platform }}
+          path: ${{ runner.temp }}/source-evidence
+          retention-days: 7
+          if-no-files-found: warn

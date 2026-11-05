@@ -533,27 +533,25 @@ class CliplyApp {
    * @param {Object} [event] - electron's before-quit event
    */
   async onBeforeQuit(event) {
-    this.isQuitting = true
-
     // the quit we re-issued below, arriving back here
     if (this.hasShutDown) {
       return
     }
 
-    this.hasShutDown = true
-    clearTimeout(this.engineUpdateTimer)
-    this.engineUpdateTimer = null
-    // Stop new update work now. Abort staging only after downloads have been
-    // cancelled: releasing its gate earlier could wake a waiting operation.
-    this.services.ytdlpEngine?.freeze?.()
-    this.services.ytdlpUpdater?.shutdown?.({ abort: false })
+    // A second quit while the first drain is waiting must not bypass it.
+    if (event && typeof event.preventDefault === "function") event.preventDefault()
+    if (this.quitDrainInProgress) return
+    this.quitDrainInProgress = true
+    this.ipcHandlers?.localMedia?.freeze()
 
-    // cleared unconditionally, install or not: the check it would fire is
-    // already refused by the isQuitting flag above, so all an armed interval
-    // can do from here is outlive the work
-    if (this.periodicUpdateTimer) {
-      clearInterval(this.periodicUpdateTimer)
-      this.periodicUpdateTimer = null
+    // This drain can refuse the quit. Keep downloads and update scheduling
+    // operational until it succeeds; neither service can undo its shutdown.
+    try {
+      if (this.ipcHandlers?.localMedia) await this.ipcHandlers.localMedia.shutdown()
+    } catch {
+      this.quitDrainInProgress = false
+      dialog.showErrorBox("Local media is still stopping", "A local media helper has not stopped. Wait and close the app again.")
+      return
     }
 
     /**
@@ -571,8 +569,19 @@ class CliplyApp {
      */
     const installing = Boolean(global.isUpdating)
 
-    if (event && typeof event.preventDefault === "function") {
-      event.preventDefault()
+    this.isQuitting = true
+    // Freeze admission before the engine, with no await between them. A
+    // completed download must not give queued work a slot in a frozen engine.
+    if (!installing) this.freezeDownloadQueue()
+    clearTimeout(this.engineUpdateTimer)
+    this.engineUpdateTimer = null
+    // Abort staging only after downloads have been cancelled: releasing its
+    // gate earlier could wake a waiting operation.
+    this.services.ytdlpEngine?.freeze?.()
+    this.services.ytdlpUpdater?.shutdown?.({ abort: false })
+    if (this.periodicUpdateTimer) {
+      clearInterval(this.periodicUpdateTimer)
+      this.periodicUpdateTimer = null
     }
 
     try {
@@ -583,14 +592,6 @@ class CliplyApp {
 
       if (!installing) {
         this.updateState.isCheckingForUpdates = false
-
-        // no slot may change hands from here on, and nothing is settled by
-        // saying so: the marking below still finds every live row as it was.
-        // without it, a cancel already in flight settles while the history is
-        // being written, its slot goes to the first queued download, and a
-        // fresh process spawns into a quit that has already decided which
-        // processes it is waiting for
-        this.freezeDownloadQueue()
 
         // an install quit skips this with the rest of the teardown: nothing is
         // being cancelled there, so there is nothing to get in front of, and
@@ -655,7 +656,10 @@ class CliplyApp {
       console.error("Error during shutdown:", error)
     }
 
-    // outside the try: whatever went wrong above, the app still has to quit
+    // outside the try: download/analytics teardown failures retain their existing
+    // quit behavior; a failed local process drain returned before reaching here.
+    this.hasShutDown = true
+    this.quitDrainInProgress = false
     app.quit()
   }
 
@@ -758,6 +762,7 @@ class CliplyApp {
 
 // Importing the class for checks must not start a second app or quit Electron.
 if (require.main === module) {
+  require("./services/local-media/preview").registerMediaScheme(require("electron").protocol)
   const gotTheLock = app.requestSingleInstanceLock()
 
   if (!gotTheLock) {

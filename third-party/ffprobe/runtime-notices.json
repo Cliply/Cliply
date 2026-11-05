@@ -1,0 +1,176 @@
+{
+  "schema": 1,
+  "linux-x64": {
+    "evidence": "https://github.com/Cliply/Cliply/actions/runs/41503566940",
+    "systemLibraries": [
+      "libc.so.6",
+      "libm.so.6"
+    ],
+    "toolchainPackages": "binutils\t2.42-4ubuntu2.10\ngcc-13\t13.3.0-6ubuntu2~24.04.1\nlibc6-dev:amd64\t2.39-0ubuntu8.9\nlibgcc-13-dev:amd64\t13.3.0-6ubuntu2~24.04.1\nmake\t4.3-4.1build2\nnasm\t2.16.01-1build1\n",
+    "toolchainHashes": {
+      "gcc-13": "1b99826121ae6682a634e5efe09bd3e3df58ce58e0b28f849114ab5b89139c26",
+      "nasm": "9b9ed9dd9a5ed930a57e32ebd1556415376e73028f17fa5b4bf43afdb61972e9",
+      "ld": "e9ceb054c12207970f2726dfc07e9a66b411602748628baf27399f02a9bbb31b"
+    },
+    "files": {
+      "gcc-13-base-copyright.txt": "08c6f3dee4c19aa1e57eb7d4ad45829b2e99656313bd07fa0922e2553f500be5",
+      "libgcc-13-dev-copyright.txt": "08c6f3dee4c19aa1e57eb7d4ad45829b2e99656313bd07fa0922e2553f500be5",
+      "libc6-dev-copyright.txt": "d3c95b56fa33e28b57860580f0baf4e4f4de2a268a2b80f1d031a5191bade265"
+    },
+    "installedFiles": {
+      "GCC-RUNTIME-NOTICES.txt": "gcc-13-base-copyright.txt",
+      "GLIBC-NOTICES.txt": "libc6-dev-copyright.txt"
+    },
+    "sourcePackages": [
+      {
+        "name": "gcc-13",
+        "version": "13.3.0-6ubuntu2~24.04.1",
+        "record": "https://launchpad.net/ubuntu/+source/gcc-13/13.3.0-6ubuntu2~24.04.1"
+      },
+      {
+        "name": "glibc",
+        "version": "2.39-0ubuntu8.9",
+        "record": "https://launchpad.net/ubuntu/+source/glibc/2.39-0ubuntu8.9"
+      }
+    ],
+    "publicationReady": false
+  },
+  "win32-x64": {
+    "evidence": "https://github.com/Cliply/Cliply/actions/runs/41817035809",
+    "systemLibraries": [
+      "api-ms-win-crt-convert-l1-1-0.dll",
+      "api-ms-win-crt-environment-l1-1-0.dll",
+      "api-ms-win-crt-filesystem-l1-1-0.dll",
+      "api-ms-win-crt-heap-l1-1-0.dll",
+      "api-ms-win-crt-locale-l1-1-0.dll",
+      "api-ms-win-crt-math-l1-1-0.dll",
+      "api-ms-win-crt-private-l1-1-0.dll",
+      "api-ms-win-crt-runtime-l1-1-0.dll",
+      "api-ms-win-crt-stdio-l1-1-0.dll",
+      "api-ms-win-crt-string-l1-1-0.dll",
+      "api-ms-win-crt-time-l1-1-0.dll",
+      "api-ms-win-crt-utility-l1-1-0.dll",
+      "bcrypt.dll",
+      "kernel32.dll",
+      "shell32.dll"
+    ],
+    "toolchainPackages": "base 2022.06-1\nbash 5.3.20-2\nbash-completion 2.18.0-1\nbrotli 1.2.1-1\nbsdtar 3.8.11-1\nbzip2 1.0.8-4\nca-certificates 20260816-3\ncoreutils 8.32-5\ncurl 8.23.0-1\ndash 0.5.13.5-1\ndiffutils 3.12-1\nfile 5.48-1\nfilesystem 2026.10.18-3\nfindutils 4.11.0-2\ngawk 5.4.1-1\ngcc-libs 16.2.0-1\ngetent 2.18.90-6\ngettext 0.22.5-1\ngmp 6.3.0-2\ngnupg 2.4.9-3\ngrep 1~3.0-7\ngzip 1.15-1\ninetutils 2.8-1\ninfo 7.2-3\nless 710-1\nlibargp 20260115-1\nlibasprintf 0.22.5-1\nlibassuan 3.0.2-1\nlibbz2 1.0.8-4\nlibcurl 8.23.0-1\nlibexpat 2.9.0-1\nlibffi 3.8.0-1\nlibgcrypt 1.12.4-1\nlibgettextpo 0.22.5-1\nlibgnutls 3.8.13-2\nlibgpg-error 1.61-1\nlibhogweed 4.0-1\nlibiconv 1.19-1\nlibidn2 2.3.8-1\nlibintl 0.22.5-1\nlibksba 1.8.1-1\nliblz4 1.10.0-1\nliblzma 5.8.4-1\nlibnettle 4.0-1\nlibnghttp2 1.70.0-1\nlibnghttp3 1.18.0-1\nlibngtcp2 1.25.0-1\nlibnpth 1.8-1\nlibopenssl 3.6.5-1\nlibp11-kit 0.26.5-1\nlibpcre 8.45-5\nlibpcre2_8 10.49-1\nlibpsl 0.23.2-1\nlibreadline 8.3.006-2\nlibsqlite 3.54.1-1\nlibssh2 1.11.1-1\nlibtasn1 4.21.0-1\nlibunistring 1.4.2-1\nlibutil-linux 2.40.2-2\nlibxcrypt 4.5.2-1\nlibzstd 1.5.7-1\nmake 4.4.1-3\nmingw-w64-ucrt-x86_64-binutils 2.47-4\nmingw-w64-ucrt-x86_64-cc-libs 16.2.0-6\nmingw-w64-ucrt-x86_64-crt 14.0.0.r598.ge3d18511f-1\nmingw-w64-ucrt-x86_64-gcc 16.2.0-6\nmingw-w64-ucrt-x86_64-gettext-runtime 1.0-1\nmingw-w64-ucrt-x86_64-gmp 6.3.0-2\nmingw-w64-ucrt-x86_64-headers 14.0.0.r598.ge3d18511f-1\nmingw-w64-ucrt-x86_64-isl 0.28-1\nmingw-w64-ucrt-x86_64-libgcc 16.2.0-6\nmingw-w64-ucrt-x86_64-libiconv 1.19-1\nmingw-w64-ucrt-x86_64-libstdc++ 16.2.0-6\nmingw-w64-ucrt-x86_64-libwinpthread 14.0.0.r598.ge3d18511f-1\nmingw-w64-ucrt-x86_64-mpc 1.4.1-1\nmingw-w64-ucrt-x86_64-mpfr 4.2.2-3\nmingw-w64-ucrt-x86_64-nasm 3.02-1\nmingw-w64-ucrt-x86_64-tzdata 2026f-1\nmingw-w64-ucrt-x86_64-windows-default-manifest 20260815-1\nmingw-w64-ucrt-x86_64-winpthreads 14.0.0.r598.ge3d18511f-1\nmingw-w64-ucrt-x86_64-zlib 1.3.2-3\nmingw-w64-ucrt-x86_64-zstd 1.5.7-2\nmintty 1~3.8.3-1\nmpfr 4.2.2-1\nmsys2-keyring 1~20260814-1\nmsys2-launcher 1.5-3\nmsys2-runtime 3.6.12-1\nnano 9.3-1\nncurses 6.6-2\nnettle 4.0-1\nopenssl 3.6.5-1\np11-kit 0.26.5-1\npacman 6.1.0-29\npacman-contrib 1.10.6-2\npacman-mirrors 20260129-1\npinentry 1.3.3-1\nrebase 4.5.0-5\nsed 4.9-1\ntar 1.35-3\ntime 1.10-1\ntzcode 2026f-1\nutil-linux 2.40.2-2\nwget 1.25.0-4\nwhich 2.25-1\nxz 5.8.4-1\nzlib 1.3.2-1\nzstd 1.5.7-1\n",
+    "toolchainHashes": {
+      "gcc": "70325d325c126905fc04c5bc57727969f4529173a139c129e3ff92b7adc2941e",
+      "nasm": "668dc94885b21efa0936491bca7dadd4a194c5b58fdf56b69d94a0e89b9f3f6b",
+      "ld": "a279cc83f198a606f255a597b3a067b51f11a9bbf8fe46de2a0dc8bb71b47f4f"
+    },
+    "files": {
+      "mingw-w64-ucrt-x86_64-gcc--ucrt64__share__licenses__gcc__COPYING.RUNTIME": "9d6b43ce4d8de0c878bf16b54d8e7a10d9bd42b75178153e3af6a815bdc90f74",
+      "mingw-w64-ucrt-x86_64-gcc--ucrt64__share__licenses__gcc__COPYING3": "8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903",
+      "mingw-w64-ucrt-x86_64-libgcc--ucrt64__share__licenses__libgcc__COPYING.RUNTIME": "9d6b43ce4d8de0c878bf16b54d8e7a10d9bd42b75178153e3af6a815bdc90f74",
+      "mingw-w64-ucrt-x86_64-libgcc--ucrt64__share__licenses__libgcc__COPYING3": "8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903",
+      "mingw-w64-ucrt-x86_64-crt--ucrt64__share__licenses__crt__COPYING": "99a69660981156c21336fdb5661f89341b013c94e4bf9e1c7467b4745718397f",
+      "mingw-w64-ucrt-x86_64-crt--ucrt64__share__licenses__crt__COPYING.MinGW-w64-runtime.txt": "1db8da07b436c68833c0673ffee3d9fcb2526047f3820b81661865dfedc79a1f",
+      "mingw-w64-ucrt-x86_64-crt--ucrt64__share__licenses__crt__COPYING.MinGW-w64.txt": "f38e6194bd3bfa1b654f118e5acefe0aead437bbe669eee43957ccc65a7127f1",
+      "mingw-w64-ucrt-x86_64-headers--ucrt64__share__licenses__headers__COPYING": "99a69660981156c21336fdb5661f89341b013c94e4bf9e1c7467b4745718397f",
+      "mingw-w64-ucrt-x86_64-headers--ucrt64__share__licenses__headers__COPYING.MinGW-w64-runtime.txt": "1db8da07b436c68833c0673ffee3d9fcb2526047f3820b81661865dfedc79a1f",
+      "mingw-w64-ucrt-x86_64-headers--ucrt64__share__licenses__headers__COPYING.MinGW-w64.txt": "f38e6194bd3bfa1b654f118e5acefe0aead437bbe669eee43957ccc65a7127f1",
+      "mingw-w64-ucrt-x86_64-headers--ucrt64__share__licenses__headers__ddk-readme.txt": "8d8f9924e4ea5466932000bdb9a4104da1d8ca3e4c979bb8207225522ba63826",
+      "mingw-w64-ucrt-x86_64-winpthreads--ucrt64__share__licenses__winpthreads__COPYING": "63263614cdd29f2f93cba85e992f041b31f9fc7b4033692f31269489a8a1b177",
+      "mingw-w64-ucrt-x86_64-libwinpthread--ucrt64__share__licenses__libwinpthread__COPYING": "63263614cdd29f2f93cba85e992f041b31f9fc7b4033692f31269489a8a1b177"
+    },
+    "installedFiles": {
+      "GCC-RUNTIME-EXCEPTION.txt": "mingw-w64-ucrt-x86_64-gcc--ucrt64__share__licenses__gcc__COPYING.RUNTIME",
+      "MINGW-ZPL.txt": "mingw-w64-ucrt-x86_64-crt--ucrt64__share__licenses__crt__COPYING",
+      "MINGW-RUNTIME-NOTICES.txt": "mingw-w64-ucrt-x86_64-crt--ucrt64__share__licenses__crt__COPYING.MinGW-w64-runtime.txt",
+      "MINGW-NOTICES.txt": "mingw-w64-ucrt-x86_64-crt--ucrt64__share__licenses__crt__COPYING.MinGW-w64.txt",
+      "MINGW-DDK-NOTICES.txt": "mingw-w64-ucrt-x86_64-headers--ucrt64__share__licenses__headers__ddk-readme.txt",
+      "WINPTHREADS-NOTICES.txt": "mingw-w64-ucrt-x86_64-winpthreads--ucrt64__share__licenses__winpthreads__COPYING"
+    },
+    "threadRuntimeArchive": {
+      "sha256": "7d4fea0820a353641a6f9d0109f05d4e206886666600bce4589dff93faf9f8c0",
+      "ownership": "/ucrt64/lib/libwinpthread.a is owned by mingw-w64-ucrt-x86_64-winpthreads 14.0.0.r598.ge3d18511f-1\n"
+    },
+    "sourcePackages": [
+      {
+        "name": "mingw-w64-gcc",
+        "version": "16.2.0-6",
+        "record": "https://packages.msys2.org/packages/mingw-w64-ucrt-x86_64-gcc",
+        "sourceArchive": "https://mirror.msys2.org/mingw/sources/mingw-w64-gcc-16.2.0-6.src.tar.zst",
+        "sourceArchiveDownloaded": false
+      },
+      {
+        "name": "mingw-w64-crt",
+        "version": "14.0.0.r598.ge3d18511f-1",
+        "record": "https://packages.msys2.org/packages/mingw-w64-ucrt-x86_64-crt",
+        "sourceArchive": "https://mirror.msys2.org/mingw/sources/mingw-w64-crt-14.0.0.r598.ge3d18511f-1.src.tar.zst",
+        "sourceArchiveDownloaded": true,
+        "sourceArchiveSha256": "a6df84c851473c2b293f36a8864b52980a5d875b1c7e2fbfb01dece3f400256a",
+        "sourceArchiveBytes": 59897640
+      },
+      {
+        "name": "mingw-w64-headers",
+        "version": "14.0.0.r598.ge3d18511f-1",
+        "record": "https://packages.msys2.org/packages/mingw-w64-ucrt-x86_64-headers",
+        "sourceArchive": "https://mirror.msys2.org/mingw/sources/mingw-w64-headers-14.0.0.r598.ge3d18511f-1.src.tar.zst",
+        "sourceArchiveDownloaded": true,
+        "sourceArchiveSha256": "b0c5391bca62b78df4fef32bc87eb94c5c29a867bfd6d3e64e0ddfb9e078b31e",
+        "sourceArchiveBytes": 59899183
+      },
+      {
+        "name": "mingw-w64-winpthreads",
+        "version": "14.0.0.r598.ge3d18511f-1",
+        "record": "https://packages.msys2.org/packages/mingw-w64-ucrt-x86_64-winpthreads",
+        "sourceArchive": "https://mirror.msys2.org/mingw/sources/mingw-w64-winpthreads-14.0.0.r598.ge3d18511f-1.src.tar.zst",
+        "sourceArchiveDownloaded": false
+      }
+    ],
+    "publicationReady": false,
+    "reviewedUpdate": {
+      "date": "2026-11-04",
+      "previousVersion": "14.0.0.r569.g34eeafb7d-1",
+      "version": "14.0.0.r598.ge3d18511f-1",
+      "recipeCommit": "https://github.com/msys2/MINGW-packages/commit/07f00a4d37082cdeaeefc366ff939b9975cf83fd",
+      "upstreamComparison": "https://github.com/mingw-w64/mingw-w64/compare/34eeafb7d0e5b037b4644c17defc4f4131ad85cc...e3d18511f9759d455cae20c34703eea4a0723cf3",
+      "upstreamGitArchiveSha256": "f96372df71b5f32f54e0c3d37e59dfc4628b41137f64a87e7ca67eda6d197185",
+      "unchangedNoticeFiles": 13,
+      "unchangedToolHashes": [
+        "gcc",
+        "nasm",
+        "ld"
+      ],
+      "unchangedImports": true,
+      "unchangedStaticThreadArchive": true,
+      "binaryPackages": [
+        {
+          "name": "mingw-w64-ucrt-x86_64-crt",
+          "version": "14.0.0.r598.ge3d18511f-1",
+          "url": "https://mirror.msys2.org/mingw/ucrt64/mingw-w64-ucrt-x86_64-crt-14.0.0.r598.ge3d18511f-1-any.pkg.tar.zst",
+          "sha256": "e863d0d1c5cef1269738f23dcc155b9b0d161d198b93d9d5aa481cb3a2f2cf53",
+          "bytes": 4097457,
+          "pkgbuildSha256": "18a0d7c5e32a7a118f220c681f3acccc8210a77bc1a08b4ef0b823932c8b9422"
+        },
+        {
+          "name": "mingw-w64-ucrt-x86_64-headers",
+          "version": "14.0.0.r598.ge3d18511f-1",
+          "url": "https://mirror.msys2.org/mingw/ucrt64/mingw-w64-ucrt-x86_64-headers-14.0.0.r598.ge3d18511f-1-any.pkg.tar.zst",
+          "sha256": "b3cec87298555a7c6694bd4d421d586d08a1cb47bc5bc76e79602cbf4421d3c9",
+          "bytes": 6896905,
+          "pkgbuildSha256": "fdd5817936b9736b36419f053034456d169ec0753c56ad532c556cf507344f76"
+        },
+        {
+          "name": "mingw-w64-ucrt-x86_64-libwinpthread",
+          "version": "14.0.0.r598.ge3d18511f-1",
+          "url": "https://mirror.msys2.org/mingw/ucrt64/mingw-w64-ucrt-x86_64-libwinpthread-14.0.0.r598.ge3d18511f-1-any.pkg.tar.zst",
+          "sha256": "c35d6be83d141c8cfbb61f1637dd4b53aac8f5562d766aa26d0741c40bad4e4d",
+          "bytes": 34470,
+          "pkgbuildSha256": "b533e6c7a634ceb574ad3e8db356bb9dbf63bb0d59e944f880be1d640c644c61"
+        },
+        {
+          "name": "mingw-w64-ucrt-x86_64-winpthreads",
+          "version": "14.0.0.r598.ge3d18511f-1",
+          "url": "https://mirror.msys2.org/mingw/ucrt64/mingw-w64-ucrt-x86_64-winpthreads-14.0.0.r598.ge3d18511f-1-any.pkg.tar.zst",
+          "sha256": "282485a1e453e972b86639cedcf43686e0000dfe5eff0421e47a4405ecdd85ce",
+          "bytes": 46453,
+          "pkgbuildSha256": "b533e6c7a634ceb574ad3e8db356bb9dbf63bb0d59e944f880be1d640c644c61"
+        }
+      ]
+    }
+  }
+}

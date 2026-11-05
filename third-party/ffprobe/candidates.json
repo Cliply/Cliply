@@ -1,0 +1,32 @@
+{
+  "darwin-arm64": {
+    "url": "https://ffmpeg.martin-riedl.de/download/macos/arm64/1789931890_9.0.2/ffprobe.zip",
+    "checksumUrl": "https://ffmpeg.martin-riedl.de/download/macos/arm64/1789931890_9.0.2/ffprobe.zip.sha256",
+    "archiveSha256": "fcbe839537485eaee7a7a8bc5cbc0f90d53617e80943e8a5b2e31cb851197ea6",
+    "member": "ffprobe",
+    "executableSha256": "2738aa46a7f9acbc8ab09a6715554c90f7de603171ac403726765685df6a0059",
+    "nativeVerified": true,
+    "publicationReady": false,
+    "executableBytes": 66158064
+  },
+  "linux-x64": {
+    "url": "https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-11-01-12-49/ffmpeg-n8.1.3-29-gad3b795b72-linux64-gpl-8.1.tar.xz",
+    "checksumUrl": "https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-11-01-12-49/checksums.sha256",
+    "archiveSha256": "378639650544dfca48e2a3f7b4e5da2071ca1d91a59b7588bd188f7219ea2d7b",
+    "member": "ffmpeg-n8.1.3-29-gad3b795b72-linux64-gpl-8.1/bin/ffprobe",
+    "nativeVerified": false,
+    "publicationReady": false,
+    "executableSha256": "64cc0a7b97fd67c6662905c44da6928e824a022684e8cbf3257ea138be29c911",
+    "executableBytes": 172850664
+  },
+  "win32-x64": {
+    "url": "https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-11-01-12-49/ffmpeg-n8.1.3-29-gad3b795b72-win64-gpl-8.1.zip",
+    "checksumUrl": "https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-11-01-12-49/checksums.sha256",
+    "archiveSha256": "0bf508ade2d757f3e9116418768deefb4046a3a1d5a9ed32299ea4fb929dd231",
+    "member": "ffmpeg-n8.1.3-29-gad3b795b72-win64-gpl-8.1/bin/ffprobe.exe",
+    "nativeVerified": false,
+    "publicationReady": false,
+    "executableSha256": "91c9061b4593b609b546f1ba1b21b129c195dfc7fec8e2066340bd52b0aef28b",
+    "executableBytes": 165371904
+  }
+}

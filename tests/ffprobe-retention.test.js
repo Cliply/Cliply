@@ -1,0 +1,62 @@
+jest.mock("../scripts/package-ffprobe-source", () => ({ ...jest.requireActual("../scripts/package-ffprobe-source"), readBuild: jest.fn() }))
+jest.mock("node:child_process", () => ({ spawnSync: jest.fn() }))
+const fs = require("node:fs"), path = require("node:path"), os = require("node:os")
+const { readBuild } = require("../scripts/package-ffprobe-source")
+const { retainCandidate, requirePassedValidation, collectRuntimeNotices } = require("../scripts/retain-ffprobe-candidate")
+const { spawnSync } = require("node:child_process")
+const { hash, sourcePin } = require("../scripts/build-ffprobe-prototype")
+let root, build, evidence, output, facts, commands
+beforeEach(() => {
+  root = fs.mkdtempSync(path.join(os.tmpdir(), "cliply-retention-test-")); build = path.join(root, "build"); evidence = path.join(root, "evidence"); output = path.join(root, "retained")
+  fs.mkdirSync(path.join(build, "source/ffbuild"), { recursive: true }); fs.mkdirSync(evidence)
+  const put = (relative, data = "fixture") => { const file = path.join(build, relative); fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, data) }
+  put("ffprobe"); put("source.tar"); put("source/ffbuild/config.mak")
+  for (const name of Object.keys(sourcePin.licenseFiles)) put("source/" + name)
+  facts = { platform: "darwin-arm64", executableSha256: hash(path.join(build, "ffprobe")), commit: sourcePin.commit, archiveSha256: hash(path.join(build, "source.tar")), recipeSha256: "a".repeat(64) }
+  put("prototype.json", JSON.stringify(facts))
+  readBuild.mockReturnValue({ facts, executable: path.join(build, "ffprobe") })
+  commands = ["package", "helpers", "libraries", "inspection", "export", "tracks", "remux", "trim", "segments", "packaged-ui", "normal-startup", "download-recovery", "url-media"].map(name => ({ name, status: 0 }))
+  save(); fs.writeFileSync(path.join(evidence, "artifact.json"), JSON.stringify({ evidenceKind: "source-built", platform: facts.platform, inputSha256: facts.executableSha256, packagedSha256: "b".repeat(64) }))
+})
+const save = () => fs.writeFileSync(path.join(evidence, "commands.json"), JSON.stringify(commands))
+afterEach(() => fs.rmSync(root, { recursive: true, force: true }))
+test("retains only verified helper/source inputs and an explicitly unapproved checksum inventory", () => {
+  const record = retainCandidate({ buildDirectory: build, evidence, output })
+  expect(record.nativeValidationPassed).toBe(true); expect(record.publicationReady).toBe(false); expect(record.evaluationOnly).toBe(true)
+  expect(record.sourcePacketReadyForReview).toBe(false); expect(record.installedNoticesValidated).toBe(false)
+  expect(hash(path.join(output, "ffprobe"))).toBe(facts.executableSha256)
+  for (const [name, digest] of Object.entries(record.files)) expect(hash(path.join(output, name))).toBe(digest)
+  expect(Object.keys(record.files).some(name => /app\.asar|\.dmg|\.deb|AppImage/.test(name))).toBe(false)
+  expect(() => retainCandidate({ buildDirectory: build, evidence, output })).toThrow(/new absolute/)
+})
+test.each(["failed", "missing", "duplicate"])("refuses %s validation without retaining any output", kind => {
+  if (kind === "failed") commands[8].status = 1
+  if (kind === "missing") commands.pop()
+  if (kind === "duplicate") commands.push(commands[0])
+  save(); expect(() => retainCandidate({ buildDirectory: build, evidence, output })).toThrow()
+  expect(fs.existsSync(output)).toBe(false)
+})
+test("refuses validation evidence for another binary", () => {
+  expect(() => requirePassedValidation(evidence, { ...facts, executableSha256: "c".repeat(64) })).toThrow(/different/)
+})
+test("failed source-input copying leaves no partial artifact", () => {
+  fs.unlinkSync(path.join(build, "source.tar"))
+  expect(() => retainCandidate({ buildDirectory: build, evidence, output })).toThrow()
+  expect(fs.existsSync(output)).toBe(false); expect(fs.readdirSync(root).some(name => name.startsWith(".ffprobe-review-"))).toBe(false)
+})
+test("Windows retains the static thread archive's actual package ownership and license", () => {
+  const msys = path.join(root, "msys"), notices = path.join(root, "runtime-notices")
+  fs.mkdirSync(path.join(msys, "ucrt64/share/licenses/winpthreads"), { recursive: true })
+  fs.mkdirSync(path.join(msys, "ucrt64/lib"), { recursive: true })
+  fs.writeFileSync(path.join(msys, "ucrt64/share/licenses/winpthreads/COPYING"), "synthetic MIT/BSD notices")
+  fs.writeFileSync(path.join(msys, "ucrt64/lib/libwinpthread.a"), "synthetic archive")
+  spawnSync.mockImplementation((command, args) => ({ status: 0, stdout: args.includes("-Ql")
+    ? "mingw-w64-ucrt-x86_64-winpthreads /ucrt64/share/licenses/winpthreads/COPYING\n"
+    : args.includes("-Qo") ? "/ucrt64/lib/libwinpthread.a is owned by mingw-w64-ucrt-x86_64-winpthreads fixture-version\n" : "synthetic native package metadata\n" }))
+  const inventory = collectRuntimeNotices(notices, "win32-x64", msys)
+  expect(inventory.reviewed).toBe(false)
+  expect(inventory.threadRuntimeArchive.ownership).toContain("fixture-version")
+  expect(inventory.threadRuntimeArchive.sha256).toBe(hash(path.join(msys, "ucrt64/lib/libwinpthread.a")))
+  expect(inventory.files[0].retainedName).toContain("winpthreads")
+  expect(spawnSync.mock.calls.find(([, args]) => args.includes("-Qi"))[1]).toEqual(expect.arrayContaining(["mingw-w64-ucrt-x86_64-winpthreads", "mingw-w64-ucrt-x86_64-libwinpthread"]))
+})

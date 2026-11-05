@@ -1,0 +1,21 @@
+{
+  "schema": 1,
+  "evaluationOnly": false,
+  "platform": "linux-x64",
+  "binarySha256": "58ff935528eb5b8c8f33bc8d2bc93f4e8b1443ba7f4f7c3cab8f4b5b672434bd",
+  "sourceCommit": "1041abdc962f4cc4f394aa8de9dc5236c0c3b9e7",
+  "sourceArchiveSha256": "801838344d51651d45ab3ce6502a2627da7746492475711ff2adfb723aeaf7b6",
+  "sourceAsset": {
+    "name": "ffprobe-source-1041abdc962f-linux-x64-58ff935528eb-bf846372bc2c.tar.gz",
+    "sha256": "bf846372bc2cb81e0573abf6292de3f3533eaf787b3182b884538b41a712520d",
+    "url": "https://github.com/Cliply/Cliply/releases/download/binaries/ffprobe-source-1041abdc962f-linux-x64-58ff935528eb-bf846372bc2c.tar.gz",
+    "assetId": 710643784
+  },
+  "files": {
+    "NOTICE.txt": "87e0677c4a27d0ddac3708495f7993d0fbd5534c3be870ee1d82910108467b73",
+    "COPYING.LGPLv2.1": "246041b6ecf9bc32d718a62c57877c78b5eb397b6467e74ed7ae2626ab189c30",
+    "COPYING.GPLv3": "8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903",
+    "GCC-RUNTIME-NOTICES.txt": "08c6f3dee4c19aa1e57eb7d4ad45829b2e99656313bd07fa0922e2553f500be5",
+    "GLIBC-NOTICES.txt": "d3c95b56fa33e28b57860580f0baf4e4f4de2a268a2b80f1d031a5191bade265"
+  }
+}

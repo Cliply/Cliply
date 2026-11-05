@@ -1,0 +1,47 @@
+Cliply source-built FFprobe
+
+FFprobe is part of FFmpeg, https://ffmpeg.org/.
+This recipe uses the unmodified FFmpeg n8.1.3 source at commit
+1041abdc962f4cc4f394aa8de9dc5236c0c3b9e7. Copyright remains with the
+FFmpeg authors and other authors identified in the individual source files.
+
+The evaluated configuration reports GNU Lesser General Public License
+version 2.1 or later. See COPYING.LGPLv2.1 and upstream LICENSE.md.
+The full source archive preserves all original copyright notices and other
+license terms, including MIT/X11/BSD notices and optional unused GPL sources.
+The presence of those optional sources does not enable GPL components.
+
+This software is based in part on the work of the Independent JPEG Group.
+Cliply has not modified libavcodec/jfdctfst.c, jfdctint_template.c or jrevdct.c
+from the pinned FFmpeg revision. Upstream adaptations and their notices are
+preserved in those files; complete copies accompany the source packet.
+
+No external codec libraries are enabled. This does not mean there are no
+operating-system or compiler-runtime dependencies. The platform build record
+identifies the toolchain, final configuration and actual library imports.
+
+The evaluated Linux distribution includes GCC-RUNTIME-NOTICES.txt (including
+the GCC Runtime Library Exception 3.1), COPYING.GPLv3 and GLIBC-NOTICES.txt.
+These preserve the exact Ubuntu package notices for the recorded compiler and
+runtime inputs. The source packet records their hashes and exact source-package
+versions/locations in third-party/ffprobe/runtime-notices.json. Shared operating-
+system libraries are supplied by the OS, not copied into this distribution.
+
+The evaluated Windows distribution includes GCC-RUNTIME-EXCEPTION.txt,
+COPYING.GPLv3, COPYING.GPLv2, MINGW-ZPL.txt, MINGW-RUNTIME-NOTICES.txt,
+MINGW-NOTICES.txt, MINGW-DDK-NOTICES.txt and WINPTHREADS-NOTICES.txt.
+These preserve the captured GCC, MinGW-w64 and winpthreads package notices,
+including notices for optional toolchain components. Their inclusion does not
+enable optional GPL components in FFprobe. The exact package versions, notice
+hashes, static thread-runtime archive identity and versioned source-package
+locations are recorded in the source packet. Shared Windows/UCRT system DLLs
+are supplied by the OS and are not redistributed with this helper.
+
+There is no warranty; the applicable license texts and source notices govern.
+The corresponding-source packet includes the complete unmodified source,
+build recipe, configuration, toolchain identity and reproduction instructions.
+Binary distributions provide this notice, the applicable license texts and
+the matching source packet identified by the installed SOURCE.json record.
+Evaluation scripts do not publish assets; explicit promotion is separate.
+The accompanying Cliply build/packaging scripts remain GPL-3.0-only; their
+license is included separately. This does not change FFprobe's build license.

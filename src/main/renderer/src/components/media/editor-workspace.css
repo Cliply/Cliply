@@ -1,0 +1,79 @@
+/* OpenCut Classic panel geometry with Cliply's shared typography and theme. */
+.media-workspace {
+  display: flex;
+  height: 100dvh;
+  min-height: 0;
+  flex-direction: column;
+  overflow: hidden;
+  @apply bg-gradient-to-br from-slate-50 via-slate-100 to-slate-200 text-slate-900 dark:from-slate-900 dark:via-slate-800 dark:to-slate-900 dark:text-white;
+  font-family: var(--font-sans);
+  font-size: 13px;
+}
+.media-workspace button, .media-workspace input, .media-workspace select { font-size: 12px; }
+.media-workspace button { box-shadow: none; }
+.editor-header { display: flex; min-height: 56px; flex-shrink: 0; align-items: center; gap: 12px; padding: 8px 12px; border-bottom: 1px solid hsl(var(--border)); }
+.editor-back { color: hsl(var(--muted-foreground)); }
+.editor-file-heading { min-width: 0; flex: 1; line-height: 1.5; }
+.editor-file-heading h1 { font-size: 12px; font-weight: 500; color: hsl(var(--muted-foreground)); }
+.editor-file-heading p { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 500; }
+.editor-header-actions { display: flex; flex-shrink: 0; align-items: center; gap: 6px; }
+.editor-body { display: flex; min-height: 0; flex: 1; gap: 4px; padding: 6px 6px 0 0; }
+.editor-tools { width: 88px; flex-shrink: 0; display: flex; flex-direction: column; gap: 7px; padding: 7px 7px 0; }
+.editor-tools button { display: flex; width: 100%; align-items: center; flex-direction: column; justify-content: center; gap: 7px; padding: 12px 4px; border: 1px solid transparent; border-radius: 6px; color: hsl(var(--muted-foreground)); line-height: 1.35; transition: background-color 120ms; }
+.editor-tools button svg { width: 18px; height: 18px; stroke-width: 1.7; }
+.editor-tools button span { font-size: 10px; }
+.editor-tools button:hover:not(:disabled) { background: hsl(var(--muted)); color: hsl(var(--foreground)); }
+.editor-tools button[aria-pressed="true"] { @apply border-cyan-600/20 bg-cyan-500/10 text-cyan-700 dark:border-cyan-400/20 dark:text-cyan-300; }
+.editor-tools button:focus-visible { outline: 2px solid hsl(var(--ring)); outline-offset: 2px; }
+.editor-tools button:disabled { opacity: 0.45; cursor: default; }
+.editor-panels { min-width: 0; min-height: 0; flex: 1; }
+.editor-preview-pane, .editor-inspector, .editor-timeline-pane { border: 1px solid hsl(var(--border)); border-radius: var(--radius); background: hsl(var(--card)); }
+.editor-preview-content { display: flex; height: 100%; min-height: 0; flex-direction: column; }
+.editor-pane-heading { display: flex; min-height: 36px; flex-shrink: 0; align-items: center; justify-content: space-between; gap: 8px; padding: 9px 12px; border-bottom: 1px solid hsl(var(--border)); }
+.editor-pane-heading h2 { flex-shrink: 0; font-size: 12px; font-weight: 500; }
+.editor-pane-heading > span { font-size: 10px; color: hsl(var(--muted-foreground)); }
+.editor-resize-handle { transition: background-color 120ms; border-radius: 2px; }
+.editor-resize-handle:hover, .editor-resize-handle[data-resize-handle-active] { background: hsl(var(--primary) / 0.5); }
+.editor-inspector { height: 100%; min-width: 0; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; }
+.editor-source-info { display: grid; gap: 8px; margin: 0; padding: 12px; border-bottom: 1px solid hsl(var(--border)); font-size: 11px; }
+.editor-source-info > div { display: flex; justify-content: space-between; gap: 12px; }
+.editor-source-info dt { color: hsl(var(--muted-foreground)); }
+.editor-source-info dd { min-width: 0; text-align: right; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+.editor-cut-inspector, .editor-file-tool { padding: 12px; }
+.editor-file-tool:empty { display: none; }
+.editor-export-status { padding: 12px; border-bottom: 1px solid hsl(var(--border)); background: hsl(var(--muted) / 0.5); }
+.editor-timeline-pane { height: 100%; overflow: auto; overscroll-behavior: contain; container-type: inline-size; }
+.editor-preview-short-label { display: none; }
+@container (max-width: 560px) {
+  .editor-mark-label, .editor-preview-label { display: none; }
+  .editor-preview-short-label { display: inline; }
+}
+.editor-source-tracks { min-width: 0; }
+.editor-notice { display: flex; flex-shrink: 0; align-items: center; gap: 8px; padding: 8px 16px; border-bottom: 1px solid hsl(var(--border)); font-size: 12px; }
+.editor-footer { display: flex; flex-shrink: 0; align-items: center; gap: 6px; padding: 6px 12px; font-size: 10px; line-height: 1.4; color: hsl(var(--muted-foreground)); }
+.editor-session-dot { width: 4px; height: 4px; flex-shrink: 0; border-radius: 50%; background: hsl(var(--muted-foreground)); }
+.editor-empty { position: relative; display: flex; min-width: 0; flex: 1; align-items: center; justify-content: center; overflow: auto; border: 1px solid hsl(var(--border)); border-radius: var(--radius); background: hsl(var(--card)); }
+.editor-empty-content { display: flex; max-width: 380px; flex-direction: column; align-items: center; padding: 32px; text-align: center; }
+.editor-empty-icon { display: flex; height: 64px; width: 64px; align-items: center; justify-content: center; margin-bottom: 20px; border: 1px solid hsl(var(--border)); border-radius: 14px; color: hsl(var(--muted-foreground)); background: hsl(var(--background)); }
+.editor-empty h2 { font-size: 18px; font-weight: 500; letter-spacing: -0.02em; }
+.editor-empty p { margin: 9px 0 22px; color: hsl(var(--muted-foreground)); font-size: 13px; line-height: 1.65; }
+.editor-empty-export { position: absolute; top: 12px; right: 12px; left: 12px; }
+@media (max-width: 1000px) {
+  .editor-tools { width: 56px; padding-left: 6px; padding-right: 6px; }
+  .editor-tools button { padding: 13px 4px; }
+  .editor-tools button span { display: none; }
+  .editor-open-label { display: none; }
+  .editor-header { gap: 8px; padding-left: 8px; padding-right: 8px; }
+  .editor-header-actions { gap: 3px; }
+  .editor-inspector .editor-pane-heading, .editor-cut-inspector, .editor-source-info, .editor-file-tool { padding-left: 10px; padding-right: 10px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .media-workspace *, .media-workspace *::before, .media-workspace *::after { transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; }
+}
+/* hiddenInset title bars put the traffic lights inside the renderer bounds. */
+.media-workspace[data-platform="darwin"] .editor-header { padding-left: 84px; }
+
+/* Match Downloads' soft card surfaces without adding extra visual chrome. */
+.editor-preview-pane, .editor-inspector, .editor-timeline-pane, .editor-empty {
+  @apply border-slate-300/50 bg-white/80 dark:border-slate-700/50 dark:bg-slate-800/60;
+}

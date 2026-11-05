@@ -13,9 +13,11 @@ const mockWindow = {
   once: jest.fn(),
   show: jest.fn(),
   isDestroyed: jest.fn(() => false),
-  loadURL: jest.fn(),
+  loadURL: jest.fn(() => Promise.resolve()),
   loadFile: jest.fn(() => Promise.resolve()),
   webContents: {
+    on: jest.fn(),
+    setWindowOpenHandler: jest.fn(),
     send: jest.fn(),
     openDevTools: jest.fn(),
     // the window's session is where the youtube embed referer is installed
@@ -371,7 +373,23 @@ describe("initialize", () => {
 })
 
 describe("the youtube embed referer", () => {
-  // the regression this guards: the packaged app is served with loadFile(),
+  it("hardens the shared window, blocks navigation/popups and fails closed without the preview gate", () => {
+    app.createWindow()
+    expect(mockElectron.BrowserWindow.mock.calls[0][0].webPreferences).toMatchObject({
+      webSecurity: true, sandbox: true, contextIsolation: true,
+      nodeIntegration: false, allowRunningInsecureContent: false
+    })
+    expect(mockWindow.webContents.setWindowOpenHandler.mock.calls[0][0]({ url: "https://example.invalid" })).toEqual({ action: "deny" })
+    const navigate = mockWindow.webContents.on.mock.calls.find(([name]) => name === "will-navigate")[1]
+    const event = { preventDefault: jest.fn() }
+    navigate(event, "https://example.invalid")
+    expect(event.preventDefault).toHaveBeenCalledTimes(1)
+    const handler = mockWindow.webContents.session.webRequest.onBeforeSendHeaders.mock.calls[0][1]
+    const callback = jest.fn()
+    handler({ url: "cliply-media://source/" + "a".repeat(64) }, callback)
+    expect(callback).toHaveBeenCalledWith({ cancel: true })
+  })
+  // the regression this guards: the packaged app is served from a file URL,
   // so the renderer runs under file:// and chromium sends no Referer at all.
   // youtube's embed player reads that header server-side to decide
   // playability, and without it the response is an errorScreen rather than a
@@ -384,10 +402,10 @@ describe("the youtube embed referer", () => {
         .calls[0]
 
     // a broader filter would hand a referer to every request the app makes
-    expect(filter.urls).toEqual(["https://www.youtube.com/embed/*"])
+    expect(filter.urls).toEqual(["https://www.youtube.com/embed/*", "cliply-media://*/*"])
 
     const callback = jest.fn()
-    handler({ requestHeaders: { "User-Agent": "Cliply" } }, callback)
+    handler({ url: "https://www.youtube.com/embed/fixture", requestHeaders: { "User-Agent": "Cliply" } }, callback)
 
     // the existing headers survive; the referer names a real site that is not
     // youtube itself, which youtube refuses as a self-referential embed
@@ -1430,6 +1448,91 @@ describe("the engine version in the Tools menu", () => {
 
 describe("quitting", () => {
   const quitEvent = () => ({ preventDefault: jest.fn() })
+
+  it("keeps the window and quit scheduling available when a close-button drain fails", async () => {
+    app.createWindow()
+    const close = mockWindow.on.mock.calls.find(([name]) => name === "close")[1]
+    app.ipcHandlers.localMedia = { freeze: jest.fn(), shutdown: jest.fn().mockRejectedValue(new Error("stuck")) }
+    const event = quitEvent()
+    close(event)
+    expect(event.preventDefault).toHaveBeenCalledTimes(1)
+    expect(app.isQuitting).toBe(false)
+    expect(mockElectron.app.quit).toHaveBeenCalledTimes(1)
+    await app.onBeforeQuit(quitEvent())
+    expect(app.isQuitting).toBe(false)
+    expect(mockEngine.freeze).not.toHaveBeenCalled()
+    close(quitEvent())
+    expect(mockElectron.app.quit).toHaveBeenCalledTimes(2)
+
+    app.hasShutDown = true
+    const finalClose = quitEvent()
+    close(finalClose)
+    expect(finalClose.preventDefault).not.toHaveBeenCalled()
+    expect(mockElectron.app.quit).toHaveBeenCalledTimes(2)
+  })
+
+  it("freezes local inspection immediately and waits for its child before quitting", async () => {
+    let drained
+    const shutdown = new Promise((resolve) => { drained = resolve })
+    app.ipcHandlers.localMedia = { freeze: jest.fn(), shutdown: jest.fn(() => shutdown) }
+    mockIpcHandlers.runner = { freeze: jest.fn(), cancelAll: jest.fn(() => 0) }
+    app.services.ytdlpUpdater = { shutdown: jest.fn() }
+    const quit = app.onBeforeQuit(quitEvent())
+    expect(app.ipcHandlers.localMedia.freeze).toHaveBeenCalledTimes(1)
+    // Until the helper drains, this quit can still fail. Do not freeze the
+    // engine while the live runner can hand a completed slot to queued work.
+    expect(mockEngine.freeze).not.toHaveBeenCalled()
+    expect(mockIpcHandlers.runner.freeze).not.toHaveBeenCalled()
+    expect(app.services.ytdlpUpdater.shutdown).not.toHaveBeenCalled()
+    expect(app.isQuitting).toBe(false)
+    expect(mockElectron.app.quit).not.toHaveBeenCalled()
+    const repeated = quitEvent()
+    await app.onBeforeQuit(repeated)
+    expect(repeated.preventDefault).toHaveBeenCalledTimes(1)
+    expect(app.ipcHandlers.localMedia.shutdown).toHaveBeenCalledTimes(1)
+    expect(mockElectron.app.quit).not.toHaveBeenCalled()
+    drained()
+    await quit
+    expect(mockIpcHandlers.runner.freeze.mock.invocationCallOrder[0]).toBeLessThan(
+      mockEngine.freeze.mock.invocationCallOrder[0]
+    )
+    expect(mockElectron.app.quit).toHaveBeenCalledTimes(1)
+  })
+
+  it("keeps downloads and update scheduling usable after a failed local drain, then allows a retry", async () => {
+    app.ipcHandlers.localMedia = { freeze: jest.fn(), shutdown: jest.fn().mockRejectedValue(new Error("stuck")) }
+    mockIpcHandlers.runner = { freeze: jest.fn(), cancelAll: jest.fn(() => 0) }
+    app.services.ytdlpUpdater = { shutdown: jest.fn() }
+    app.engineUpdateTimer = setTimeout(() => {}, 60000)
+    app.periodicUpdateTimer = setInterval(() => {}, 60000)
+    const engineTimer = app.engineUpdateTimer
+    const periodicTimer = app.periodicUpdateTimer
+    try {
+      await app.onBeforeQuit(quitEvent())
+      expect(mockElectron.app.quit).not.toHaveBeenCalled()
+      expect(mockElectron.dialog.showErrorBox).toHaveBeenCalled()
+      expect(app.hasShutDown).toBe(false)
+      expect(app.isQuitting).toBe(false)
+      expect(app.quitDrainInProgress).toBe(false)
+      expect(mockEngine.freeze).not.toHaveBeenCalled()
+      expect(mockIpcHandlers.runner.freeze).not.toHaveBeenCalled()
+      expect(mockIpcHandlers.runner.cancelAll).not.toHaveBeenCalled()
+      expect(mockIpcHandlers.history.interruptLive).not.toHaveBeenCalled()
+      expect(app.services.ytdlpUpdater.shutdown).not.toHaveBeenCalled()
+      expect(app.engineUpdateTimer).toBe(engineTimer)
+      expect(app.periodicUpdateTimer).toBe(periodicTimer)
+
+      app.ipcHandlers.localMedia.shutdown.mockResolvedValueOnce({ closed: true })
+      await app.onBeforeQuit(quitEvent())
+      expect(mockElectron.app.quit).toHaveBeenCalledTimes(1)
+      expect(mockEngine.freeze).toHaveBeenCalledTimes(1)
+      expect(app.engineUpdateTimer).toBeNull()
+      expect(app.periodicUpdateTimer).toBeNull()
+    } finally {
+      clearTimeout(engineTimer)
+      clearInterval(periodicTimer)
+    }
+  })
 
   it("drains queued events before the ipc handlers go", async () => {
     await app.onBeforeQuit(quitEvent())

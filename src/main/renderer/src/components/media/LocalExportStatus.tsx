@@ -1,0 +1,61 @@
+import { useEffect } from "react"
+import { Link, useLocation } from "react-router-dom"
+import { Button } from "@/components/ui/button"
+import { Progress } from "@/components/ui/progress"
+import { mediaApi } from "@/lib/api"
+import { useT, type Key } from "@/lib/i18n"
+import { acceptExport, localExportActions, useLocalExport } from "@/lib/stores/localExportStore"
+import { en } from "@/lib/i18n/en"
+import type { LocalExportJob } from "@/lib/local-media-types"
+
+const labels: Record<LocalExportJob["state"], Key> = {
+  reserved: "media.exportReserved", running: "media.exportRunning", validating: "media.exportValidating",
+  publishing: "media.exportPublishing", stopping: "media.exportStopping", completed: "media.exportCompleted",
+  cancelled: "media.exportCancelled", failed: "media.exportFailed", interrupted: "media.exportInterrupted"
+}
+
+export function ExportStatus() {
+  const t = useT()
+  const snapshot = useLocalExport(s => s.snapshot)
+  const pending = useLocalExport(s => s.pending)
+  const error = useLocalExport(s => s.error)
+  const job = snapshot.job
+  const copyLabels: Partial<Record<LocalExportJob["state"], Key>> = {
+    running: "media.copyRunning", validating: "media.copyValidating", completed: "media.copyCompleted",
+    cancelled: "media.copyCancelled", failed: "media.copyFailed"
+  }
+  const clipLabels: Partial<Record<LocalExportJob["state"], Key>> = {
+    running: "media.clipRunning", validating: "media.clipValidating", completed: "media.clipCompleted",
+    cancelled: "media.clipCancelled", failed: "media.clipFailed"
+  }
+  const code = snapshot.recoveryError || job?.error
+  return <div className="min-w-0 space-y-2 empty:hidden" aria-label={t("media.exportStatus")}>
+    {job && <>
+      <p role="status" className="break-words text-xs leading-relaxed [overflow-wrap:anywhere]">{t(job.operation === "trim" ? clipLabels[job.state] || labels[job.state] : (job.operation === "removeTracks" || job.operation === "remux") ? copyLabels[job.state] || labels[job.state] : labels[job.state])}{job.outputName ? ` · ${job.outputName}` : ""}</p>
+      <Progress className="h-1.5" value={job.progress} aria-label={t("media.exportProgress")} />
+      <div className="flex flex-wrap gap-2">
+        {["reserved", "running", "validating", "stopping"].includes(job.state) && <Button size="sm" variant="outline" className="h-auto min-h-8 whitespace-normal py-1.5 text-xs" disabled={pending || job.state === "stopping"} onClick={() => void localExportActions.cancel(job.jobId)}>{t(job.operation === "trim" ? "media.cancelClip" : (job.operation === "removeTracks" || job.operation === "remux") ? "media.cancelCopy" : "media.cancelExport")}</Button>}
+        {job.state === "completed" && <Button size="sm" variant="outline" className="h-auto min-h-8 whitespace-normal py-1.5 text-xs" onClick={() => void localExportActions.reveal(job.jobId)}>{t("media.revealOutput")}</Button>}
+      </div>
+    </>}
+    {(error || code) && <p role="alert" className="break-words text-xs leading-relaxed text-red-600 [overflow-wrap:anywhere] dark:text-red-400">{error || t(Object.hasOwn(en, `media.error.${code}`) ? `media.error.${code}` as Key : "media.exportFailureHelp")}</p>}
+  </div>
+}
+
+// One subscription outside the route; subscribe before reading to avoid missing
+// a terminal update racing the initial state reply. No download-store writes.
+export function LocalExportEvents() {
+  const t = useT()
+  const location = useLocation()
+  const hasStatus = useLocalExport(s => Boolean(s.snapshot.job || s.snapshot.recoveryError))
+  useEffect(() => {
+    let alive = true
+    const unsubscribe = mediaApi.onExportUpdated(acceptExport)
+    void mediaApi.exportState().then(state => { if (alive) acceptExport(state) }).catch(() => {})
+    return () => { alive = false; unsubscribe() }
+  }, [])
+  if (!hasStatus || location.pathname === "/media") return null
+  return <aside className="fixed bottom-4 left-4 z-30 w-80 max-w-[calc(100vw-2rem)] space-y-2 rounded-lg border border-border bg-background p-3 shadow-lg">
+    <ExportStatus /><Button size="sm" variant="ghost" className="h-auto min-h-8 whitespace-normal py-1.5 text-xs" asChild><Link to="/media">{t("media.return")}</Link></Button>
+  </aside>
+}

@@ -46,6 +46,21 @@ it speaks english and russian based on your system language, updates itself, and
 
 got an idea or found something broken? [open an issue](https://github.com/Cliply/Cliply/issues).
 
+### local files — under validation
+
+this branch also has a local-file workspace: preview a file, mark sections on a visual timeline, keep or remove them and save
+one joined result. You can also extract audio, remove tracks or change a compatible container.
+the compact workspace uses resizable preview/timeline panels and a separate
+section/export inspector, adapted from [OpenCut Classic](third-party/opencut-classic/README.md).
+exports copy existing media without re-encoding. keyframe cuts can start early and
+normal cuts can have a brief picture gap. see the [cutting and playback credits](third-party/losslesscut/README.md).
+native playback has an FFmpeg-assisted compatibility mode; unsupported layouts show a reason instead of converting
+or silently dropping tracks. the original stays open and exports use a new file.
+
+builds from this branch bundle the verified ffprobe executable for the target platform.
+the editor is pending an app release. see the [verified profiles and limits](docs/architecture.md#local-media-validation-status)
+and [ffprobe build and source records](third-party/ffprobe/README.md).
+
 ### get it
 
 grab it from [releases](https://github.com/Cliply/Cliply/releases/latest), or [cliply.space](https://cliply.space/downloads) if you'd rather just click a button. windows gets an `.exe` installer, macos a `.dmg` for apple silicon. intel macs aren't currently supported. linux x64 packaging is prepared for the next release: an AppImage and a `.deb` for ubuntu/debian systems. linux downloads become available when those files appear on the release page.

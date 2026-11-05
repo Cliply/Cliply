@@ -1,0 +1,18 @@
+{
+  "schema": 1,
+  "evaluationOnly": false,
+  "platform": "darwin-arm64",
+  "binarySha256": "12f33a63103e9d7cbd469993e466f8c1891bb3ad253a2ab5ccec62b551a5d328",
+  "sourceCommit": "1041abdc962f4cc4f394aa8de9dc5236c0c3b9e7",
+  "sourceArchiveSha256": "801838344d51651d45ab3ce6502a2627da7746492475711ff2adfb723aeaf7b6",
+  "sourceAsset": {
+    "name": "ffprobe-source-1041abdc962f-darwin-arm64-12f33a63103e-41dafacbd38e.tar.gz",
+    "sha256": "41dafacbd38e42aab43a4e77010212ca3a327500037978fde6c26de9609da2c8",
+    "url": "https://github.com/Cliply/Cliply/releases/download/binaries/ffprobe-source-1041abdc962f-darwin-arm64-12f33a63103e-41dafacbd38e.tar.gz",
+    "assetId": 710639578
+  },
+  "files": {
+    "NOTICE.txt": "87e0677c4a27d0ddac3708495f7993d0fbd5534c3be870ee1d82910108467b73",
+    "COPYING.LGPLv2.1": "246041b6ecf9bc32d718a62c57877c78b5eb397b6467e74ed7ae2626ab189c30"
+  }
+}

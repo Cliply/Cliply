@@ -8,8 +8,9 @@
 //
 //   required - anything the packaged app cannot run without. a failure throws,
 //              electron-builder exits nonzero, and no artifact is produced.
-//   optional - genuinely absent inputs (an ffprobe we do not always ship).
-//              missing is fine; present-but-broken is not.
+//   optional - FFprobe until its verified publication record exists, unless
+//              CLIPLY_REQUIRE_FFPROBE=1 explicitly requests local-media support.
+//              A present helper is always prepared and audited.
 //
 // this file used to swallow every error on the grounds that it only did
 // best-effort chmod. it now performs required transforms, so a swallowed
@@ -20,6 +21,8 @@ const fs = require("fs").promises
 const os = require("os")
 const path = require("path")
 const { spawn } = require("child_process")
+const { ffprobeRelease } = require("./fetch-helpers")
+const { prepareNotices, finishNotices } = require("./ffprobe-notices")
 
 // the same resolver the app uses at runtime, so the check here and the lookup
 // there can never disagree about what counts as a usable engine
@@ -41,9 +44,8 @@ const ARCH_UNIVERSAL = 4
  * youtube's javascript challenges. a package missing either installs happily
  * and then fails the moment the user asks for anything.
  *
- * optional: genuinely not always shipped. ffprobe is not in any platform's
- * extraResources today - it is listed so that a build which does start
- * bundling it gets chmod'd and signed rather than silently skipped.
+ * FFprobe becomes required for a published platform or an explicit local-media
+ * package check. Until publication, ordinary downloader builds may omit it.
  */
 const REQUIRED_BINARIES = {
   darwin: [
@@ -83,6 +85,14 @@ async function afterPack(context) {
   console.log(`running after-pack for platform: ${electronPlatformName}`)
   console.log(`app output directory: ${appOutDir}`)
 
+  const resources = electronPlatformName === "darwin"
+    ? path.join(appOutDir, `${packager.appInfo.productFilename}.app`, "Contents", "Resources")
+    : path.join(appOutDir, "resources")
+  const platform = `${electronPlatformName}-${context.arch === 3 ? "arm64" : "x64"}`
+  const notices = prepareNotices({ resources, platform,
+    projectDir: packager.projectDir || path.resolve(__dirname, ".."),
+    evaluationRecord: process.env.CLIPLY_FFPROBE_NOTICE_RECORD })
+
   switch (electronPlatformName) {
     case "darwin":
       await prepareMacOS(appOutDir, packager, context.arch)
@@ -96,6 +106,8 @@ async function afterPack(context) {
     default:
       console.log(`no after-pack work for ${electronPlatformName}`)
   }
+
+  finishNotices(notices)
 
   console.log("after-pack completed")
 }
@@ -188,11 +200,13 @@ async function prepareLinux(appOutDir) {
  * @param {string} platform - node platform key
  * @returns {Promise<string[]>} absolute paths of the binaries present
  */
-async function collectBinaries(binariesPath, platform) {
+async function collectBinaries(binariesPath, platform, { requireFfprobe = process.env.CLIPLY_REQUIRE_FFPROBE === "1" ||
+  Boolean(ffprobeRelease(`${platform}-${platform === "darwin" ? "arm64" : "x64"}`)) } = {}) {
   const present = []
   const missing = []
 
-  for (const entry of REQUIRED_BINARIES[platform] || []) {
+  const probe = OPTIONAL_BINARIES[platform] || []
+  for (const entry of [...(REQUIRED_BINARIES[platform] || []), ...(requireFfprobe ? probe : [])]) {
     const binary = path.join(binariesPath, ...entry.segments)
 
     if (await fileExists(binary)) {
@@ -208,7 +222,7 @@ async function collectBinaries(binariesPath, platform) {
     )
   }
 
-  for (const entry of OPTIONAL_BINARIES[platform] || []) {
+  for (const entry of requireFfprobe ? [] : probe) {
     const binary = path.join(binariesPath, ...entry.segments)
 
     if (await fileExists(binary)) {

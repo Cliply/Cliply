@@ -1,0 +1,26 @@
+{
+  "schema": 1,
+  "evaluationOnly": false,
+  "platform": "win32-x64",
+  "binarySha256": "2a58ef3bcf84e78afab58a29d248a382a098fd93640709fb4d88de662fc5bb1d",
+  "sourceCommit": "1041abdc962f4cc4f394aa8de9dc5236c0c3b9e7",
+  "sourceArchiveSha256": "801838344d51651d45ab3ce6502a2627da7746492475711ff2adfb723aeaf7b6",
+  "sourceAsset": {
+    "name": "ffprobe-source-1041abdc962f-win32-x64-2a58ef3bcf84-4022e9cf7d95.tar.gz",
+    "sha256": "4022e9cf7d9545b3a49ecb09b960f638564fa47ad4783e74b9c44e75e0f4c8c4",
+    "url": "https://github.com/Cliply/Cliply/releases/download/binaries/ffprobe-source-1041abdc962f-win32-x64-2a58ef3bcf84-4022e9cf7d95.tar.gz",
+    "assetId": 710641647
+  },
+  "files": {
+    "NOTICE.txt": "87e0677c4a27d0ddac3708495f7993d0fbd5534c3be870ee1d82910108467b73",
+    "COPYING.LGPLv2.1": "246041b6ecf9bc32d718a62c57877c78b5eb397b6467e74ed7ae2626ab189c30",
+    "COPYING.GPLv3": "8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903",
+    "COPYING.GPLv2": "8177f97513213526df2cf6184d8ff986c675afb514d4e68a404010521b880643",
+    "GCC-RUNTIME-EXCEPTION.txt": "9d6b43ce4d8de0c878bf16b54d8e7a10d9bd42b75178153e3af6a815bdc90f74",
+    "MINGW-ZPL.txt": "99a69660981156c21336fdb5661f89341b013c94e4bf9e1c7467b4745718397f",
+    "MINGW-RUNTIME-NOTICES.txt": "1db8da07b436c68833c0673ffee3d9fcb2526047f3820b81661865dfedc79a1f",
+    "MINGW-NOTICES.txt": "f38e6194bd3bfa1b654f118e5acefe0aead437bbe669eee43957ccc65a7127f1",
+    "MINGW-DDK-NOTICES.txt": "8d8f9924e4ea5466932000bdb9a4104da1d8ca3e4c979bb8207225522ba63826",
+    "WINPTHREADS-NOTICES.txt": "63263614cdd29f2f93cba85e992f041b31f9fc7b4033692f31269489a8a1b177"
+  }
+}

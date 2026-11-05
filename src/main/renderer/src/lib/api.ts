@@ -28,7 +28,9 @@ import {
   type VideoDownloadRequest,
   type VideoInfoResponse
 } from "./api-types"
+import { localizeCode } from "./i18n"
 import type { IPCResponse } from "./electron-api"
+import type { LocalExportRequest, LocalExportState, TrimInspectRequest } from "./local-media-types"
 
 // the types and the pure helpers used to live here, so they are re-exported
 // under this name: every importer of this module still reads them here
@@ -126,6 +128,57 @@ const listSnapshot = (
   lifetimeCompleted: data?.lifetimeCompleted ?? 0,
   rows: data?.rows ?? []
 })
+
+const mediaError: ErrorFactory = (message, error) =>
+  Object.assign(new Error(localizeCode(error?.code ? `LOCAL_${error.code}` : undefined, message)), { code: error?.code })
+
+// Local inspection is separate from download state, history and telemetry.
+export const mediaApi = {
+  async compatStart(request: { sourceId: string; seekTo: number }) { return unwrap(await getElectronAPI().media.compatStart(request), "Preview unavailable", { makeError: mediaError }) },
+  async compatRead(id: string) { return unwrap(await getElectronAPI().media.compatRead(id), "Preview unavailable", { makeError: mediaError, requireData: false }) ?? null },
+  async compatStop(id: string) { return unwrap(await getElectronAPI().media.compatStop(id), "Preview unavailable", { makeError: mediaError }) },
+  async compatClock(id: string) { return unwrap(await getElectronAPI().media.compatClock(id), "Preview unavailable", { makeError: mediaError }) },
+  async inspectTrim(request: TrimInspectRequest) {
+    return unwrap(await getElectronAPI().media.inspectTrim(request), "Could not inspect cut boundaries", { makeError: mediaError })
+  },
+  async cancelTrim() {
+    return unwrap(await getElectronAPI().media.cancelTrim(), "Could not cancel timing inspection", { makeError: mediaError })
+  },
+  async confirmPlayback(request: { previewId: string; played: boolean }) {
+    return unwrap(await getElectronAPI().media.confirmPlayback(request), "Native playback unavailable", { makeError: mediaError })
+  },
+  async prepareExport(request: LocalExportRequest) {
+    return unwrap(await getElectronAPI().media.prepareExport(request), "Could not prepare local export", { makeError: mediaError })
+  },
+  async startExport(planId: string) {
+    return unwrap(await getElectronAPI().media.startExport(planId), "Could not start local export", { makeError: mediaError })
+  },
+  async cancelExport(jobId: string) {
+    return unwrap(await getElectronAPI().media.cancelExport(jobId), "Could not cancel local export", { makeError: mediaError })
+  },
+  async exportState() {
+    return unwrap(await getElectronAPI().media.exportState(), "Could not read local export status", { makeError: mediaError })
+  },
+  async revealOutput(jobId: string) {
+    return unwrap(await getElectronAPI().media.revealOutput(jobId), "Could not reveal local output", { makeError: mediaError })
+  },
+  onExportUpdated(callback: (state: LocalExportState) => void) { return getElectronAPI().media.onExportUpdated(callback) },
+  async preview(sourceId: string) {
+    return unwrap(await getElectronAPI().media.preview(sourceId), "Native preview is unavailable", { makeError: mediaError })
+  },
+  async releasePreview(previewId: string) {
+    return unwrap(await getElectronAPI().media.releasePreview(previewId), "Could not release preview", { makeError: mediaError })
+  },
+  async open() {
+    return unwrap(await getElectronAPI().media.open(), "Could not inspect the local file", { makeError: mediaError })
+  },
+  async getState() {
+    return unwrap(await getElectronAPI().media.getState(), "Could not read local media state", { makeError: mediaError })
+  },
+  async close() {
+    return unwrap(await getElectronAPI().media.close(), "Could not close the local file", { makeError: mediaError })
+  }
+}
 
 // Video API functions
 export const videoApi = {

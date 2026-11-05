@@ -5,15 +5,21 @@ const path = require("node:path")
 const { spawnSync } = require("node:child_process")
 const { parseArgs } = require("node:util")
 const { resolveExecutableIn } = require("../src/main/services/ytdlp-engine")
-const { verifyArchitecture } = require("./fetch-helpers")
+const { verifyArchitecture, ffprobeRelease } = require("./fetch-helpers")
+const { verifyInstalledNotices } = require("./ffprobe-notices")
 
-async function verifyPackagedHelpers(resources) {
+async function verifyPackagedHelpers(resources, { requireFfprobe = false, requireFfprobeNotices = false } = {}) {
   const platform = `${process.platform}-${process.arch}`
+  requireFfprobe ||= process.env.CLIPLY_REQUIRE_FFPROBE === "1" || Boolean(ffprobeRelease(platform))
   const binaries = path.resolve(resources, "binaries")
   const suffix = process.platform === "win32" ? ".exe" : ""
   const engine = resolveExecutableIn(path.join(binaries, "ytdlp"))
   assert.ok(engine, "packaged yt-dlp executable is present")
+  const ffprobe = path.join(binaries, `ffprobe${suffix}`)
+  if (requireFfprobe) assert.ok(fs.existsSync(ffprobe), "packaged FFprobe is required for local media capability")
+  verifyInstalledNotices(resources, platform, { required: requireFfprobeNotices })
   for (const [binary, args] of [
+    ...(fs.existsSync(ffprobe) ? [[ffprobe, ["-version"]]] : []),
     [path.join(binaries, `ffmpeg${suffix}`), ["-version"]],
     [path.join(binaries, "deno", `deno${suffix}`), ["--version"]],
     [engine, ["--version"]]
@@ -34,9 +40,9 @@ async function verifyPackagedHelpers(resources) {
 }
 
 if (require.main === module) {
-  const { values } = parseArgs({ options: { resources: { type: "string" } } })
+  const { values } = parseArgs({ options: { resources: { type: "string" }, "require-ffprobe": { type: "boolean", default: false }, "require-ffprobe-notices": { type: "boolean", default: false } } })
   if (!values.resources) throw new Error("Pass --resources <packaged resources directory>")
-  verifyPackagedHelpers(values.resources).catch((error) => {
+  verifyPackagedHelpers(values.resources, { requireFfprobe: values["require-ffprobe"], requireFfprobeNotices: values["require-ffprobe-notices"] }).catch((error) => {
     console.error(error)
     process.exitCode = 1
   })

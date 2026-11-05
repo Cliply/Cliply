@@ -1,6 +1,7 @@
 // the preload bridge as the renderer sees it
 
 import type { ReportEnvironment } from "@/lib/report"
+import type { LocalExportRequest, LocalExportPlan, LocalExportState, TrimInspectRequest, TrimTiming } from "./local-media-types"
 
 import type {
   ApiError,
@@ -28,6 +29,8 @@ import type {
   VideoInfoResponse
 } from "./api-types"
 
+import type { MediaOpenResult, MediaState, MediaPreview } from "./local-media-types"
+
 // IPC Response wrapper
 export interface IPCResponse<T> {
   success: boolean
@@ -39,6 +42,26 @@ export interface IPCResponse<T> {
 declare global {
   interface Window {
     electronAPI?: {
+      media: {
+        compatStart: (request: { sourceId: string; seekTo: number }) => Promise<IPCResponse<{ sessionId: string; video: boolean; audio: boolean }>>
+        compatRead: (sessionId: string) => Promise<IPCResponse<Uint8Array | null>>
+        compatStop: (sessionId: string) => Promise<IPCResponse<{ stopped: boolean }>>
+        compatClock: (sourceId: string) => Promise<IPCResponse<Uint8Array>>
+        inspectTrim: (request: TrimInspectRequest) => Promise<IPCResponse<TrimTiming>>
+        cancelTrim: () => Promise<IPCResponse<{ cancelled: boolean }>>
+        confirmPlayback: (request: { previewId: string; played: boolean }) => Promise<IPCResponse<{ confirmed: boolean }>>
+        prepareExport: (request: LocalExportRequest) => Promise<IPCResponse<{ cancelled: boolean; plan: LocalExportPlan | null }>>
+        startExport: (planId: string) => Promise<IPCResponse<LocalExportState>>
+        cancelExport: (jobId: string) => Promise<IPCResponse<LocalExportState>>
+        exportState: () => Promise<IPCResponse<LocalExportState>>
+        revealOutput: (jobId: string) => Promise<IPCResponse<{ revealed: boolean }>>
+        onExportUpdated: (callback: (state: LocalExportState) => void) => () => void
+        open: () => Promise<IPCResponse<MediaOpenResult>>
+        preview: (sourceId: string) => Promise<IPCResponse<MediaPreview>>
+        releasePreview: (previewId: string) => Promise<IPCResponse<{ released: boolean }>>
+        getState: () => Promise<IPCResponse<MediaState>>
+        close: () => Promise<IPCResponse<{ closed: boolean }>>
+      }
       video: {
         getInfo: (
           options: { url: string; platform?: string } | string

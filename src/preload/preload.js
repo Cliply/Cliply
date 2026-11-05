@@ -69,6 +69,31 @@ const invoke = async (channel, data) => {
 
 // expose ipc api to renderer process
 contextBridge.exposeInMainWorld("electronAPI", {
+  // Local media: opaque IDs and a selected stream; no paths or FFmpeg arguments.
+  media: {
+    compatStart: (request) => invoke("media:compat-start", request),
+    compatRead: (sessionId) => invoke("media:compat-read", sessionId),
+    compatStop: (sessionId) => invoke("media:compat-stop", sessionId),
+    compatClock: (sourceId) => invoke("media:compat-clock", sourceId),
+    inspectTrim: (request) => invoke("media:inspect-trim", request),
+    cancelTrim: () => invoke("media:cancel-trim"),
+    confirmPlayback: (request) => invoke("media:preview-playback", request),
+    open: () => invoke("media:open"),
+    getState: () => invoke("media:get-state"),
+    preview: (sourceId) => invoke("media:preview", sourceId),
+    releasePreview: (previewId) => invoke("media:release-preview", previewId),
+    close: () => invoke("media:close"),
+    prepareExport: (request) => invoke("media:prepare-export", request),
+    startExport: (planId) => invoke("media:start-export", planId),
+    cancelExport: (jobId) => invoke("media:cancel-export", jobId),
+    exportState: () => invoke("media:export-state"),
+    revealOutput: (jobId) => invoke("media:reveal-output", jobId),
+    onExportUpdated: (callback) => {
+      const handler = (_event, snapshot) => callback(snapshot)
+      ipcRenderer.on("media:export-updated", handler)
+      return () => ipcRenderer.removeListener("media:export-updated", handler)
+    }
+  },
   // video operations
   video: {
     getInfo: (options) => {

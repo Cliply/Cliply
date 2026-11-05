@@ -1,6 +1,13 @@
 # bundled helper binaries
 
-Cliply packages FFmpeg, Deno and the standalone yt-dlp engine. Users do not need to install Python, FFmpeg or Deno separately. The large executables stay out of git.
+Cliply packages FFmpeg, FFprobe, Deno and the standalone yt-dlp engine. Users do not need to install Python, FFmpeg, FFprobe or Deno separately. The large executables stay out of git.
+
+Local-file inspection uses a separately resolved, bundled FFprobe. Verified
+source-built assets are published for macOS ARM64, Windows x64 and Linux x64.
+Their production records automatically require FFprobe during fetching and packaging.
+See the [FFprobe distribution record](../third-party/ffprobe/README.md) for exact
+source/build identities, source delivery and platform coverage. Missing inspection
+support still does not disable the downloader at runtime.
 
 ## fetch the release helpers
 
@@ -25,6 +32,7 @@ The `BUILD_TARGET_PLATFORM` example uses a POSIX shell. In PowerShell, set `$env
 | Component | Build source and update ownership |
 | --- | --- |
 | FFmpeg | CI fetches the platform executable from Cliply's helper release. Linux staging verifies a dated BtbN upstream archive; Mac and Windows have their own existing provenance. Exact records belong in [build-info.md](../third-party/ffmpeg/build-info.md). |
+| FFprobe | CI fetches the pinned source-built executable from the same helper release. [Publication records](../third-party/ffprobe/published.json) bind its versioned asset, SHA256 and corresponding source/notices; [source-build.json](../third-party/ffprobe/source-build.json) identifies the official FFmpeg source. |
 | Deno | CI fetches the platform executable from the same helper release. Linux staging extracts the official [denoland/deno](https://github.com/denoland/deno/releases) archive, using the version selected in the staging workflow. |
 | yt-dlp | [fetch-ytdlp.js](../scripts/fetch-ytdlp.js) downloads official [yt-dlp releases](https://github.com/yt-dlp/yt-dlp/releases), verifies SHA256 and preserves the onedir payload. [YtdlpUpdater](../src/main/services/ytdlp-updater.js) independently owns the writable runtime copy and later upstream updates. |
 | PO token recovery | [Build PO token payload](../.github/workflows/build-pot-payload.yml) assembles the [bgutil provider](https://github.com/Brainicism/bgutil-ytdlp-pot-provider) plugin and generator with native dependencies per platform. Published `pot-<version>-<platform>.zip` files live in the helper release; the installer verifies the selected hash in `pot-installer.js`. This is downloaded on demand, not bundled into every installer. |
@@ -53,12 +61,15 @@ binaries/
 │   └── windows/deno.exe
 ├── linux/
 │   ├── ffmpeg
+│   ├── ffprobe
 │   └── ytdlp/...
 ├── macos/
 │   ├── ffmpeg
+│   ├── ffprobe
 │   └── ytdlp/...
 └── windows/
     ├── ffmpeg.exe
+    ├── ffprobe.exe
     └── ytdlp/...
 ```
 
@@ -71,6 +82,34 @@ macOS and Linux require executable permissions; the downloader and packaging hoo
 writable copy under Electron user data. Packaged resources and the writable engine
 are different locations. See [architecture](../docs/architecture.md) and
 [release validation](../docs/releasing.md) for their lifecycles.
+
+FFprobe's prepared paths are `binaries/macos/ffprobe`,
+`binaries/linux/ffprobe`, `binaries/windows/ffprobe.exe`, copied to
+`<resources>/binaries/ffprobe[.exe]`. The reviewed publication manifest
+[`published.json`](../third-party/ffprobe/published.json) selects all three supported platforms.
+`fetch:helpers` fetches the selected FFprobe alongside the existing FFmpeg and Deno.
+Each production record contains a versioned `assetName`, verified shared-release
+asset ID, executable SHA256 and source-record reference/checksum. FFprobe asset
+names are `ffprobe-<source-commit12>-<platform>-<sha256-first12>[.exe]`; only Windows
+uses `.exe`. The build downloader uses that exact name, then installs it under
+the stable local filename above. Old release assets are retained, so older pinned
+builds remain fetchable. Fetching verifies the hash and architecture
+before installing any staged helper. It never follows an upstream “latest” URL.
+A changed shared asset fails the pinned hash check; it cannot silently update the
+helper used by an app build. The source archive has its own content-addressed
+asset name and hash; its URL is included in the installed notice record.
+
+`node scripts/fetch-helpers.js --require-ffprobe` fails before downloading anything
+when the platform has no publication record. `CLIPLY_REQUIRE_FFPROBE=1` applies
+the same requirement to fetching, after-pack and packaged-helper validation.
+A published platform automatically requires FFprobe in all three. Local inspection
+works offline once a complete app is installed; FFprobe updates travel with app
+updates, not a separate runtime downloader. Existing installations do not change
+when a GitHub asset changes.
+
+For explicit local development, `CLIPLY_DEV_FFPROBE` may name an absolute,
+verified task-owned executable when `NODE_ENV=development`; packaged apps ignore
+this override. The resolver never uses PATH/Homebrew or downloads on file open.
 
 ## build and check
 

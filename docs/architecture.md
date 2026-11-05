@@ -43,6 +43,10 @@ seeds a runnable engine into writable user data. IPC handlers then own the runne
 and expose the request boundary. A delayed engine check gives the first download
 a head start. Production app updates use electron-updater separately.
 
+Cookie construction and application startup share the same in-flight
+initialization promise. This prevents simultaneous startup calls from replacing
+the same temporary cookie jar; a later explicit refresh still runs normally.
+
 For a download, IPC maps the request and reserves a runner entry. The runner owns
 admission and concurrency; the configured cap is in `APP_CONFIG` in
 [`constants.js`](../src/main/utils/constants.js). Queued entries remain cancellable.
@@ -121,6 +125,447 @@ Existing telemetry records the
 Instagram platform and `best_available` quality, never captions, usernames or URLs.
 The managed stable-channel engine updater remains responsible for extractor fixes.
 
+## Local-file inspection, preview and copy-only tools
+
+[`local-media.js`](../src/main/services/local-media.js) owns one in-memory source
+and at most one inspection, separately from download history, slots and the
+yt-dlp update gate. The home entry opens the `/media` workspace after a successful
+native selection. The separate session-only store retains source/position across
+routes; global download subscriptions and the panel remain mounted. No startup
+scan, saved project or new analytics is introduced. One local export has its
+own reservation and status; it does not use downloader queue admission.
+
+The narrow [`media` IPC handlers](../src/main/ipc/local-media.js), preload and
+renderer `mediaApi` expose these calls:
+
+| Call | Successful data |
+| --- | --- |
+| `media:open` | `{ cancelled, source }`; main selects one file through a native dialog. Cancel leaves the existing source open. |
+| `media:get-state` | `{ source, busy }`; rechecks source identity before returning metadata. |
+| `media:close` | `{ closed: true }`; revokes the source and cancels/drains a running probe. A pending dialog's eventual result is discarded. |
+| `media:preview(sourceId)` | `{ sourceId, previewId, url, mime, expiresAt }`; one temporary access grant for the currently registered source. |
+| `media:release-preview(previewId)` | `{ released: true }`; revokes that grant without closing the inspected source. |
+| `media:prepare-export(request)` | `{ cancelled, plan }`; main validates the operation and actual stream IDs, derives the output format, and owns the native save dialog. |
+| `media:start-export(planId)` | Export snapshot with a unique job already reserved; plans expire after ten minutes. |
+| `media:cancel-export(jobId)` | Export snapshot; repeat cancellation is harmless. |
+| `media:export-state` | Revision, preparing flag, plan, job and cleanup error. |
+| `media:preview-playback({ previewId, played })` | `{ confirmed }`; trusted native-player event, tied to the current grant. |
+| `media:inspect-trim({ sourceId, previewId, start, end, mode })` | Main-owned five-minute cut plan; legacy `before` means keyframe/input seek, `after` means normal/output seek. |
+| `media:cancel-trim` | `{ cancelled }`; drains timing inspection while retaining the source. |
+| `media:reveal-output(jobId)` | `{ revealed: true }`; main revalidates its completed path before revealing it. |
+
+Requests are exactly `{ operation: "extractAudio", sourceId, streamIndex }` or
+`{ operation: "removeTracks", sourceId, streamIndexes, removeChapters }`, or
+`{ operation: "remux", sourceId, targetContainer, streamIndexes, removeChapters }`, or
+`{ operation: "trim", sourceId, trimPlanId }`.
+Remux targets are exactly `mp4`, `mov`, or `mkv`; main checks the destination
+extension. Export requests never accept arbitrary flags, paths or cut times;
+trim times are validated against the source duration before destination selection.
+
+`media:export-updated` sends the same revisioned snapshot only to the trusted
+application main frame. Renderer subscriptions live outside the route. Requests
+never accept destination paths, executable names or FFmpeg arguments.
+
+Only the application window's main frame at its expected local URL is accepted;
+renderer-supplied paths/options are refused. The shared host now requires
+`webSecurity:true`, `sandbox:true`, `contextIsolation:true`, `nodeIntegration:false`
+and `allowRunningInsecureContent:false`. Top-level external navigation and new
+Electron windows are denied; app website links use the existing external-browser
+bridge. The scoped YouTube embed referer is preserved in the same session hook.
+The window loads the same canonical `pathToFileURL` URL used for authorization,
+including encoded Windows short-name tildes and literal percent signs. Electron's
+legacy `loadFile` formatting can differ. Authorization remains an exact URL
+comparison after removing only the route fragment; queries and foreign frames,
+windows, file paths and remote origins are still rejected. The existing fallback
+load also uses `pathToFileURL` and does not expand the trusted URL set.
+
+[`preview.js`](../src/main/services/local-media/preview.js) registers the
+`cliply-media` scheme before app readiness and its handler only in the owner's
+session. Its exact URL contains a random 256-bit token, never a path. Tokens last
+30 minutes and are revoked on replacement, close, expiry, full navigation,
+renderer loss or shutdown. Route cleanup releases the token and stops/unloads
+the native element; returning requests new access and restores position.
+Unloading the element during expiry/retry must not overwrite that position with
+the browser's reset-to-zero time event.
+
+Before sending headers, main checks the owner WebContents, exact trusted top
+frame URL, GET/HEAD method and media/fetch request type, then injects a private
+proof header. The protocol fails closed without that proof; caller headers are
+overwritten. A leaked URL alone cannot authorize foreign frames/windows/sessions.
+The one header hook also preserves the YouTube referer; do not replace it with
+another listener. CSP permits the custom scheme for media/fetch without a CSP
+bypass privilege. Responses are uncached and stream only the main-owned file;
+single prefix/open/suffix byte ranges and HEAD are supported, malformed or multiple
+ranges return 416, and at most four streams remain live. Identity is rechecked
+before opening and on the opened descriptor to catch replacement during open.
+Revocation destroys active streams. A local process can still modify bytes during
+an already-open read: this is a bounded stat detector, not an immutable snapshot.
+
+The workspace rechecks identity every two seconds while mounted. Native controls
+report loading/play/seek/end/error, support audio-only media and distinguish
+decoder failure from successful inspection. The player chooses default tracks;
+all probed tracks remain visible, including cover artwork. Unsupported native tracks can use the LosslessCut compatibility player described below. Audio extraction and full-file track removal are enabled for verified profiles;
+compatible full-file container changes and reviewed multi-section cuts
+are also enabled. The section editor can plan exports independently of playback;
+the legacy single-range request also remains independent of preview.
+
+The version-1 [DTO](../src/main/renderer/src/lib/local-media-types.ts) contains an
+opaque source ID, filename/size, nullable duration/start, format-family labels,
+all actual stream indexes (including unknown/unsupported types), bounded stream
+details, chapter count and bounded chapter start/end/title. It carries separate probe, native-preview, trim,
+extraction, removal and remux capabilities. Probe success enables inspection
+only; the DTO's preview capability remains unchecked until the renderer tries
+the native element. Export capability remains independent of local playback status.
+Main computes separate `extractionProfiles`, `trackRemovalProfile`, `remuxProfiles` and `trimProfile` from the
+verified codecs/container, stream properties and duration. Unsupported streams
+stay in the inventory and are not silently removed from a planned copy.
+
+Canonical path plus device/inode/size/nanosecond mtime/ctime stay in main. They
+are checked before/after probing and on state access, and changes revoke the
+registration. This is a stat change detector, not a cryptographic identity or a
+defence against a hostile local process racing file replacement. Devices,
+directories, relative paths, URLs and UNC inputs are refused. Mounted network
+filesystems that present ordinary local paths are not identified by this check.
+
+The [probe runner](../src/main/services/local-media/probe.js) uses shell-free
+argv, file-only protocols, a small self-contained demuxer allow-list and disabled
+MOV external references. It limits JSON to 1 MiB, stderr to 64 KiB, streams to
+128, chapters to 512, probing analysis to 5 MB/5 seconds, and wall time to
+30 seconds. A 64 MiB single-allocation cap is not a total-RSS limit. Invalid or
+missing numeric fields remain `null`; inventories are refused, never silently
+truncated. Errors carry stable codes and path-free messages, not raw stderr.
+
+Cancel/timeout/overflow sends TERM, escalates to KILL after 500 ms and waits for
+close. A further 2-second drain failure reports `PROBE_STUCK` while keeping the
+slot occupied until actual exit. Quit freezes admission and drains local exports and inspection;
+repeated quit requests cannot bypass that drain. Installer handoff drains first
+and refuses to proceed if a helper is still active. A cleanup warning after all
+helpers exit retains its recovery record without preventing quit/install. Source selection/state are discarded
+on close or app exit; nothing is written to the source.
+
+An ordinary quit drains local media before committing downloader teardown.
+If that drain fails, download admission, the engine and update scheduling remain
+operational; local media stays frozen until the app closes. After a
+successful drain, queue admission and the engine freeze together before the
+first asynchronous history write. Downloads are cancelled before an updater
+abort can release its gate.
+The window close button prevents immediate destruction and delegates to this
+same drain; it does not set the quit flag early. A refused quit leaves the
+window available for the error and a later retry.
+
+See [bundled FFprobe](../third-party/ffprobe/README.md) for the verified production
+assets and source records. Supported production builds require the pinned helper.
+A development build without FFprobe returns `PROBE_MISSING` on open, with no
+download or startup failure.
+
+### One-track audio export
+
+The main-owned [planner](../src/main/services/local-media/export-plan.js) accepts
+one full-duration track: AAC-LC to ADTS `.aac`, MP3 to `.mp3`, or signed 16-bit
+little-endian PCM to `.wav`. Only mono/stereo and the tested source families are
+enabled. Only the selected track is mapped; metadata follows FFmpeg defaults
+for the destination format, matching LosslessCut extraction. There is no codec conversion, batch, range or preview
+requirement. The original source stays open after success or cancellation.
+
+[LocalExport](../src/main/services/local-media/export.js) reserves before replying,
+allows one local job, maps `0:<actual index>` and uses `-c copy`. Main opens the input as an inherited seekable descriptor and reserves the
+temporary output. FFmpeg writes to its owned staging path so faststart can reopen
+the same output; it never receives the final destination path. The
+[supervisor](../src/main/services/local-media/export-worker.js) uses Electron's
+embedded Node and owns one FFmpeg child. Parent IPC loss stops and drains FFmpeg;
+no separately installed Node or Python is needed. Machine progress is bounded,
+monotonic and capped below 100 until publication. Diagnostics are bounded and
+never sent to the renderer. Cancellation escalates TERM to KILL; a helper that
+has not actually closed keeps admission held and prevents quit/install success.
+
+[ExportOutput](../src/main/services/local-media/export-output.js) places an
+exclusive partial in a private random directory in the chosen destination.
+Before publication, main rechecks source identity and validates nonempty output,
+one audio stream, codec/sample rate/channels, output family and
+duration within the larger of 250 ms or 2%. Native acceptance additionally decodes
+and compares the selected encoded audio, including MP3 chapter preservation under
+the muxer's default behavior; this is not sample-accurate editing.
+
+The final file is created with an atomic, no-clobber hard link. Existing files,
+symlinks, hardlink aliases and collision races are refused. Unsupported
+filesystems fail without an overwrite/copy fallback. Entering `publishing` is the
+cancel commit point: cancellation is then ignored, so a saved file cannot also
+be reported cancelled. Cleanup removes the temporary link, never the final file.
+
+A bounded `<userData>/local-media/partial.json` record stores the owned paths,
+random marker and directory/file identities. Restart marks interrupted work and
+cleans only a matching recorded partial; it never scans folders, resumes work or
+removes unknown files. Uncertain ownership or a changed destination blocks new
+exports until cleanup can be verified; it does not trap shutdown/install once
+the writer and validation probe have exited. Recovery can finish removing an
+empty staging directory after an interrupted cleanup when its durable identity
+still matches; missing markers never authorize deleting remaining contents or
+replacement directories. A hard crash in the
+small setup window before ownership is durable can leave an empty staging
+artifact requiring inspection. File descriptors and identity checks reduce path
+races; they are not protection against a hostile local process modifying bytes
+or directories. Network-mounted local paths are not positively identified.
+Descriptor inheritance, joined exports and hard-link publication are covered by
+the native checks recorded in [validation status](#local-media-validation-status).
+
+### Full-file track removal
+
+The same planner and `LocalExport` lifecycle accept one `removeTracks` request.
+The workspace's action choice and selections are session-only and survive route
+changes; switching/closing the source resets them. All streams start checked,
+including unsupported attachments, artwork and data. “Remove all audio” changes
+only audio selection. Unchecking an unsupported stream is explicit consent to
+omit it; chapters require a separate removal checkbox when present. Chapter,
+attachment, data and cover-art preservation are not advertised for this action.
+The source remains open, and decoder/preview failure does not block planning.
+
+The initial same-container matrix is H.264 `yuv420p` SDR video (at most one
+retained), mono/stereo AAC-LC audio, and compatible text subtitles: `mov_text`
+for MP4/MOV or `subrip` for MKV. Retained subtitle codecs are never converted.
+Require at least one playable video/audio stream and positive known duration.
+Same-container audio-only AAC results are tested for all three containers;
+other audio-only formats should use Extract audio. Nonzero MKV rotation, HDR,
+other active disposition flags, unsafe-to-round-trip titles and unverified
+streams are refused unless removed. Container detection checks both demuxer
+family and filename extension; MOV additionally requires QuickTime brand and
+MP4 a recognized MP4 brand, rather than trusting the shared `mov,mp4,...` label.
+
+Maps use actual input IDs sorted in ascending order. Output ordinals then scope
+stream metadata and disposition arguments. File metadata is copied, and the
+runtime validator checks ordinary `title`, `artist`, `comment` tags, stream
+title/handler name, language, default/forced flags and rotation. MOV/MP4's `name`
+tag is normalized as a displayed track title and passed back as the muxer's
+`title` option; values altered by display sanitization/truncation are refused.
+Other format-specific metadata may vary; this is not privacy sanitization.
+Matroska follows LosslessCut with `-default_mode infer_no_subs`: when a retained
+audio/video type has no default, its first track becomes default. The output
+validator checks that inferred result; subtitle default flags are not inferred.
+MOV/MP4 automatically promotes a retained track when its type has no default;
+that selection is refused with `TRACK_DEFAULT`, rather than silently changing
+the flag. Keep the existing default track too, or use Extract audio.
+
+The validator checks nonempty data, container family/brand, exact stream count,
+order, codec and tested properties, video dimensions/pixel/color/rotation,
+audio profile/rate/channels, expected tags/flags, absent chapters and duration
+within the larger of 250 ms or 2%. Native acceptance additionally compares each
+retained stream's encoded-content hash and fully decodes video/audio. There is
+no new runner or publication path. The reviewed cleanup rule remains: uncertain
+ownership blocks new exports but does not trap shutdown/install after helpers
+have actually exited; live helpers still block drainage.
+
+The synthetic harness is `scripts/smoke-local-tracks.js <new-task-dir>
+<absolute-project-ffmpeg> <absolute-verified-ffprobe>`. Set `CLIPLY_SMOKE_TRACKS=1`
+with the existing `CLIPLY_SMOKE_FFMPEG`/`CLIPLY_SMOKE_FFPROBE` overrides to include
+the real Electron UI checks in `npm run smoke:electron` after renderer build.
+Use a task-owned directory and remove helpers/media after verification. Later
+source-built native package checks supersede the initial macOS-only Stage 4
+evidence; see [validation status](#local-media-validation-status).
+
+### Compatible full-file container changes
+
+Change format reuses the track selection panel and the same export lifecycle.
+Every stream starts selected. Target changes never silently remove tracks or
+convert codecs; incompatible selections require explicit removal. The original
+source and in-memory options stay open after export and navigation. The UI
+explains that quality/codecs remain unchanged and smaller size is not guaranteed.
+
+Source container evidence is independent of filename: FFprobe's MOV-family
+major brand identifies verified MP4 (`isom`, `iso2`, `mp41`, `mp42`, `avc1`) or
+MOV (`qt`). For the shared Matroska/WebM family, a bounded 4096-byte EBML Header
+DocType check accepts only `matroska`; WebM/unknown/malformed headers are refused.
+This small check in [container.js](../src/main/services/local-media/container.js)
+is not a general media detector. Same-container track removal keeps its existing
+source-profile policy.
+
+The tested cross-container matrix is H.264 yuv420p SDR and AAC-LC mono/stereo
+at 44.1/48 kHz, with known near-zero starts (within 100 ms). MP4/MOV `mov_text`
+can be retained between those two containers when flags survive. MKV text
+subtitles cannot be copied to MOV/MP4, and MOV text cannot be copied to MKV.
+Unsupported streams stay selected until explicitly removed. MOV forced tracks,
+MOV/MP4 selections without a retained default of each type, and nonzero rotation
+to MKV are refused. Portrait rotation is verified for MOV↔MP4. No conversion,
+compression, combined trimming or automatic fallback is exposed.
+
+Full-file chapters can be preserved into MKV when there are at most 512 bounded,
+ordered, nonoverlapping chapters, within the source duration, with exact titles
+up to 256 characters and no additional chapter tags. `-map_chapters 0` copies
+them; source chapter data tracks still require explicit removal. MOV/MP4 chapter
+output is not enabled because its muxer can create an implicit chapter data
+track. Other cases require separate explicit chapter-removal consent. Chapter
+editing and trimmed chapter rewriting remain out of scope.
+
+Before publication, remux validation checks content container, stream order/count,
+codec, tested tags/language/default/forced/rotation and ordinary properties,
+plus duration, start offsets and chapter count/timing/title. Start and chapter
+differences are bounded to 50 ms for the measured AAC priming/container rounding;
+whole duration retains the existing 250 ms / 2% tolerance. Native acceptance
+compares decoded video exactly and decoded audio's aligned overlap exactly,
+allowing up to 2048 sample frames of priming/padding at the edges. These checks
+do not claim universal codec, complex timestamp or arbitrary metadata support.
+
+Reproduce the synthetic cross-container matrix with
+`node scripts/smoke-local-remux.js <new-task-dir> <project-ffmpeg> <verified-ffprobe>`.
+After building the renderer, set `CLIPLY_SMOKE_REMUX=1`,
+`CLIPLY_SMOKE_FFMPEG`, `CLIPLY_SMOKE_FFPROBE` and optional
+`CLIPLY_SMOKE_EVIDENCE` for `npm run smoke:electron`. Helpers must follow the
+existing verified staging process; the scripts do not download or replace them.
+
+### Visual cutting and stream-copy export
+
+Cutting is the default local-file tool. The preview sits above a zoomable,
+scrollable timeline with draggable boundaries, marked sections and a retained
+output lane. I/O sets the active section's boundaries, B splits at the cursor,
+Delete deletes a marking, and Ctrl/Cmd+Z / Shift+Ctrl/Cmd+Z undo/redo. Fields for
+precise times are secondary. Edits survive route changes and repeated exports;
+a new source resets the bounded session history. Nothing persists as a project.
+
+The editor workspace adapts OpenCut Classic's resizable React panels, compact
+toolbar and timeline ruler/zoom presentation. Its neutral light/dark palette is
+scoped to the local editor. A left tool rail switches operations; the center
+holds the original/compatibility preview and timeline, while a separately
+scrolling inspector holds marked sections, precise fields and export review.
+Panel resizing uses `react-resizable-panels` 2.1.7. The same edit document drives
+the timeline and inspector, including when the latter is rendered through a
+React portal. OpenCut's composition engine and export pipeline are not imported;
+the media procedures below are unchanged. See the pinned
+[UI source and notices](../third-party/opencut-classic/README.md).
+
+`TrimPanel` composes the timeline and transport controls. `TrimInspector` owns
+section fields and export review, `useTrimPlayback` owns retained-section
+audition and native transport subscriptions, and `useTrimShortcuts` owns the
+keyboard guards/actions. They share the session edit document; no second trim
+selection state or separate playback engine is introduced.
+
+“Keep marked sections” exports the marked ranges; “Remove marked sections”
+exports their complement. A middle removal retains both sides and joins them in
+source order into one output. The separate retained-content preview skips the
+omitted sections using requested times; it is not proof of keyframe-exact output.
+Review shows each requested cut and output format before destination selection.
+Arbitrary segment reordering, separate-clip batch export and smart re-encoding
+are outside this iteration.
+
+The measured video profile is SDR H.264 yuv420p with AAC-LC or HE-AAC,
+mono/stereo 44.1/48 kHz, in MP4/MOV or compatible MKV. Up to 16 audio tracks can
+be retained; every supported track is mapped explicitly. MP4/MOV must have a
+default track of each type, with no other active disposition flags. Rotation is
+preserved where verified. MP4/MOV exports retain their container. MKV video
+exports to MP4 without re-encoding; the UI shows this in the reviewed plan.
+Audio-only AAC MP4/MOV/M4A and PCM16 WAV retain their existing measured profiles.
+Chapters, subtitles, attachments/data, additional video, HDR and other codecs
+receive specific capability reasons; nothing is silently dropped or converted.
+MP3/raw ADTS cutting remains refused. Use the explicit full-file tools when
+appropriate, which have their own compatibility rules.
+
+Preview and stream-copy support are independent, including the legacy single-range
+IPC request. The custom packet-window/decoded-first-frame planner has been removed.
+`losslesscut.js` adapts upstream `losslessCutSingle`, `concatFiles` and stream maps:
+requested times go unchanged to FFmpeg, keyframe mode puts `-ss` before input and
+uses `-avoid_negative_ts make_zero` when cutting the start; normal mode puts `-ss`
+after input and uses `-copyinkf` for audio-only cuts. Matroska B-frames use upstream's
+positive `3/23 + 0.001` seek compensation and `-itsoffset`. Zero/EOF omit unnecessary
+seek/duration flags. MOV-family outputs use faststart. Nonzero source starts are
+not rejected by a custom zero-origin policy.
+
+Each retained section is cut sequentially, including adjacent split sections.
+Concat lists contain only file entries, without custom duration rows or copyts.
+Global metadata is supplied using the first cut as a separate input (upstream's
+preserve-metadata-on-merge option); titles use its per-stream metadata mechanism.
+Inventory/content checks and owned staging/cancellation/publication remain. There
+is no assertion that requested duration or the first picture matches an exact
+frame: ordinary upstream stream-copy cuts can include leading media, blank starts
+and gaps. Smart Cut is not implemented. Cut mode is independent of keep/remove.
+
+Native playback is attempted first. Missing video tracks or decoder errors switch
+to the adapted `MediaSourcePlayer`; it can also be selected manually. Following
+upstream `html5ifyDummy`, FFmpeg creates a temporary silent FLAC clock. The native
+master remains the source of play/pause/time/volume; an MSE slave displays an
+on-demand FFmpeg fragmented MP4 stream (800px/30fps H.264 ultrafast CRF 10,
+AAC 128k stereo). Buffering, 30ms master/slave synchronization and out-of-buffer
+seek resets follow upstream. This encodes preview data only; exports always use
+the original. Clock files are removed after loading; session release, source
+replacement, navigation and shutdown drain the supervised decoder.
+
+The authenticated IPC adds `media:compat-start({sourceId, seekTo})` returning an
+opaque session ID, `media:compat-read(sessionId)` returning a bounded chunk or EOF,
+`media:compat-stop(sessionId)`, and `media:compat-clock(sourceId)` returning the
+bounded silent clock bytes. No renderer filesystem/FFmpeg access is added.
+Provenance and the deferred license reconciliation are recorded in
+[third-party/losslesscut](../third-party/losslesscut/README.md).
+
+`node scripts/smoke-local-trim.js <task-dir> <ffmpeg> <ffprobe>` and
+`node scripts/smoke-local-segments.js <task-dir> <ffmpeg> <ffprobe>` now compare
+single and joined outputs with independently reproduced upstream commands:
+packet hashes, PTS/DTS/durations, full decoding, original hashes and cancellation.
+Use new disposable directories. After building, `CLIPLY_SMOKE_TRIM=1` checks the
+visual editor; `CLIPLY_SMOKE_COMPAT=1` checks ProRes fallback, playback, forward/back
+seeking and route cleanup with `npm run smoke:electron` and explicit helper paths.
+The packaged local-media check includes compatibility playback. HE-AAC fixture
+encoding uses AudioToolbox only on macOS.
+
+### Local-media validation status
+
+The platform table below preserves historical validation and its outstanding work
+at that revision. Production FFprobe publication and final installer acceptance
+have since passed at `2521723`: [native installer CI](https://github.com/Cliply/Cliply/actions/runs/41897463113)
+validated macOS DMG, Windows NSIS and Linux DEB/AppImage payloads, including editor
+compatibility playback, normal services and download recovery. See
+[release checks](releasing.md) and the PR for current runs and coverage limits.
+
+These are narrow verified profiles, not support for every file carrying an
+extension. Main rejects unknown, incompatible or ambiguous layouts before saving.
+
+| Action | Enabled behavior | Important limits |
+| --- | --- | --- |
+| Extract audio | One actual selected AAC-LC/MP3/PCM16 track, full duration, to ADTS AAC/MP3/WAV | No conversion or batch; verified mono/stereo PCM only; preview not required |
+| Remove tracks | Full-file compatible MP4/MOV/MKV, explicit retained tracks or Remove all audio | No implicit loss; tested H.264/AAC/text-subtitle profiles only; MP4/MOV default-flag promotion refused |
+| Change container | Full-file compatible MP4/MOV/MKV, all streams selected initially | Incompatible tracks need deliberate removal; bounded chapters preserved only in compatible MKV; unsupported subtitle flags refused |
+| Cut video | Visual keep/remove sections, joined original-quality output; H.264/AAC-LC or HE-AAC MP4/MOV, compatible MKV to MP4; existing AAC/PCM audio profiles | Keyframe/packet/block boundaries; chapters/subtitles/HDR and unmeasured codecs refused; preview independent |
+
+All four use the same one-job lifecycle, source checks, owned partial, validated
+output and atomic no-clobber publication. Main handles destination paths and
+commands; the renderer never supplies shell text. The original remains open.
+Exports can run beside URL downloads without occupying yt-dlp's replacement gate.
+No background proxies, thumbnails, waveforms, compression or saved projects were added.
+
+| Target | Evidence established | Still required |
+| --- | --- | --- |
+| macOS 26 ARM64 | Source-built package/helper checks, editor playback/export and nine decoded multi-cut cases including HE-AAC passed at 7596f09 | Production FFprobe pins/installer acceptance, macOS 13 (owner deferred), broader performance/storage evidence |
+| Windows Server 2025 x64 | Source-built package/helper checks, packaged editor and eight decoded multi-cut cases passed at 7596f09 | HE-AAC native fixture/playback coverage, production distribution, Windows 10 (owner deferred) |
+| Ubuntu 24.04 x64 | Source-built package/helper checks, packaged editor and eight decoded multi-cut cases passed at 7596f09 | HE-AAC native fixture/playback coverage and production distribution |
+
+[Native CI run 41575378080](https://github.com/Cliply/Cliply/actions/runs/41575378080)
+passed all 13 checks per platform: package, helpers, libraries, inspection,
+extraction, tracks, remux, trim, segments, packaged UI, normal startup, download
+recovery and URL media. Later changes add pointer tests, documentation and page
+spacing; they do not alter the tested media/helper pipeline. The compact spacing
+was reviewed in native Electron at 1200×800 with the complete picture and
+timeline visible together. Component pointer/keyboard checks passed.
+Native file opening, scrubbing, keyboard handle adjustment, split, zoom, delete
+and Cmd-Z undo also passed on macOS. OS-level dragging remains unverified:
+automation emitted its drag movement with `buttons=0`, without pointer capture,
+after earlier timeout/no-window errors. This is not full LosslessCut parity.
+
+The macOS private package check runs offline with development helper overrides
+absent. Its test entry isolates external services and dialogs; it does not claim
+normal updater or pristine signed-app acceptance. Production FFprobe acquisition
+is active through `third-party/ffprobe/published.json`. Missing-helper errors in
+development remain readable and do not stop downloads. Native/helper readiness
+gates cannot be waived by a successful ordinary downloader build.
+
+Reproduce combined UI with `CLIPLY_SMOKE_INTEGRATION=1` and the existing verified
+helper overrides for `npm run smoke:electron`, or run
+`scripts/smoke-packaged-local-media.js --resources <native-resources>` without
+overrides. Its fixtures include a 12-second H.264/AAC source and a sparse 512 MiB
+WAV; sparse-file opening is not large-disk throughput evidence. The package
+checker has `--idle-only` for like-for-like isolated startup/idle measurements.
+Native compatibility/cancel/crash matrices remain in the individual smoke scripts.
+[Release checks](releasing.md) define the nonpublishing native CI workflow.
+
+Follow-up acceptance: retain the owner's minimum-OS deferral and complete broader
+cold/warm startup, representative long-media, helper CPU/RSS peak,
+slower/removable storage and disk-exhaustion measurements.
+Do not infer zero overhead or cross-platform support from small local fixtures.
+
 ## Storage and privacy
 
 | Data | Location / behavior |
@@ -153,6 +598,12 @@ comes from official upstream archives. The runtime updater seeds from the packag
 then verifies, stages, probes and swaps newer upstream engines into writable user
 data under the gate. Calling `yt-dlp -U` is not the app's update mechanism.
 
+On Windows, atomic directory swaps retry only EPERM/EBUSY rename failures up to
+five times with 100–500 ms delays (1.5 seconds total per rename). The caller's
+replacement gate stays held through retire, install and any rollback; persistent
+failures still fail and retain existing recovery metadata. Other errors and
+platforms fail immediately. Probes still wait for child closure before swapping.
+
 Optional token recovery builds the provider's native dependencies per platform,
 checks a pinned payload hash and downloads only on demand. It is not a dependency
 that every installer carries. Cookie imports and token escalation are different
@@ -162,3 +613,19 @@ Use the [binary guide](../binaries/README.md) for asset mappings and provenance,
 and the [release guide](releasing.md) for app packaging and publication. A helper
 fetcher's broader list of upstream architectures does not establish app support
 on those architectures.
+
+### Visual editor continuation
+
+The corrected editor direction supersedes the one-section product restriction.
+`media:inspect-trim` also accepts `{ sourceId, ranges: [{ start, end }], intent:
+"keep" | "remove", mode: "before" | "after" }`. Main validates up to 32 ordered,
+disjoint marked ranges and computes the retained intervals, including both sides
+of a middle removal. Empty outputs and retained slivers below 0.1 seconds are
+refused. The existing legacy request remains supported. Segment planning does
+not require native playback; preview capability is separate from stream copying.
+
+A main-owned cut plan contains every retained section. One export reservation
+cuts and validates each part, then concatenates using LosslessCut's procedure
+above. All intermediates remain recorded in the ownership ledger and are cleaned
+on cancellation/recovery. Original identity, explicit stream maps and atomic
+no-clobber publication remain mandatory.

@@ -562,6 +562,14 @@ describe("the list main pushes and answers with", () => {
      */
     const removed = ipcMain.removeHandler.mock.calls.map(([channel]) => channel)
     expect(removed).toEqual([
+      "media:open",
+      "media:get-state",
+      "media:close",
+      "media:preview",
+      "media:release-preview",
+      "media:prepare-export", "media:start-export", "media:cancel-export", "media:export-state", "media:reveal-output",
+      "media:inspect-trim", "media:cancel-trim", "media:preview-playback",
+      "media:compat-start", "media:compat-read", "media:compat-stop", "media:compat-clock",
       "download:get-list",
       "download:clear-history",
       "download:remove-history",

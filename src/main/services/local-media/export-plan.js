@@ -1,0 +1,170 @@
+const { cutArgs, fullFileArgs } = require("./losslesscut")
+const { MediaError } = require("./errors")
+const path = require("node:path")
+const { MP4_BRANDS } = require("./container")
+
+function trackContainer(source) {
+  const extension = path.extname(source.filename || "").slice(1).toLowerCase()
+  if (extension === "mkv" && source.formatNames.includes("matroska")) return { extension, muxer: "matroska" }
+  if (!source.formatNames.includes("mov")) return null
+  if (extension === "mov" && source.majorBrand === "qt") return { extension, muxer: "mov" }
+  if (extension === "mp4" && ["isom", "iso2", "mp41", "mp42", "avc1"].includes(source.majorBrand)) return { extension, muxer: "mp4" }
+  return null // a demuxer-family label alone does not prove the source container
+}
+
+function trackSupported(container, stream) {
+  if (stream.titleCopySafe === false) return false
+  if (Object.entries(stream.disposition || {}).some(([key, value]) => value === 1 && !["default", "forced"].includes(key))) return false
+  if (stream.language && !/^[a-z]{3}$/i.test(stream.language)) return false
+  if (stream.type === "video") return stream.codec === "h264" && stream.pixelFormat === "yuv420p" &&
+    Number.isSafeInteger(stream.width) && stream.width > 0 && Number.isSafeInteger(stream.height) && stream.height > 0 &&
+    !stream.hasHdrMetadata && [null, undefined, "unknown", "bt709", "smpte170m", "bt470bg"].includes(stream.colorTransfer) &&
+    [null, undefined, "unknown", "bt709", "smpte170m", "bt470bg"].includes(stream.colorPrimaries) &&
+    [0, 90, -90, 180, -180, 270].includes(stream.rotation ?? 0) && (container.extension !== "mkv" || !stream.rotation)
+  if (stream.type === "audio") return stream.codec === "aac" && ["LC", "HE-AAC"].includes(stream.profile) &&
+    Number.isSafeInteger(stream.sampleRate) && stream.sampleRate > 0 && [1, 2].includes(stream.channels)
+  return stream.type === "subtitle" && stream.codec === (container.extension === "mkv" ? "subrip" : "mov_text")
+}
+
+function trackRemovalProfile(source) {
+  const container = trackContainer(source)
+  if (!container || !Number.isFinite(source.duration) || source.duration <= 0) return null
+  return { extension: container.extension, supportedStreamIndexes: source.streams.filter(stream => trackSupported(container, stream)).map(stream => stream.index) }
+}
+
+const REMUX_CONTAINERS = { mp4: "mp4", mov: "mov", mkv: "matroska" }
+function remuxSupported(container, stream) {
+  return trackSupported(container, stream) && !(container.extension === "mov" && stream.disposition?.forced) && (stream.type !== "audio" || [44100, 48000].includes(stream.sampleRate))
+}
+function remuxProfiles(source) {
+  if (!Object.hasOwn(REMUX_CONTAINERS, source.contentContainer || "") || !Number.isFinite(source.duration) || source.duration <= 0) return []
+  return Object.keys(REMUX_CONTAINERS).filter(target => target !== source.contentContainer).map(targetContainer => ({
+    targetContainer, extension: targetContainer,
+    supportedStreamIndexes: source.streams.filter(stream => remuxSupported({ extension: targetContainer }, stream)).map(stream => stream.index),
+    preservesChapters: targetContainer === "mkv" && source.chaptersCopySafe === true
+  }))
+}
+function planTracks(source, request) { return planCopy(source, request, false) }
+function planRemux(source, request) { return planCopy(source, request, true) }
+function planCopy(source, request, remux) {
+  if (!request || typeof request !== "object" || Array.isArray(request) ||
+      Object.keys(request).sort().join(",") !== (remux ? "operation,removeChapters,sourceId,streamIndexes,targetContainer" : "operation,removeChapters,sourceId,streamIndexes") ||
+      request.operation !== (remux ? "remux" : "removeTracks") || typeof request.removeChapters !== "boolean" ||
+      !Array.isArray(request.streamIndexes) || request.streamIndexes.length > 128 ||
+      request.streamIndexes.some(index => !Number.isSafeInteger(index) || index < 0) ||
+      new Set(request.streamIndexes).size !== request.streamIndexes.length) throw new MediaError("REQUEST_INVALID")
+  if (!source || request.sourceId !== source.sourceId) throw new MediaError("SOURCE_UNKNOWN")
+  const capability = remux ? remuxProfiles(source).find(profile => profile.targetContainer === request.targetContainer) : null
+  const container = remux ? capability && { extension: capability.extension, muxer: REMUX_CONTAINERS[capability.extension] } : trackContainer(source)
+  if (!container || !Number.isFinite(source.duration) || source.duration <= 0) throw new MediaError(remux ? "REMUX_TARGET" : "TRACK_CONTAINER")
+  const selected = source.streams.filter(stream => request.streamIndexes.includes(stream.index)).sort((a, b) => a.index - b.index)
+  if (selected.length !== request.streamIndexes.length) throw new MediaError("REQUEST_INVALID")
+  if (!selected.some(stream => ["video", "audio"].includes(stream.type) && !stream.disposition?.attached_pic)) throw new MediaError("TRACK_EMPTY")
+  if (selected.some(stream => !(remux ? remuxSupported : trackSupported)(container, stream))) throw new MediaError("TRACK_UNSUPPORTED")
+  if (selected.filter(stream => stream.type === "video").length > 1) throw new MediaError("TRACK_VIDEO_LIMIT")
+  if (source.chapterCount > 0 && !request.removeChapters && !capability?.preservesChapters) throw new MediaError(remux ? "REMUX_CHAPTERS" : "TRACK_CHAPTERS")
+  // Only the measured near-zero start timeline is supported for cross-container
+  // copies. Large edit lists / delayed tracks need a separate verified profile.
+  if (remux && [source, ...selected.filter(stream => ["audio", "video"].includes(stream.type))].some(item =>
+    !Number.isFinite(item.startTime) || Math.abs(item.startTime) > 0.1)) throw new MediaError("REMUX_TIMING")
+  // MOV/MP4 promotes the first remaining track of a type when none is default.
+  // Refuse that unrequested disposition change; Matroska supports passthrough.
+  if (container.extension !== "mkv" && selected.some(stream => !selected.some(other => other.type === stream.type && other.disposition?.default))) throw new MediaError("TRACK_DEFAULT")
+  const duration = Math.max(...selected.filter(stream => ["video", "audio"].includes(stream.type)).map(stream => stream.duration ?? source.duration))
+  if (!Number.isFinite(duration) || duration <= 0) throw new MediaError("TRACK_CONTAINER")
+  return { operation: remux ? "remux" : "removeTracks", ...(remux ? { targetContainer: container.extension, expectedChapters: request.removeChapters ? [] : source.chapters || [] } : {}), sourceId: source.sourceId, streamIndexes: selected.map(stream => stream.index),
+    removeChapters: request.removeChapters, removedStreamIndexes: source.streams.filter(stream => !request.streamIndexes.includes(stream.index)).map(stream => stream.index),
+    duration,
+    expectedStreams: selected, fileTags: source.tags || {}, movInput: (remux ? source.contentContainer : container.extension) !== "mkv", ...container }
+}
+
+function planExport(source, request, trimPlan) {
+  if (request?.operation === "trim") {
+    if (Object.keys(request).sort().join(",") !== "operation,sourceId,trimPlanId" || typeof request.trimPlanId !== "string") throw new MediaError("REQUEST_INVALID")
+    if (!source || request.sourceId !== source.sourceId) throw new MediaError("SOURCE_UNKNOWN")
+    if (!trimPlan || trimPlan.trimPlanId !== request.trimPlanId || trimPlan.sourceId !== source.sourceId || Date.now() >= trimPlan.expiresAt) throw new MediaError("PLAN_EXPIRED")
+    return trimPlan
+  }
+  return request?.operation === "remux" ? planRemux(source, request) : request?.operation === "removeTracks" ? planTracks(source, request) : planAudio(source, request)
+}
+
+// Deliberately narrow, copy-only profiles. No generic codec/container fallback.
+function audioProfile(source, stream) {
+  const families = source.formatNames || []
+  if (stream.type !== "audio" || !Number.isSafeInteger(stream.sampleRate) || stream.sampleRate <= 0 || ![1, 2].includes(stream.channels)) return null
+  if (stream.codec === "aac" && stream.profile === "LC" && families.some(f => ["mov", "matroska", "aac"].includes(f))) return { extension: "aac", muxer: "adts" }
+  if (stream.codec === "mp3" && families.some(f => ["mp3", "matroska"].includes(f))) return { extension: "mp3", muxer: "mp3" }
+  if (stream.codec === "pcm_s16le" && families.some(f => ["wav", "mov", "matroska"].includes(f))) return { extension: "wav", muxer: "wav" }
+  return null
+}
+
+function planAudio(source, request) {
+  if (!request || typeof request !== "object" || Array.isArray(request) ||
+      Object.keys(request).sort().join(",") !== "operation,sourceId,streamIndex" ||
+      request.operation !== "extractAudio" || !Number.isSafeInteger(request.streamIndex) || request.streamIndex < 0) throw new MediaError("REQUEST_INVALID")
+  if (!source || request.sourceId !== source.sourceId) throw new MediaError("SOURCE_UNKNOWN")
+  const stream = source.streams.find(s => s.index === request.streamIndex)
+  const profile = stream && audioProfile(source, stream)
+  const duration = stream?.duration ?? source.duration
+  if (!profile || !Number.isFinite(duration) || duration <= 0) throw new MediaError("AUDIO_UNSUPPORTED")
+  return { operation: "extractAudio", sourceId: source.sourceId, streamIndex: stream.index,
+    codec: stream.codec, language: stream.language, title: stream.title, sampleRate: stream.sampleRate,
+    channels: stream.channels, duration, movInput: source.formatNames.includes("mov"), ...profile }
+}
+
+function exportArgs(plan, outputPath) {
+  if (plan.operation === "trim") return cutArgs(plan, undefined, outputPath ? ["-y", outputPath] : undefined)
+  return fullFileArgs(plan, outputPath)
+}
+
+function validateOutput(plan, metadata, bytes) {
+  if (["removeTracks", "remux", "trim"].includes(plan.operation)) return validateTracks(plan, metadata, bytes)
+  const stream = metadata.streams[0]
+  const family = plan.extension === "aac" ? "aac" : plan.extension
+  const duration = stream?.duration ?? metadata.duration
+  if (bytes <= 0 || metadata.streams.length !== 1 || stream?.type !== "audio" ||
+      stream.codec !== plan.codec || stream.sampleRate !== plan.sampleRate || stream.channels !== plan.channels ||
+      !metadata.formatNames.includes(family) ||
+      !Number.isFinite(duration) || duration <= 0 || Math.abs(duration - plan.duration) > Math.max(0.25, plan.duration * 0.02)) throw new MediaError("OUTPUT_INVALID")
+}
+
+function validateTracks(plan, metadata, bytes) {
+  const fail = () => { throw new MediaError("OUTPUT_INVALID") }
+  const duration = metadata.duration
+  const containerMatches = plan.operation === "trim" ? metadata.formatNames.includes(plan.family) &&
+    (plan.family !== "mov" || (plan.extension === "mp4" ? MP4_BRANDS.has(metadata.majorBrand) : metadata.majorBrand === plan.majorBrand))
+    : (plan.operation === "remux" ? metadata.contentContainer : trackContainer({ ...metadata, filename: `output.${plan.extension}` })?.extension) === plan.extension
+  if (bytes <= 0 || metadata.streams.length !== plan.expectedStreams.length || metadata.chapterCount !== (plan.expectedChapters?.length || 0) ||
+      !Number.isFinite(duration) || duration <= 0 || (plan.operation !== "trim" && Math.abs(duration - plan.duration) > Math.max(0.25, plan.duration * 0.02)) || !containerMatches) fail()
+  if (plan.operation === "remux") {
+    if (!Number.isFinite(metadata.startTime) || Math.abs(metadata.startTime) > 0.1) fail()
+    if (plan.expectedChapters.length && (!metadata.chaptersCopySafe || !Array.isArray(metadata.chapters) || metadata.chapters.length !== plan.expectedChapters.length)) fail()
+    plan.expectedChapters.forEach((before, index) => {
+      const after = metadata.chapters[index]
+      if (before.title !== after.title || Math.abs(before.start - after.start) > 0.05 || Math.abs(before.end - after.end) > 0.05) fail()
+    })
+  }
+  const containsTags = (before, after) => Object.entries(before || {}).every(([key, value]) => after?.[key] === value)
+  if (!containsTags(plan.fileTags, metadata.tags)) fail()
+  plan.expectedStreams.forEach((before, index) => {
+    const after = metadata.streams[index]
+    const same = keys => keys.every(key => (before[key] ?? null) === (after[key] ?? null))
+    // LosslessCut uses Matroska infer_no_subs: if no retained audio/video
+    // track is explicitly default, the muxer marks the first of that type.
+    const disposition = { ...before.disposition }
+    if (plan.muxer === "matroska" && ["audio", "video"].includes(before.type) &&
+        !plan.expectedStreams.some(stream => stream.type === before.type && stream.disposition?.default) &&
+        plan.expectedStreams.findIndex(stream => stream.type === before.type) === index) disposition.default = 1
+    const angle = value => ((value ?? 0) % 360 + 360) % 360
+    if (after.index !== index || !same(["type", "codec", "title"]) ||
+        (before.language || "und") !== (after.language || "und") || !containsTags(before.tags, after.tags) ||
+        Object.entries(after.disposition || {}).some(([flag, value]) => value === 1 && disposition[flag] !== 1) ||
+        ["default", "forced"].some(flag => (disposition[flag] || 0) !== (after.disposition?.[flag] || 0))) fail()
+    if (plan.operation === "remux" && ["video", "audio"].includes(before.type) &&
+        (!Number.isFinite(after.startTime) || Math.abs(before.startTime - after.startTime) > 0.05)) fail()
+    if (before.type === "video" && (!same(["width", "height", "pixelFormat", "colorTransfer", "colorPrimaries", "hasHdrMetadata"]) || angle(before.rotation) !== angle(after.rotation))) fail()
+    if (before.type === "audio" && !same(["profile", "sampleRate", "channels"])) fail()
+  })
+}
+
+module.exports = { trackSupported, remuxProfiles, planRemux, audioProfile, planAudio, planTracks, planExport, trackRemovalProfile, exportArgs, validateOutput }
