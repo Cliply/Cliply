@@ -1,3 +1,4 @@
+const { pickOption } = require("./smoke-pick-option")
 // Stage 7: one source session, all four actions, actual native playback.
 // Fixtures and outputs belong to the caller's disposable profile.
 const fs = require("node:fs")
@@ -27,7 +28,7 @@ async function runUI({ window, service, userData, app }) {
   const wc = window.webContents, js = code => wc.executeJavaScript(code, true)
   const wait = async expression => { for (let i = 0; i < 150; i++) { if (await js(expression)) return; await delay(100) } throw new Error(`Integration condition timed out: ${expression}`) }
   const click = label => js(`(()=>{const e=Array.from(document.querySelectorAll('button,a')).find(e=>(e.getAttribute('aria-label') || e.textContent.trim())===${JSON.stringify(label)});if(!e)throw Error('Missing control: '+${JSON.stringify(label)});e.click()})()`)
-  const set = (id, value) => js(`(()=>{const e=document.getElementById(${JSON.stringify(id)});Object.getOwnPropertyDescriptor(e.tagName==='SELECT'?HTMLSelectElement.prototype:HTMLInputElement.prototype,'value').set.call(e,${JSON.stringify(String(value))});e.dispatchEvent(new Event(e.tagName==='SELECT'?'change':'input',{bubbles:true}));})()`)
+  const set = (id, value) => js(`(()=>{const e=document.getElementById(${JSON.stringify(id)});Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(e,${JSON.stringify(String(value))});e.dispatchEvent(new Event('input',{bubbles:true}));})()`)
   const sourcePath = path.join(userData, "session.mp4"), sourceHash = createHash("sha256").update(fs.readFileSync(sourcePath)).digest("hex")
   const facts = { operations: [], commands: [], metrics: [], outputBytes: {}, helpers: {}, packaged: app.isPackaged }
   const measure = label => facts.metrics.push({ label, at: performance.now(), processes: app.getAppMetrics().map(({ type, cpu, memory }) => ({ type, cpu, memory })) })
@@ -60,11 +61,11 @@ async function runUI({ window, service, userData, app }) {
     facts.operations.push({ action, milliseconds: performance.now() - began, sourceStillOpen: true })
     facts.outputBytes[filename] = fs.statSync(path.join(userData, filename)).size
   }
-  await set("local-audio-track", "1"); await save("session.aac", "extractAudio", "Audio saved")
+  await pickOption(js, "local-audio-track", "1"); await save("session.aac", "extractAudio", "Audio saved")
   await click("Remove tracks"); await wait("!!document.getElementById('keep-track-1')")
   await click("Remove all audio"); await save("silent.mp4", "removeTracks", "Copy saved")
   await click("Change format"); await wait("!!document.getElementById('target-container')")
-  await set("target-container", "mkv"); await save("session.mkv", "remux", "Copy saved")
+  await pickOption(js, "target-container", "mkv"); await save("session.mkv", "remux", "Copy saved")
   await click("Trim"); await wait("!!document.getElementById('trim-start')")
   await wait("document.querySelector('video')?.readyState >= 2")
   start = performance.now()

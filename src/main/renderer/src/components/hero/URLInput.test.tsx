@@ -1,10 +1,4 @@
 // @vitest-environment jsdom
-//
-// every other control in the action bar takes `disabled={isLoading}`, but the
-// platform picker is a plain div, so it never got the guard. switching platform
-// mid-flight resets every store underneath an in-flight fetch, whose late
-// resolve then writes into the store that was just cleared.
-
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { useForm } from "react-hook-form"
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
@@ -86,15 +80,9 @@ function Harness({
   )
 }
 
-const pickerState = () =>
-  screen.getByTestId("platform-picker").getAttribute("data-state")
-
-const openPicker = () =>
-  fireEvent.click(screen.getByTestId("platform-picker-trigger"))
-
-// the row div and its span both carry the label as text content
-const platformOption = (label: string) =>
-  screen.getByText(label, { selector: "span" })
+const picker = () => screen.getByRole("combobox", { name: en["url.platform"] })
+const openPicker = () => fireEvent.click(picker())
+const platformOption = (label: string) => screen.getByRole("option", { name: label })
 
 beforeEach(() => {
   vi.clearAllMocks()
@@ -110,13 +98,14 @@ describe("platform picker while a url is being processed", () => {
 
     openPicker()
 
-    expect(pickerState()).toBe("closed")
+    expect(picker().getAttribute("aria-expanded")).toBe("false")
   })
 
   test("a platform cannot be selected", () => {
     render(<Harness isLoading />)
 
-    fireEvent.click(platformOption("pinterest"))
+    openPicker()
+    expect(screen.queryByRole("option", { name: "pinterest" })).toBeNull()
 
     expect(useAppStore.getState().selectedPlatform).toBe("youtube")
     expect(mocks.resetYouTube).not.toHaveBeenCalled()
@@ -127,11 +116,11 @@ describe("platform picker while a url is being processed", () => {
     const { rerender } = render(<Harness isLoading={false} />)
 
     openPicker()
-    expect(pickerState()).toBe("open")
+    expect(picker().getAttribute("aria-expanded")).toBe("true")
 
     rerender(<Harness isLoading />)
 
-    expect(pickerState()).toBe("closed")
+    expect(picker().getAttribute("aria-expanded")).toBe("false")
   })
 })
 
@@ -242,18 +231,19 @@ describe("platform picker while idle", () => {
 
     openPicker()
 
-    expect(pickerState()).toBe("open")
+    expect(picker().getAttribute("aria-expanded")).toBe("true")
   })
 
   test("selects a platform and clears the previous platform's state", () => {
     render(<Harness isLoading={false} />)
 
+    openPicker()
     fireEvent.click(platformOption("pinterest"))
 
     expect(useAppStore.getState().selectedPlatform).toBe("pinterest")
     expect(useAppStore.getState().showMediaDetails).toBe(false)
     expect(mocks.resetYouTube).toHaveBeenCalled()
     expect(mocks.resetPinterest).toHaveBeenCalled()
-    expect(pickerState()).toBe("closed")
+    expect(picker().getAttribute("aria-expanded")).toBe("false")
   })
 })

@@ -1,6 +1,6 @@
+import { CompactPicker } from "@/components/ui/compact-picker"
 import { motion } from "framer-motion"
-import { ChevronUp, Folder, Loader2, Send } from "lucide-react"
-import { useEffect, useState } from "react"
+import { Folder, Loader2, Send } from "lucide-react"
 import type { UseFormReturn } from "react-hook-form"
 
 import { track } from "@/lib/analytics"
@@ -36,25 +36,11 @@ export function URLInput({
   const { selectFolder, isLoading: folderLoading } = useDownloadPath()
   const { selectedPlatform, setSelectedPlatform, setShowMediaDetails } =
     useAppStore()
-  const [isOpen, setIsOpen] = useState(false)
 
   const config = PLATFORM_REGISTRY[platform]
-  const currentPlatform =
-    PLATFORM_LIST.find((p) => p.id === selectedPlatform) ?? PLATFORM_LIST[0]
   const urlValue = watch("url")
   const hasError = !!errors.url
   const hasValue = urlValue && urlValue.length > 0
-
-  // switching platform resets every store, so a switch during an in-flight
-  // fetch would clear the store its late resolve is about to write into
-  useEffect(() => {
-    if (isLoading) setIsOpen(false)
-  }, [isLoading])
-
-  const handleToggle = () => {
-    if (isLoading) return
-    setIsOpen((o) => !o)
-  }
 
   const handlePlatformSelect = (p: Platform) => {
     if (isLoading) return
@@ -64,7 +50,6 @@ export function URLInput({
       Object.values(PLATFORM_REGISTRY).forEach((cfg) => cfg.store.reset())
       setShowMediaDetails(false)
     }
-    setIsOpen(false)
   }
 
   /**
@@ -97,7 +82,7 @@ export function URLInput({
       <div
         className={cn(
           "relative border transition-all duration-500 ease-[cubic-bezier(0.4,0,0.2,1)]",
-          isOpen ? "rounded-3xl" : "rounded-2xl",
+          "rounded-2xl has-[[aria-expanded=true]]:rounded-3xl",
           "dark:bg-slate-800/60 dark:border-slate-700/60 dark:backdrop-blur-sm",
           "dark:focus-within:border-slate-600/70 dark:hover:border-slate-600/70",
           "bg-white/90 border-slate-200/60 backdrop-blur-sm",
@@ -151,98 +136,14 @@ export function URLInput({
 
           {/* right: platform picker + send */}
           <div className="flex items-center gap-2">
-            {/* Platform dropdown */}
-            <div
-              data-testid="platform-picker"
-              data-state={isOpen ? "open" : "closed"}
-              className={cn(
-                "select-none overflow-hidden",
-                isLoading ? "cursor-not-allowed opacity-50" : "cursor-pointer",
-                "transition-all duration-500 ease-[cubic-bezier(0.4,0,0.2,1)]",
-                isOpen ? "rounded-2xl" : "rounded-xl",
-                "border dark:border-slate-700/40 border-slate-200/50",
-                "dark:bg-slate-800 bg-white"
-              )}
-              onClick={handleToggle}
-            >
-              {/* trigger row */}
-              <div
-                data-testid="platform-picker-trigger"
-                aria-disabled={isLoading}
-                title={isLoading ? t("url.pickerBusy") : undefined}
-                className="flex items-center gap-2 px-2.5 py-1.5"
-              >
-                <img
-                  src={currentPlatform.logo}
-                  alt={currentPlatform.label}
-                  className="w-3.5 h-3.5 object-contain flex-shrink-0"
-                />
-                <span
-                  className={cn(
-                    "text-xs dark:text-slate-300 text-slate-600",
-                    "transition-all duration-500 ease-[cubic-bezier(0.4,0,0.2,1)]",
-                    isOpen
-                      ? "opacity-0 max-w-0 overflow-hidden"
-                      : "opacity-100 max-w-[80px]"
-                  )}
-                  style={{ fontFamily: MONO }}
-                >
-                  {currentPlatform.label}
-                </span>
-                <ChevronUp
-                  className={cn(
-                    "w-3 h-3 dark:text-slate-400 text-slate-500",
-                    "transition-transform duration-500 ease-[cubic-bezier(0.4,0,0.2,1)]",
-                    isOpen ? "rotate-0" : "rotate-180"
-                  )}
-                />
-              </div>
-
-              {/* expandable list */}
-              <div
-                className={cn(
-                  "grid transition-all duration-500 ease-[cubic-bezier(0.4,0,0.2,1)]",
-                  isOpen
-                    ? "grid-rows-[1fr] opacity-100"
-                    : "grid-rows-[0fr] opacity-0"
-                )}
-              >
-                <div className="overflow-hidden">
-                  <div className="px-1.5 pb-1.5 space-y-0.5">
-                    {PLATFORM_LIST.map((p, index) => (
-                      <div
-                        key={p.id}
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          handlePlatformSelect(p.id)
-                        }}
-                        className={cn(
-                          "flex items-center gap-2 rounded-lg px-2 py-1.5 cursor-pointer",
-                          "transition-all duration-500 ease-[cubic-bezier(0.4,0,0.2,1)]",
-                          isOpen
-                            ? "translate-y-0 opacity-100"
-                            : "translate-y-2 opacity-0",
-                          p.id === selectedPlatform
-                            ? "dark:bg-slate-700/80 bg-slate-100 dark:text-white text-slate-900"
-                            : "dark:text-slate-400 text-slate-500 dark:hover:bg-slate-700/50 hover:bg-slate-50"
-                        )}
-                        style={{
-                          transitionDelay: isOpen ? `${index * 75}ms` : "0ms",
-                          fontFamily: MONO
-                        }}
-                      >
-                        <img
-                          src={p.logo}
-                          alt={p.label}
-                          className="w-3.5 h-3.5 object-contain flex-shrink-0"
-                        />
-                        <span className="text-xs">{p.label}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            </div>
+            <CompactPicker
+              label={t("url.platform")}
+              value={selectedPlatform}
+              options={PLATFORM_LIST.map(p => ({ value: p.id, label: p.label, logo: p.logo }))}
+              disabled={isLoading}
+              title={isLoading ? t("url.pickerBusy") : undefined}
+              onSelect={handlePlatformSelect}
+            />
 
             {/* submit button */}
             <button

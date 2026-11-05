@@ -1,3 +1,4 @@
+import { CompactPicker } from "@/components/ui/compact-picker"
 import { Button } from "@/components/ui/button"
 import { FileVideo, FolderOpen, ListVideo, VolumeX } from "lucide-react"
 import { useT, type Key } from "@/lib/i18n"
@@ -42,11 +43,10 @@ export function TrackRemovalPanel({ source, busy, operation = "removeTracks" }: 
       <p className="text-xs leading-relaxed text-muted-foreground">{t(remux ? "media.remuxNotice" : "media.trackCopyNotice")}</p>
       {remux && <div className="space-y-2">
         <label htmlFor="target-container" className="block text-xs font-medium text-muted-foreground">{t("media.targetContainer")}</label>
-        <select id="target-container" className="h-9 w-full min-w-0 rounded-md border border-border bg-background px-2 text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50" disabled={locked} value={targetContainer}
-          onChange={event => setSelection({ targetContainer: event.target.value as MediaContainer | "" })}>
-          <option value="">{t("media.chooseContainer")}</option>
-          {(source.remuxProfiles || []).map(target => <option key={target.targetContainer} value={target.targetContainer}>{target.targetContainer.toUpperCase()}</option>)}
-        </select>
+        <CompactPicker<MediaContainer | ""> id="target-container" label={t("media.targetContainer")}
+          className="w-full" value={targetContainer} disabled={locked}
+          options={[{ value: "", label: t("media.chooseContainer") }, ...(source.remuxProfiles || []).map(({ targetContainer: value }) => ({ value, label: value.toUpperCase() }))]}
+          onSelect={value => setSelection({ targetContainer: value })} />
       </div>}
       <Button id="remove-all-audio" size="sm" variant="outline" className="h-auto min-h-8 w-full whitespace-normal py-2 text-xs" disabled={locked || !kept.some(stream => stream.type === "audio")}
         onClick={() => setSelection({ streamIndexes: kept.filter(stream => stream.type !== "audio").map(stream => stream.index) })}><VolumeX aria-hidden="true" />{t("media.removeAllAudio")}</Button>

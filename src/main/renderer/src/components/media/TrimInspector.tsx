@@ -1,3 +1,4 @@
+import { CompactPicker } from "@/components/ui/compact-picker"
 import { Scissors, Trash2, ArrowDownToLine } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { useT, type Key } from "@/lib/i18n"
@@ -72,18 +73,9 @@ export function TrimInspector({
             aria-hidden="true"
           />
         </div>
-        <select
-          aria-label={t("media.editMode")}
-          value={edit.intent}
-          disabled={locked}
-          onChange={(event) =>
-            commit({ ...edit, intent: event.target.value as "keep" | "remove" })
-          }
-          className="h-9 w-full rounded-md border border-border bg-background px-2 text-xs outline-none focus-visible:ring-2 focus-visible:ring-primary"
-        >
-          <option value="keep">{t("media.keepMarked")}</option>
-          <option value="remove">{t("media.removeMarked")}</option>
-        </select>
+        <CompactPicker id="edit-intent" label={t("media.editMode")} value={edit.intent} disabled={locked}
+          options={[{ value: "keep", label: t("media.keepMarked") }, { value: "remove", label: t("media.removeMarked") }]}
+          onSelect={intent => commit({ ...edit, intent })} />
         <p className="text-[11px] leading-relaxed text-muted-foreground">
           {t(
             edit.intent === "keep" ? "media.keepMeaning" : "media.removeMeaning"
@@ -154,24 +146,12 @@ export function TrimInspector({
                 />
               </label>
             ))}
-          <label className="col-span-2 space-y-1 text-[11px]">
-            {t("media.keyframeDirection")}
-            <select
-              id="trim-keyframe"
-              value={edit.mode}
-              disabled={locked}
-              onChange={(event) =>
-                commit({
-                  ...edit,
-                  mode: event.target.value as "before" | "after"
-                })
-              }
-              className="block h-8 w-full rounded border border-border bg-background px-2 text-xs text-foreground outline-none focus-visible:ring-2 focus-visible:ring-primary"
-            >
-              <option value="before">{t("media.keyframeBefore")}</option>
-              <option value="after">{t("media.keyframeAfter")}</option>
-            </select>
-          </label>
+          <div className="col-span-2 space-y-1 text-[11px]">
+            <label htmlFor="trim-keyframe">{t("media.keyframeDirection")}</label>
+            <CompactPicker id="trim-keyframe" label={t("media.keyframeDirection")} value={edit.mode} disabled={locked}
+              options={[{ value: "before", label: t("media.keyframeBefore") }, { value: "after", label: t("media.keyframeAfter") }]}
+              onSelect={mode => commit({ ...edit, mode })} />
+          </div>
         </div>
         <p className="mt-3 text-[11px] leading-relaxed">
           {t("media.editorShortcuts")}

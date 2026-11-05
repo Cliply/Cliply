@@ -1,3 +1,4 @@
+import { CompactPicker } from "@/components/ui/compact-picker"
 import { Button } from "@/components/ui/button"
 import { FolderOpen, Music2 } from "lucide-react"
 import { useT } from "@/lib/i18n"
@@ -19,12 +20,13 @@ export function AudioExtractionPanel({ source, busy }: { source: MediaSource; bu
     <div className="space-y-4">
       <div className="space-y-2">
         <label htmlFor="local-audio-track" className="block text-xs font-medium text-muted-foreground">{t("media.selectAudio")}</label>
-        <select id="local-audio-track" value={selected ?? ""} disabled={locked || !audio.length}
-          className="h-9 w-full min-w-0 rounded-md border border-border bg-background px-2 text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
-          onChange={event => useLocalExport.setState({ selection: event.target.value === "" ? null : { sourceId: source.sourceId, streamIndex: Number(event.target.value) } })}>
-          <option value="">{t("media.chooseTrack")}</option>
-          {audio.map(stream => <option key={stream.index} value={stream.index}>{`#${stream.index} · ${stream.codec || "?"} · ${stream.language || "—"}${stream.title ? ` · ${stream.title}` : ""}`}</option>)}
-        </select>
+        <CompactPicker id="local-audio-track" label={t("media.selectAudio")} value={String(selected ?? "")}
+          disabled={locked || !audio.length} className="w-full"
+          options={[{ value: "", label: t("media.chooseTrack") }, ...audio.map(stream => ({
+            value: String(stream.index),
+            label: `#${stream.index} · ${stream.codec || "?"} · ${stream.language || "—"}${stream.title ? ` · ${stream.title}` : ""}`
+          }))]}
+          onSelect={value => useLocalExport.setState({ selection: value === "" ? null : { sourceId: source.sourceId, streamIndex: Number(value) } })} />
       </div>
       <p className="rounded-md bg-muted/50 p-3 text-xs leading-relaxed">{profile ? t("media.audioResult", { format: profile.extension.toUpperCase() }) : t(audio.length ? "media.audioProfiles" : "media.noAudio")}</p>
       <div className="space-y-2 text-xs leading-relaxed text-muted-foreground">

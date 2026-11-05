@@ -1,3 +1,4 @@
+const { pickOption } = require("./smoke-pick-option")
 // Real, synthetic extraction checks. All media and crash-ledger files live in
 // the caller's task-owned directory; this script never downloads helpers.
 const fs = require("node:fs")
@@ -146,7 +147,7 @@ async function runUI({ window, service, userData }) {
   await wait("!!document.getElementById('trim-panel')"); await click("Extract audio")
   await wait("!!document.getElementById('local-audio-track')")
   await wait("Array.from(document.querySelectorAll('[role=alert]')).some(e=>e.textContent.includes('Preview unavailable'))")
-  await js("const select=document.getElementById('local-audio-track'); select.value='2'; select.dispatchEvent(new Event('change',{bubbles:true}))")
+  await pickOption(js, "local-audio-track", "2")
   await click("Choose destination")
   await wait("document.body.textContent.includes('Save as: extracted.aac')")
   await js("Array.from(document.querySelectorAll('#audio-extraction button')).find(e=>e.textContent.trim()==='Extract audio').click()")

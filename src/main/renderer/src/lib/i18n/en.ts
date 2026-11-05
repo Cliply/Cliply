@@ -220,6 +220,7 @@ export const en = {
   "url.loading": "\u{1F40B} getting video information",
   "url.loaded": "Video information loaded successfully!",
   "url.selectFolder": "Select folder",
+  "url.platform": "Platform",
   "url.pickerBusy": "Wait for the current link to finish",
   // the box takes a playlist link now, and a helper line that only mentions
   // videos and shorts is the reason somebody would never try one.

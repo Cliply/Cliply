@@ -38,10 +38,11 @@ test("explicit track choice shows actual ID/language/title, resulting format and
   render(<AudioExtractionPanel source={source} busy={false} />)
   const choose = screen.getByRole("button", { name: en["media.chooseDestination"] }) as HTMLButtonElement
   expect(choose.disabled).toBe(true)
-  expect(screen.getByRole("option", { name: /#7 · aac · rus · Alternate/ })).toBeTruthy()
-  fireEvent.change(screen.getByRole("combobox"), { target: { value: "3" } })
+  fireEvent.click(screen.getByRole("combobox"))
+  fireEvent.click(screen.getByRole("option", { name: /#3 · opus/ }))
   expect(choose.disabled).toBe(true)
-  fireEvent.change(screen.getByRole("combobox"), { target: { value: "7" } })
+  fireEvent.click(screen.getByRole("combobox"))
+  fireEvent.click(screen.getByRole("option", { name: /#7 · aac · rus · Alternate/ }))
   expect(choose.disabled).toBe(false)
   expect(screen.getByText(en["media.extractionNotice"])).toBeTruthy()
   expect(screen.getByText(/Output: .AAC/)).toBeTruthy()
@@ -52,7 +53,7 @@ test("explicit track choice shows actual ID/language/title, resulting format and
   expect(mediaApi.startExport).not.toHaveBeenCalled()
   fireEvent.click(screen.getByRole("button", { name: en["media.extract"] }))
   await waitFor(() => expect(mediaApi.startExport).toHaveBeenCalledWith("plan"))
-  await waitFor(() => expect((screen.getByRole("combobox") as HTMLSelectElement).disabled).toBe(true))
+  await waitFor(() => expect((screen.getByRole("combobox") as HTMLButtonElement).disabled).toBe(true))
 })
 test("a cancelled save dialog produces no review/start action; errors are readable", async () => {
   useLocalExport.setState({ selection: { sourceId: "source", streamIndex: 7 } })
@@ -67,13 +68,13 @@ test("a cancelled save dialog produces no review/start action; errors are readab
 test("a new source does not inherit another source's selection or plan", () => {
   useLocalExport.setState({ selection: { sourceId: "old", streamIndex: 7 }, snapshot: { ...empty, plan: { ...plan, sourceId: "old" } } })
   render(<AudioExtractionPanel source={source} busy={false} />)
-  expect((screen.getByRole("combobox") as HTMLSelectElement).value).toBe("")
+  expect((screen.getByRole("combobox") as HTMLButtonElement).value).toBe("")
   expect(screen.queryByText("Save as: selected.aac")).toBeNull()
 })
 test("no audio and unsupported profiles are limitations rather than conversion controls", () => {
   render(<AudioExtractionPanel source={{ ...source, streams: [] }} busy={false} />)
   expect(screen.getByText(en["media.noAudio"])).toBeTruthy()
-  expect((screen.getByRole("combobox") as HTMLSelectElement).disabled).toBe(true)
+  expect((screen.getByRole("combobox") as HTMLButtonElement).disabled).toBe(true)
 })
 test("global status survives routes; terminal revisions defeat late progress and initial reads", async () => {
   const view = render(<MemoryRouter><LocalExportEvents /><Routes>

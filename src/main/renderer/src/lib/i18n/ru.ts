@@ -215,6 +215,7 @@ export const ru: Record<Key, string> = {
   "url.loading": "\u{1F40B} получаем информацию о видео",
   "url.loaded": "информация о видео загружена",
   "url.selectFolder": "выбрать папку",
+  "url.platform": "Платформа",
   "url.pickerBusy": "дождитесь обработки текущей ссылки",
   "url.youtubeHelper": "поддерживаются видео, shorts и ",
   "url.youtubeHelperPlaylists": "плейлисты",

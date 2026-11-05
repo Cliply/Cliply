@@ -39,7 +39,7 @@ export function useTrimShortcuts({
         event.repeat ||
         target?.isContentEditable ||
         target?.closest(
-          "input,textarea,select,video,audio,[role=slider],[role=separator],[contenteditable]"
+          "input,textarea,select,[role=combobox],video,audio,[role=slider],[role=separator],[contenteditable]"
         )
       )
         return

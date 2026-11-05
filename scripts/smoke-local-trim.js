@@ -1,3 +1,4 @@
+const { pickOption } = require("./smoke-pick-option")
 // Synthetic trim acceptance; encoding occurs only while making test fixtures.
 const fs = require("node:fs")
 const path = require("node:path")
@@ -43,7 +44,7 @@ async function runUI({ window, service, userData }) {
   const wc = window.webContents, js = code => wc.executeJavaScript(code), delay = ms => new Promise(resolve => setTimeout(resolve, ms))
   const wait = async expression => { for (let i = 0; i < 100; i++) { if (await js(expression)) return; await delay(100) } throw new Error(`Editor UI condition timed out: ${expression}`) }
   const click = label => js(`Array.from(document.querySelectorAll('button,a')).find(e=>(e.getAttribute('aria-label') || e.textContent.trim())===${JSON.stringify(label)})?.click()`)
-  const set = (id, value) => js(`(() => { const e=document.getElementById(${JSON.stringify(id)});Object.getOwnPropertyDescriptor(e.tagName==='SELECT'?HTMLSelectElement.prototype:HTMLInputElement.prototype,'value').set.call(e,${JSON.stringify(String(value))});e.dispatchEvent(new Event(e.tagName==='SELECT'?'change':'input',{bubbles:true}));})()`)
+  const set = (id, value) => js(`(() => { const e=document.getElementById(${JSON.stringify(id)});Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(e,${JSON.stringify(String(value))});e.dispatchEvent(new Event('input',{bubbles:true}));})()`)
   service.selectFile = async () => path.join(userData, "gop.mp4")
   service.exports.selectDestination = async () => path.join(userData, "ui-edited.mp4")
   await click("Open local file"); await wait("!!document.getElementById('trim-start')")
@@ -54,7 +55,7 @@ async function runUI({ window, service, userData }) {
   await js("document.querySelector('video').pause()")
   await require("./smoke-editor-workspace").run({ window })
   await set("trim-start", "4"); await set("trim-end", "8")
-  await js("const mode=document.querySelector('select[aria-label=\"What to export\"]'); mode.value='remove';mode.dispatchEvent(new Event('change',{bubbles:true}))")
+  await pickOption(js, "edit-intent", "remove")
   await wait("document.getElementById('trim-panel').textContent.includes('2 parts')")
   await click("Preview retained video")
   await wait("!document.querySelector('video').paused")

@@ -1,3 +1,4 @@
+const { pickOption } = require("./smoke-pick-option")
 // Stage 5 synthetic acceptance through the existing LocalExport supervisor.
 // Fixtures may encode; every production copy must contain only -c copy.
 const fs = require("node:fs")
@@ -108,7 +109,7 @@ async function runUI({ window, service, userData }) {
     throw new Error(`Remux UI condition timed out: ${expression}`)
   }
   const click = label => js(`Array.from(document.querySelectorAll('button,a')).find(e=>(e.getAttribute('aria-label') || e.textContent.trim())===${JSON.stringify(label)})?.click()`)
-  const select = value => js(`(() => { const el=document.getElementById('target-container'); Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype,'value').set.call(el,${JSON.stringify(value)}); el.dispatchEvent(new Event('change',{bubbles:true})); })()`)
+  const select = value => pickOption(js, "target-container", value)
   const original = path.join(userData, "tracks.mp4"), originalHash = hash(fs.readFileSync(original))
   service.selectFile = async () => original
   service.exports.selectDestination = async () => path.join(userData, "ui-copy.mkv")

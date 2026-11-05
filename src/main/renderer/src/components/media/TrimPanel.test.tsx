@@ -32,11 +32,28 @@ test("marks and inversion produce the actual segment request without playback ga
   useLocalMedia.setState({ auditionPreviewId: null })
   render(<TrimPanel source={source} busy={false} player={player} />)
   setRange()
-  fireEvent.change(screen.getByLabelText(en["media.editMode"]), { target: { value: "remove" } })
+  fireEvent.click(screen.getByLabelText(en["media.editMode"]))
+  fireEvent.click(screen.getByRole("option", { name: en["media.removeMarked"] }))
   fireEvent.click(button("media.reviewCut"))
   await waitFor(() => expect(mediaApi.inspectTrim).toHaveBeenCalledWith({ sourceId: "source", ranges: [{ start: 4.2, end: 6 }], intent: "remove", mode: "before" }))
   expect(screen.getByText(/2 parts/)).toBeTruthy()
 })
+test("keyboard choices in the cut picker do not edit timeline marks", () => {
+  render(<TrimPanel source={source} busy={false} player={player} />)
+  const picker = screen.getByRole("combobox", { name: en["media.editMode"] }) as HTMLButtonElement
+  picker.focus()
+  fireEvent.keyDown(picker, { key: "ArrowDown" })
+  fireEvent.keyDown(picker, { key: "End" })
+  fireEvent.keyDown(picker, { key: "b" })
+  fireEvent.keyDown(picker, { key: "Escape" })
+  expect(picker.value).toBe("keep")
+  expect(screen.queryByRole("button", { name: "Delete marking 2" })).toBeNull()
+  fireEvent.keyDown(picker, { key: "End" })
+  fireEvent.keyDown(picker, { key: "Enter" })
+  expect(picker.value).toBe("remove")
+  expect(picker.getAttribute("aria-expanded")).toBe("false")
+})
+
 test("split, delete, undo and redo affect the output rather than just the drawing", () => {
   render(<TrimPanel source={source} busy={false} player={player} />)
   player.current.currentTime = 4
@@ -64,7 +81,8 @@ test("I/O read player time, shortcuts protect typing, handles support keyboard a
 })
 test("empty remainder blocks export and mode/edits invalidate a reviewed plan", () => {
   render(<TrimPanel source={source} busy={false} player={player} />)
-  fireEvent.change(screen.getByLabelText(en["media.editMode"]), { target: { value: "remove" } })
+  fireEvent.click(screen.getByLabelText(en["media.editMode"]))
+  fireEvent.click(screen.getByRole("option", { name: en["media.removeMarked"] }))
   expect(button("media.reviewCut").disabled).toBe(true)
   expect(screen.getByRole("alert").textContent).toBe(en["media.emptyEdit"])
 })
@@ -263,7 +281,8 @@ test("retained preview skips removed ranges, survives position updates and stops
   const view = render(<TrimPanel source={source} busy={false} player={player} />)
   try {
     setRange()
-    fireEvent.change(screen.getByLabelText(en["media.editMode"]), { target: { value: "remove" } })
+    fireEvent.click(screen.getByLabelText(en["media.editMode"]))
+    fireEvent.click(screen.getByRole("option", { name: en["media.removeMarked"] }))
     fireEvent.click(screen.getByRole("button", { name: en["media.previewEdit"] }))
     expect(player.current.currentTime).toBe(0)
     expect(play).toHaveBeenCalledOnce()
