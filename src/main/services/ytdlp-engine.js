@@ -373,6 +373,11 @@ class YtdlpEngine {
         params.potEnabled !== undefined ? params.potEnabled : this.potEnabled
     }
 
+    if (params.platform === "instagram") {
+      resolved.cookieFile = null
+      resolved.potEnabled = false
+    }
+
     resolved.potPaths =
       params.potPaths !== undefined
         ? params.potPaths
@@ -439,6 +444,7 @@ class YtdlpEngine {
     const handle = new YtdlpOperation({
       id,
       operation,
+      platform: params.platform,
       binaryPath: this.getBinaryPath(),
       args: buildArgs(operation, resolved),
       // -P already decides where files land; inheriting a cwd that may not

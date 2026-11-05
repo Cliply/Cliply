@@ -1,7 +1,8 @@
 import { create } from "zustand"
 
 import { en, type Key } from "./en"
-import { ru, ruCodes, ruErrors } from "./ru"
+import type { Platform } from "@/lib/stores/store"
+import { ru, ruCodes, ruErrors, ruInstagramErrors } from "./ru"
 
 export type { Key }
 export type Locale = "en" | "ru"
@@ -90,10 +91,12 @@ export function t(key: Key, params?: Record<string, string | number>): string {
  */
 export function localizeError<
   T extends { message: string; suggestion?: string; category?: string }
->(error: T): T {
+>(error: T, platform?: Platform): T {
   const russian =
     useLocale.getState().locale === "ru" && error.category
-      ? ruErrors[error.category]
+      ? ((platform === "instagram"
+          ? ruInstagramErrors[error.category]
+          : undefined) ?? ruErrors[error.category])
       : undefined
 
   return russian ? { ...error, ...russian } : error

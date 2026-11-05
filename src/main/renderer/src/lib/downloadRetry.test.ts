@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   downloadAudio: vi.fn(),
   downloadPlaylist: vi.fn(),
   downloadTikTok: vi.fn(),
+  downloadInstagram: vi.fn(),
   downloadPinterest: vi.fn(),
   removeHistory: vi.fn(),
   clearHistory: vi.fn(),
@@ -41,6 +42,7 @@ vi.mock("@/lib/api", () => {
     },
     playlistApi: { download: mocks.downloadPlaylist },
     tiktokApi: { download: mocks.downloadTikTok },
+    instagramApi: { download: mocks.downloadInstagram },
     pinterestApi: { download: mocks.downloadPinterest }
   }
 })
@@ -90,6 +92,7 @@ beforeEach(() => {
   mocks.downloadAudio.mockResolvedValue({ downloadId: "new" })
   mocks.downloadPlaylist.mockResolvedValue({ downloadId: "new", itemsTotal: 3 })
   mocks.downloadTikTok.mockResolvedValue({ downloadId: "new" })
+  mocks.downloadInstagram.mockResolvedValue({ downloadId: "new" })
   mocks.downloadPinterest.mockResolvedValue({ downloadId: "new" })
   mocks.cancelDownload.mockResolvedValue(true)
 
@@ -176,6 +179,11 @@ describe("the channel a kind goes back out on", () => {
   })
 
   test.each([
+    [
+      "instagram" as const,
+      () => mocks.downloadInstagram,
+      () => mocks.downloadPinterest
+    ],
     [
       "tiktok" as const,
       () => mocks.downloadTikTok,
@@ -590,4 +598,24 @@ describe("the download_started it sends", () => {
 
     expect(mocks.track).not.toHaveBeenCalled()
   })
+})
+
+test("an Instagram retry normalizes its request before storing and sending it", async () => {
+  const canonical = "https://www.instagram.com/reel/Ab_C/?caption=hello%20world"
+  await retryDownload(
+    row({
+      kind: "simple",
+      platform: "instagram",
+      label: "instagram",
+      request: {
+        url: " WWW.Instagram.COM/reel/Ab_C/?caption=hello world ",
+        platform: "instagram"
+      }
+    })
+  )
+  expect(mocks.downloadInstagram).toHaveBeenCalledWith({
+    url: canonical,
+    download_id: started().downloadId
+  })
+  expect(started().request?.url).toBe(canonical)
 })

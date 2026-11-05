@@ -19,6 +19,8 @@ import {
   type PlaylistDownloadRequest,
   type PlaylistInfoResponse,
   type SystemHealth,
+  type InstagramDownloadRequest,
+  type InstagramVideoInfoResponse,
   type TikTokDownloadRequest,
   type TikTokVideoInfoResponse,
   type UpdateInfo,
@@ -337,6 +339,32 @@ export const tiktokApi = {
 
     const data = unwrap(response, "Failed to download TikTok video", {
       log: "TikTok download failed:"
+    })
+
+    return {
+      downloadId: data.download_id
+    }
+  }
+}
+
+export const instagramApi = {
+  async getInfo(url: string): Promise<InstagramVideoInfoResponse> {
+    const electronAPI = getElectronAPI()
+    const response = await electronAPI.instagram.getInfo(url)
+
+    return unwrap(response, "failed to get instagram video info", {
+      log: "Instagram info failed:"
+    })
+  },
+
+  async download(
+    request: InstagramDownloadRequest
+  ): Promise<{ downloadId: string }> {
+    const electronAPI = getElectronAPI()
+    const response = await electronAPI.instagram.download(request)
+
+    const data = unwrap(response, "failed to download instagram video", {
+      log: "Instagram download failed:"
     })
 
     return {

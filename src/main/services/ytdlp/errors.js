@@ -28,15 +28,19 @@ const ERROR_METADATA = {
     message: "This video isn't available for download.",
     suggestion: "It may be private, age-restricted, or removed."
   },
-  // no pattern reaches this one - it is raised by whoever looked at the format
-  // list and found no video in it. the wording is here anyway, because a code
-  // classify() can hand back needs something to say: a caller that names it
-  // would otherwise get "Download failed", which explains nothing. the
-  // pinterest refusal in ipc-handlers says the same thing in its own words,
-  // because it knows which platform the user was on and this does not
+  // Main can refuse empty formats, and Instagram's extractor can report the
+  // same condition during a direct download without a metadata request.
   [ERROR_CODES.NOT_A_VIDEO]: {
     message: "There's no video at this link.",
     suggestion: "Cliply downloads video, so try a link that has one."
+  },
+  [ERROR_CODES.UNSUPPORTED_COLLECTION]: {
+    message: "carousels aren't supported. use a single video.",
+    suggestion: "paste a reel or a post with one video."
+  },
+  [ERROR_CODES.LOGIN_REQUIRED]: {
+    message: "this video needs login or is restricted.",
+    suggestion: "try another public video."
   },
   [ERROR_CODES.GEO_BLOCKED]: {
     message: "This video isn't available in your country.",
@@ -129,7 +133,23 @@ for (const entry of Object.values(TERMINAL_ERRORS)) Object.freeze(entry)
 
 // wording for any code, whoever produced it, so the ui never shows a blank
 // message. terminal codes first, then the classified ones, then the catch-all.
-function wordingFor(code) {
+function wordingFor(code, platform) {
+  if (platform === "instagram") {
+    if (code === ERROR_CODES.EXTRACTION_FAILED) {
+      return {
+        ...ERROR_METADATA[code],
+        message: "instagram changed. try updating the downloader.",
+        suggestion: "updating the downloader usually fixes this."
+      }
+    }
+    if (code === ERROR_CODES.RATE_LIMITED) {
+      return {
+        ...ERROR_METADATA[code],
+        message: "instagram is limiting requests. try again later.",
+        suggestion: "wait a few minutes."
+      }
+    }
+  }
   return (
     TERMINAL_ERRORS[code] ||
     ERROR_METADATA[code] ||
@@ -171,6 +191,7 @@ function explicitError(code, details = null) {
  */
 function mapError({
   exitCode = null,
+  platform = null,
   stderrLines = [],
   cancelled = false,
   stalled = false
@@ -193,8 +214,8 @@ function mapError({
   // the taxonomy owns the pattern table now. UNKNOWN_ERROR means nothing
   // matched, which is the same "we ran and it broke" the fallback below has
   // always reported - so it falls through rather than becoming a new code.
-  const { category } = classify(haystack, ERROR_STAGES.DOWNLOAD)
-  const metadata = category === ERROR_CODES.UNKNOWN_ERROR ? null : ERROR_METADATA[category]
+  const { category } = classify(haystack, ERROR_STAGES.DOWNLOAD, { platform, exitCode })
+  const metadata = category === ERROR_CODES.UNKNOWN_ERROR ? null : wordingFor(category, platform)
 
   if (metadata) {
     return errorShape(category, metadata, details)

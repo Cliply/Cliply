@@ -221,6 +221,17 @@ export const ru: Record<Key, string> = {
   "url.youtubeHelperRest": " с youtube.com и youtu.be",
   "url.pinterestHelper":
     "поддерживаются ссылки pin.it и pinterest.com/pin, любой домен страны",
+  "url.instagramHelper":
+    "публичные reels и публикации с видео",
+  "error.instagramUrl": "неверная ссылка на instagram",
+  "validation.instagramRequired": "введите ссылку на instagram",
+  "validation.instagramInvalid":
+    "вставьте ссылку на reels или видео в instagram",
+  "card.instagramSubtitle":
+    "лучшее качество автоматически",
+  "card.unknownDuration": "длительность неизвестна",
+  "thumb.instagramViewOn": "открыть в instagram",
+  "thumb.instagramOpenFailed": "не удалось открыть ссылку instagram",
   "url.tiktokHelper":
     "поддерживаются ссылки tiktok.com/@user/video/ID, vm.tiktok.com и vt.tiktok.com",
 
@@ -654,6 +665,16 @@ export const ruErrors: Partial<
     suggestion:
       "возможно, оно приватное, с возрастным ограничением или удалено."
   },
+  LOGIN_REQUIRED: {
+    message: "для видео нужен вход или доступ ограничен.",
+    suggestion:
+      "попробуйте другое публичное видео."
+  },
+  UNSUPPORTED_COLLECTION: {
+    message: "карусели instagram не поддерживаются.",
+    suggestion:
+      "вставьте ссылку на reels или одно видео."
+  },
   NOT_A_VIDEO: {
     message: "по этой ссылке нет видео.",
     suggestion: "cliply скачивает видео, попробуйте ссылку, где оно есть."
@@ -734,6 +755,19 @@ export const ruErrors: Partial<
   DOWNLOAD_FAILED: {
     message: "не удалось скачать.",
     suggestion: "попробуйте ещё раз."
+  }
+}
+
+// These categories also describe YouTube failures; preserve their existing words
+// unless the caller knows it is displaying an Instagram error.
+export const ruInstagramErrors: typeof ruErrors = {
+  EXTRACTION_FAILED: {
+    message: "instagram изменился. обновите загрузчик.",
+    suggestion: "обычно помогает обновление загрузчика."
+  },
+  RATE_LIMITED: {
+    message: "instagram ограничивает запросы. попробуйте позже.",
+    suggestion: "подождите несколько минут перед следующей попыткой."
   }
 }
 

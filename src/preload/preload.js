@@ -127,6 +127,17 @@ contextBridge.exposeInMainWorld("electronAPI", {
       })
   },
 
+  // instagram operations use the same narrow media channels as other platforms
+  instagram: {
+    getInfo: (url) =>
+      invoke(IPC_CHANNELS.VIDEO_GET_INFO, { url, platform: "instagram" }),
+    download: (data) =>
+      invoke(IPC_CHANNELS.VIDEO_DOWNLOAD_COMBINED, {
+        ...data,
+        platform: "instagram"
+      })
+  },
+
   // tiktok operations
   tiktok: {
     getInfo: (url) =>

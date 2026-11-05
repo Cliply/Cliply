@@ -7,9 +7,10 @@
 // chrome and is the only pre-emptive one, so it is worth a test that it still
 // opens the thing it advertises.
 
-import { cleanup, fireEvent, render, screen } from "@testing-library/react"
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
 
+import { useAppStore } from "@/lib/stores/store"
 import { useCookieStore } from "@/lib/stores/cookieStore"
 import { en } from "@/lib/i18n/en"
 import { ru } from "@/lib/i18n/ru"
@@ -50,6 +51,7 @@ vi.mock("react-router-dom", () => ({
 
 beforeEach(() => {
   useCookieStore.setState({ isOpen: false })
+  useAppStore.getState().setSelectedPlatform("youtube")
 })
 
 afterEach(cleanup)
@@ -59,7 +61,9 @@ test("the home invite opens Discord through the browser bridge", async () => {
   render(<HeroSection />)
 
   fireEvent.click(screen.getByRole("link", { name: "come chat on discord" }))
-  expect(systemApi.openExternal).toHaveBeenLastCalledWith("https://discord.gg/kjhtgYFFbh")
+  expect(systemApi.openExternal).toHaveBeenLastCalledWith(
+    "https://discord.gg/kjhtgYFFbh"
+  )
 })
 
 describe("the line in the top chrome", () => {
@@ -176,3 +180,22 @@ describe("in russian", () => {
     expect(pressed()).toEqual({ en: "true", ru: "false" })
   })
 })
+
+test.each(["instagram", "pinterest", "tiktok"] as const)(
+  "cookie hint follows the selected platform and stays hidden on %s",
+  async (platform) => {
+    const { HeroSection } = await import("./HeroSection")
+    render(<HeroSection />)
+    expect(
+      screen.getByRole("button", { name: en["hero.cookieHint"] })
+    ).toBeTruthy()
+    act(() => useAppStore.getState().setSelectedPlatform(platform))
+    expect(
+      screen.queryByRole("button", { name: en["hero.cookieHint"] })
+    ).toBeNull()
+    expect(useCookieStore.getState().isOpen).toBe(false)
+    act(() => useAppStore.getState().setSelectedPlatform("youtube"))
+    fireEvent.click(screen.getByRole("button", { name: en["hero.cookieHint"] }))
+    expect(useCookieStore.getState().isOpen).toBe(true)
+  }
+)

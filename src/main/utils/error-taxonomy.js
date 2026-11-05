@@ -21,9 +21,10 @@ const ERROR_CATEGORIES = Object.freeze({
   // downloader to take something that is not one, and that is a question about
   // where people get stuck rather than about content that went away.
   //
-  // no pattern produces it and none should: it is raised by inspecting a format
-  // list (ipc-handlers' pinterest branch), never by reading stderr
+  // Main inspects formats; Instagram's own no-video error also produces it.
   NOT_A_VIDEO: "NOT_A_VIDEO",
+  UNSUPPORTED_COLLECTION: "UNSUPPORTED_COLLECTION",
+  LOGIN_REQUIRED: "LOGIN_REQUIRED",
   GEO_BLOCKED: "GEO_BLOCKED",
   EXTRACTION_FAILED: "EXTRACTION_FAILED",
   INVALID_URL: "INVALID_URL",
@@ -131,6 +132,22 @@ const CATEGORY_PATTERNS = [
   },
 
   // --- platform / content ---
+  {
+    platform: "instagram",
+    category: ERROR_CATEGORIES.LOGIN_REQUIRED,
+    patterns: [
+      /use --cookies/i,
+      /(?:log in|login|sign.in) (?:required|to access|page)/i,
+      /you need to log in/i,
+      /cookies are no longer valid/i,
+      /confirm you.{0,3}re not a bot/i
+    ]
+  },
+  {
+    platform: "instagram",
+    category: ERROR_CATEGORIES.NOT_A_VIDEO,
+    patterns: [/no video formats found/i, /there is no video in this post/i]
+  },
   {
     category: ERROR_CATEGORIES.BOT_DETECTION,
     patterns: [
@@ -272,7 +289,7 @@ function appliesToStage(entry, stage) {
  * @param {string} stage - one of ERROR_STAGES
  * @returns {{category: string, stage: string}}
  */
-function classify(input, stage) {
+function classify(input, stage, { platform, exitCode } = {}) {
   const resolvedStage = Object.values(ERROR_STAGES).includes(stage)
     ? stage
     : ERROR_STAGES.DOWNLOAD
@@ -286,11 +303,22 @@ function classify(input, stage) {
       return { category: code, stage: resolvedStage }
     }
 
+    // Instagram uses only one break condition: reject collection entries.
+    // yt-dlp exits 101 for this CLI break-filter path; its normal
+    // informational message goes to stdout, not the stderr error channel.
+    if (platform === "instagram" && exitCode === 101) {
+      return {
+        category: ERROR_CATEGORIES.UNSUPPORTED_COLLECTION,
+        stage: resolvedStage
+      }
+    }
+
     const text = toText(input)
 
     for (const entry of CATEGORY_PATTERNS) {
       if (
         appliesToStage(entry, resolvedStage) &&
+        (!entry.platform || entry.platform === platform) &&
         entry.patterns.some((pattern) => pattern.test(text))
       ) {
         return { category: entry.category, stage: resolvedStage }

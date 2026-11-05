@@ -1,0 +1,78 @@
+import { systemApi } from "@/lib/api"
+import { useT } from "@/lib/i18n"
+import { cn } from "@/lib/utils"
+import { ensureHttpScheme } from "@/lib/validation"
+import { motion } from "framer-motion"
+import { ExternalLink } from "lucide-react"
+import { toast } from "sonner"
+
+interface InstagramThumbnailProps {
+  thumbnailUrl: string | null
+  videoUrl: string
+  title: string
+  className?: string
+}
+
+export function InstagramThumbnail({
+  thumbnailUrl,
+  videoUrl,
+  title,
+  className
+}: InstagramThumbnailProps) {
+  const t = useT()
+
+  const handleOpenVideo = async () => {
+    try {
+      await systemApi.openExternal(ensureHttpScheme(videoUrl))
+    } catch (error) {
+      console.error("Failed to open Instagram link:", error)
+      toast.error(t("thumb.instagramOpenFailed"))
+    }
+  }
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.5, delay: 0.2 }}
+      className={cn(
+        "w-full p-1 rounded-2xl border-2 transition-all duration-200",
+        "dark:bg-slate-800/60 dark:border-slate-700/50 dark:backdrop-blur-sm",
+        "bg-white/80 border-slate-300/50 backdrop-blur-sm",
+        "shadow-xl shadow-black/10 font-space-grotesk",
+        className
+      )}
+    >
+      <div className="relative overflow-hidden rounded-xl aspect-video min-h-[320px] bg-slate-100/60 dark:bg-slate-900/40">
+        {thumbnailUrl ? (
+          <img
+            src={thumbnailUrl}
+            alt={title}
+            className="absolute inset-0 h-full w-full object-contain"
+            loading="lazy"
+          />
+        ) : (
+          <div className="absolute inset-0 flex items-center justify-center">
+            <p className="text-sm text-slate-500 dark:text-slate-400">
+              {t("thumb.unavailable")}
+            </p>
+          </div>
+        )}
+
+        <button
+          type="button"
+          onClick={handleOpenVideo}
+          className={cn(
+            "absolute left-3 right-3 bottom-3 inline-flex items-center justify-center gap-2",
+            "rounded-lg px-3 py-2 text-xs font-medium transition-all duration-200",
+            "bg-white/80 text-slate-800 hover:bg-white/95 border border-slate-200/50 shadow-sm",
+            "dark:bg-white/90 dark:text-slate-900 dark:hover:bg-white dark:border-transparent"
+          )}
+        >
+          <ExternalLink className="h-4 w-4" />
+          {t("thumb.instagramViewOn")}
+        </button>
+      </div>
+    </motion.div>
+  )
+}

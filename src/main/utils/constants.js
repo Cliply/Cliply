@@ -100,7 +100,7 @@ const SUPPORTED_PLATFORMS = {
     ],
     name: "YouTube"
   },
-  // future platform support
+  // URL acceptance is enforced separately by the renderer and IPC validators.
   INSTAGRAM: {
     patterns: [/^(https?:\/\/)?(www\.)?instagram\.com\/(p|reel)\//],
     name: "Instagram"

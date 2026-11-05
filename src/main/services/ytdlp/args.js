@@ -408,6 +408,9 @@ function buildAudioModeArgs(params, language) {
  */
 function buildArgs(operation, params = {}) {
   const args = buildCommonArgs(params)
+  const instagram = params.platform === "instagram"
+  // Keep this platform on upstream defaults even when a CLI user has a config.
+  if (instagram) args.push("--ignore-config")
 
   // the output shape follows the **operation**, and is never read off params.
   // the two template sets are not interchangeable - the single-video parser
@@ -418,7 +421,14 @@ function buildArgs(operation, params = {}) {
 
   switch (operation) {
     case "info": {
-      args.push("--dump-json", "--no-download", "--no-playlist")
+      if (instagram) {
+        // Retain the collection envelope so main can refuse carousels without
+        // fetching each child. Empty formats let main explain image-only posts.
+        args.push("--dump-single-json", "--flat-playlist", "--ignore-no-formats-error")
+      } else {
+        args.push("--dump-json")
+      }
+      args.push("--no-download", "--no-playlist")
       break
     }
 
@@ -537,8 +547,13 @@ function buildArgs(operation, params = {}) {
     }
 
     case "simple": {
-      // tiktok / pinterest - one muxed file, no format picking
-      args.push("-f", params.formatSelector || "best")
+      if (instagram) {
+        // A direct request/retry must obey the same single-video boundary as
+        // metadata. yt-dlp rejects the first collection entry before saving it.
+        args.push("--break-match-filters", "!playlist")
+      } else {
+        args.push("-f", params.formatSelector || "best")
+      }
       args.push("--no-playlist")
       args.push(...buildDownloadArgs({ ...params, playlist }))
       break

@@ -234,7 +234,7 @@ function archiveComponent(value, fallback) {
 }
 
 /**
- * output template for a simple platform download (tiktok / pinterest)
+ * output template for a simple platform download (tiktok / pinterest / instagram)
  * @param {Object} params - {title, platform, now}
  * @returns {string} yt-dlp -o template
  */

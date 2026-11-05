@@ -28,7 +28,8 @@ const {
   buildPlaylistOutputTemplate,
   buildPlaylistArchivePath
 } = require("./utils/ytdlp-mappers")
-const { getSimplePlatformOptions } = require("./utils/ytdlp-formats")
+const { getSimplePlatformOptions, isSimplePlatform } = require("./utils/ytdlp-formats")
+const { normalizeInstagramUrl } = require("./utils/instagram-url")
 const { resolveDownloadId } = require("./utils/download-id")
 
 const { LocalMediaService } = require("./services/local-media")
@@ -104,7 +105,7 @@ function listRow(status) {
       ? "playlist"
       : status.type === "audio"
         ? "audio"
-        : status.platform === "tiktok" || status.platform === "pinterest"
+        : isSimplePlatform(status.platform)
           ? "simple"
           : "video",
     platform: status.platform,
@@ -780,8 +781,10 @@ class IPCHandlers {
    * @param {string} category - what the taxonomy made of the failure
    * @returns {boolean} whether a payload is being fetched because of this
    */
-  noteRefusal(category) {
-    if (category !== ERROR_CATEGORIES.BOT_DETECTION) return false
+  noteRefusal(category, platform = "youtube") {
+    if (platform !== "youtube" || category !== ERROR_CATEGORIES.BOT_DETECTION) {
+      return false
+    }
 
     this.engine.setPotEnabled(true)
 
@@ -1017,10 +1020,11 @@ class IPCHandlers {
 
   // handle video info extraction with validation
   async handleGetVideoInfo(event, data) {
+    let targetPlatform = "youtube"
     try {
       this.validateRequest(data, ["url"])
-      const { url, platform } = data
-      const targetPlatform = platform ? String(platform).toLowerCase() : "youtube"
+      targetPlatform = data.platform ? String(data.platform).toLowerCase() : "youtube"
+      let { url } = data
 
       if (!SUPPORTED_DOWNLOAD_PLATFORMS.includes(targetPlatform)) {
         // classified here because nothing else will: this refusal is raised
@@ -1029,14 +1033,46 @@ class IPCHandlers {
         // we do not serve is the invalid one
         return this.createError(
           "Unsupported platform",
-          "Please use YouTube, Pinterest, or TikTok",
+          "please use youtube, pinterest, tiktok, or instagram",
           "GENERAL_ERROR",
           { category: ERROR_CATEGORIES.INVALID_URL }
         )
       }
 
+      if (targetPlatform === "instagram") url = this.instagramRequestUrl(url)
+
       // one spawn, no server to wait for
-      const info = await this.engine.getInfo(url)
+      const info =
+        targetPlatform === "instagram"
+          ? await this.engine.getInfo(url, { platform: "instagram" })
+          : await this.engine.getInfo(url)
+
+      if (targetPlatform === "instagram") {
+        if (
+          info._type === "playlist" ||
+          info._type === "multi_video" ||
+          Array.isArray(info.entries)
+        ) {
+          return this.createError(
+            "carousels aren't supported. use a single video.",
+            "paste a reel or a post with one video.",
+            ERROR_CODES.UNSUPPORTED_COLLECTION,
+            { category: ERROR_CODES.UNSUPPORTED_COLLECTION }
+          )
+        }
+        // Unknown codecs are allowed: only yt-dlp decides which stream to use.
+        if (
+          !Array.isArray(info.formats) ||
+          !info.formats.some((format) => format && format.vcodec !== "none")
+        ) {
+          return this.createError(
+            "this post has no downloadable video.",
+            "try a public reel or a post with one video.",
+            ERROR_CODES.NOT_A_VIDEO,
+            { category: ERROR_CODES.NOT_A_VIDEO }
+          )
+        }
+      }
 
       // the python pinterest service refused image pins by inspecting formats
       if (targetPlatform === "pinterest" && !hasPlayableVideo(info)) {
@@ -1061,8 +1097,21 @@ class IPCHandlers {
       return this.createSuccess(videoInfo)
     } catch (error) {
       console.error("Info extraction failed:", error.message)
-      return this.infoFailure(error)
+      const recoveryPlatform =
+        targetPlatform === "youtube" && !isYouTubeRequestUrl(data?.url)
+          ? "unsupported"
+          : targetPlatform
+      return this.infoFailure(error, recoveryPlatform)
     }
+  }
+
+  instagramRequestUrl(url) {
+    const normalized = normalizeInstagramUrl(url)
+    if (normalized) return normalized
+    const error = new Error("paste a direct instagram reel or post link.")
+    error.code = ERROR_CODES.INVALID_URL
+    error.suggestion = "use an instagram.com link."
+    throw error
   }
 
   /**
@@ -1074,12 +1123,12 @@ class IPCHandlers {
    * @param {Error} error - what the engine threw
    * @returns {Object} the ipc error response
    */
-  infoFailure(error) {
+  infoFailure(error, platform = "youtube") {
     const { category } = classify(error, ERROR_STAGES.FETCH_INFO)
 
     // the metadata fetch is the first thing a blocked install fails at, so
     // this is usually where the refusal is discovered
-    const fetching = this.noteRefusal(category)
+    const fetching = this.noteRefusal(category, platform)
 
     /**
      * the only thing the user is told about the download, and it is told
@@ -1122,7 +1171,7 @@ class IPCHandlers {
     if (!SUPPORTED_DOWNLOAD_PLATFORMS.includes(targetPlatform)) {
       return this.createError(
         "Unsupported platform",
-        "Please use YouTube, Pinterest, or TikTok"
+        "please use youtube, pinterest, tiktok, or instagram"
       )
     }
 
@@ -1144,12 +1193,12 @@ class IPCHandlers {
         // row was labelled with
         this.validateRequest(data, ["url", "height"])
       } else {
-        // pinterest and tiktok only need the url
+        // simple platforms only need the url
         this.validateRequest(data, ["url"])
       }
 
       const {
-        url,
+        url: inputUrl,
         height,
         container,
         audio_language: audioLanguage,
@@ -1158,6 +1207,11 @@ class IPCHandlers {
         title = "video",
         format_id: simpleFormatId
       } = data
+
+      const url =
+        targetPlatform === "instagram"
+          ? this.instagramRequestUrl(inputUrl)
+          : inputUrl
 
       const outputDir = await this.getDownloadDirectory()
       const timeRange = normalizeTimeRange(rawTimeRange)
@@ -1228,7 +1282,7 @@ class IPCHandlers {
       }
 
       /**
-       * tiktok and pinterest answer the same way every other kind does: an
+       * simple platforms answer the same way every other kind does: an
        * acknowledgement now, the rest over progress events.
        *
        * awaiting the run here would hold the ipc call open for however long the
@@ -1247,8 +1301,8 @@ class IPCHandlers {
         platform: targetPlatform
       })
 
-      // each platform keeps the options its python service used - format_id
-      // is accepted for its analytics label below, never as a selector
+      // TikTok/Pinterest retain their existing presets; Instagram leaves
+      // format selection to yt-dlp. format_id is never a selector
       // override. tiktok's preset exists specifically to avoid the
       // watermarked stream; letting an incoming value replace it would
       // silently undo that
@@ -1260,7 +1314,8 @@ class IPCHandlers {
           outputDir,
           outputTemplate,
           formatSelector: preset.formatSelector,
-          extraArgs: preset.extraArgs
+          extraArgs: preset.extraArgs,
+          ...(targetPlatform === "instagram" ? { platform: "instagram" } : {})
         })
 
       if (
@@ -1286,7 +1341,10 @@ class IPCHandlers {
         type: "combined",
         platform: targetPlatform,
         title,
-        formatId: simpleFormatId || targetPlatform,
+        formatId:
+          targetPlatform === "instagram"
+            ? "instagram"
+            : simpleFormatId || targetPlatform,
         createHandle
       })
 
@@ -1732,7 +1790,10 @@ class IPCHandlers {
           // the download half of the refusal check. a cancel is not a refusal,
           // and it settles through here wearing the same `success: false`
           if (!result.success && !result.cancelled) {
-            this.noteRefusal(classify(result.error, ERROR_STAGES.DOWNLOAD).category)
+            this.noteRefusal(
+              classify(result.error, ERROR_STAGES.DOWNLOAD).category,
+              options.platform
+            )
             return
           }
 
@@ -1743,7 +1804,7 @@ class IPCHandlers {
           // would otherwise be missed for having arrived on a download that
           // worked
           if (result.success && result.category) {
-            this.noteRefusal(result.category)
+            this.noteRefusal(result.category, options.platform)
           }
         })
         .catch((error) => {

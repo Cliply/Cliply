@@ -232,6 +232,15 @@ export const en = {
   "url.youtubeHelperRest": " from youtube.com and youtu.be",
   "url.pinterestHelper":
     "supports pin.it and pinterest.com/pin links, any country domain",
+  "url.instagramHelper":
+    "public reels and video posts",
+  "error.instagramUrl": "invalid instagram url",
+  "validation.instagramRequired": "please enter an instagram url",
+  "validation.instagramInvalid": "paste an instagram reel or post link",
+  "card.instagramSubtitle": "best quality, automatically",
+  "card.unknownDuration": "unknown duration",
+  "thumb.instagramViewOn": "view on instagram",
+  "thumb.instagramOpenFailed": "could not open instagram link",
   "url.tiktokHelper":
     "supports tiktok.com/@user/video/ID, vm.tiktok.com, and vt.tiktok.com links",
 

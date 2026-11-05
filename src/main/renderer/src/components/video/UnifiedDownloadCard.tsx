@@ -3,6 +3,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import {
   pinterestApi,
   tiktokApi,
+  instagramApi,
+  type InstagramVideoInfoResponse,
   validateTimeRange,
   type AudioTrack,
   type PinterestVideoInfoResponse,
@@ -12,6 +14,7 @@ import {
 import { useSimplePlatformDownload } from "@/lib/hooks/useSimplePlatformDownload"
 import { useT } from "@/lib/i18n"
 import { usePinterestStore } from "@/lib/stores/pinterestStore"
+import { useInstagramStore } from "@/lib/stores/instagramStore"
 import { useTikTokStore } from "@/lib/stores/tiktokStore"
 import { useYouTubeStore } from "@/lib/stores/youtubeStore"
 import { cn } from "@/lib/utils"
@@ -47,10 +50,17 @@ type TikTokDownloadCardProps = {
   className?: string
 }
 
+type InstagramDownloadCardProps = {
+  platform: "instagram"
+  instagramInfo: InstagramVideoInfoResponse
+  className?: string
+}
+
 type UnifiedDownloadCardProps =
   | YouTubeDownloadCardProps
   | PinterestDownloadCardProps
   | TikTokDownloadCardProps
+  | InstagramDownloadCardProps
 
 export function UnifiedDownloadCard(props: UnifiedDownloadCardProps) {
   if (props.platform === "pinterest") {
@@ -66,6 +76,15 @@ export function UnifiedDownloadCard(props: UnifiedDownloadCardProps) {
     return (
       <TikTokDownloadCard
         tikTokInfo={props.tikTokInfo}
+        className={props.className}
+      />
+    )
+  }
+
+  if (props.platform === "instagram") {
+    return (
+      <InstagramDownloadCard
+        instagramInfo={props.instagramInfo}
         className={props.className}
       />
     )
@@ -221,7 +240,11 @@ function SimpleVideoDownloadCard({
   onDownload,
   className
 }: {
-  videoInfo: { title: string; uploader: string; duration_string: string }
+  videoInfo: {
+    title: string
+    uploader: string
+    duration_string?: string | null
+  }
   subtitle: string
   isDownloading: boolean
   onDownload: () => void
@@ -260,7 +283,9 @@ function SimpleVideoDownloadCard({
             {t("card.uploader")} {videoInfo.uploader}
           </p>
           <p>
-            {t("card.duration")} {videoInfo.duration_string}
+            {videoInfo.duration_string
+              ? `${t("card.duration")} ${videoInfo.duration_string}`
+              : t("card.unknownDuration")}
           </p>
         </div>
 
@@ -325,6 +350,38 @@ function TikTokDownloadCard({
     <SimpleVideoDownloadCard
       videoInfo={tikTokInfo}
       subtitle={t("card.tiktokSubtitle")}
+      isDownloading={isDownloading}
+      onDownload={handleDownload}
+      className={className}
+    />
+  )
+}
+
+function InstagramDownloadCard({
+  instagramInfo,
+  className
+}: {
+  instagramInfo: InstagramVideoInfoResponse
+  className?: string
+}) {
+  const t = useT()
+  const { isDownloading, handleDownload } = useSimplePlatformDownload({
+    platform: "instagram",
+    store: useInstagramStore,
+    api: instagramApi,
+    title: instagramInfo?.title
+  })
+
+  return (
+    <SimpleVideoDownloadCard
+      videoInfo={{
+        ...instagramInfo,
+        duration_string:
+          (instagramInfo.duration ?? 0) <= 0
+            ? null
+            : instagramInfo.duration_string
+      }}
+      subtitle={t("card.instagramSubtitle")}
       isDownloading={isDownloading}
       onDownload={handleDownload}
       className={className}

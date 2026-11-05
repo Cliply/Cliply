@@ -211,8 +211,10 @@ function announceFailed(row: DownloadRow, event: DownloadProgress): void {
     // the staged report above keeps main's english; only what is read here is
     // translated
     event.error
-      ? localizeError({ message: event.error, category: event.category })
-          .message
+      ? localizeError(
+          { message: event.error, category: event.category },
+          row.platform
+        ).message
       : t("download.wentWrong"),
     event.category,
     row.platform

@@ -18,7 +18,8 @@ import {
   detectYouTubeTarget,
   isValidYouTubePlaylistUrl,
   isValidYouTubeUrl,
-  isValidPinterestUrl
+  isValidPinterestUrl,
+  normalizeInstagramUrl
 } from "./validation"
 
 describe("pinterest links", () => {
@@ -208,4 +209,52 @@ describe("detectYouTubeTarget", () => {
     expect(target.kind).toBe("video")
     expect(target.listId).toBeNull()
   })
+})
+
+describe("Instagram links", () => {
+  it.each([
+    "https://instagram.com/p/Ab_C-12/",
+    "https://www.instagram.com/tv/Ab_C-12/",
+    "https://www.instagram.com/reel/Ab_C-12/?igsh=shared",
+    "https://www.instagram.com/reels/Ab_C-12/",
+    "https://www.instagram.com/example.user/reel/Ab_C-12/?utm_source=share",
+    "instagram.com/p/Ab_C-12"
+  ])("accepts a supported public post path: %s", (url) => {
+    expect(detectPlatform(url)).toBe("instagram")
+  })
+  it.each([
+    "https://instagram.com.evil.com/reel/abc/",
+    "https://evil.com/?url=instagram.com/reel/abc/",
+    "https://instagram.com@evil.com/reel/abc/",
+    "https://user@instagram.com/reel/abc/",
+    "https://m.instagram.com/reel/abc/",
+    "https://instagr.am/p/abc/",
+    "https://instagram.com/stories/user/123/",
+    "https://instagram.com/example.user/",
+    "https://instagram.com/share/reel/abc/",
+    "https://instagram.com/stories/reel/abc/",
+    "https://instagram.com/explore/reel/abc/",
+    "https://instagram.com/share/reel/abc/extra/",
+    "https://instagram.com/share/abc/",
+    "https://instagram.com/p/abc/extra/",
+    "https://instagram.com/reel/",
+    "ftp://instagram.com/reel/abc/"
+  ])("refuses unsupported paths and lookalike hosts: %s", (url) => {
+    expect(detectPlatform(url)).toBeNull()
+  })
+})
+
+it.each([
+  [
+    "  WWW.Instagram.COM/reel/Ab_C/?caption=hello world&symbol=é  ",
+    "https://www.instagram.com/reel/Ab_C/?caption=hello%20world&symbol=%C3%A9"
+  ],
+  [
+    "HTTPS://Instagram.COM:443/p/Ab_C/?igsh=a%2Fb#part",
+    "https://instagram.com/p/Ab_C/?igsh=a%2Fb#part"
+  ],
+  ["http://Instagram.com:80/reel/Ab_C/", "http://instagram.com/reel/Ab_C/"],
+  ["https:instagram.com/reel/Ab_C/", "https://instagram.com/reel/Ab_C/"]
+])("canonicalizes Instagram URL %s with the URL parser", (input, expected) => {
+  expect(normalizeInstagramUrl(input)).toBe(expected)
 })

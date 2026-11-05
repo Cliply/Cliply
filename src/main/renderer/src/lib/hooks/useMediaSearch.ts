@@ -20,6 +20,7 @@ import { PLATFORM_REGISTRY, type PlatformConfig } from "@/lib/platform-config"
 import { usePinterestStore } from "@/lib/stores/pinterestStore"
 import { usePlaylistStore } from "@/lib/stores/playlistStore"
 import { useAppStore, type Platform } from "@/lib/stores/store"
+import { useInstagramStore } from "@/lib/stores/instagramStore"
 import { useTikTokStore } from "@/lib/stores/tiktokStore"
 import {
   showBotDetectionToast,
@@ -65,19 +66,29 @@ export function useMediaSearch(
   const ptIsLoading = usePinterestStore((s) => s.isLoadingInfo)
   const ttUrl = useTikTokStore((s) => s.url)
   const ttIsLoading = useTikTokStore((s) => s.isLoadingInfo)
+  const igUrl = useInstagramStore((s) => s.url)
+  const igIsLoading = useInstagramStore((s) => s.isLoadingInfo)
   // a playlist is the second thing the youtube box can hold, and listing one is
   // a request like any other - the box has to say it is working
   const plIsLoading = usePlaylistStore((s) => s.isLoadingPlaylistInfo)
 
   // Select reactive state for the current platform
   const url =
-    platform === "youtube" ? ytUrl : platform === "tiktok" ? ttUrl : ptUrl
+    platform === "youtube"
+      ? ytUrl
+      : platform === "tiktok"
+        ? ttUrl
+        : platform === "instagram"
+          ? igUrl
+          : ptUrl
   const isLoading =
     platform === "youtube"
       ? ytIsLoading || plIsLoading
       : platform === "tiktok"
         ? ttIsLoading
-        : ptIsLoading
+        : platform === "instagram"
+          ? igIsLoading
+          : ptIsLoading
 
   const form = useForm<{ url: string }>({
     resolver: config.formResolver,
@@ -177,10 +188,17 @@ async function loadSingleVideo(
   url: string,
   reveal: () => void
 ) {
+  const instagramVersion =
+    platform === "instagram" ? useInstagramStore.getState().beginLookup() : null
+  const isCurrent = () =>
+    instagramVersion === null ||
+    useInstagramStore.getState().isCurrentLookup(instagramVersion)
+
   try {
     config.store.setIsLoading(true)
-    config.store.setUrl(url)
+    if (platform !== "instagram") config.store.setUrl(url)
     const summary = await config.fetchAndStore(url)
+    if (!isCurrent()) return
     reveal()
     toast.success(t(config.successMessage))
 
@@ -190,10 +208,11 @@ async function loadSingleVideo(
       formats_count: summary.formatsCount
     })
   } catch (error) {
+    if (!isCurrent()) return
     trackSearchFailure(platform, error)
     handleSearchError(error, config, form)
   } finally {
-    config.store.setIsLoading(false)
+    if (isCurrent()) config.store.setIsLoading(false)
   }
 }
 
@@ -465,10 +484,13 @@ function handleSearchError(
   // main's sentence is matched in english below, because that is the language it
   // is written in, and shown in the reader's - which are two different strings
   // once the locale is russian
-  const shown = localizeError({
-    message: errorMessage,
-    category: error instanceof DownloadError ? error.category : undefined
-  }).message
+  const shown = localizeError(
+    {
+      message: errorMessage,
+      category: error instanceof DownloadError ? error.category : undefined
+    },
+    config.id
+  ).message
 
   // checked first, and on the category rather than the wording: this is the one
   // failure here the user can actually fix, and main already decided which it

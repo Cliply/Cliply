@@ -60,6 +60,8 @@ vi.mock("@/lib/toast-utils", () => ({
   showDownloadErrorToast: mocks.showDownloadErrorToast
 }))
 
+import { useLocale } from "@/lib/i18n"
+import { ruInstagramErrors } from "@/lib/i18n/ru"
 import { en } from "@/lib/i18n/en"
 import {
   useDownloadsStore,
@@ -433,3 +435,23 @@ describe("the highlight", () => {
     expect(container.firstElementChild?.className).not.toContain("ring-2")
   })
 })
+
+test.each(["RATE_LIMITED", "EXTRACTION_FAILED"])(
+  "Instagram history renders %s for its own platform",
+  (category) => {
+    useLocale.getState().setLocale("ru")
+    render(
+      <DownloadRow
+        row={row({
+          kind: "simple",
+          platform: "instagram",
+          status: "failed",
+          error: "Instagram failure",
+          category
+        })}
+      />
+    )
+    expect(screen.getByText(ruInstagramErrors[category]!.message)).toBeTruthy()
+    useLocale.getState().setLocale("en")
+  }
+)

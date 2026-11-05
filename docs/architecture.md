@@ -3,7 +3,7 @@
 ## Product and process boundaries
 
 This repository contains the Electron desktop app. It supports YouTube video/audio,
-trimming and playlists, plus TikTok and Pinterest video downloads. English and
+trimming and playlists, plus TikTok, Pinterest and public Instagram video downloads. English and
 Russian UI strings live under the renderer's `lib/i18n/` directory. Exact tool and
 dependency versions belong to the two package manifests and lockfiles.
 
@@ -75,6 +75,12 @@ completed items to be skipped on a repeated run. An archive skip is not proof
 that the corresponding file still exists. Preserve saved/reused/skipped counts
 and item identity when changing this flow.
 
+YouTube, Instagram, Pinterest and TikTok share the same queue and concurrency
+limit. Users can load another link while earlier downloads run or wait. Replacing
+a link on the same screen leaves those jobs intact; the simple download button's
+busy state applies only to its current URL. Selecting an already active download
+opens its existing row instead of creating a duplicate.
+
 ## Renderer state and IPC contracts
 
 `lib/api.ts` wraps the preload API. Feature hooks live in `lib/hooks/`, Zustand
@@ -88,6 +94,36 @@ the list/history IPC tests.
 When adding a channel or changing a response, inspect main handlers, preload,
 renderer declarations, API wrappers and their tests together. Keep Node/file
 access in main and expose only the required bridge operations.
+
+### Instagram single-video downloads
+
+Instagram uses the existing video-info/combined-download channels and simple
+platform queue, progress, retry and history flow. Main validates direct Reel and
+post URLs using [`instagram-url.js`](../src/main/utils/instagram-url.js), including
+on retries. Stories, profiles, `/share/` and shortened links are outside this scope.
+
+Metadata uses yt-dlp's `--dump-single-json --flat-playlist` so a carousel remains a
+collection rather than several JSON lines. `--ignore-no-formats-error` lets main
+explain photo-only results; unknown codecs are not ranked or rejected. Collections
+are refused even when only one video entry is available. Downloads independently
+use `--break-match-filters !playlist` to reject collection entries before saving,
+including direct requests that never fetched metadata. yt-dlp's filter exit 101
+maps to `UNSUPPORTED_COLLECTION` for Instagram operations only.
+
+Instagram passes no format, sort, container or client overrides. yt-dlp selects
+and merges streams using the managed FFmpeg executable; final filenames retain
+the extension it reports. `--ignore-config` prevents a user's CLI config from
+changing this policy. Cookies and YouTube token recovery are disabled for these
+operations. Authentication failures use `LOGIN_REQUIRED` without a cookie-import
+action, and shared extraction/rate-limit errors use Instagram wording.
+
+The renderer displays available metadata and an automatic best-quality download
+button; absent duration is shown as unknown. Instagram lookups commit the normalized
+URL and metadata together, ignore responses superseded by a new lookup or reset,
+and use the same URL identity as main for duplicate-download detection.
+Existing telemetry records the
+Instagram platform and `best_available` quality, never captions, usernames or URLs.
+The managed stable-channel engine updater remains responsible for extractor fixes.
 
 ## Local-file inspection, preview and copy-only tools
 
@@ -217,8 +253,9 @@ The window close button prevents immediate destruction and delegates to this
 same drain; it does not set the quit flag early. A refused quit leaves the
 window available for the error and a later retry.
 
-See [FFprobe staging](../third-party/ffprobe/README.md) for the development-only
-verified candidates. Missing FFprobe returns `PROBE_MISSING` on open, with no
+See [bundled FFprobe](../third-party/ffprobe/README.md) for the verified production
+assets and source records. Supported production builds require the pinned helper.
+A development build without FFprobe returns `PROBE_MISSING` on open, with no
 download or startup failure.
 
 ### One-track audio export
@@ -467,9 +504,12 @@ encoding uses AudioToolbox only on macOS.
 
 ### Local-media validation status
 
-The older cross-platform results below predate the LosslessCut foundation change.
-They are historical evidence, not validation of the replacement engine/player.
-Current alignment checks and native CI are recorded in the PR and research report.
+The platform table below preserves historical validation and its outstanding work
+at that revision. Production FFprobe publication and final installer acceptance
+have since passed at `2521723`: [native installer CI](https://github.com/Cliply/Cliply/actions/runs/41897463113)
+validated macOS DMG, Windows NSIS and Linux DEB/AppImage payloads, including editor
+compatibility playback, normal services and download recovery. See
+[release checks](releasing.md) and the PR for current runs and coverage limits.
 
 These are narrow verified profiles, not support for every file carrying an
 extension. Main rejects unknown, incompatible or ambiguous layouts before saving.
@@ -507,10 +547,10 @@ after earlier timeout/no-window errors. This is not full LosslessCut parity.
 
 The macOS private package check runs offline with development helper overrides
 absent. Its test entry isolates external services and dialogs; it does not claim
-normal updater/installed-app acceptance. Final production FFprobe acquisition is
-inactive while `third-party/ffprobe/published.json` is empty. Missing-helper errors
-remain readable and do not stop downloads. Native/helper readiness gates cannot
-be waived by a successful ordinary downloader build.
+normal updater or pristine signed-app acceptance. Production FFprobe acquisition
+is active through `third-party/ffprobe/published.json`. Missing-helper errors in
+development remain readable and do not stop downloads. Native/helper readiness
+gates cannot be waived by a successful ordinary downloader build.
 
 Reproduce combined UI with `CLIPLY_SMOKE_INTEGRATION=1` and the existing verified
 helper overrides for `npm run smoke:electron`, or run
@@ -521,10 +561,9 @@ checker has `--idle-only` for like-for-like isolated startup/idle measurements.
 Native compatibility/cancel/crash matrices remain in the individual smoke scripts.
 [Release checks](releasing.md) define the nonpublishing native CI workflow.
 
-Follow-up acceptance: finalize production source/distribution records and pinned
-helper acquisition, perform installer/clean-install/offline checks, retain the
-owner's minimum-OS deferral, and complete cold/warm normal-service startup, representative long media,
-helper CPU/RSS peaks, slower/removable storage and disk-exhaustion measurements.
+Follow-up acceptance: retain the owner's minimum-OS deferral and complete broader
+cold/warm startup, representative long-media, helper CPU/RSS peak,
+slower/removable storage and disk-exhaustion measurements.
 Do not infer zero overhead or cross-platform support from small local fixtures.
 
 ## Storage and privacy

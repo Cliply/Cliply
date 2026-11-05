@@ -1,5 +1,6 @@
 // starting a download again, from the panel, whatever kind it was
 
+import { normalizeInstagramUrl } from "@/lib/validation"
 import {
   SIMPLE_QUALITY,
   audioQuality,
@@ -13,6 +14,8 @@ import {
   pinterestApi,
   playlistApi,
   tiktokApi,
+  instagramApi,
+  type InstagramDownloadRequest,
   videoApi,
   type AudioDownloadRequest,
   type DownloadRequest,
@@ -54,9 +57,15 @@ export const canRetry = (row: DownloadRow): boolean => Boolean(row.request?.url)
  * is how a panel full of attempts is tidied.
  */
 export async function retryDownload(row: DownloadRow): Promise<void> {
-  const request = row.request
+  if (!row.request?.url) return
 
-  if (!request?.url) return
+  const request =
+    row.platform === "instagram"
+      ? {
+          ...row.request,
+          url: normalizeInstagramUrl(row.request.url) ?? row.request.url
+        }
+      : row.request
 
   /**
    * the same download, already back in flight.
@@ -82,6 +91,7 @@ export async function retryDownload(row: DownloadRow): Promise<void> {
 
   downloadsActions.add({
     ...row,
+    request,
     downloadId,
     // main never sends this one: it is the gap between the click and the first
     // event, the same state the hooks add a row in
@@ -158,7 +168,7 @@ export async function retryDownload(row: DownloadRow): Promise<void> {
     // Retry hears that nothing started, wherever they are looking
     showDownloadErrorToast(
       t("downloads.retryFailed"),
-      localizeError({ message, category }).message,
+      localizeError({ message, category }, row.platform).message,
       category,
       row.platform
     )
@@ -212,6 +222,12 @@ function startDownload(
       })
 
     case "simple":
+      if (row.platform === "instagram") {
+        return instagramApi.download({
+          ...(wire as InstagramDownloadRequest),
+          download_id: downloadId
+        })
+      }
       return row.platform === "tiktok"
         ? tiktokApi.download({
             ...(wire as TikTokDownloadRequest),

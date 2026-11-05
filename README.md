@@ -22,7 +22,7 @@ it's free, open source, and available for macos and windows.
 
 ### what it does
 
-cliply supports **youtube, tiktok, and pinterest**.
+cliply supports **youtube, tiktok, pinterest, and public instagram videos**.
 
 for youtube, you can:
 
@@ -31,6 +31,14 @@ for youtube, you can:
 - trim videos by setting a start and end time
 - download playlists
 - set a quality limit for playlist downloads
+
+for instagram, paste an `instagram.com` Reel or single-video post link and download
+at the best quality yt-dlp selects automatically. `/reel/`, `/reels/`, `/p/` and
+legacy `/tv/` links work, including username prefixes and share query parameters.
+photos, carousels, Stories, profiles and shortened links aren't supported. no
+instagram cookies are used; a public link can still be blocked by instagram or
+require sign-in. yt-dlp updates supply extraction fixes when they reach its stable
+release channel.
 
 downloads run through a queue, with multiple downloads running at once. the downloads panel shows what's running, what's finished, and keeps your recent download history. if youtube asks for authentication, there's a guided cookie import.
 

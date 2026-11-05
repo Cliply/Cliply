@@ -100,23 +100,25 @@ export function HeroSection() {
         someone whose downloads keep failing is far likelier to read a line
         about that than a link to an announcements page.
       */}
-      <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        transition={{ duration: 0.8, delay: 0.1 }}
-        className="absolute top-6 left-1/2 -translate-x-1/2 z-20"
-      >
-        <button
-          onClick={() => cookieActions.open()}
-          className="text-xs text-slate-500 dark:text-slate-400 hover:text-cyan-500 dark:hover:text-cyan-400 transition-colors duration-200 hover:underline underline-offset-4"
-          style={{
-            fontFamily:
-              'Geist Mono, ui-monospace, SFMono-Regular, "SF Mono", Consolas, "Liberation Mono", Menlo, monospace'
-          }}
+      {selectedPlatform === "youtube" && (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ duration: 0.8, delay: 0.1 }}
+          className="absolute top-6 left-1/2 -translate-x-1/2 z-20"
         >
-          {t("hero.cookieHint")}
-        </button>
-      </motion.div>
+          <button
+            onClick={() => cookieActions.open()}
+            className="text-xs text-slate-500 dark:text-slate-400 hover:text-cyan-500 dark:hover:text-cyan-400 transition-colors duration-200 hover:underline underline-offset-4"
+            style={{
+              fontFamily:
+                'Geist Mono, ui-monospace, SFMono-Regular, "SF Mono", Consolas, "Liberation Mono", Menlo, monospace'
+            }}
+          >
+            {t("hero.cookieHint")}
+          </button>
+        </motion.div>
+      )}
 
       {/* Dark gradient background */}
       <div className="absolute inset-0 bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 dark:opacity-100 opacity-0 transition-opacity duration-300" />

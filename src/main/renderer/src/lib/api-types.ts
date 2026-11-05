@@ -185,7 +185,10 @@ export interface DownloadRequestsByKind {
   video: VideoDownloadRequest
   audio: AudioDownloadRequest
   playlist: PlaylistDownloadRequest
-  simple: PinterestDownloadRequest | TikTokDownloadRequest
+  simple:
+    | PinterestDownloadRequest
+    | TikTokDownloadRequest
+    | InstagramDownloadRequest
 }
 
 /**
@@ -386,6 +389,20 @@ export interface TikTokDownloadRequest {
   // keeps the media title in the output filename
   title?: string
   // see PinterestDownloadRequest.download_id
+  download_id?: string
+}
+
+export interface InstagramVideoInfoResponse {
+  title: string
+  duration?: number | null
+  duration_string?: string | null
+  thumbnail: string | null
+  uploader: string
+}
+
+export interface InstagramDownloadRequest {
+  url: string
+  title?: string
   download_id?: string
 }
 

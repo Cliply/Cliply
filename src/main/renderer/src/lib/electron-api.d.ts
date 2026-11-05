@@ -19,6 +19,8 @@ import type {
   PlaylistInfoResponse,
   SimpleDownloadResponse,
   SystemHealth,
+  InstagramDownloadRequest,
+  InstagramVideoInfoResponse,
   TikTokDownloadRequest,
   TikTokVideoInfoResponse,
   UpdateInfo,
@@ -114,6 +116,14 @@ declare global {
         getInfo: (url: string) => Promise<IPCResponse<TikTokVideoInfoResponse>>
         download: (
           options: TikTokDownloadRequest
+        ) => Promise<IPCResponse<SimpleDownloadResponse>>
+      }
+      instagram: {
+        getInfo: (
+          url: string
+        ) => Promise<IPCResponse<InstagramVideoInfoResponse>>
+        download: (
+          options: InstagramDownloadRequest
         ) => Promise<IPCResponse<SimpleDownloadResponse>>
       }
       download: {
