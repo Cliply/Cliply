@@ -1108,3 +1108,52 @@ describe("a cancel main could not take yet", () => {
     expect(store().cancelIntents).toEqual(["d1"])
   })
 })
+
+test("Instagram history preserves its platform and retry request", () => {
+  const request = {
+    url: "https://www.instagram.com/reel/Example/",
+    platform: "instagram"
+  }
+  store().applySnapshot(
+    snapshot({
+      rows: [
+        {
+          download_id: "instagram-history",
+          status: "interrupted",
+          kind: "simple",
+          platform: "instagram",
+          title: "A Reel",
+          label: "instagram",
+          started_at: 1000,
+          request
+        }
+      ]
+    })
+  )
+  expect(rowOf("instagram-history")).toMatchObject({
+    platform: "instagram",
+    kind: "simple",
+    label: "instagram",
+    request
+  })
+})
+
+test("Instagram duplicate matching canonicalizes both legacy rows and new candidates", () => {
+  store().add(
+    row({
+      kind: "simple",
+      platform: "instagram",
+      label: "instagram",
+      request: { url: " WWW.Instagram.COM/reel/Ab_C/?caption=hello world " }
+    })
+  )
+  expect(
+    store().findLive({
+      kind: "simple",
+      label: "instagram",
+      request: {
+        url: "https://www.instagram.com/reel/Ab_C/?caption=hello%20world"
+      }
+    })?.downloadId
+  ).toBe("d1")
+})

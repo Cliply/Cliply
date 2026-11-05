@@ -1,15 +1,18 @@
 import { zodResolver } from "@hookform/resolvers/zod"
 import type { Resolver } from "react-hook-form"
 
-import { pinterestApi, tiktokApi, videoApi } from "@/lib/api"
+import { instagramApi, pinterestApi, tiktokApi, videoApi } from "@/lib/api"
 import type { Key } from "@/lib/i18n"
 import { usePinterestStore } from "@/lib/stores/pinterestStore"
 import { usePlaylistStore } from "@/lib/stores/playlistStore"
 import type { Platform } from "@/lib/stores/store"
+import { useInstagramStore } from "@/lib/stores/instagramStore"
 import { useTikTokStore } from "@/lib/stores/tiktokStore"
 import {
   pinterestUrlSchema,
   tiktokUrlSchema,
+  instagramUrlSchema,
+  normalizeInstagramUrl,
   youtubeUrlSchema
 } from "@/lib/validation"
 import { useYouTubeStore } from "@/lib/stores/youtubeStore"
@@ -170,6 +173,44 @@ export const PLATFORM_REGISTRY: Record<Platform, PlatformConfig> = {
         useTikTokStore.getState().setIsLoadingInfo(loading),
       hasInfo: () => useTikTokStore.getState().info !== null,
       reset: () => useTikTokStore.getState().reset()
+    }
+  },
+  instagram: {
+    id: "instagram",
+    label: "instagram",
+    logo: "./instagram-logo.svg",
+    formResolver: zodResolver(instagramUrlSchema),
+    placeholder: "url.placeholder",
+    helperText: "url.instagramHelper",
+    loadingText: "url.loading",
+    successMessage: "url.loaded",
+    errorMessages: {
+      invalidUrl: "error.instagramUrl",
+      invalidUrlToast: "validation.instagramInvalid",
+      unavailable: "error.unavailable",
+      genericFail: "error.infoFailed",
+      logPrefix: "Instagram info request failed:"
+    },
+    fetchAndStore: async (url: string) => {
+      const version = useInstagramStore.getState().lookupVersion
+      const normalizedUrl = normalizeInstagramUrl(url) ?? url
+      const info = await instagramApi.getInfo(normalizedUrl)
+      useInstagramStore.getState().setLoadedInfo(version, normalizedUrl, info)
+
+      return {
+        durationSeconds:
+          info.duration == null || info.duration <= 0 ? null : info.duration,
+        formatsCount: null
+      }
+    },
+    store: {
+      getUrl: () => useInstagramStore.getState().url,
+      setUrl: (url) => useInstagramStore.getState().setUrl(url),
+      isLoading: () => useInstagramStore.getState().isLoadingInfo,
+      setIsLoading: (loading) =>
+        useInstagramStore.getState().setIsLoadingInfo(loading),
+      hasInfo: () => useInstagramStore.getState().info !== null,
+      reset: () => useInstagramStore.getState().reset()
     }
   }
 }

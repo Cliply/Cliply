@@ -191,7 +191,7 @@ function mapPlaylistInfo(info) {
 }
 
 /**
- * tiktok / pinterest info -> their simpler shared shape
+ * tiktok / pinterest / instagram info -> their simpler shared shape
  * @param {Object} info - parsed --dump-json payload
  * @param {string} fallbackTitle - used when the extractor has no title
  * @returns {Object} response body

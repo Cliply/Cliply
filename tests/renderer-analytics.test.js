@@ -288,8 +288,8 @@ describe("the info failures the renderer has to name", () => {
     jest.spyOn(console, "error").mockImplementation(() => {})
 
     const result = await handlers.handleGetVideoInfo(null, {
-      url: "https://www.instagram.com/p/abc/",
-      platform: "instagram"
+      url: "https://unsupported.example/video/abc",
+      platform: "unsupported"
     })
 
     expect(result.success).toBe(false)
@@ -326,8 +326,8 @@ describe("the info failures the renderer has to name", () => {
     jest.spyOn(console, "error").mockImplementation(() => {})
 
     const refusal = await handlers.handleGetVideoInfo(null, {
-      url: "https://www.instagram.com/p/abc/",
-      platform: "instagram"
+      url: "https://unsupported.example/video/abc",
+      platform: "unsupported"
     })
 
     await send(handlers, [

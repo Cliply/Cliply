@@ -14,15 +14,19 @@ import {
   showDownloadErrorToast,
   showServerOverwhelmedToast
 } from "@/lib/toast-utils"
+import { normalizeInstagramUrl } from "@/lib/validation"
 import { useEffect, useState } from "react"
 
 /** the platforms whose whole download is one quality behind one button */
-export type SimplePlatform = Extract<Platform, "pinterest" | "tiktok">
+export type SimplePlatform = Extract<
+  Platform,
+  "pinterest" | "tiktok" | "instagram"
+>
 
 /**
  * the slice of a platform store a download of this kind touches
  *
- * deliberately narrow: the two stores keep the loaded media under names of
+ * deliberately narrow: the stores keep the loaded media under names of
  * their own, and which name that is stays none of this hook's business.
  */
 interface SimpleDownloadSlice {
@@ -49,12 +53,12 @@ export interface SimplePlatformDownloadOptions {
 }
 
 /**
- * the one download pinterest and tiktok both have
+ * the shared download flow for instagram, pinterest and tiktok
  *
- * neither platform offers a choice of quality, of format or of a range, so a
+ * these platforms offer no choice of quality, of format or of a range, so a
  * download is the stored url and a click.
  *
- * these two used to be the odd ones out: main awaited the whole download and
+ * pinterest and tiktok used to await the whole download in main and
  * answered with the finished file, so this hook toasted "complete" on the
  * reply. with a queue in front of the engine that reply would have had to wait
  * out the queue as well, so they now start and report through
@@ -72,9 +76,14 @@ export function useSimplePlatformDownload({
 
   const [lastId, setLastId] = useState<string | undefined>(undefined)
   const row = useDownloadRow(lastId)
-  // the row this card started is queued, starting or downloading - which is
-  // what the button has always meant by "busy", minus the await
-  const isDownloading = isLiveRow(row)
+  const requestUrl =
+    platform === "instagram" ? (normalizeInstagramUrl(url) ?? url) : url
+  // Replacing the link keeps this card mounted. Its previous job stays in the
+  // shared queue, but must not disable downloading the newly loaded video.
+  const isDownloading =
+    isLiveRow(row) &&
+    row?.platform === platform &&
+    row.request?.url === requestUrl
 
   // the platform store's own flag keeps its meaning for anything that reads it,
   // and the row is now the thing that decides what that meaning is
@@ -86,7 +95,10 @@ export function useSimplePlatformDownload({
     if (!url || isDownloading) return
 
     const label = platform
-    const request = { url, ...(title ? { title } : {}) }
+    const request = {
+      url: requestUrl,
+      ...(title ? { title } : {})
+    }
 
     /**
      * the same pin or clip, asked for twice. two processes writing one `.part`
@@ -173,10 +185,14 @@ export function useSimplePlatformDownload({
       showDownloadErrorToast(
         t(DOWNLOAD_WORDING.simple.failed),
         // the staged report above keeps main's english; the toast is read
-        localizeError({
-          message,
-          category: error instanceof DownloadError ? error.category : undefined
-        }).message,
+        localizeError(
+          {
+            message,
+            category:
+              error instanceof DownloadError ? error.category : undefined
+          },
+          platform
+        ).message,
         error instanceof DownloadError ? error.category : undefined,
         platform
       )

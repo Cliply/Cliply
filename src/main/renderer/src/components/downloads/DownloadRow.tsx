@@ -288,10 +288,13 @@ function standingOf(row: Row, t: Translate): string {
       return t("downloads.interrupted")
 
     case "failed":
-      return localizeError({
-        message: row.error || t("download.wentWrong"),
-        category: row.category
-      }).message
+      return localizeError(
+        {
+          message: row.error || t("download.wentWrong"),
+          category: row.category
+        },
+        row.platform
+      ).message
 
     default:
       return ""

@@ -49,7 +49,8 @@ function extractQuality(formatId) {
 
     // platforms that always use best available (no user format selection)
     pinterest: "best_available",
-    tiktok: "best_available"
+    tiktok: "best_available",
+    instagram: "best_available"
   }
 
   if (knownIds[id]) {

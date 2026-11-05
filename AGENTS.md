@@ -1,6 +1,6 @@
 # Working on Cliply
 
-Cliply is an Electron desktop downloader for YouTube, TikTok and Pinterest.
+Cliply is an Electron desktop downloader for YouTube, TikTok, Pinterest and public Instagram videos.
 The React/TypeScript renderer calls main through preload/IPC. Main spawns
 standalone yt-dlp processes. There is no FastAPI server or separately installed
 Python requirement.

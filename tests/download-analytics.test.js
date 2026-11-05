@@ -211,7 +211,7 @@ describe("what the taxonomy does with a download failure", () => {
   })
 })
 
-describe("what a pinterest/tiktok download hands the renderer", () => {
+describe("what a simple platform download hands the renderer", () => {
   /**
    * start one simple-platform download through the real ipc handler
    *
@@ -364,7 +364,11 @@ describe("what a pinterest/tiktok download hands the renderer", () => {
     )
   })
 
-  it("parks behind the cap and still answers straight away", async () => {
+  it.each([
+    ["instagram", "https://instagram.com/reel/Example/"],
+    ["pinterest", "https://www.pinterest.com/pin/1/"],
+    ["tiktok", "https://www.tiktok.com/@user/video/1"]
+  ])("%s parks behind the shared cap and still answers straight away", async (platform, url) => {
     // three downloads hold every slot, so the fourth is accepted and queued.
     // the invoke must not wait for a slot: it resolves now, and the row says
     // `queued` until one comes free
@@ -386,8 +390,8 @@ describe("what a pinterest/tiktok download hands the renderer", () => {
     await settle()
 
     const { response, handle } = await startSimpleDownload(harness, {
-      platform: "tiktok",
-      url: "https://www.tiktok.com/@user/video/1"
+      platform,
+      url
     })
 
     expect(response.data).toEqual({
@@ -410,6 +414,61 @@ describe("what a pinterest/tiktok download hands the renderer", () => {
     held[1].resolve({ filePath: "/downloads/b.mp4" })
     held[2].resolve({ filePath: "/downloads/c.mp4" })
     await settle()
+  })
+
+  it("keeps all platforms in one queue and cancels a waiting Instagram job without spawning it", async () => {
+    const { handlers, events, captured } = createHandlers()
+    const handles = new Map()
+    const started = []
+    const spawn = ({ url }) => {
+      const handle = new FakeHandle()
+      handles.set(url, handle)
+      started.push(url)
+      return handle
+    }
+    handlers.engine.downloadCombined = jest.fn(spawn)
+    handlers.engine.downloadSimple = jest.fn(spawn)
+    const requests = [
+      { platform: "youtube", url: "https://youtube.com/watch?v=example", height: 720, container: "mp4" },
+      { platform: "instagram", url: "https://instagram.com/reel/First/" },
+      { platform: "pinterest", url: "https://www.pinterest.com/pin/1/" },
+      { platform: "instagram", url: "https://instagram.com/reel/Cancelled/" },
+      { platform: "tiktok", url: "https://www.tiktok.com/@user/video/1" },
+      { platform: "instagram", url: "https://instagram.com/reel/Last/" }
+    ]
+    for (const [index, request] of requests.entries()) {
+      const response = await handlers.handleDownloadCombined(null, {
+        ...request, download_id: `mixed_${index}`
+      })
+      expect(response.success).toBe(true)
+    }
+    await settle()
+    expect(started).toEqual(requests.slice(0, 3).map(({ url }) => url))
+    for (const index of [3, 4, 5]) {
+      expect(lastEvent(events, `mixed_${index}`).status).toBe("queued")
+    }
+
+    await handlers.handleCancelDownload(null, { downloadId: "mixed_3" })
+    await settle()
+    expect(lastEvent(events, "mixed_3").status).toBe("cancelled")
+    expect(started).toHaveLength(3)
+
+    handles.get(requests[0].url).resolve({ filePath: "/downloads/youtube.mp4" })
+    await settle()
+    expect(started[3]).toBe(requests[4].url)
+    expect(lastEvent(events, "mixed_5").status).toBe("queued")
+    handles.get(requests[1].url).resolve({ filePath: "/downloads/instagram.mp4" })
+    await settle()
+    expect(started[4]).toBe(requests[5].url)
+    expect(started).not.toContain(requests[3].url)
+
+    for (const index of [2, 4, 5]) {
+      handles.get(requests[index].url).resolve({ filePath: `/downloads/example_${index}.mp4` })
+    }
+    await settle()
+    expect(handlers.runner.size).toBe(0)
+    expect(captured.filter(({ event }) => event === "download_completed")).toHaveLength(5)
+    expect(captured.filter(({ event }) => event === "download_cancelled")).toHaveLength(1)
   })
 
   it("hands the renderer's list and DownloadStatus contracts back as declared", async () => {
