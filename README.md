@@ -11,7 +11,7 @@
 <p align="center">
   <a href="https://github.com/Cliply/Cliply/releases/latest">download</a> ·
   <a href="https://x.com/cliplydotspace">twitter</a> ·
-  <a href="https://reddit.com/r/cliply">r/cliply</a>
+  <a href="https://discord.com/invite/kjhtgYFFbh">discord</a>
 </p>
 
 cliply started as a small weekend project. i just wanted a simple way to download videos without ads, shady websites, popups, or unnecessary clutter.
